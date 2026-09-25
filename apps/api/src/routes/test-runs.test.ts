@@ -59,6 +59,17 @@ describe("POST /v1/test-runs", () => {
     expect(JSON.stringify(events)).not.toContain("hunter2");
   });
 
+  it("returns 400 for malformed JSON", async () => {
+    const res = await t.app.inject({
+      method: "POST",
+      url: "/v1/test-runs",
+      headers: { ...auth, "content-type": "application/json" },
+      payload: "{nope",
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("INVALID_JSON");
+  });
+
   it("returns 400 with Zod issue paths for an invalid body", async () => {
     const res = await post({ targetUrl: "javascript:alert(1)", requirement: "short" });
     expect(res.statusCode).toBe(400);
@@ -199,6 +210,17 @@ describe("POST /v1/test-runs/:runId/cancel", () => {
     expect(run.cancelRequestedAt).toBeInstanceOf(Date);
     await vi.waitFor(() => expect(got).toEqual([runCancelChannel(runId)]));
     sub.disconnect();
+  });
+
+  it("accepts an empty body sent with content-type: application/json", async () => {
+    const { runId } = (await post(validBody())).json();
+    const res = await t.app.inject({
+      method: "POST",
+      url: `/v1/test-runs/${runId}/cancel`,
+      headers: { ...auth, "content-type": "application/json" },
+      payload: "",
+    });
+    expect(res.statusCode).toBe(202);
   });
 
   it("returns 409 for a terminal run", async () => {

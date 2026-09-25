@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # One image recipe for api, worker, and web (select with --target).
 ARG BASE_IMAGE=node:22-bookworm-slim
 
