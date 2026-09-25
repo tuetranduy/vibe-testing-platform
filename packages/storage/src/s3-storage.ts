@@ -1,0 +1,112 @@
+import { pipeline } from "node:stream";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { assertValidObjectKey, buildObjectKey } from "./object-key";
+import { type ArtifactStorage, createHashingStream, hashBuffer, normalizeTtl, StorageError, wrapStorageError } from "./storage";
+
+export interface S3StorageOptions {
+  bucket: string;
+  /** Custom endpoint for S3-compatible servers (MinIO: http://localhost:9000). Omit for AWS. */
+  endpoint?: string | undefined;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  /** true for MinIO and most S3-compatible servers. */
+  forcePathStyle: boolean;
+}
+
+/** Multipart part size for streamed uploads (S3 minimum is 5 MiB). */
+const PART_SIZE = 5 * 1024 * 1024;
+const QUEUE_SIZE = 4;
+
+export function createS3Storage(opts: S3StorageOptions): ArtifactStorage {
+  for (const k of ["bucket", "region", "accessKeyId", "secretAccessKey"] as const) {
+    if (!opts[k]) throw new StorageError(`s3 storage: ${k} is required`, { operation: "config" });
+  }
+  const { bucket } = opts;
+  const client = new S3Client({
+    region: opts.region,
+    ...(opts.endpoint ? { endpoint: opts.endpoint } : {}),
+    forcePathStyle: opts.forcePathStyle,
+    credentials: { accessKeyId: opts.accessKeyId, secretAccessKey: opts.secretAccessKey },
+    // Only send/validate flexible checksums when an operation requires them. The default
+    // ("WHEN_SUPPORTED") uses aws-chunked trailer encoding that several S3-compatible servers
+    // mishandle; integrity is covered by our own sha256.
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
+  });
+
+  return {
+    async put(input) {
+      const objectKey = buildObjectKey(input);
+      const Metadata = { sensitivity: input.sensitivity, "artifact-type": input.type };
+
+      if (Buffer.isBuffer(input.body)) {
+        const result = hashBuffer(input.body);
+        try {
+          await client.send(
+            new PutObjectCommand({
+              Bucket: bucket,
+              Key: objectKey,
+              Body: input.body,
+              ContentLength: input.body.length,
+              ContentType: input.contentType,
+              Metadata,
+            }),
+          );
+        } catch (err) {
+          throw wrapStorageError(err, "put", objectKey);
+        }
+        return { objectKey, ...result };
+      }
+
+      // Stream of unknown length: hash while piping into a multipart-capable Upload.
+      const source = input.body;
+      const hasher = createHashingStream();
+      let sourceError: Error | undefined;
+      pipeline(source, hasher, (err) => {
+        if (err) sourceError = err;
+      });
+      const upload = new Upload({
+        client,
+        params: { Bucket: bucket, Key: objectKey, Body: hasher, ContentType: input.contentType, Metadata },
+        partSize: PART_SIZE,
+        queueSize: QUEUE_SIZE,
+        leavePartsOnError: false,
+      });
+      try {
+        await upload.done();
+      } catch (err) {
+        source.destroy();
+        hasher.destroy();
+        throw wrapStorageError(sourceError ?? err, "put", objectKey);
+      }
+      const result = hasher.result();
+      if (sourceError || !result) {
+        throw wrapStorageError(sourceError ?? new Error("hash not finalized"), "put", objectKey);
+      }
+      return { objectKey, ...result };
+    },
+
+    async getSignedReadUrl(objectKey, ttlSeconds) {
+      assertValidObjectKey(objectKey);
+      const expiresIn = normalizeTtl(ttlSeconds);
+      try {
+        return await getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: objectKey }), { expiresIn });
+      } catch (err) {
+        throw wrapStorageError(err, "sign", objectKey);
+      }
+    },
+
+    async delete(objectKey) {
+      assertValidObjectKey(objectKey);
+      try {
+        await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey }));
+      } catch (err) {
+        if ((err as { name?: string }).name === "NoSuchKey") return;
+        throw wrapStorageError(err, "delete", objectKey);
+      }
+    },
+  };
+}
