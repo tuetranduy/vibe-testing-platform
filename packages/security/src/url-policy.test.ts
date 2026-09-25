@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultResolver, isHostPortAllowlisted, validateTargetUrl, type Resolver } from "./url-policy";
+import { classifyUrlWithoutDns, defaultResolver, isHostPortAllowlisted, normalizeHost, validateTargetUrl, type Resolver } from "./url-policy";
 
 function fakeResolver(table: Record<string, string[]>): Resolver & { calls: string[] } {
   const calls: string[] = [];
@@ -234,5 +234,55 @@ describe("defaultResolver", () => {
 
   it("rejects for names that cannot be resolved", async () => {
     await expect(defaultResolver("definitely-not-a-real-host.invalid")).rejects.toThrow();
+  });
+});
+
+describe("normalizeHost", () => {
+  it.each([
+    ["Example.COM", "example.com"],
+    ["  shop.test.  ", "shop.test"],
+    ["example.com..", "example.com"],
+    ["[::1]", "::1"],
+    ["[FD00::5]", "fd00::5"],
+    ["", ""],
+  ])("%j → %j", (input, expected) => {
+    expect(normalizeHost(input)).toBe(expected);
+  });
+});
+
+describe("classifyUrlWithoutDns — the no-DNS half of validateTargetUrl", () => {
+  const allow = { privateAllowlist: ["demo-shop:4000", "127.0.0.1:9222"] };
+
+  it.each([
+    ["not a url", "INVALID_URL"],
+    ["ftp://example.com/", "UNSUPPORTED_PROTOCOL"],
+    ["javascript:alert(1)", "UNSUPPORTED_PROTOCOL"],
+    ["file:///etc/passwd", "UNSUPPORTED_PROTOCOL"],
+    ["https://user:pw@example.com/", "CREDENTIALS_IN_URL"],
+    ["https://user:pw@demo-shop:4000/", "CREDENTIALS_IN_URL"],
+    ["http://10.0.0.1/", "NON_PUBLIC_ADDRESS"],
+    ["http://2130706433/", "NON_PUBLIC_ADDRESS"],
+    ["http://[::1]:4000/", "NON_PUBLIC_ADDRESS"],
+    ["http://127.0.0.1:9223/", "NON_PUBLIC_ADDRESS"],
+    ["http://localhost/", "NON_PUBLIC_ADDRESS"],
+    ["http://app.localhost:3000/", "NON_PUBLIC_ADDRESS"],
+  ])("rejects %s with %s", (url, reason) => {
+    const r = classifyUrlWithoutDns(url, allow);
+    expect(r.kind).toBe("reject");
+    if (r.kind === "reject") expect(r.reason).toBe(reason);
+  });
+
+  it("admits allowlisted host:port pairs (names and IP literals) without an address check", () => {
+    expect(classifyUrlWithoutDns("http://Demo-Shop.:4000/x", allow)).toMatchObject({ kind: "allowlisted", host: "demo-shop", port: 4000 });
+    expect(classifyUrlWithoutDns("http://127.0.0.1:9222/json", allow)).toMatchObject({ kind: "allowlisted", host: "127.0.0.1", port: 9222 });
+  });
+
+  it("admits public IP literals as-is", () => {
+    expect(classifyUrlWithoutDns("https://93.184.215.14/", allow)).toMatchObject({ kind: "public_ip", host: "93.184.215.14", port: 443 });
+    expect(classifyUrlWithoutDns("http://[2606:4700::1111]:8080/", allow)).toMatchObject({ kind: "public_ip", host: "2606:4700::1111", port: 8080 });
+  });
+
+  it("defers every other hostname to DNS", () => {
+    expect(classifyUrlWithoutDns("https://Example.com./path", allow)).toMatchObject({ kind: "needs_dns", host: "example.com", port: 443 });
   });
 });

@@ -1,7 +1,9 @@
 import { defaultResolver, type Resolver } from "@platform/security";
 import type { StageContext } from "@platform/testing-engine";
+import type { WorkerLogger } from "../deps";
 import { findFreePort, launchSandboxedBrowser, type BrowserExtension, type SandboxedBrowser } from "./browser-launcher";
-import { startEgressProxy, type EgressBlockEvent } from "./egress-proxy";
+import { createEgressEventReporter } from "./egress-events";
+import { startEgressProxy } from "./egress-proxy";
 import { computeAllowedHosts, installNavigationGuard, type NavigationBlockEvent } from "./navigation-guard";
 
 /**
@@ -13,6 +15,7 @@ import { computeAllowedHosts, installNavigationGuard, type NavigationBlockEvent 
 export interface RunSandboxDeps {
   /** The worker's TARGET_PRIVATE_ALLOWLIST. The browser's own CDP loopback entry is added here. */
   privateAllowlist: string[];
+  logger: Pick<WorkerLogger, "warn">;
   resolve?: Resolver;
   /** e.g. the Stagehand runtime extension (supplied by `@platform/stagehand-adapter`, Ruling R9). */
   extensions?: BrowserExtension[];
@@ -27,8 +30,44 @@ export interface RunSandbox extends SandboxedBrowser {
   onNavigationBlocked(listener: (e: NavigationBlockEvent) => void): () => void;
 }
 
-function hostPort(e: EgressBlockEvent): string {
-  return e.host.includes(":") ? `[${e.host}]:${e.port}` : `${e.host}:${e.port}`;
+/**
+ * Owns the sandbox's resources. The orchestrator abandons a stage on abort and the worker runs the
+ * stage cleanups right away, possibly while we are still launching; so once teardown has started,
+ * anything that finishes starting afterwards is released immediately instead of being queued.
+ */
+class ResourceScope {
+  private readonly release: (() => Promise<void>)[] = [];
+  private closing: Promise<void> | undefined;
+
+  constructor(private readonly logger: Pick<WorkerLogger, "warn">) {}
+
+  get closed(): boolean {
+    return this.closing !== undefined;
+  }
+
+  /** Registers `fn`; if the scope is already closing, runs it now. */
+  async own(fn: () => Promise<void>): Promise<void> {
+    if (this.closing) {
+      await this.run(fn);
+      return;
+    }
+    this.release.push(fn);
+  }
+
+  close(): Promise<void> {
+    this.closing ??= (async () => {
+      for (const fn of this.release.splice(0).reverse()) await this.run(fn);
+    })();
+    return this.closing;
+  }
+
+  private async run(fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (err) {
+      this.logger.warn({ err }, "sandbox resource release failed");
+    }
+  }
 }
 
 export async function openRunSandbox(ctx: StageContext, deps: RunSandboxDeps): Promise<RunSandbox> {
@@ -36,44 +75,29 @@ export async function openRunSandbox(ctx: StageContext, deps: RunSandboxDeps): P
   const listeners = new Set<(e: NavigationBlockEvent) => void>();
   if (deps.onNavigationBlocked) listeners.add(deps.onNavigationBlocked);
 
-  const release: (() => Promise<void>)[] = [];
-  let closing: Promise<void> | undefined;
-  const close = () =>
-    (closing ??= (async () => {
-      for (const fn of release.splice(0).reverse()) await fn().catch(() => {});
-    })());
+  const scope = new ResourceScope(deps.logger);
+  const close = () => scope.close();
   ctx.addCleanup(close);
+  // An abort also tears down on its own, so nothing depends on the caller running cleanups.
+  const onAbort = () => void close();
+  ctx.signal.addEventListener("abort", onAbort, { once: true });
 
-  const checkAborted = () => {
+  const stopIfClosed = () => {
     if (ctx.signal.aborted) throw ctx.signal.reason ?? new Error("aborted");
+    if (scope.closed) throw new Error("sandbox closed while opening");
   };
 
   try {
-    checkAborted();
+    stopIfClosed();
     const cdpPort = await findFreePort();
 
-    // One egress.blocked event per host:port + reason, so a page can't flood the timeline.
-    // Chromium's own background services are denied silently: the site under test didn't cause them.
-    const reported = new Set<string>();
     const proxy = await startEgressProxy({
       resolve: deps.resolve ?? defaultResolver,
       privateAllowlist: [...deps.privateAllowlist, `127.0.0.1:${cdpPort}`],
-      onBlock: (e) => {
-        if (e.reason === "BACKGROUND_SERVICE_DENIED") return;
-        const key = `${hostPort(e)}|${e.reason}`;
-        if (reported.has(key)) return;
-        reported.add(key);
-        void ctx
-          .publish({
-            type: "egress.blocked",
-            message: `Blocked network access to ${hostPort(e)} (${e.reason})`,
-            payload: { host: e.host, reason: e.reason },
-          })
-          .catch(() => {});
-      },
+      onBlock: createEgressEventReporter({ publish: (e) => ctx.publish(e), logger: deps.logger }),
     });
-    release.push(() => proxy.close());
-    checkAborted();
+    await scope.own(() => proxy.close());
+    stopIfClosed();
 
     const browser = await launchSandboxedBrowser({
       proxyUrl: proxy.url,
@@ -81,9 +105,10 @@ export async function openRunSandbox(ctx: StageContext, deps: RunSandboxDeps): P
       cdpPort,
       extensions: deps.extensions,
       executablePath: deps.executablePath,
+      signal: ctx.signal,
     });
-    release.push(() => browser.close());
-    checkAborted();
+    await scope.own(() => browser.close());
+    stopIfClosed();
 
     const guard = await installNavigationGuard(browser, {
       allowedHosts,
@@ -98,10 +123,13 @@ export async function openRunSandbox(ctx: StageContext, deps: RunSandboxDeps): P
         }
       },
       // Fail closed: an unguarded browser is torn down.
-      onError: () => void close(),
+      onError: (err) => {
+        deps.logger.warn({ err, runId: ctx.runId }, "navigation guard lost; closing the sandbox");
+        void close();
+      },
     });
-    release.push(() => guard.close());
-    checkAborted();
+    await scope.own(() => guard.close());
+    stopIfClosed();
 
     return {
       ...browser,
@@ -116,5 +144,7 @@ export async function openRunSandbox(ctx: StageContext, deps: RunSandboxDeps): P
   } catch (err) {
     await close();
     throw err;
+  } finally {
+    ctx.signal.removeEventListener("abort", onAbort);
   }
 }
