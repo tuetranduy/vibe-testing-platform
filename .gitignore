@@ -9,3 +9,4 @@ test-results/
 playwright-report/
 spikes/**/node_modules/
 .sync/
+*.tsbuildinfo
