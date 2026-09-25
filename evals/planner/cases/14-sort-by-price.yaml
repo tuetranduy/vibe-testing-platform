@@ -1,0 +1,18 @@
+id: sort-by-price
+tags: [semantic]
+# Input reused from requirement-compiler/cases/23-sort-by-price.yaml; the confirmed criterion stays
+# semantic (no facts), so it is referenced by a step but never blocked.
+requirement:
+  originalText: Sorting products by price shows them in a sensible order.
+  criteria:
+    - id: AC-1
+      sourceText: Sorting products by price shows them in a sensible order.
+      statement: Products sorted by price appear in a sensible order
+      expectedOutcome: { kind: semantic, description: Sorting products by price shows them in a sensible order. }
+      preconditions: []
+      ambiguity: { reason: "No order (ascending or descending) is stated", suggestions: [] }
+  facts: []
+expect:
+  requiredStepKinds: [navigate]
+  maxSteps: 8
+  blocked: []

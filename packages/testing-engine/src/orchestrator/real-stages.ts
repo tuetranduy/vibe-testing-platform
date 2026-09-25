@@ -1,8 +1,10 @@
 import type { ProvisionalResult } from "@platform/contracts";
+import { createPlanStage } from "../planner/planner";
 import { createAnalyzeStage, type RequirementLlm } from "../requirement/compiler";
 import type { EngineStages } from "./stages";
 
 export interface RealStageDeps {
+  /** Structured-output LLM port shared by the analyze and plan stages. */
   llm: RequirementLlm;
 }
 
@@ -13,7 +15,7 @@ export interface RealStageDeps {
 export function createRealStages(deps: RealStageDeps, fallback: EngineStages): EngineStages {
   return {
     analyze: createAnalyzeStage(deps.llm), // Task 10
-    plan: (ctx, requirement) => fallback.plan(ctx, requirement), // fake until Task 11
+    plan: createPlanStage(deps.llm), // Task 12
     explore: (ctx, plan, requirement) => fallback.explore(ctx, plan, requirement), // fake until Task 14
     // Fake until Task 15. The fake explorer observes nothing real, so its PASS/FAIL would be
     // fabricated evidence (§2.3: no PASS without deterministic evidence) — never let one through.

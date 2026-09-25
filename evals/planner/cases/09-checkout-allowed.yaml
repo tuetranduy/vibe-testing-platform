@@ -1,0 +1,35 @@
+id: checkout-allowed
+tags: [destructive]
+# Same requirement as 08-checkout-denied, with destructive actions allowed (staging, opted in).
+testDataKeys: [cardNumber, cardExpiry]
+secretNames: [card_cvc]
+allowDestructive: true
+requirement:
+  originalText: >-
+    Completing checkout with the test card shows an order confirmation page with an order number, and
+    the cart is empty afterwards.
+  criteria:
+    - id: AC-1
+      sourceText: Completing checkout with the test card shows an order confirmation page with an order number
+      statement: The order confirmation page shows an order number
+      expectedOutcome: { kind: visible, fact: { key: orderNumber, checkpoint: confirmation }, expected: true }
+      preconditions:
+        - { kind: test_data, ref: cardNumber, description: Test card number }
+        - { kind: secret, ref: card_cvc, description: Test card CVC }
+      ambiguity: null
+    - id: AC-2
+      sourceText: the cart is empty afterwards.
+      statement: The cart is empty after checkout
+      expectedOutcome: { kind: visible, fact: { key: emptyCartMessage, checkpoint: cart_after_order }, expected: true }
+      preconditions: []
+      ambiguity: null
+  facts:
+    - { key: orderNumber, checkpoint: confirmation, description: Order number on the confirmation page, valueType: boolean }
+    - { key: emptyCartMessage, checkpoint: cart_after_order, description: Empty cart message, valueType: boolean }
+expect:
+  requiredStepKinds: [fill, capture_checkpoint]
+  blocked: []
+  destructiveStep: true
+  inputRefs:
+    - { source: testData, key: cardNumber }
+    - { source: secret, key: card_cvc }

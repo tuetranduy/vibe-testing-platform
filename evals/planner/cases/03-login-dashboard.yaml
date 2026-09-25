@@ -1,0 +1,27 @@
+id: login-dashboard
+tags: [login]
+# Input reused from requirement-compiler/cases/04-login-dashboard.yaml.
+testDataKeys: [username, firstName]
+secretNames: [password]
+requirement:
+  originalText: After logging in, the dashboard greets the user by their first name.
+  criteria:
+    - id: AC-1
+      sourceText: After logging in, the dashboard greets the user by their first name.
+      statement: The dashboard shows a greeting after login
+      expectedOutcome: { kind: visible, fact: { key: greeting, checkpoint: dashboard }, expected: true }
+      preconditions:
+        - { kind: authenticated, description: User is logged in }
+        - { kind: test_data, ref: username, description: Username to log in with }
+        - { kind: secret, ref: password, description: Account password }
+      ambiguity: null
+  facts:
+    - { key: greeting, checkpoint: dashboard, description: Greeting on the dashboard, valueType: boolean }
+expect:
+  requiredStepKinds: [fill, login, capture_checkpoint]
+  maxSteps: 12
+  blocked: []
+  requiresLogin: true
+  inputRefs:
+    - { source: testData, key: username }
+    - { source: secret, key: password }

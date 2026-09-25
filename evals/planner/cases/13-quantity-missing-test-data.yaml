@@ -1,0 +1,44 @@
+id: quantity-missing-test-data
+tags: [test-data, blocking]
+# Input reused from requirement-compiler/cases/24-quantity-from-test-data.yaml, but the "quantity"
+# test data key was not provided: both criteria depend on the step that enters it.
+requirement:
+  originalText: >-
+    Setting the quantity field to the configured quantity and adding the product updates the cart count
+    to that quantity. The subtotal is updated too.
+  criteria:
+    - id: AC-1
+      sourceText: >-
+        Setting the quantity field to the configured quantity and adding the product updates the cart count
+        to that quantity.
+      statement: The cart count increases after adding the configured quantity
+      expectedOutcome:
+        kind: numeric_compare
+        left: { key: cartCount, checkpoint: after_add }
+        operator: gt
+        right: { key: cartCount, checkpoint: before_add }
+      preconditions:
+        - { kind: test_data, ref: quantity, description: Quantity to add }
+      ambiguity: null
+    - id: AC-2
+      sourceText: The subtotal is updated too.
+      statement: The subtotal changes after adding the product
+      expectedOutcome:
+        kind: numeric_compare
+        left: { key: subtotal, checkpoint: after_add }
+        operator: neq
+        right: { key: subtotal, checkpoint: before_add }
+      preconditions: []
+      ambiguity: null
+  facts:
+    - { key: cartCount, checkpoint: before_add, description: Cart badge count, valueType: number }
+    - { key: cartCount, checkpoint: after_add, description: Cart badge count, valueType: number }
+    - { key: subtotal, checkpoint: before_add, description: Cart subtotal, valueType: number }
+    - { key: subtotal, checkpoint: after_add, description: Cart subtotal, valueType: number }
+expect:
+  requiredStepKinds: [fill]
+  blocked:
+    - { criterionId: AC-1, reason: MISSING_TEST_DATA }
+    - { criterionId: AC-2, reason: MISSING_TEST_DATA }
+  inputRefs:
+    - { source: testData, key: quantity }

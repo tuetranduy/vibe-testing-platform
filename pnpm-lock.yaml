@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@platform/contracts':
+        specifier: workspace:*
+        version: link:packages/contracts
       '@platform/llm':
         specifier: workspace:*
         version: link:packages/llm
@@ -230,13 +233,12 @@ importers:
       '@platform/llm':
         specifier: workspace:*
         version: link:../llm
-      zod:
-        specifier: 4.4.3
-        version: 4.4.3
-    devDependencies:
       '@platform/security':
         specifier: workspace:*
         version: link:../security
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
 
   tests/fixtures/demo-shop:
     devDependencies:

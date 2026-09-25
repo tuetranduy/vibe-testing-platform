@@ -6,9 +6,9 @@ Plan: [`docs/ai-testing-platform-implementation-plan.md`](docs/ai-testing-platfo
 ## Status
 
 **Milestone A (Tasks 0–9) is done**: contracts, database and run state machine, security primitives, artifact storage, demo shop, API (create / get / list / cancel / artifact URLs), live events over SSE, and the worker lifecycle with cancellation, deadlines, and crash recovery.
-With `LLM_PROVIDER=fake` (the default for local dev and compose) the test engine is the deterministic **fake** one (`packages/testing-engine/src/orchestrator/fake-stages.ts`). With `LLM_PROVIDER=anthropic` (+ `ANTHROPIC_API_KEY`, optional `LLM_MODEL`, default `claude-sonnet-5`) the requirement is compiled into criteria by the real model (Task 10); the remaining stages are still fake until Tasks 11–18 replace them (`packages/testing-engine/src/orchestrator/real-stages.ts`). The web UI is a placeholder until Task 19.
+With `LLM_PROVIDER=fake` (the default for local dev and compose) the test engine is the deterministic **fake** one (`packages/testing-engine/src/orchestrator/fake-stages.ts`). With `LLM_PROVIDER=anthropic` (+ `ANTHROPIC_API_KEY`, optional `LLM_MODEL`, default `claude-sonnet-5`) the requirement is compiled into criteria (Task 10) and the test plan is built (Task 12) by the real model, with blocking decided deterministically; the remaining stages are still fake until Tasks 13–18 replace them (`packages/testing-engine/src/orchestrator/real-stages.ts`). The web UI is a placeholder until Task 19.
 
-Prompt/model changes are tracked with `pnpm eval requirement-compiler` (needs `ANTHROPIC_API_KEY`; see `evals/BASELINE.md`).
+Prompt/model changes are tracked with `pnpm eval requirement-compiler` and `pnpm eval planner` (need `ANTHROPIC_API_KEY`; see `evals/BASELINE.md`).
 
 ## Run everything with Docker
 

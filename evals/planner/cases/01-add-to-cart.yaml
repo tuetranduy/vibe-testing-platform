@@ -1,0 +1,35 @@
+id: add-to-cart
+tags: [cart, checkpoints]
+# Input reused from requirement-compiler/cases/01-add-to-cart.yaml; the confirmed criteria are hand-written.
+requirement:
+  originalText: A user can add a product to the cart. The cart count should increase.
+  criteria:
+    - id: AC-1
+      sourceText: A user can add a product to the cart.
+      statement: The product appears in the cart after adding it
+      expectedOutcome:
+        kind: collection_contains
+        collection: { key: cartItems, checkpoint: after_add }
+        item: { key: productName, checkpoint: product_page }
+        match: contains
+      preconditions: []
+      ambiguity: null
+    - id: AC-2
+      sourceText: The cart count should increase.
+      statement: The cart count increases after adding a product
+      expectedOutcome:
+        kind: numeric_compare
+        left: { key: cartCount, checkpoint: after_add }
+        operator: gt
+        right: { key: cartCount, checkpoint: before_add }
+      preconditions: []
+      ambiguity: null
+  facts:
+    - { key: productName, checkpoint: product_page, description: Name of the product being added, valueType: string }
+    - { key: cartItems, checkpoint: after_add, description: Names of the items in the cart, valueType: string_list }
+    - { key: cartCount, checkpoint: before_add, description: Cart badge count, valueType: number }
+    - { key: cartCount, checkpoint: after_add, description: Cart badge count, valueType: number }
+expect:
+  requiredStepKinds: [click, capture_checkpoint]
+  maxSteps: 15
+  blocked: []

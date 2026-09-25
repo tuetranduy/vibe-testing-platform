@@ -1,0 +1,34 @@
+id: delete-account
+tags: [destructive, login, blocking]
+# Input reused from requirement-compiler/cases/07-delete-account.yaml. Default policy: destructive denied.
+testDataKeys: [email]
+secretNames: [password]
+requirement:
+  originalText: >-
+    A user can delete their account from the settings page. After deletion they are logged out and
+    see the message "Your account has been deleted".
+  criteria:
+    - id: AC-1
+      sourceText: see the message "Your account has been deleted"
+      statement: The message Your account has been deleted is shown after deletion
+      expectedOutcome:
+        kind: text_matches
+        fact: { key: deletionMessage, checkpoint: after_delete }
+        match: { mode: contains, value: Your account has been deleted, caseSensitive: false }
+      preconditions:
+        - { kind: authenticated, description: User is logged in }
+      ambiguity: null
+    - id: AC-2
+      sourceText: After deletion they are logged out
+      statement: The user is logged out after deleting the account
+      expectedOutcome: { kind: visible, fact: { key: loginLink, checkpoint: after_delete }, expected: true }
+      preconditions: []
+      ambiguity: null
+  facts:
+    - { key: deletionMessage, checkpoint: after_delete, description: Confirmation message after deletion, valueType: string }
+    - { key: loginLink, checkpoint: after_delete, description: Log in link shown to logged-out users, valueType: boolean }
+expect:
+  requiredStepKinds: [login]
+  blocked:
+    - { criterionId: AC-1, reason: DESTRUCTIVE_ACTION_NOT_AUTHORIZED }
+    - { criterionId: AC-2, reason: DESTRUCTIVE_ACTION_NOT_AUTHORIZED }

@@ -1,0 +1,22 @@
+id: empty-cart
+tags: [cart]
+# Input reused from requirement-compiler/cases/20-empty-cart.yaml. Removing a cart item is not a
+# destructive action under the policy, so nothing is blocked.
+requirement:
+  originalText: Removing the only item from the cart shows "Your cart is empty".
+  criteria:
+    - id: AC-1
+      sourceText: Removing the only item from the cart shows "Your cart is empty".
+      statement: Removing the only cart item shows Your cart is empty
+      expectedOutcome:
+        kind: text_matches
+        fact: { key: cartMessage, checkpoint: after_remove }
+        match: { mode: contains, value: Your cart is empty, caseSensitive: false }
+      preconditions: []
+      ambiguity: null
+  facts:
+    - { key: cartMessage, checkpoint: after_remove, description: Message shown in the cart, valueType: string }
+expect:
+  requiredStepKinds: [click, capture_checkpoint]
+  maxSteps: 12
+  blocked: []

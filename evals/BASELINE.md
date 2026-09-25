@@ -28,3 +28,27 @@ What a case checks (`evals/requirement-compiler/cases/*.yaml`): the compiled cri
 (a list entry means "any of these kinds"), and when `mustFlagAmbiguous` is true at least one criterion
 carries an ambiguity. A compile that throws (e.g. `ContractError` after the correction round) fails
 the case. The runner exits 0 regardless of the score.
+
+## planner
+
+**Status: pending — no baseline recorded yet.** Same reason as above (no `ANTHROPIC_API_KEY` where
+the suite was built, Ruling R8). No score below is real until someone records it.
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... pnpm eval planner          # model: claude-sonnet-5 (default)
+```
+
+Record the `Total:` line with the commit of `packages/testing-engine/src/planner/prompts.ts`.
+
+| Date | Model | Prompt commit | Passed | Tokens in / out | Est. cost | Failing cases |
+|------|-------|---------------|--------|-----------------|-----------|---------------|
+| _pending_ | | | | | | |
+
+What a case checks (`evals/planner/cases/*.yaml`, each with a hand-written confirmed requirement, most
+reusing a requirement-compiler input): planning succeeds without `ContractError` (every checkpoint
+captured once, in order, no unknown criterion ids, ≤ 50 steps); every `expect.requiredStepKinds` kind
+appears; the scenario has at most `expect.maxSteps` steps; the blocked criteria and reasons equal
+`expect.blocked` exactly (so the model must reference the inputs and mark the destructive steps that
+our deterministic blocking relies on); with `requiresLogin`, a `login` step is preceded by a `fill`
+carrying a secret `inputRef`; every `expect.inputRefs` entry is carried by some step; with
+`destructiveStep`, some step is flagged destructive.
