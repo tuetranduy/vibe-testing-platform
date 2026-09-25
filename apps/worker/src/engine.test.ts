@@ -1,9 +1,10 @@
-import { LlmCallRepository, RequirementRepository, RunRepository } from "@platform/db";
+import { LlmCallRepository, RequirementRepository, ResultRepository, RunRepository } from "@platform/db";
 import { FakeTransport } from "@platform/llm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { silentLogger } from "./deps";
 import { createEngine } from "./engine";
 import { analyzeRunJob } from "./jobs/analyze-run";
+import { executeRunJob } from "./jobs/execute-run";
 import { createHarness, eventsOf, seedRun, type WorkerHarness } from "./test-support";
 
 let h: WorkerHarness;
@@ -88,5 +89,23 @@ describe("createEngine (Ruling R7)", () => {
       { db: h.tdb.db, logger: silentLogger, transport: new FakeTransport() },
     );
     expect(await engine.stages.generateTest({} as never, {} as never)).toBeNull();
+  });
+
+  it("real engine never reports PASS/FAIL from stages that are still fake (no PASS without evidence)", async () => {
+    const engine = createEngine(
+      { LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5", ANTHROPIC_API_KEY: "sk-test" },
+      // Even a fallback configured to PASS must not leak a verdict into a real run.
+      { db: h.tdb.db, logger: silentLogger, transport: new FakeTransport(), fake: { provisionalStatus: "PASS" } },
+    );
+    const run = await seedRun(h, { lifecycle: "PLANNING" });
+
+    await executeRunJob(h.deps(engine.stages), run.id);
+
+    const after = await new RunRepository(h.tdb.db).getById(run.id);
+    expect(after.lifecycle).toBe("COMPLETED");
+    expect(after.verdict).toBe("INCONCLUSIVE");
+    const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) expect(r).toMatchObject({ status: "INCONCLUSIVE", reason: "FACT_NOT_OBSERVED" });
   });
 });

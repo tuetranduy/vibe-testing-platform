@@ -15,7 +15,10 @@ export interface LlmTransportRequest {
 export interface LlmTransportResponse {
   /** Raw response text; the client parses and validates it. */
   text: string;
-  /** The model that served the request, as reported by the provider. */
+  /**
+   * The model that served the request, as reported by the provider (may be a dated snapshot id).
+   * Informational: LlmClient prices and records the requested model.
+   */
   model: string;
   usage: { inputTokens: number; outputTokens: number };
 }

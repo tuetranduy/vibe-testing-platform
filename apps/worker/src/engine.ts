@@ -30,6 +30,7 @@ export function createEngine(
   const llm = new LlmClient({
     transport,
     model: config.LLM_MODEL,
+    logger: deps.logger,
     recordCall: async (call) => {
       await calls.create(call);
     },
