@@ -50,6 +50,7 @@ export interface TransitionPatch {
   errorCategory?: ErrorCategory;
   errorMessage?: string;
   cancelReason?: CancelReason;
+  cancelRequestedAt?: Date;
   heartbeatAt?: Date | null;
   deadlineAt?: Date | null;
   startedAt?: Date;
