@@ -14,6 +14,8 @@
   "dependencies": {
     "@platform/contracts": "workspace:*",
     "@platform/db": "workspace:*",
+    "@platform/security": "workspace:*",
+    "bullmq": "^6.3.8",
     "ioredis": "^6.0.0"
   }
 }
