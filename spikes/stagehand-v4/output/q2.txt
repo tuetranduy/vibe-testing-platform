@@ -1,0 +1,11 @@
+
+===== Q2: Playwright connected over CDP to the same browser =====
+playwright contexts: 1 pages: [ 'about:blank' ]
+same page? stagehand url: http://127.0.0.1:41205/ | playwright url: http://127.0.0.1:41205/
+stagehand pageId: 0E62EF3A2A1F78AB8CD0B9934C217DC5 | playwright page CDP targetId: 0E62EF3A2A1F78AB8CD0B9934C217DC5 | equal: true
+page.route fired: 1 time(s); price text via Playwright: Price: CHF 0.99 (mocked by Playwright)
+locator counts via Playwright: buttons = 1 , 'Add to cart' = 1 , textbox/spinbutton 'Quantity' = 1
+stagehand.act success: true -> badge via Playwright: 1
+after Playwright click -> badge via Stagehand locator: 6
+stagehand.extract sees: { heading: 'Spike Shop', cartCount: 6 }
+exit=0

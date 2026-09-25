@@ -1,0 +1,6 @@
+
+===== Q6: repeated identical observe() calls with caching requested =====
+call 1 opts={"cache":true} -> metadata.cache={"status":"DISABLED"} | LLM calls: 1
+call 2 opts={"cache":true} -> metadata.cache={"status":"DISABLED"} | LLM calls: 1
+call 3 opts={"cache":{"threshold":1}} -> metadata.cache={"status":"DISABLED"} | LLM calls: 1
+exit=0

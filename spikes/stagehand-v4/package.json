@@ -1,0 +1,22 @@
+{
+  "name": "stagehand-v4-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "spike": "./run-all.sh"
+  },
+  "dependencies": {
+    "@browserbasehq/stagehand": "^4.1.0",
+    "playwright-core": "1.56.1",
+    "tsx": "^4.23.15",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "~5.9.3"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

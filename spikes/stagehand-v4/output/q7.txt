@@ -1,0 +1,36 @@
+BROWSERBASE_API_KEY set: false | OPENAI/ANTHROPIC key set: false
+
+===== Q7a: Stagehand-managed local launch: localBrowser.launch({ executablePath, proxy, args }) =====
+localBrowser.launch FAILED on chromium-1194/chrome-linux/chrome -> Method not available. {"code":-32000,"message":"Method not available.","method":"Extensions.loadUnpacked"}
+
+===== Q7b: our own local Chromium + localBrowser.connect (no Browserbase anywhere) =====
+provider: local origin: connected sessionId: undefined
+observe with ClientLLM (fully local): [
+  'xpath=/html[1]/body[1]/button[1]',
+  'xpath=/html[1]/body[1]/input[1]'
+]
+
+===== Q7c: provider ModelConfig -> where does inference run? =====
+observe with dummy OpenAI key failed as expected: Failed to fetch
+proxy log during provider-model observe: [ 'CONNECT example.com:443', 'CONNECT api.openai.com:443' ]
+
+===== Q7d: non-page egress seen by our proxy from Q7c until after stagehand.close() =====
+[
+  'CONNECT example.com:443',
+  'CONNECT api.openai.com:443',
+  'CONNECT example.com:443',
+  'CONNECT accounts.google.com:443',
+  'CONNECT content-autofill.googleapis.com:443',
+  'CONNECT example.com:443',
+  'CONNECT example.com:443',
+  'CONNECT android.clients.google.com:443',
+  'CONNECT example.com:443',
+  'CONNECT example.com:443',
+  'CONNECT content-autofill.googleapis.com:443',
+  'CONNECT accounts.google.com:443',
+  'CONNECT example.com:443',
+  'CONNECT example.com:443',
+  'CONNECT content-autofill.googleapis.com:443',
+  'CONNECT example.com:443'
+]
+exit=0
