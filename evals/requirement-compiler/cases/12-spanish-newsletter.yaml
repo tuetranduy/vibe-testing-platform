@@ -1,0 +1,9 @@
+id: spanish-newsletter
+tags: [non-english]
+input: Al hacer clic en "Suscribirse" con un correo válido, aparece el mensaje "Gracias por suscribirte".
+testDataKeys: [email]
+secretNames: []
+expect:
+  criteriaCount: { min: 1, max: 2 }
+  requiredOutcomeKinds: [text_matches]
+  mustFlagAmbiguous: false

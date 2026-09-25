@@ -1,0 +1,12 @@
+id: checkout-confirmation
+tags: [destructive, multi-criterion]
+input: >-
+  Completing checkout with the test card shows an order confirmation page with an order number, and
+  the cart is empty afterwards.
+testDataKeys: [cardNumber, cardExpiry]
+secretNames: [card_cvc]
+expect:
+  criteriaCount: { min: 2, max: 3 }
+  requiredOutcomeKinds:
+    - [visible, text_matches]
+  mustFlagAmbiguous: false

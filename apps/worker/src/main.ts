@@ -1,11 +1,11 @@
 import { loadEnvOrExit } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
 import { createRunQueue } from "@platform/event-bus";
-import { createFakeStages } from "@platform/testing-engine";
 import { writeFileSync } from "node:fs";
 import { Redis } from "ioredis";
 import { CancelWatcher } from "./cancel-watcher";
 import type { WorkerLogger } from "./deps";
+import { createEngine } from "./engine";
 import { startWorkers } from "./worker";
 
 const env = loadEnvOrExit();
@@ -31,9 +31,16 @@ const publisher = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 3 });
 const cancelWatcher = new CancelWatcher(new Redis(env.REDIS_URL, { maxRetriesPerRequest: null }));
 const queue = createRunQueue(connection);
 
-// V1 milestone A: the engine is the deterministic fake until Tasks 10–18 replace each stage.
-logger.warn({ engine: "fake" }, "using the fake test engine (Milestone A)");
-const stages = createFakeStages({ stepDelayMs: Number(process.env.FAKE_ENGINE_STEP_DELAY_MS ?? 500), explorationSteps: 4 });
+// Ruling R7: LLM_PROVIDER=fake → the deterministic fake engine; otherwise real stages as they land
+// (Task 10: analyze), with the fake engine standing in for the rest.
+const engine = createEngine(env, {
+  db: handle.db,
+  logger,
+  fake: { stepDelayMs: Number(process.env.FAKE_ENGINE_STEP_DELAY_MS ?? 500), explorationSteps: 4 },
+});
+if (engine.kind === "fake") logger.warn({ engine: "fake" }, "using the fake test engine (LLM_PROVIDER=fake)");
+else logger.info({ engine: "real", provider: engine.llm?.provider, model: engine.llm?.model }, "using the real test engine");
+const stages = engine.stages;
 
 const workers = await startWorkers(
   {

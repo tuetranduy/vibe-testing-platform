@@ -1,0 +1,10 @@
+id: invalid-email
+tags: [validation]
+input: Submitting the newsletter form with an invalid email shows the error "Please enter a valid email address".
+testDataKeys: [invalidEmail]
+secretNames: []
+expect:
+  criteriaCount: { min: 1, max: 2 }
+  requiredOutcomeKinds:
+    - [text_matches, visible]
+  mustFlagAmbiguous: false

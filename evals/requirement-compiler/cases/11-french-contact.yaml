@@ -1,0 +1,10 @@
+id: french-contact
+tags: [non-english]
+input: Après l'envoi du formulaire de contact, un message de confirmation « Merci pour votre message » s'affiche.
+testDataKeys: [name, email, message]
+secretNames: []
+expect:
+  criteriaCount: { min: 1, max: 2 }
+  requiredOutcomeKinds:
+    - [text_matches, visible]
+  mustFlagAmbiguous: false

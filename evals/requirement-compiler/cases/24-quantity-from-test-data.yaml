@@ -1,0 +1,12 @@
+id: quantity-from-test-data
+tags: [numbers, multi-criterion]
+input: >-
+  Setting the quantity field to the configured quantity and adding the product updates the cart count
+  to that quantity. The subtotal is updated too.
+testDataKeys: [quantity]
+secretNames: []
+expect:
+  criteriaCount: { min: 2, max: 3 }
+  requiredOutcomeKinds:
+    - [numeric_compare, text_matches, numeric_delta]
+  mustFlagAmbiguous: false

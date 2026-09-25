@@ -16,6 +16,7 @@ x-app-env: &app-env
   S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-s3admin-secret}
   S3_FORCE_PATH_STYLE: "true"
   LLM_PROVIDER: ${LLM_PROVIDER:-fake}
+  LLM_MODEL: ${LLM_MODEL:-claude-sonnet-5}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   BROWSER_MODE: local

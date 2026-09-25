@@ -1,0 +1,10 @@
+id: italian-login
+tags: [non-english, login]
+input: Dopo l'accesso, l'utente vede il proprio nome nell'intestazione della pagina.
+testDataKeys: [username, displayName]
+secretNames: [password]
+expect:
+  criteriaCount: { min: 1, max: 2 }
+  requiredOutcomeKinds:
+    - [text_matches, visible]
+  mustFlagAmbiguous: false

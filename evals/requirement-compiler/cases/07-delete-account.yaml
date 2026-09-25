@@ -1,0 +1,12 @@
+id: delete-account
+tags: [destructive, login]
+input: >-
+  A user can delete their account from the settings page. After deletion they are logged out and
+  see the message "Your account has been deleted".
+testDataKeys: [email]
+secretNames: [password]
+expect:
+  criteriaCount: { min: 1, max: 3 }
+  requiredOutcomeKinds:
+    - [text_matches, visible]
+  mustFlagAmbiguous: false

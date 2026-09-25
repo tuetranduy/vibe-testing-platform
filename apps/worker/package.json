@@ -15,6 +15,7 @@
     "@platform/contracts": "workspace:*",
     "@platform/db": "workspace:*",
     "@platform/event-bus": "workspace:*",
+    "@platform/llm": "workspace:*",
     "@platform/security": "workspace:*",
     "@platform/storage": "workspace:*",
     "@platform/testing-engine": "workspace:*",

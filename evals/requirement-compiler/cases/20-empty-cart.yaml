@@ -1,0 +1,10 @@
+id: empty-cart
+tags: [destructive]
+input: Removing the only item from the cart shows "Your cart is empty".
+testDataKeys: []
+secretNames: []
+expect:
+  criteriaCount: { min: 1, max: 2 }
+  requiredOutcomeKinds:
+    - [text_matches, visible]
+  mustFlagAmbiguous: false

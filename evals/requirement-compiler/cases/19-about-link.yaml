@@ -1,0 +1,10 @@
+id: about-link
+tags: [navigation]
+input: Clicking the "About" link in the header opens the About us page.
+testDataKeys: []
+secretNames: []
+expect:
+  criteriaCount: { min: 1, max: 2 }
+  requiredOutcomeKinds:
+    - [text_matches, visible]
+  mustFlagAmbiguous: false

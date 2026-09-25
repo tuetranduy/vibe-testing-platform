@@ -1,0 +1,9 @@
+id: looks-modern
+tags: [vague]
+input: The homepage should look nice and modern.
+testDataKeys: []
+secretNames: []
+expect:
+  criteriaCount: { min: 1, max: 2 }
+  requiredOutcomeKinds: [semantic]
+  mustFlagAmbiguous: true

@@ -6,7 +6,9 @@ Plan: [`docs/ai-testing-platform-implementation-plan.md`](docs/ai-testing-platfo
 ## Status
 
 **Milestone A (Tasks 0–9) is done**: contracts, database and run state machine, security primitives, artifact storage, demo shop, API (create / get / list / cancel / artifact URLs), live events over SSE, and the worker lifecycle with cancellation, deadlines, and crash recovery.
-The test engine is still the **fake** one (`packages/testing-engine/src/orchestrator/fake-stages.ts`). Tasks 10–18 replace it stage by stage. The web UI is a placeholder until Task 19.
+With `LLM_PROVIDER=fake` (the default for local dev and compose) the test engine is the deterministic **fake** one (`packages/testing-engine/src/orchestrator/fake-stages.ts`). With `LLM_PROVIDER=anthropic` (+ `ANTHROPIC_API_KEY`, optional `LLM_MODEL`, default `claude-sonnet-5`) the requirement is compiled into criteria by the real model (Task 10); the remaining stages are still fake until Tasks 11–18 replace them (`packages/testing-engine/src/orchestrator/real-stages.ts`). The web UI is a placeholder until Task 19.
+
+Prompt/model changes are tracked with `pnpm eval requirement-compiler` (needs `ANTHROPIC_API_KEY`; see `evals/BASELINE.md`).
 
 ## Run everything with Docker
 
@@ -75,7 +77,9 @@ packages/db               Drizzle schema, SQL migrations, repositories, state ma
 packages/security         URL/IP policy, redaction, secret vault, destructive-action policy
 packages/storage          artifact storage (local, S3)
 packages/event-bus        event publisher, Redis fan-out, queue names
-packages/testing-engine   orchestrator + engine stages (fake for now)
+packages/llm              provider-neutral LLM client (redaction, retries, LlmCall records), Anthropic adapter
+packages/testing-engine   orchestrator + engine stages (requirement compiler real, the rest fake for now)
+evals                     `pnpm eval <suite>` harness and cases
 tests/fixtures/demo-shop  deterministic test target
 spikes/stagehand-v4       Task 0 spike code (see docs/spikes/stagehand-v4.md)
 ```
@@ -85,4 +89,7 @@ spikes/stagehand-v4       Task 0 spike code (see docs/spikes/stagehand-v4.md)
 - **Drizzle ORM instead of Prisma.** Prisma's CLI downloads a native engine from `binaries.prisma.sh`, which was unreachable in the build environments. Drizzle is pure TypeScript and gives the same Postgres tables, enums, and constraints. Migrations are plain SQL in `packages/db/migrations` (`pnpm --filter @platform/db db:generate` after editing `schema.ts`).
 - **rclone's S3 server instead of MinIO** in Docker Compose: MinIO images are no longer available on Docker Hub. Production can use any S3-compatible store.
 - **Zod pinned to 4.4.3** because Stagehand v4 pins it (Task 0 finding).
+- **Only the Anthropic provider exists in V1.** `LLM_PROVIDER=openai` makes the worker fail at start-up. The model is set with `LLM_MODEL`.
+- **Engine error classes live in `@platform/contracts`** (re-exported by `@platform/testing-engine`) so `@platform/llm` can throw `ModelProviderError` / `ContractError` / `CancelledError` without depending on the engine.
+- **`analyze` returns a draft; the orchestrator persists revision 1** (the plan's `compileRequirement` signature returns the stored requirement).
 - **`docs/ai-testing-platform-architecture.md`** is referenced by the plan but wasn't in the repo, so it hasn't been updated.

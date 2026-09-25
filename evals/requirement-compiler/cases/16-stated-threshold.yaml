@@ -1,0 +1,9 @@
+id: stated-threshold
+tags: [numbers]
+input: The product list shows at most 12 products per page.
+testDataKeys: []
+secretNames: []
+expect:
+  criteriaCount: { min: 1, max: 1 }
+  requiredOutcomeKinds: [numeric_compare]
+  mustFlagAmbiguous: false
