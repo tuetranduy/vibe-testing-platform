@@ -59,6 +59,25 @@ describe("POST /v1/test-runs", () => {
     expect(JSON.stringify(events)).not.toContain("hunter2");
   });
 
+  it("redacts secret values that also appear in the requirement text or test data", async () => {
+    const res = await post(
+      validBody({
+        requirement: "Log in with password hunter2-long-secret and check the account page.",
+        secrets: { login_password: "hunter2-long-secret" },
+        testData: { email: "qa@demo.test", password: "hunter2-long-secret", note: "pw is hunter2-long-secret" },
+      }),
+    );
+    expect(res.statusCode).toBe(202);
+    const { runId } = res.json();
+    const [row] = await t.tdb.db.select().from(schema.testRuns).where(eq(schema.testRuns.id, runId));
+    expect(JSON.stringify(row)).not.toContain("hunter2");
+    const stored = row!.requestJson as { requirement: string; testData: Record<string, string> };
+    expect(stored.requirement).toBe("Log in with password [REDACTED] and check the account page.");
+    expect(stored.testData.email).toBe("qa@demo.test");
+    const summary = await t.app.inject({ method: "GET", url: `/v1/test-runs/${runId}`, headers: auth });
+    expect(summary.body).not.toContain("hunter2");
+  });
+
   it("returns 400 for malformed JSON", async () => {
     const res = await t.app.inject({
       method: "POST",
@@ -119,6 +138,22 @@ describe("POST /v1/test-runs", () => {
     const res = await post(validBody());
     expect(res.statusCode).toBe(429);
     expect(res.json().code).toBe("TOO_MANY_ACTIVE_RUNS");
+  });
+
+  it("lets a client retry with the same Idempotency-Key after a 503", async () => {
+    const key = `idem-503-${Date.now()}`;
+    t.queue.fail = true;
+    const first = await post(validBody(), { "idempotency-key": key });
+    expect(first.statusCode).toBe(503);
+    t.queue.fail = false;
+    const retry = await post(validBody(), { "idempotency-key": key });
+    expect(retry.statusCode).toBe(202);
+    const { runId } = retry.json();
+    expect(t.queue.analyze).toContain(runId);
+    const summary = (await t.app.inject({ method: "GET", url: `/v1/test-runs/${runId}`, headers: auth })).json();
+    expect(summary.lifecycle).toBe("QUEUED");
+    const again = await post(validBody(), { "idempotency-key": key });
+    expect(again.json().runId).toBe(runId);
   });
 
   it("marks the run ERRORED/INTERNAL and returns 503 when the queue is unavailable", async () => {

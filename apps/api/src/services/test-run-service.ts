@@ -21,6 +21,8 @@ import { createHmac } from "node:crypto";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 
+const ENQUEUE_FAILED = "Queue unavailable at creation";
+
 /** Stable JSON (sorted keys) so equal bodies hash equally regardless of key order. */
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -72,7 +74,10 @@ export class TestRunService {
     if (idempotencyKey) {
       if (idempotencyKey.length > 200) throw new HttpError(400, "VALIDATION_FAILED", "Idempotency-Key too long");
       const existing = await this.runs.findByIdempotencyKey(tenantId, idempotencyKey);
-      if (existing) return this.replay(existing, requestHash!);
+      if (existing) {
+        const replayed = await this.replay(existing, requestHash!);
+        if (replayed) return replayed;
+      }
     }
 
     const policy = await validateTargetUrl(req.targetUrl, {
@@ -85,20 +90,27 @@ export class TestRunService {
       ]);
     }
 
-    if ((await this.runs.countActive(tenantId)) >= this.deps.config.maxActiveRunsPerTenant) {
-      throw new HttpError(429, "TOO_MANY_ACTIVE_RUNS", "Too many active runs; wait for one to finish");
-    }
-
     const { secrets, ...rest } = req;
-    const stored: StoredTestRunRequest = { ...rest, secretNames: Object.keys(secrets).sort() };
     const redact = createRunRedactor(Object.values(secrets));
+    // Secret values can also appear in the requirement text or test data: redact them by key and
+    // value before anything is persisted (D7). The worker only ever sees this redacted copy.
+    const stored: StoredTestRunRequest = {
+      ...(redact(rest) as typeof rest),
+      secretNames: Object.keys(secrets).sort(),
+    };
     const publisher = this.publisher(redact);
     const runId = newId("run");
 
     let created: { run: TestRun; event: Awaited<ReturnType<EventRepository["append"]>> };
     try {
       created = await this.deps.db.transaction(async (tx) => {
-        const run = await new RunRepository(tx).create({
+        const txRuns = new RunRepository(tx);
+        // Admission check under a tenant row lock, so concurrent creates can't exceed the cap.
+        await txRuns.lockTenant(tenantId);
+        if ((await txRuns.countActive(tenantId)) >= this.deps.config.maxActiveRunsPerTenant) {
+          throw new HttpError(429, "TOO_MANY_ACTIVE_RUNS", "Too many active runs; wait for one to finish");
+        }
+        const run = await txRuns.create({
           id: runId,
           tenantId,
           targetUrl: req.targetUrl,
@@ -127,7 +139,9 @@ export class TestRunService {
     } catch (err) {
       if (idempotencyKey && isUniqueViolation(err)) {
         const existing = await this.runs.findByIdempotencyKey(tenantId, idempotencyKey);
-        if (existing) return this.replay(existing, requestHash!);
+        const replayed = existing && (await this.replay(existing, requestHash!));
+        if (replayed) return replayed;
+        throw new HttpError(409, "IDEMPOTENCY_CONFLICT", "A request with this Idempotency-Key is being processed");
       }
       throw err;
     }
@@ -142,8 +156,16 @@ export class TestRunService {
     return { status: 202, body: this.response(created.run) };
   }
 
-  private replay(existing: TestRun, requestHash: string): { status: 202; body: CreateTestRunResponse } {
+  /**
+   * Same key + same body → the original response. A run that failed to enqueue (the client got 503
+   * and was told to retry) releases its key so the retry creates a fresh run; returns null then.
+   */
+  private async replay(existing: TestRun, requestHash: string): Promise<{ status: 202; body: CreateTestRunResponse } | null> {
     if (existing.requestHash !== requestHash) throw new IdempotencyConflictError(existing.id);
+    if (existing.lifecycle === "ERRORED" && existing.errorMessage === ENQUEUE_FAILED) {
+      await this.runs.releaseIdempotencyKey(existing.id);
+      return null;
+    }
     return { status: 202, body: this.response(existing) };
   }
 
@@ -151,7 +173,7 @@ export class TestRunService {
     try {
       await this.runs.transition(runId, "QUEUED", "ERRORED", {
         errorCategory: "INTERNAL",
-        errorMessage: "Queue unavailable at creation",
+        errorMessage: ENQUEUE_FAILED,
       });
       await new SecretRepository(this.deps.db).purge(runId);
       await this.publisher().publish({
@@ -159,7 +181,7 @@ export class TestRunService {
         stage: "ERRORED",
         type: "run.errored",
         message: "Run could not be queued",
-        payload: { category: "INTERNAL", message: "Queue unavailable at creation" },
+        payload: { category: "INTERNAL", message: ENQUEUE_FAILED },
       });
     } catch {
       // best effort; the reaper does not touch QUEUED runs, so log-level visibility is enough here

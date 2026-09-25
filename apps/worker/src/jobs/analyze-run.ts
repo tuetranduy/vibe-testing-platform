@@ -2,7 +2,7 @@ import { RunRepository } from "@platform/db";
 import { runAnalysis } from "@platform/testing-engine";
 import type { WorkerDeps } from "../deps";
 import { createRunContext } from "../run-context";
-import { failRun, purgeSecretsIfTerminal } from "./finish";
+import { failBeforeContext, failRun, purgeSecretsIfTerminal } from "./finish";
 
 /** analyze-run: QUEUED → ANALYZING_REQUIREMENT → AWAITING_CONFIRMATION | PLANNING (+ execute-run). */
 export async function analyzeRunJob(deps: WorkerDeps, runId: string): Promise<void> {
@@ -13,10 +13,16 @@ export async function analyzeRunJob(deps: WorkerDeps, runId: string): Promise<vo
     return;
   }
   const budgetMs = deps.config.analysisTimeoutSeconds * 1000 * deps.config.timeScale;
-  const handle = await createRunContext(deps, run, {
-    deadlineAt: new Date(now().getTime() + budgetMs),
-    totalBudgetMs: budgetMs,
-  });
+  let handle;
+  try {
+    handle = await createRunContext(deps, run, {
+      deadlineAt: new Date(now().getTime() + budgetMs),
+      totalBudgetMs: budgetMs,
+    });
+  } catch (err) {
+    await failBeforeContext(deps, run, err);
+    return;
+  }
   try {
     await runAnalysis(handle.ctx, handle.ports, deps.stages);
   } catch (err) {

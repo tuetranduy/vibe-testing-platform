@@ -119,9 +119,21 @@ export class RunRepository {
         requestJson: input.request,
         idempotencyKey: input.idempotencyKey ?? null,
         requestHash: input.requestHash ?? null,
+        // Millisecond precision (not Postgres' microseconds) so list cursors round-trip exactly.
+        createdAt: new Date(),
       })
       .returning();
     return toRun(row!);
+  }
+
+  /** Frees an Idempotency-Key so a retry can create a new run (used when enqueueing failed). */
+  async releaseIdempotencyKey(runId: string): Promise<void> {
+    await this.db.update(testRuns).set({ idempotencyKey: null, updatedAt: new Date() }).where(eq(testRuns.id, runId));
+  }
+
+  /** Locks the tenant row for the rest of the transaction (serializes per-tenant admission checks). */
+  async lockTenant(tenantId: string): Promise<void> {
+    await this.db.execute(sql`SELECT id FROM tenants WHERE id = ${tenantId} FOR UPDATE`);
   }
 
   async findById(runId: string): Promise<TestRun | null> {
@@ -254,6 +266,24 @@ export class RunRepository {
           lt(sql`coalesce(${testRuns.heartbeatAt}, ${testRuns.lifecycleChangedAt})`, olderThan),
         ),
       );
+    return rows.map(toRun);
+  }
+
+  /** QUEUED runs created before `before` (candidates for "never picked up"). */
+  async findQueuedSince(before: Date): Promise<TestRun[]> {
+    const rows = await this.db
+      .select()
+      .from(testRuns)
+      .where(and(eq(testRuns.lifecycle, "QUEUED"), lt(testRuns.createdAt, before)));
+    return rows.map(toRun);
+  }
+
+  /** Active runs whose hard deadline passed before `before`. */
+  async findPastDeadline(before: Date): Promise<TestRun[]> {
+    const rows = await this.db
+      .select()
+      .from(testRuns)
+      .where(and(inArray(testRuns.lifecycle, [...ACTIVE_LIFECYCLES]), lt(testRuns.deadlineAt, before)));
     return rows.map(toRun);
   }
 
