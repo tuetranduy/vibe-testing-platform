@@ -41,7 +41,8 @@ export interface UrlPolicyOptions {
 
 const DEFAULT_PORTS: Record<string, number> = { "http:": 80, "https:": 443 };
 
-function normalizeHost(host: string): string {
+/** Lowercase, no IPv6 brackets, no surrounding whitespace, no trailing dots. */
+export function normalizeHost(host: string): string {
   let h = host.trim().toLowerCase();
   if (h.startsWith("[") && h.endsWith("]")) h = h.slice(1, -1);
   while (h.endsWith(".")) h = h.slice(0, -1);
@@ -70,52 +71,70 @@ export function isHostPortAllowlisted(host: string, port: number, allowlist: str
 
 const reject = (reason: UrlPolicyRejectReason, detail: string): UrlPolicyResult => ({ allowed: false, reason, detail });
 
+export type StaticUrlClassification =
+  | { kind: "reject"; reason: Exclude<UrlPolicyRejectReason, "DNS_RESOLUTION_FAILED">; detail: string }
+  /** Exact `host:port` allowlist match: no address check applies. */
+  | { kind: "allowlisted"; url: URL; host: string; port: number }
+  /** A public IP literal: nothing to resolve. */
+  | { kind: "public_ip"; url: URL; host: string; port: number }
+  /** A hostname: its addresses must be resolved and vetted before connecting. */
+  | { kind: "needs_dns"; url: URL; host: string; port: number };
+
+/**
+ * The part of the target-URL policy that needs no DNS, as one synchronous step:
+ * parse → scheme → credentials → private allowlist (host:port) → IP literal / localhost checks.
+ *
+ * Decimal/octal/hex IPv4 hostnames (`http://2130706433`, `http://0177.0.0.1`) are normalized
+ * to dotted form by the WHATWG URL parser before they are classified.
+ */
+export function classifyUrlWithoutDns(rawUrl: string, opts: { privateAllowlist: string[] }): StaticUrlClassification {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return { kind: "reject", reason: "INVALID_URL", detail: "URL could not be parsed" };
+  }
+
+  const defaultPort = DEFAULT_PORTS[url.protocol];
+  if (defaultPort === undefined) {
+    return { kind: "reject", reason: "UNSUPPORTED_PROTOCOL", detail: `Protocol ${url.protocol} is not allowed; use http or https` };
+  }
+  if (url.username !== "" || url.password !== "") {
+    return { kind: "reject", reason: "CREDENTIALS_IN_URL", detail: "URLs must not contain a username or password" };
+  }
+
+  const host = normalizeHost(url.hostname);
+  if (!host) return { kind: "reject", reason: "INVALID_URL", detail: "URL has no host" };
+  const port = url.port === "" ? defaultPort : Number(url.port);
+
+  if (isHostPortAllowlisted(host, port, opts.privateAllowlist)) return { kind: "allowlisted", url, host, port };
+
+  if (isIP(host) !== 0) {
+    const cls = classifyAddress(host);
+    if (cls !== "public") return { kind: "reject", reason: "NON_PUBLIC_ADDRESS", detail: `${host} is a ${cls} address` };
+    return { kind: "public_ip", url, host, port };
+  }
+
+  if (isLocalhostName(host)) {
+    return { kind: "reject", reason: "NON_PUBLIC_ADDRESS", detail: `${host} is a loopback name` };
+  }
+  return { kind: "needs_dns", url, host, port };
+}
+
 /**
  * Decide whether a user-supplied target URL may be browsed.
  *
- * Order: parse → scheme → credentials → private allowlist (host:port, no DNS)
- * → IP literal / localhost checks (no DNS) → resolve and require that EVERY
- * address is public.
- *
- * Decimal/octal/hex IPv4 hostnames (`http://2130706433`, `http://0177.0.0.1`)
- * are normalized to dotted form by the WHATWG URL parser before we see them.
+ * `classifyUrlWithoutDns`, then (for hostnames) resolve and require that EVERY address is public.
  *
  * This is an admission check only; the egress proxy must still connect to a
  * vetted address itself to defeat DNS rebinding.
  */
 export async function validateTargetUrl(rawUrl: string, opts: UrlPolicyOptions): Promise<UrlPolicyResult> {
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return reject("INVALID_URL", "URL could not be parsed");
-  }
-
-  const defaultPort = DEFAULT_PORTS[url.protocol];
-  if (defaultPort === undefined) {
-    return reject("UNSUPPORTED_PROTOCOL", `Protocol ${url.protocol} is not allowed; use http or https`);
-  }
-  if (url.username !== "" || url.password !== "") {
-    return reject("CREDENTIALS_IN_URL", "URLs must not contain a username or password");
-  }
-
-  const host = normalizeHost(url.hostname);
-  if (!host) return reject("INVALID_URL", "URL has no host");
-  const port = url.port === "" ? defaultPort : Number(url.port);
-
-  if (isHostPortAllowlisted(host, port, opts.privateAllowlist)) {
-    return { allowed: true, url, host, port, addresses: [] };
-  }
-
-  if (isIP(host) !== 0) {
-    const cls = classifyAddress(host);
-    if (cls !== "public") return reject("NON_PUBLIC_ADDRESS", `${host} is a ${cls} address`);
-    return { allowed: true, url, host, port, addresses: [host] };
-  }
-
-  if (isLocalhostName(host)) {
-    return reject("NON_PUBLIC_ADDRESS", `${host} is a loopback name`);
-  }
+  const pre = classifyUrlWithoutDns(rawUrl, opts);
+  if (pre.kind === "reject") return reject(pre.reason, pre.detail);
+  const { url, host, port } = pre;
+  if (pre.kind === "allowlisted") return { allowed: true, url, host, port, addresses: [] };
+  if (pre.kind === "public_ip") return { allowed: true, url, host, port, addresses: [host] };
 
   let addresses: string[];
   try {

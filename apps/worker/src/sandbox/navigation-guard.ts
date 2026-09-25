@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import { classifyAddress, isHostPortAllowlisted } from "@platform/security";
+import { classifyUrlWithoutDns, normalizeHost } from "@platform/security";
 import { CdpConnection, type CdpEvent } from "./cdp-connection";
 
 /**
@@ -22,13 +22,6 @@ export interface NavigationPolicy {
   privateAllowlist: string[];
 }
 
-function normalizeHost(host: string): string {
-  let h = host.trim().toLowerCase();
-  if (h.startsWith("[") && h.endsWith("]")) h = h.slice(1, -1);
-  while (h.endsWith(".")) h = h.slice(0, -1);
-  return h;
-}
-
 /** Target host + its subdomains + `options.additionalAllowedHosts` (exact). */
 export function computeAllowedHosts(targetUrl: string, additionalAllowedHosts: string[]): string[] {
   const host = normalizeHost(new URL(targetUrl).hostname);
@@ -48,29 +41,15 @@ export function isHostAllowed(host: string, allowedHosts: string[]): boolean {
   });
 }
 
-const DEFAULT_PORTS: Record<string, number> = { "http:": 80, "https:": 443 };
-
-/** Decide a main-frame navigation. Address policy first, then the domain policy. Never resolves DNS. */
+/**
+ * Decide a main-frame navigation: the shared no-DNS URL policy first (scheme, credentials,
+ * private allowlist, IP literal, localhost → TARGET_BLOCKED_BY_POLICY), then the domain policy.
+ */
 export function checkMainFrameNavigation(rawUrl: string, policy: NavigationPolicy): NavigationBlockReason | null {
   if (rawUrl === "about:blank" || rawUrl === "about:srcdoc") return null;
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return "TARGET_BLOCKED_BY_POLICY";
-  }
-  const defaultPort = DEFAULT_PORTS[url.protocol];
-  if (defaultPort === undefined) return "TARGET_BLOCKED_BY_POLICY";
-  if (url.username !== "" || url.password !== "") return "TARGET_BLOCKED_BY_POLICY";
-
-  const host = normalizeHost(url.hostname);
-  if (!host) return "TARGET_BLOCKED_BY_POLICY";
-  const port = url.port === "" ? defaultPort : Number(url.port);
-  if (!isHostPortAllowlisted(host, port, policy.privateAllowlist)) {
-    if (isIP(host) !== 0 && classifyAddress(host) !== "public") return "TARGET_BLOCKED_BY_POLICY";
-    if (host === "localhost" || host.endsWith(".localhost")) return "TARGET_BLOCKED_BY_POLICY";
-  }
-  if (!isHostAllowed(host, policy.allowedHosts)) return "OFF_DOMAIN_NAVIGATION";
+  const verdict = classifyUrlWithoutDns(rawUrl, { privateAllowlist: policy.privateAllowlist });
+  if (verdict.kind === "reject") return "TARGET_BLOCKED_BY_POLICY";
+  if (!isHostAllowed(verdict.host, policy.allowedHosts)) return "OFF_DOMAIN_NAVIGATION";
   return null;
 }
 

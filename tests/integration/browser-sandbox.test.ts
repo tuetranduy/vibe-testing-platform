@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import type net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { startDemoShop, type RunningDemoShop } from "@platform/demo-shop";
 import type { EventDraft, StageContext } from "@platform/testing-engine";
+import { chromium } from "playwright-core";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { computeExtensionId } from "../../apps/worker/src/sandbox/browser-launcher";
 import type { NavigationBlockEvent } from "../../apps/worker/src/sandbox/navigation-guard";
@@ -110,10 +111,30 @@ function commandLineOf(pid: number): string {
   return execFileSync("ps", ["-ww", "-o", "command=", "-p", String(pid)], { encoding: "utf8" });
 }
 
+const CHROMIUM_EXE = chromium.executablePath();
+const CHROMIUM_ROOT = CHROMIUM_EXE.includes(".app/") ? CHROMIUM_EXE.slice(0, CHROMIUM_EXE.indexOf(".app/") + 5) : path.dirname(CHROMIUM_EXE);
+
 function sandboxProcesses(): string[] {
   const out = execFileSync("ps", ["-ax", "-ww", "-o", "pid=,command="], { encoding: "utf8" });
-  return out.split("\n").filter((l) => l.includes("platform-sandbox-"));
+  // Chromium processes only (browser + helpers live under one install dir), with a sandbox profile.
+  return out.split("\n").filter((l) => {
+    const command = l.trim().replace(/^\d+\s+/, "");
+    return command.startsWith(CHROMIUM_ROOT) && /--user-data-dir=\S*platform-sandbox-/.test(command);
+  });
 }
+
+/** Chromium processes / profile dirs belonging to one run id (the profile path carries it). */
+function leftoversFor(runId: string): { processes: string[]; profiles: string[] } {
+  const prefix = `platform-sandbox-${runId}-`;
+  return {
+    processes: sandboxProcesses().filter((l) => l.includes(`platform-sandbox-${runId}-`)),
+    profiles: readdirSync(realpathSync(os.tmpdir())).filter((n) => n.startsWith(prefix)),
+  };
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const testLogger = { info() {}, warn() {}, error() {} };
 
 function isAlive(pid: number): boolean {
   try {
@@ -152,6 +173,7 @@ describe("browser sandbox (real Chromium, demo shop)", () => {
       resolve: resolver,
       // Stand-ins for TARGET_PRIVATE_ALLOWLIST: the local fixtures, by name only.
       privateAllowlist: [`shop.test:${shop.port}`, `static.shop.test:${fixture.port}`, `cdn.test:${fixture.port}`],
+      logger: testLogger,
       ...extra,
     };
     stage = fakeStage(target);
@@ -187,6 +209,8 @@ describe("browser sandbox (real Chromium, demo shop)", () => {
     expect(sb.profileDir.startsWith(realpathSync(os.tmpdir()))).toBe(true);
     expect(path.basename(sb.profileDir)).toMatch(/^platform-sandbox-run_sandbox_it-/);
     expect(existsSync(sb.profileDir)).toBe(true);
+    // The leftover detector used by the teardown tests really sees a live sandbox browser.
+    expect(leftoversFor("run_sandbox_it").processes.length).toBeGreaterThan(0);
     expect(sb.extensionIds).toEqual([]);
     expect(sb.cdpUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
 
@@ -344,6 +368,54 @@ describe("browser sandbox (real Chromium, demo shop)", () => {
     await expect(fetch(proxyUrl)).rejects.toThrow();
     // The cleanup registered with the stage runs again in afterEach; it must be a no-op.
     await stage?.runCleanups();
+  });
+
+
+  describe("teardown when the run is cancelled mid-open", () => {
+    // The orchestrator's guard() rejects on abort without waiting for the stage, and the worker's
+    // dispose() then runs the stage cleanups while openRunSandbox may still be launching.
+    it.each([0, 20, 60, 150, 300, 600, 1000])("abort after %i ms + immediate cleanup leaves no browser and no profile", async (delayMs) => {
+      const runId = `run_race_${delayMs}`;
+      const ac = new AbortController();
+      const cleanups: (() => Promise<void> | void)[] = [];
+      const ctx = {
+        runId,
+        tenantId: "tenant_default",
+        request: { targetUrl: target, options: { additionalAllowedHosts: [] } },
+        signal: ac.signal,
+        publish: async () => {},
+        addCleanup: (fn: () => Promise<void> | void) => {
+          cleanups.push(fn);
+        },
+      } as unknown as StageContext;
+
+      const opening = openRunSandbox(ctx, {
+        resolve: fakeResolver({ "shop.test": ["127.0.0.1"] }),
+        privateAllowlist: [`shop.test:${shop.port}`],
+        logger: testLogger,
+      });
+      const settled = opening.then(
+        (sb) => ({ ok: true as const, sb }),
+        (err: unknown) => ({ ok: false as const, err }),
+      );
+
+      await sleep(delayMs);
+      const abortedAt = Date.now();
+      ac.abort(new Error("run cancelled"));
+      // Like handle.dispose(): run what was registered so far, without awaiting the stage.
+      for (const fn of cleanups.splice(0).reverse()) await fn();
+
+      const outcome = await settled;
+      // Launch honours the run signal instead of waiting out its 30 s timeout.
+      expect(Date.now() - abortedAt).toBeLessThan(5_000);
+      if (outcome.ok) {
+        // Opened before the abort landed: the cleanup already closed it.
+        expect(isAlive(outcome.sb.pid)).toBe(false);
+      } else {
+        expect(String(outcome.err)).toContain("run cancelled");
+      }
+      await expect.poll(() => leftoversFor(runId), { timeout: 10_000 }).toEqual({ processes: [], profiles: [] });
+    });
   });
 
   describe("with an extension", () => {

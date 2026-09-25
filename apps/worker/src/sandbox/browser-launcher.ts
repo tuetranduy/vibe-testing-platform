@@ -30,6 +30,8 @@ export interface LaunchSandboxedBrowserOptions {
   /** Defaults to Playwright's Chromium (`chromium.executablePath()`). */
   executablePath?: string;
   launchTimeoutMs?: number;
+  /** The run signal: aborting stops the launch promptly and releases everything it created. */
+  signal?: AbortSignal;
 }
 
 /** Structural (plain fields) so `@platform/stagehand-adapter` can declare a matching type (Ruling R10). */
@@ -188,37 +190,53 @@ export async function launchSandboxedBrowser(opts: LaunchSandboxedBrowserOptions
     if (!path.isAbsolute(e.dir) || e.dir.includes(",")) throw new Error(`invalid extension dir: ${e.dir}`);
     if (!/^[a-p]{32}$/.test(e.id)) throw new Error(`invalid extension id: ${e.id}`);
   }
+  const { signal } = opts;
+  signal?.throwIfAborted();
   const cdpPort = opts.cdpPort ?? (await findFreePort());
   const cdpUrl = `http://127.0.0.1:${cdpPort}`;
   const timeoutMs = opts.launchTimeoutMs ?? 30_000;
   const safeRunId = opts.runId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
-  const profileDir = await mkdtemp(path.join(realpathSync(os.tmpdir()), `platform-sandbox-${safeRunId}-`));
 
+  let profileDir: string | undefined;
   let proc: ChildProcess | undefined;
   let browser: Browser | undefined;
   let stderrTail = "";
-  let closing: Promise<void> | undefined;
+  let disposed = false;
 
-  const close = () =>
-    (closing ??= (async () => {
-      await browser?.close().catch(() => {});
-      if (proc?.pid !== undefined && proc.exitCode === null && proc.signalCode === null) {
-        const exited = new Promise<void>((r) => proc!.once("exit", () => r()));
-        try {
-          process.kill(-proc.pid, "SIGKILL"); // the whole process group: browser + helpers
-        } catch {
-          // already gone
-        }
-        await Promise.race([exited, sleep(5_000)]);
+  /** Idempotent; safe to run again to catch anything created after an earlier run. */
+  const teardown = async () => {
+    await browser?.close().catch(() => {});
+    if (proc?.pid !== undefined && proc.exitCode === null && proc.signalCode === null) {
+      const child = proc;
+      const exited = new Promise<void>((r) => child.once("exit", () => r()));
+      try {
+        process.kill(-child.pid!, "SIGKILL"); // the whole process group: browser + helpers
+      } catch {
+        // already gone
       }
-      proc?.stderr?.destroy();
-      await rm(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-    })());
+      await Promise.race([exited, sleep(5_000)]);
+    }
+    proc?.stderr?.destroy();
+    if (profileDir) await rm(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  };
+  let closing: Promise<void> | undefined;
+  const close = () => {
+    disposed = true;
+    return (closing ??= teardown());
+  };
+  const stopIfDisposed = () => {
+    if (disposed) throw signal?.reason ?? new Error("browser launch cancelled");
+  };
+  const onAbort = () => void close();
+  signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
+    profileDir = await mkdtemp(path.join(realpathSync(os.tmpdir()), `platform-sandbox-${safeRunId}-`));
+    stopIfDisposed();
     await mkdir(path.join(profileDir, "Default"));
     await writeFile(path.join(profileDir, "Default", "Preferences"), JSON.stringify(PROFILE_PREFERENCES));
     const args = buildChromiumArgs({ proxyUrl: opts.proxyUrl, cdpPort, profileDir, extensions });
+    stopIfDisposed(); // no await between this check and spawn: a close() can't slip in between
     const child = spawn(opts.executablePath ?? chromium.executablePath(), args, {
       detached: true,
       stdio: ["ignore", "ignore", "pipe"],
@@ -231,10 +249,11 @@ export async function launchSandboxedBrowser(opts: LaunchSandboxedBrowserOptions
     const spawnError = new Promise<never>((_, reject) => child.once("error", reject));
     spawnError.catch(() => {});
 
-    // Wait for the CDP endpoint; fail fast if Chromium exits.
+    // Wait for the CDP endpoint; fail fast if Chromium exits or the run is aborted.
     const deadline = Date.now() + timeoutMs;
     let browserWsUrl: string | undefined;
     while (!browserWsUrl) {
+      stopIfDisposed();
       if (child.exitCode !== null || child.signalCode !== null) throw new Error(`Chromium exited during launch: ${stderrTail.slice(-500)}`);
       if (Date.now() > deadline) throw new Error("Chromium did not expose its CDP endpoint in time");
       const version = await Promise.race([getJson<{ webSocketDebuggerUrl?: string }>(`${cdpUrl}/json/version`), spawnError]);
@@ -247,6 +266,7 @@ export async function launchSandboxedBrowser(opts: LaunchSandboxedBrowserOptions
     for (const { id } of extensions) {
       let found = false;
       while (!found) {
+        stopIfDisposed();
         const targets = (await getJson<{ url: string }[]>(`${cdpUrl}/json/list`)) ?? [];
         found = targets.some((t) => t.url.startsWith(`chrome-extension://${id}/`));
         if (!found) {
@@ -256,11 +276,15 @@ export async function launchSandboxedBrowser(opts: LaunchSandboxedBrowserOptions
       }
     }
 
+    stopIfDisposed();
     browser = await chromium.connectOverCDP(cdpUrl);
+    stopIfDisposed();
     const context = browser.contexts()[0];
     if (!context) throw new Error("Chromium has no default browser context");
     await applySessionHygiene(browser, context);
+    stopIfDisposed();
     const page = context.pages().find((p) => p.url() === "about:blank") ?? (await context.newPage());
+    stopIfDisposed();
 
     return {
       cdpUrl,
@@ -272,7 +296,11 @@ export async function launchSandboxedBrowser(opts: LaunchSandboxedBrowserOptions
       close,
     };
   } catch (err) {
-    await close();
-    throw err;
+    disposed = true;
+    await closing; // a concurrent close() may be mid-flight
+    await teardown(); // and may have run before something above was created
+    throw signal?.aborted ? (signal.reason ?? err) : err;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
   }
 }

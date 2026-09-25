@@ -1,6 +1,6 @@
 import http from "node:http";
 import net from "node:net";
-import { validateTargetUrl, type Resolver } from "@platform/security";
+import { normalizeHost, validateTargetUrl, type Resolver } from "@platform/security";
 
 /**
  * D8 egress guard: an HTTP forward proxy (plain `http:` requests + `CONNECT` tunnels) that every
@@ -94,13 +94,6 @@ const HOP_BY_HOP = new Set([
 
 // Hostnames (LDH + underscore) or IP literals; anything else is not a proxy target.
 const HOSTNAME_RE = /^(?=.{1,253}$)[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?(?:\.[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?)*$/;
-
-function normalizeHost(host: string): string {
-  let h = host.trim().toLowerCase();
-  if (h.startsWith("[") && h.endsWith("]")) h = h.slice(1, -1);
-  while (h.endsWith(".")) h = h.slice(0, -1);
-  return h;
-}
 
 type Verdict =
   | { kind: "allow"; addresses: string[] }
