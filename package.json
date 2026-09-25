@@ -1,0 +1,27 @@
+{
+  "name": "ai-testing-platform",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "test:integration": "vitest run --project integration",
+    "test:e2e": "playwright test -c tests/e2e",
+    "test:live": "vitest run --project live",
+    "eval": "tsx evals/run-evals.ts",
+    "typecheck": "pnpm -r typecheck",
+    "db:migrate": "pnpm --filter @platform/db migrate",
+    "infra:up": "docker compose -f infra/compose/docker-compose.yml up -d --wait postgres redis minio minio-init demo-shop",
+    "infra:down": "docker compose -f infra/compose/docker-compose.yml down -v",
+    "stack:up": "docker compose -f infra/compose/docker-compose.yml up -d --build --wait",
+    "stack:down": "docker compose -f infra/compose/docker-compose.yml down"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "tsx": "^4.23.0",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.11"
+  }
+}
