@@ -29,9 +29,11 @@ export interface ArtifactStorage {
   getSignedReadUrl(objectKey: string, ttlSeconds: number): Promise<string>;
   /** Idempotent: deleting a missing object is not an error. */
   delete(objectKey: string): Promise<void>;
+  /** Idempotent start-up check: creates the bucket / root directory if missing. */
+  ensureReady(): Promise<void>;
 }
 
-export type StorageOperation = "put" | "sign" | "delete" | "config";
+export type StorageOperation = "put" | "sign" | "delete" | "config" | "init";
 
 /**
  * Infrastructure failure talking to the artifact store (S3 SDK error, filesystem error,

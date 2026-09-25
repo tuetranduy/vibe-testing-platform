@@ -24,6 +24,14 @@ describe("local storage", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("ensureReady creates the root directory and is idempotent", async () => {
+    const dir = join(root, "nested", "store");
+    const storage = createLocalStorage({ rootDir: dir });
+    await storage.ensureReady();
+    await storage.ensureReady();
+    expect((await stat(dir)).isDirectory()).toBe(true);
+  });
+
   it("puts a Buffer under rootDir and returns key, sha256 and bytes", async () => {
     const storage = createLocalStorage({ rootDir: root });
     const body = Buffer.from("png-bytes");

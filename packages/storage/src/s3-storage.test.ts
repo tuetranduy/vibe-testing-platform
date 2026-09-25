@@ -35,6 +35,12 @@ describe.skipIf(!endpoint)("S3 storage (real S3-compatible server)", () => {
     }
   });
 
+  it("ensureReady creates a missing bucket and is idempotent", async () => {
+    const fresh = createS3Storage({ ...opts, bucket: `ensure-${randomUUID().slice(0, 8)}` });
+    await fresh.ensureReady();
+    await fresh.ensureReady();
+  });
+
   it("puts a Buffer and the signed URL returns identical bytes", async () => {
     const body = Buffer.from(`hello from ${runId}`);
     const res = await storage.put({
