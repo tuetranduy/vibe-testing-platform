@@ -227,15 +227,20 @@ export class RunRepository {
     return null;
   }
 
+  /** Only active runs beat; QUEUED / AWAITING_CONFIRMATION / terminal runs are left untouched. */
   async heartbeat(runId: string, at: Date = new Date()): Promise<void> {
     await this.db
       .update(testRuns)
       .set({ heartbeatAt: at })
-      .where(and(eq(testRuns.id, runId), notInArray(testRuns.lifecycle, [...TERMINAL_LIFECYCLES])));
+      .where(and(eq(testRuns.id, runId), inArray(testRuns.lifecycle, [...ACTIVE_LIFECYCLES])));
   }
 
-  async setDeadline(runId: string, deadlineAt: Date): Promise<void> {
-    await this.db.update(testRuns).set({ deadlineAt, updatedAt: new Date() }).where(eq(testRuns.id, runId));
+  /** Records the hard deadline and start time when execution begins (the clock starts at PLANNING). */
+  async markExecutionStarted(runId: string, at: { deadlineAt: Date; startedAt: Date }): Promise<void> {
+    await this.db
+      .update(testRuns)
+      .set({ deadlineAt: at.deadlineAt, startedAt: at.startedAt, heartbeatAt: at.startedAt, updatedAt: new Date() })
+      .where(eq(testRuns.id, runId));
   }
 
   /** Active runs whose last heartbeat (or lifecycle change, if never beat) is older than `olderThan`. */
