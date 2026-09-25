@@ -12,6 +12,14 @@
   },
   "dependencies": {
     "@platform/config": "workspace:*",
-    "@platform/contracts": "workspace:*"
+    "@platform/contracts": "workspace:*",
+    "@platform/db": "workspace:*",
+    "@platform/event-bus": "workspace:*",
+    "@platform/security": "workspace:*",
+    "@platform/storage": "workspace:*",
+    "@platform/testing-engine": "workspace:*",
+    "bullmq": "^6.3.8",
+    "ioredis": "^6.0.0",
+    "zod": "4.4.3"
   }
 }

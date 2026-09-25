@@ -12,6 +12,15 @@
   },
   "dependencies": {
     "@platform/config": "workspace:*",
-    "@platform/contracts": "workspace:*"
+    "@platform/contracts": "workspace:*",
+    "@platform/db": "workspace:*",
+    "@platform/event-bus": "workspace:*",
+    "@platform/security": "workspace:*",
+    "@platform/storage": "workspace:*",
+    "bullmq": "^6.3.8",
+    "fastify": "^5.12.5",
+    "fastify-type-provider-zod": "^7.0.0",
+    "ioredis": "^6.0.0",
+    "zod": "4.4.3"
   }
 }
