@@ -10,10 +10,10 @@ x-app-env: &app-env
   REDIS_URL: redis://redis:6379
   ARTIFACT_STORAGE_TYPE: s3
   ARTIFACT_BUCKET: artifacts
-  S3_ENDPOINT: http://minio:9000
+  S3_ENDPOINT: http://s3:9000
   S3_REGION: us-east-1
-  S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-  S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-s3admin}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-s3admin-secret}
   S3_FORCE_PATH_STYLE: "true"
   LLM_PROVIDER: ${LLM_PROVIDER:-fake}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -53,20 +53,18 @@ services:
       timeout: 3s
       retries: 20
 
-  # MinIO community images are no longer updated upstream; any S3-compatible server works here.
+  # S3-compatible artifact store for local use (rclone's S3 server).
+  # MinIO's images are no longer published on Docker Hub. Any S3-compatible server works here.
   # The api creates the `artifacts` bucket on start-up.
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    ports: ["9000:9000", "9001:9001"]
-    volumes: [miniodata:/data]
+  s3:
+    image: rclone/rclone:latest
+    command: ["serve", "s3", "--auth-key", "${S3_ACCESS_KEY_ID:-s3admin},${S3_SECRET_ACCESS_KEY:-s3admin-secret}", "--addr", ":9000", "/data"]
+    ports: ["9000:9000"]
+    volumes: [s3data:/data]
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9000"]
       interval: 5s
-      timeout: 5s
+      timeout: 3s
       retries: 20
 
   demo-shop:
@@ -100,7 +98,7 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
-      minio: { condition: service_healthy }
+      s3: { condition: service_healthy }
     restart: unless-stopped
 
   worker:
@@ -113,7 +111,7 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
-      minio: { condition: service_healthy }
+      s3: { condition: service_healthy }
     restart: unless-stopped
 
   web:
@@ -131,4 +129,4 @@ services:
 
 volumes:
   pgdata:
-  miniodata:
+  s3data:
