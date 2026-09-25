@@ -19,6 +19,10 @@ export type ActionDecision =
  * element's accessible name and its text; `-`/`_` count as spaces, so
  * "place-order" matches "place order".
  *
+ * Word boundaries mean a base term does not match its inflections ("delete" ≠
+ * "deletion"), so the inflected forms that describe the same action are listed
+ * explicitly (Ruling R19), as are the ways of cancelling an order.
+ *
  * `checkout` is conditional — see `CHECKOUT_SUBMIT_TERMS`.
  */
 export const DESTRUCTIVE_TERMS = [
@@ -37,6 +41,23 @@ export const DESTRUCTIVE_TERMS = [
   "unsubscribe",
   "cancel subscription",
   "cancel plan",
+  // Ruling R19: inflected forms and order cancellation.
+  "deletes",
+  "deleted",
+  "deleting",
+  "deletion",
+  "deactivates",
+  "deactivated",
+  "deactivating",
+  "deactivation",
+  "purchases",
+  "purchased",
+  "purchasing",
+  "unsubscribes",
+  "unsubscribed",
+  "unsubscribing",
+  "cancel order",
+  "cancel my order",
 ] as const;
 
 export type DestructiveTerm = (typeof DESTRUCTIVE_TERMS)[number];

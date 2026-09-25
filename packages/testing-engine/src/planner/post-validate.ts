@@ -55,6 +55,11 @@ export function validatePlanOutput(
     for (const id of step.criterionIds) {
       if (!known.has(id)) issues.push(`steps.${i}.criterionIds: unknown criterion id ${id} (valid ids: ${criterionIds.join(", ")})`);
     }
+    // A value entered without a reference could only come from the model (D7): it must name the test
+    // data key or secret it needs, so a missing one is blocked deterministically.
+    if (step.kind === "fill" && !step.inputRef) {
+      issues.push(`steps.${i}.inputRef: required when kind = fill (reference the test data key or secret name it enters)`);
+    }
     if (step.kind !== "capture_checkpoint") return;
     if (!step.checkpoint) {
       issues.push(`steps.${i}.checkpoint: required when kind = capture_checkpoint`);
@@ -62,6 +67,11 @@ export function validatePlanOutput(
     }
     captures.set(step.checkpoint, [...(captures.get(step.checkpoint) ?? []), i]);
   });
+
+  const logins = output.steps.flatMap((s, i) => (s.kind === "login" ? [`steps.${i}`] : []));
+  if (logins.length > 1) {
+    issues.push(`${logins.length} login steps (${logins.join(", ")}): at most one step may submit the credentials`);
+  }
 
   for (const [cp, at] of captures) {
     if (at.length > 1) issues.push(`checkpoint ${cp} is captured more than once (${at.map((i) => `steps.${i}`).join(", ")}); capture it exactly once`);
