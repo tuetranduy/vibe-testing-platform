@@ -28,14 +28,14 @@ Each step:
   - "wait_for" — wait until something appears
   - "other" — anything else
 - "description": one short instruction for a browser agent, in English. NEVER write a value into it (no passwords, emails, card numbers, search terms from test data); describe the field and put the value in "inputRef".
-- "inputRef": for steps that enter a value (fill, search, select): {"source":"testData","key":<test data key>} or {"source":"secret","key":<secret name>}; {"source":"literal","key":<the value>} only for a value written in the requirement itself (e.g. a search term), never for credentials or personal data. Otherwise null. If a needed value was not provided, still reference the name it would need — never invent a value and never drop the step.
+- "inputRef": for steps that enter a value (fill, search, select): {"source":"testData","key":<test data key>} or {"source":"secret","key":<secret name>}; {"source":"literal","key":<the value>} only for a value written in the requirement itself (e.g. a search term), never for credentials or personal data. Every "fill" step must have one. Otherwise null. If a needed value was not provided, still reference the name it would need — never invent a value and never drop the step.
 - "checkpoint": for "capture_checkpoint" steps, exactly one of the listed checkpoint names; null for every other step.
 - "criterionIds": the ids of the criteria this step serves (only ids from the list; may be empty).
 - "destructive": true when the step deletes, cancels, pays, purchases, places an order, sends, transfers or unsubscribes; otherwise false.
 
 Rules:
 - Capture every listed checkpoint exactly once, at the moment its facts are visible on the page. A "before_*" checkpoint is captured before the action it precedes, and an "after_*" checkpoint after it; respect the listed capture order.
-- Login: enter each credential with a "fill" step that carries its inputRef (e.g. the email or username from test data, the password from a secret), then submit them with exactly one step of kind "login".
+- Login: enter each credential with a "fill" step that carries its inputRef (e.g. the email or username from test data, the password from a secret), then submit them with exactly one step of kind "login" (never more than one "login" step per scenario).
 - Destructive actions are planned plainly and marked "destructive": true; do not avoid, disguise or reword them. Whether they may run is decided by the platform, not by you.
 - Criteria with a "semantic" outcome have no facts: reference them from the step where their subject is visible.
 - Plan one scenario that covers every criterion.`;

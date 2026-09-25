@@ -26,6 +26,24 @@ describe("assertActionAllowed — default policy denies destructive actions", ()
     ["submit checkout", "checkout"],
     ["Confirm checkout", "checkout"],
     ["Complete check-out", "checkout"],
+    // Inflected forms (Ruling R19)
+    ["Verify that account deletion works", "deletion"],
+    ["Deletes the saved address", "deletes"],
+    ["Check the account is deleted", "deleted"],
+    ["Try deleting the account", "deleting"],
+    ["Deactivates the profile", "deactivates"],
+    ["The account is deactivated", "deactivated"],
+    ["Test deactivating the account", "deactivating"],
+    ["Request account deactivation", "deactivation"],
+    ["Purchases the item", "purchases"],
+    ["The item is purchased", "purchased"],
+    ["Continue purchasing", "purchasing"],
+    ["Unsubscribes from the newsletter", "unsubscribes"],
+    ["The user is unsubscribed", "unsubscribed"],
+    ["Try unsubscribing", "unsubscribing"],
+    ["Cancel order #1234", "cancel order"],
+    ["Click Cancel my order", "cancel my order"],
+    ["cancel-order", "cancel order"],
   ])("%j → %s", (instruction, matched) => {
     expect(assertActionAllowed({ instruction }, deny)).toEqual({
       allowed: false,
@@ -79,7 +97,7 @@ describe("assertActionAllowed — default policy allows benign actions", () => {
     "Remove item from cart", // only "remove account" is destructive
     "Display payment options", // "pay" must be a whole word
     "Open PayPal info page",
-    "View deleted items", // "deleted" is not "delete"
+    "View the order list", // cancelling an order needs "cancel order" / "cancel my order"
     "Close the modal",
     "Cancel", // plain cancel of a dialog
   ])("%j", (instruction) => {
@@ -126,6 +144,23 @@ describe("DESTRUCTIVE_TERMS", () => {
         "unsubscribe",
         "cancel subscription",
         "cancel plan",
+        // Ruling R19: inflected forms and order cancellation
+        "deletes",
+        "deleted",
+        "deleting",
+        "deletion",
+        "deactivates",
+        "deactivated",
+        "deactivating",
+        "deactivation",
+        "purchases",
+        "purchased",
+        "purchasing",
+        "unsubscribes",
+        "unsubscribed",
+        "unsubscribing",
+        "cancel order",
+        "cancel my order",
       ].sort(),
     );
   });

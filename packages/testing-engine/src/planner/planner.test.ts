@@ -363,6 +363,41 @@ describe("planTest — model contract (one correction round, then ContractError)
     expect(lastCorrection(transport)).toMatch(/cart_page is captured more than once/);
   });
 
+  it("a fill step without an inputRef (a value the platform could not supply) → correction → ContractError", async () => {
+    const bad = () => {
+      const out = loginPlan();
+      out.steps[4]!.inputRef = null; // "Enter the password" with no secret reference
+      return out;
+    };
+    const { llm, transport } = setup({ json: bad() }, { json: bad() });
+    await expect(planTest(llm, input(loginRequirement(), { testDataKeys: ["email"], secretNames: [] }))).rejects.toBeInstanceOf(
+      ContractError,
+    );
+    expect(transport.requests).toHaveLength(2);
+    expect(lastCorrection(transport)).toMatch(/steps\.4\.inputRef.*required when kind = fill/);
+  });
+
+  it("a fill step without an inputRef is corrected once, and the corrected plan still blocks MISSING_SECRET", async () => {
+    const bad = loginPlan();
+    bad.steps[4]!.inputRef = null;
+    const { llm } = setup({ json: bad }, { json: loginPlan() });
+    const plan = await planTest(llm, input(loginRequirement(), { testDataKeys: ["email"], secretNames: [] }));
+    expect(blocked(plan)).toEqual([["AC-1", "MISSING_SECRET"]]);
+  });
+
+  it("more than one login step → correction → ContractError", async () => {
+    const bad = () => {
+      const out = loginPlan();
+      out.steps.splice(6, 0, step("login", "Submit the login form again"));
+      return out;
+    };
+    const { llm, transport } = setup({ json: bad() }, { json: bad() });
+    await expect(planTest(llm, input(loginRequirement(), { testDataKeys: ["email"], secretNames: ["password"] }))).rejects.toBeInstanceOf(
+      ContractError,
+    );
+    expect(lastCorrection(transport)).toMatch(/2 login steps.*at most one/);
+  });
+
   it("more than 50 steps → correction → ContractError", async () => {
     const long = () => {
       const out = cartPlan();
@@ -417,9 +452,26 @@ describe("planTest — deterministic blocking", () => {
     expect(TestPlanSchema.safeParse(plan).success).toBe(true);
   });
 
-  it("the model's destructive flag adds blocking (\"Verify that account deletion works\" is not a policy term on its own)", async () => {
+  it("\"Verify that account deletion works\" is blocked by the policy itself, even when the model says destructive=false", async () => {
     const { llm } = setup({
-      json: deletePlan(step("click", "Verify that account deletion works", { criterionIds: ["AC-2"], destructive: true })),
+      json: deletePlan(step("click", "Verify that account deletion works", { criterionIds: ["AC-2"], destructive: false })),
+    });
+    const plan = await planTest(llm, input(deleteRequirement()));
+    expect(kinds(plan)).toHaveLength(3);
+    expect(blocked(plan)).toEqual([["AC-2", "DESTRUCTIVE_ACTION_NOT_AUTHORIZED"]]);
+    expect(plan.blockedCriteria[0]!.detail).toMatch(/"deletion"/);
+  });
+
+  it("cancelling an order is blocked by the policy itself, even when the model says destructive=false", async () => {
+    const { llm } = setup({ json: deletePlan(step("click", "Click Cancel my order", { criterionIds: ["AC-2"], destructive: false })) });
+    const plan = await planTest(llm, input(deleteRequirement()));
+    expect(blocked(plan)).toEqual([["AC-2", "DESTRUCTIVE_ACTION_NOT_AUTHORIZED"]]);
+    expect(plan.blockedCriteria[0]!.detail).toMatch(/"cancel my order"/);
+  });
+
+  it("the model's destructive flag adds blocking for a step no policy term matches", async () => {
+    const { llm } = setup({
+      json: deletePlan(step("click", "Confirm the irreversible action", { criterionIds: ["AC-2"], destructive: true })),
     });
     const plan = await planTest(llm, input(deleteRequirement()));
     expect(kinds(plan)).toHaveLength(3);

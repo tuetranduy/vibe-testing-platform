@@ -1,7 +1,8 @@
 id: cancel-order
 tags: [destructive, login, blocking, model-flag]
-# Input reused from requirement-compiler/cases/08-cancel-order.yaml. "Cancel an order" is not one of
-# the action policy's terms, so the block depends on the model marking the step destructive.
+# Input reused from requirement-compiler/cases/08-cancel-order.yaml. The action policy denies
+# "cancel order" / "cancel my order" (Ruling R19); other phrasings ("Cancel the order") are blocked
+# only if the model marks the step destructive.
 testDataKeys: [orderNumber, email]
 secretNames: [password]
 requirement:
