@@ -13,7 +13,7 @@
     "eval": "tsx evals/run-evals.ts",
     "typecheck": "pnpm -r typecheck",
     "db:migrate": "pnpm --filter @platform/db migrate",
-    "infra:up": "docker compose -f infra/compose/docker-compose.yml up -d --wait postgres redis minio demo-shop",
+    "infra:up": "docker compose -f infra/compose/docker-compose.yml up -d --wait postgres redis s3 demo-shop",
     "infra:down": "docker compose -f infra/compose/docker-compose.yml down -v",
     "stack:up": "docker compose -f infra/compose/docker-compose.yml up -d --build --wait",
     "stack:down": "docker compose -f infra/compose/docker-compose.yml down"

@@ -10,7 +10,7 @@ The test engine is still the **fake** one (`packages/testing-engine/src/orchestr
 
 ## Run everything with Docker
 
-Requires Docker Desktop.
+Requires Docker Desktop. (`pnpm stack:up` needs Node ≥ 22.18; if Corepack fails with "Cannot find matching keyid", upgrade Node — e.g. `nvm install 22`.)
 
 ```bash
 pnpm stack:up        # or: docker compose -f infra/compose/docker-compose.yml up -d --build --wait
@@ -23,9 +23,9 @@ pnpm stack:down
 | API | http://localhost:3001 (bearer token `dev-api-token-change-me-please`) |
 | Web | http://localhost:3000 |
 | Demo shop (test target) | http://localhost:4000 — use `http://demo-shop:4000/` as `targetUrl` |
-| MinIO console | http://localhost:9001 (minioadmin / minioadmin) |
+| S3 artifact store | http://localhost:9000 (s3admin / s3admin-secret) |
 
-Override secrets in `infra/compose/.env` (`API_TOKEN`, `SECRETS_ENCRYPTION_KEY`, `MINIO_ROOT_USER`, …).
+Override secrets in `infra/compose/.env` (`API_TOKEN`, `SECRETS_ENCRYPTION_KEY`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, …).
 The defaults are for local use only.
 
 Try it by hand:
@@ -44,7 +44,7 @@ Requires Node ≥ 22.18, pnpm 10 (`corepack enable`), and Docker for Postgres / 
 ```bash
 pnpm install
 cp .env.example .env            # then adjust
-pnpm infra:up                   # postgres, redis, minio, demo-shop
+pnpm infra:up                   # postgres, redis, s3, demo-shop
 pnpm db:migrate
 pnpm --filter @platform/api dev
 pnpm --filter @platform/worker dev
@@ -83,5 +83,6 @@ spikes/stagehand-v4       Task 0 spike code (see docs/spikes/stagehand-v4.md)
 ## Deviations from the plan
 
 - **Drizzle ORM instead of Prisma.** Prisma's CLI downloads a native engine from `binaries.prisma.sh`, which was unreachable in the build environments. Drizzle is pure TypeScript and gives the same Postgres tables, enums, and constraints. Migrations are plain SQL in `packages/db/migrations` (`pnpm --filter @platform/db db:generate` after editing `schema.ts`).
+- **rclone's S3 server instead of MinIO** in Docker Compose: MinIO images are no longer available on Docker Hub. Production can use any S3-compatible store.
 - **Zod pinned to 4.4.3** because Stagehand v4 pins it (Task 0 finding).
 - **`docs/ai-testing-platform-architecture.md`** is referenced by the plan but wasn't in the repo, so it hasn't been updated.
