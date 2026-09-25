@@ -1,0 +1,32 @@
+import { RunRepository } from "@platform/db";
+import { runExecution } from "@platform/testing-engine";
+import type { WorkerDeps } from "../deps";
+import { createRunContext } from "../run-context";
+import { failRun, purgeSecretsIfTerminal } from "./finish";
+
+/** execute-run: PLANNING → … → COMPLETED, or CANCELLED / ERRORED. */
+export async function executeRunJob(deps: WorkerDeps, runId: string): Promise<void> {
+  const now = deps.now ?? (() => new Date());
+  const runs = new RunRepository(deps.db);
+  const run = await runs.findById(runId);
+  if (!run || run.lifecycle !== "PLANNING") {
+    deps.logger.info({ runId, lifecycle: run?.lifecycle }, "execute-run skipped: run is not PLANNING");
+    return;
+  }
+  // The maxRunSeconds clock starts here (time spent awaiting confirmation doesn't count).
+  const totalBudgetMs = run.request.options.maxRunSeconds * 1000 * deps.config.timeScale;
+  const startedAt = now();
+  const deadlineAt = new Date(startedAt.getTime() + totalBudgetMs);
+  await runs.markExecutionStarted(runId, { deadlineAt, startedAt });
+
+  const handle = await createRunContext(deps, run, { deadlineAt, totalBudgetMs });
+  try {
+    const { verdict } = await runExecution(handle.ctx, handle.ports, deps.stages);
+    deps.logger.info({ runId, verdict }, "run completed");
+  } catch (err) {
+    await failRun(deps, handle, err);
+  } finally {
+    await handle.dispose();
+    await purgeSecretsIfTerminal(deps, runId);
+  }
+}

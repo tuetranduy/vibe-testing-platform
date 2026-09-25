@@ -1,7 +1,8 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
+import { TERMINAL_LIFECYCLES } from "./state-machine";
 import type { Executor } from "./client";
 import { newId } from "./ids";
-import { runSecrets } from "./schema";
+import { runSecrets, testRuns } from "./schema";
 
 export interface EncryptedSecretRow {
   name: string;
@@ -41,5 +42,16 @@ export class SecretRepository {
       .where(and(eq(runSecrets.runId, runId), isNull(runSecrets.purgedAt)))
       .returning({ id: runSecrets.id });
     return rows.length;
+  }
+
+  /** Runs that ended but still hold unpurged secrets (safety net for the reaper). */
+  async findTerminalRunIdsWithActiveSecrets(limit = 100): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ runId: runSecrets.runId })
+      .from(runSecrets)
+      .innerJoin(testRuns, eq(testRuns.id, runSecrets.runId))
+      .where(and(isNull(runSecrets.purgedAt), inArray(testRuns.lifecycle, [...TERMINAL_LIFECYCLES])))
+      .limit(limit);
+    return rows.map((r) => r.runId);
   }
 }
