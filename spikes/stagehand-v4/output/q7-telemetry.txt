@@ -1,0 +1,9 @@
+
+===== Q7 telemetry: traces endpoint overridden =====
+example.com seen by proxy: false
+trace sink hits: [ 'POST /v1/traces', 'POST /v1/traces' ]
+proxy lines to the sink (trace export goes through the browser proxy too): [
+  'HTTP POST http://127.0.0.1:42857/v1/traces',
+  'HTTP POST http://127.0.0.1:42857/v1/traces'
+]
+exit=0

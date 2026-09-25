@@ -1,0 +1,39 @@
+
+===== Q1 attempt A: connect() and let Stagehand install its extension over CDP =====
+attempt A FAILED: Method not available. {"code":-32000,"message":"Method not available.","method":"Extensions.loadUnpacked"}
+
+===== Q1 attempt B: we launched Chromium ourselves (+ --load-extension) =====
+args: [
+  '--user-data-dir=/tmp/spike-profile-gwculH',
+  '--remote-debugging-port=0',
+  '--enable-unsafe-extension-debugging',
+  '--proxy-server=http://127.0.0.1:36015',
+  '--proxy-bypass-list=<-loopback>',
+  '--load-extension=/home/claude/ai-testing-platform/spikes/stagehand-v4/node_modules/@browserbasehq/stagehand/dist/extension',
+  '--disable-extensions-except=/home/claude/ai-testing-platform/spikes/stagehand-v4/node_modules/@browserbasehq/stagehand/dist/extension'
+]
+cdpUrl: http://127.0.0.1:34773 extensionId: ikgaeljdjobhglboihahmcfaffdppmkb
+StagehandBrowser: { provider: 'local', origin: 'connected', sessionId: undefined }
+goto status: 200 title: Spike Shop
+observe via our browser -> [
+  'xpath=/html[1]/body[1]/button[1]',
+  'xpath=/html[1]/body[1]/input[1]'
+]
+
+===== Q1/Q7: egress proxy log (requests Chromium sent via --proxy-server) =====
+  proxy saw: HTTP GET http://clients2.google.com/time/1/current?cup2key=9:ZtJ64TpEbw2uJXR2sw_ApKf1O6Zwvk7WQk7e1bt6k_A&cup2hreq=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  proxy saw: CONNECT www.google.com:443
+  proxy saw: CONNECT www.google.com:443
+  proxy saw: CONNECT accounts.google.com:443
+  proxy saw: HTTP GET http://clients2.google.com/time/1/current?cup2key=9:DHJIZy4zmRXs50Q5tY12s--_iO_M4YochL2cD9T9Z8E&cup2hreq=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  proxy saw: CONNECT www.google.com:443
+  proxy saw: CONNECT accounts.google.com:443
+  proxy saw: CONNECT 127.0.0.1:34773
+  proxy saw: HTTP GET http://127.0.0.1:44089/
+  proxy saw: CONNECT www.google.com:443
+  proxy saw: HTTP GET http://127.0.0.1:44089/api/price
+  proxy saw: CONNECT content-autofill.googleapis.com:443
+  proxy saw: HTTP GET http://127.0.0.1:44089/favicon.ico
+site server hits: [ 'GET /', 'GET /api/price', 'GET /favicon.ico' ]
+PROXY SAW PAGE REQUEST: true
+exit=0

@@ -1,0 +1,25 @@
+computed Stagehand extension id: ikgaeljdjobhglboihahmcfaffdppmkb
+
+===== A: CDP port blocked by egress proxy =====
+extensionId discovered: ikgaeljdjobhglboihahmcfaffdppmkb | --remote-allow-origins: *
+Stagehand.create FAILED: CDP websocket failed to open
+proxy decisions on loopback: [ 'DENIED CONNECT 127.0.0.1:40625' ]
+
+===== B: CDP port allow-listed + remote-allow-origins restricted to the extension =====
+extensionId discovered: ikgaeljdjobhglboihahmcfaffdppmkb | --remote-allow-origins: chrome-extension://ikgaeljdjobhglboihahmcfaffdppmkb
+Stagehand.create OK; observe -> [
+  'xpath=/html[1]/body[1]/button[1]',
+  'xpath=/html[1]/body[1]/input[1]'
+]
+Playwright connectOverCDP: OK | web page opening the CDP websocket: REJECTED
+proxy decisions on loopback: [ 'CONNECT 127.0.0.1:44571' ]
+
+===== C: CDP port allow-listed + remote-allow-origins=* =====
+extensionId discovered: ikgaeljdjobhglboihahmcfaffdppmkb | --remote-allow-origins: *
+Stagehand.create OK; observe -> [
+  'xpath=/html[1]/body[1]/button[1]',
+  'xpath=/html[1]/body[1]/input[1]'
+]
+Playwright connectOverCDP: OK | web page opening the CDP websocket: OPEN (page can drive CDP!)
+proxy decisions on loopback: [ 'CONNECT 127.0.0.1:34089' ]
+exit=0

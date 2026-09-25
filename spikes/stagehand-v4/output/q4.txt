@@ -1,0 +1,38 @@
+
+===== Q4: observe() result =====
+{
+ "data": [
+  {
+   "selector": "xpath=/html[1]/body[1]/button[1]",
+   "description": "Add to cart button",
+   "method": "click",
+   "arguments": []
+  },
+  {
+   "selector": "xpath=/html[1]/body[1]/input[1]",
+   "description": "Quantity input",
+   "method": "fill",
+   "arguments": [
+    "3"
+   ]
+  }
+ ],
+ "metadata": {
+  "cache": {
+   "status": "DISABLED"
+  },
+  "usage": {
+   "inputTokens": 118,
+   "outputTokens": 42,
+   "reasoningTokens": 0,
+   "cachedInputTokens": 0,
+   "inferenceTimeMs": 14
+  }
+ }
+}
+
+===== Q4: act on observed elements ourselves =====
+(a) Playwright locator(observed.selector) -> badge: 2
+(b) stagehand page.locator(observed.selector).click() -> badge: 4
+(c) stagehand.act(observedAction) success: true | LLM calls made: 0 | usage: {"inputTokens":0,"outputTokens":0,"reasoningTokens":0,"cachedInputTokens":0,"inferenceTimeMs":0} -> badge: 6
+exit=0

@@ -1,0 +1,15 @@
+
+===== Q8: act/observe/extract through our injected LLM client =====
+observe  -> ["xpath=/html[1]/body[1]/button[1]"] usage {"inputTokens":380,"outputTokens":30,"reasoningTokens":0,"cachedInputTokens":0,"inferenceTimeMs":19}
+act      -> true usage {"inputTokens":863,"outputTokens":30,"reasoningTokens":0,"cachedInputTokens":0,"inferenceTimeMs":8}
+extract  -> {"heading":"Spike Shop"} usage {"inputTokens":431,"outputTokens":60,"reasoningTokens":0,"cachedInputTokens":0,"inferenceTimeMs":10}
+our ledger (model name + usage recorded by OUR package):
+   {"purpose":"Observation","model":"claude-sonnet-4-5 (canned)","input":380,"output":30}
+   {"purpose":"Act","model":"claude-sonnet-4-5 (canned)","input":863,"output":30}
+   {"purpose":"Extraction","model":"claude-sonnet-4-5 (canned)","input":258,"output":30}
+   {"purpose":"Metadata","model":"claude-sonnet-4-5 (canned)","input":173,"output":30}
+stagehand.metrics().total* : {"totalPromptTokens":1674,"totalCompletionTokens":120,"totalReasoningTokens":0,"totalCachedInputTokens":0,"totalInferenceTimeMs":37}
+
+===== Q8: per-call model override only accepts a provider ModelConfig (not a ClientLLM) =====
+per-call ClientLLM rejected: [   {     "code": "invalid_union",
+exit=0
