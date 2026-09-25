@@ -1,0 +1,10 @@
+id: product-page
+tags: [multi-criterion]
+input: The product page shows the product name, the price, and an "Add to cart" button.
+testDataKeys: [productName]
+secretNames: []
+expect:
+  criteriaCount: { min: 2, max: 4 }
+  requiredOutcomeKinds:
+    - [visible, text_matches]
+  mustFlagAmbiguous: false

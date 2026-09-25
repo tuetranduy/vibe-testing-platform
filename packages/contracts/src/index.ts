@@ -6,3 +6,4 @@ export * from "./exploration";
 export * from "./results";
 export * from "./events";
 export * from "./report";
+export * from "./engine-errors";

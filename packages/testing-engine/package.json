@@ -12,6 +12,11 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@platform/contracts": "workspace:*"
+    "@platform/contracts": "workspace:*",
+    "@platform/llm": "workspace:*",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@platform/security": "workspace:*"
   }
 }

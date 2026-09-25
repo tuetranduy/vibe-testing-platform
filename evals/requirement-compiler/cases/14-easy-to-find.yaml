@@ -1,0 +1,9 @@
+id: easy-to-find
+tags: [vague]
+input: Users can easily find the products they are looking for.
+testDataKeys: []
+secretNames: []
+expect:
+  criteriaCount: { min: 1, max: 2 }
+  requiredOutcomeKinds: []
+  mustFlagAmbiguous: true

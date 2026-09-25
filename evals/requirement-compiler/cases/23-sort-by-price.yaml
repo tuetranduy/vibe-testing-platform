@@ -1,0 +1,9 @@
+id: sort-by-price
+tags: [vague]
+input: Sorting products by price shows them in a sensible order.
+testDataKeys: []
+secretNames: []
+expect:
+  criteriaCount: { min: 1, max: 2 }
+  requiredOutcomeKinds: []
+  mustFlagAmbiguous: true

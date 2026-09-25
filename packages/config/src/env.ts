@@ -20,6 +20,8 @@ const EnvSchema = z
       .default("true")
       .transform((v) => v === "true"),
     LLM_PROVIDER: z.enum(["fake", "anthropic", "openai"]),
+    /** Model id for the configured provider (see @platform/llm pricing for known ids). */
+    LLM_MODEL: z.string().min(1).default("claude-sonnet-5"),
     ANTHROPIC_API_KEY: z.string().optional(),
     OPENAI_API_KEY: z.string().optional(),
     BROWSER_MODE: z.literal("local"),

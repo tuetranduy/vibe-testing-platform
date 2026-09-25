@@ -1,0 +1,10 @@
+id: german-cart
+tags: [non-english]
+input: Wenn der Nutzer ein Produkt in den Warenkorb legt, erhöht sich die Zahl am Warenkorb-Symbol.
+testDataKeys: []
+secretNames: []
+expect:
+  criteriaCount: { min: 1, max: 2 }
+  requiredOutcomeKinds:
+    - [numeric_compare, numeric_delta]
+  mustFlagAmbiguous: false

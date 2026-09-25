@@ -1,0 +1,12 @@
+id: search-results
+tags: [multi-criterion]
+input: >-
+  Searching for "shoes" shows a list of results. Every result title contains the word "shoe".
+  When nothing matches, the page says "No results found".
+testDataKeys: []
+secretNames: []
+expect:
+  criteriaCount: { min: 2, max: 4 }
+  requiredOutcomeKinds:
+    - [text_matches, visible]
+  mustFlagAmbiguous: false

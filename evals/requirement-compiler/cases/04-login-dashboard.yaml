@@ -1,0 +1,10 @@
+id: login-dashboard
+tags: [login]
+input: After logging in, the dashboard greets the user by their first name.
+testDataKeys: [username, firstName]
+secretNames: [password]
+expect:
+  criteriaCount: { min: 1, max: 2 }
+  requiredOutcomeKinds:
+    - [text_matches, visible]
+  mustFlagAmbiguous: false

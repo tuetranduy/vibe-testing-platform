@@ -73,6 +73,12 @@ describe("loadEnv", () => {
     expect(loadEnv({ ...validEnv, LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-test" }).LLM_PROVIDER).toBe("anthropic");
   });
 
+  it("LLM_MODEL defaults to claude-sonnet-5 and can be overridden", () => {
+    expect(loadEnv(validEnv).LLM_MODEL).toBe("claude-sonnet-5");
+    expect(loadEnv({ ...validEnv, LLM_MODEL: "claude-opus-5" }).LLM_MODEL).toBe("claude-opus-5");
+    expect(() => loadEnv({ ...validEnv, LLM_MODEL: "" })).toThrow(/LLM_MODEL/);
+  });
+
   it("disallows the fake LLM provider in production", () => {
     expect(() => loadEnv({ ...validEnv, NODE_ENV: "production" })).toThrow(/LLM_PROVIDER/);
   });
