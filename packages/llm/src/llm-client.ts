@@ -6,7 +6,7 @@ import {
   type RunLifecycle,
 } from "@platform/contracts";
 import { z, type ZodType } from "zod";
-import { estimateCostUsd } from "./pricing";
+import { estimateCostUsd, priceFor } from "./pricing";
 import { DEFAULT_RETRY, backoffMs, sleep as defaultSleep, type RetryPolicy } from "./retry";
 import { LlmTransportError, type LlmTransport, type LlmTransportResponse } from "./transport";
 import type { JsonSchema, LlmCallRecord, LlmCallSink, LlmCallStatus, LlmMessage, LlmUsage } from "./types";
@@ -17,6 +17,8 @@ export interface LlmClientOptions {
   recordCall?: LlmCallSink;
   /** Called when `recordCall` throws; the model call itself still succeeds. */
   onRecordError?: (err: unknown, call: LlmCallRecord) => void;
+  /** Receives operational warnings (e.g. a model with no known price). Defaults to console.warn. */
+  logger?: { warn(obj: object, msg?: string): void };
   maxTokens?: number;
   retry?: Partial<RetryPolicy>;
   now?: () => number;
@@ -75,6 +77,12 @@ export class LlmClient {
     this.retry = { ...DEFAULT_RETRY, ...opts.retry };
     this.now = opts.now ?? Date.now;
     this.sleep = opts.sleep ?? defaultSleep;
+    if (!priceFor(opts.model)) {
+      (opts.logger ?? consoleLogger).warn(
+        { model: opts.model, provider: opts.transport.provider },
+        "LLM model has no price in @platform/llm pricing; estimatedCostUsd will be recorded as 0",
+      );
+    }
   }
 
   get model(): string {
@@ -113,14 +121,15 @@ export class LlmClient {
     let messages = input.messages;
     for (let round = 0; ; round++) {
       const { response, latencyMs } = await this.request(input, messages, jsonSchema);
-      const cost = estimateCostUsd(response.model, response.usage.inputTokens, response.usage.outputTokens);
+      // Priced and recorded by the requested model: providers may echo a resolved snapshot id.
+      const cost = estimateCostUsd(this.opts.model, response.usage.inputTokens, response.usage.outputTokens) ?? 0;
       usage.inputTokens += response.usage.inputTokens;
       usage.outputTokens += response.usage.outputTokens;
       usage.estimatedCostUsd = round6(usage.estimatedCostUsd + cost);
 
       const result = parseAndValidate(response.text, validate);
       await this.record(input, {
-        model: response.model,
+        model: this.opts.model,
         inputTokens: response.usage.inputTokens,
         outputTokens: response.usage.outputTokens,
         estimatedCostUsd: cost,
@@ -269,5 +278,7 @@ function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+const consoleLogger = { warn: (obj: object, msg?: string) => console.warn(msg, obj) };
 
 const round6 = (n: number) => Math.round(n * 1e6) / 1e6;

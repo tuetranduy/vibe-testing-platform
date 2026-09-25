@@ -227,6 +227,30 @@ describe("LlmClient.generateStructured", () => {
     expect(sent).toContain("[REDACTED]");
   });
 
+  it("prices and records by the requested model even when the provider echoes a snapshot id", async () => {
+    const { client, transport, calls } = setup();
+    transport.enqueue(
+      { error: new LlmTransportError("overloaded", { status: 529, retryable: true }) },
+      { json: { answer: "ok", count: 1 }, usage: { inputTokens: 1000, outputTokens: 500 }, model: "claude-sonnet-5-20260401" },
+    );
+    const res = await client.generateStructured({ ...base(), schema: Answer });
+    expect(res.usage.estimatedCostUsd).toBe(0.007);
+    expect(calls.map((c) => c.model)).toEqual(["claude-sonnet-5", "claude-sonnet-5"]);
+    expect(calls[1]!.estimatedCostUsd).toBe(0.007);
+  });
+
+  it("an unpriced model is surfaced once through the logger, not silently costed at $0", async () => {
+    const warn = vi.fn();
+    const { client, transport, calls } = setup({ model: "claude-future-9", logger: { warn } });
+    transport.enqueue({ json: { answer: "ok", count: 1 } }, { json: { answer: "ok", count: 1 } });
+    await client.generateStructured({ ...base(), schema: Answer });
+    await client.generateStructured({ ...base(), schema: Answer });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]![0]).toMatchObject({ model: "claude-future-9" });
+    expect(warn.mock.calls[0]![1]).toMatch(/no price/i);
+    expect(calls.map((c) => c.estimatedCostUsd)).toEqual([0, 0]);
+  });
+
   it("a failing call sink never fails the model call", async () => {
     const onRecordError = vi.fn();
     const { client, transport } = setup({
