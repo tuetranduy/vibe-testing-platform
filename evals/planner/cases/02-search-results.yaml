@@ -1,0 +1,42 @@
+id: search-results
+tags: [search]
+# Input reused from requirement-compiler/cases/03-search-results.yaml.
+requirement:
+  originalText: >-
+    Searching for "shoes" shows a list of results. Every result title contains the word "shoe".
+    When nothing matches, the page says "No results found".
+  criteria:
+    - id: AC-1
+      sourceText: Searching for "shoes" shows a list of results.
+      statement: Searching for shoes shows a list of results
+      expectedOutcome: { kind: visible, fact: { key: resultsList, checkpoint: search_results }, expected: true }
+      preconditions: []
+      ambiguity: null
+    - id: AC-2
+      sourceText: Every result title contains the word "shoe".
+      statement: The first result title contains the word shoe
+      expectedOutcome:
+        kind: text_matches
+        fact: { key: firstResultTitle, checkpoint: search_results }
+        match: { mode: contains, value: shoe, caseSensitive: false }
+      preconditions: []
+      ambiguity: null
+    - id: AC-3
+      sourceText: When nothing matches, the page says "No results found".
+      statement: A search without matches says No results found
+      expectedOutcome:
+        kind: text_matches
+        fact: { key: emptyMessage, checkpoint: no_results }
+        match: { mode: contains, value: No results found, caseSensitive: false }
+      preconditions: []
+      ambiguity: null
+  facts:
+    - { key: resultsList, checkpoint: search_results, description: The search results list, valueType: boolean }
+    - { key: firstResultTitle, checkpoint: search_results, description: Title of the first search result, valueType: string }
+    - { key: emptyMessage, checkpoint: no_results, description: Message shown when nothing matches, valueType: string }
+expect:
+  requiredStepKinds: [search, capture_checkpoint]
+  maxSteps: 15
+  blocked: []
+  inputRefs:
+    - { source: literal, key: shoes }

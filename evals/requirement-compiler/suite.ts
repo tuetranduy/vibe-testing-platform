@@ -6,10 +6,11 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { GenerateStructuredInput, LlmClient } from "@platform/llm";
-import { compileRequirement, type RequirementLlm } from "@platform/testing-engine";
+import type { LlmClient } from "@platform/llm";
+import { compileRequirement } from "@platform/testing-engine";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { countingLlm, describeError, report, type CaseResult } from "../usage";
 
 const OUTCOME_KINDS = ["visible", "text_matches", "numeric_compare", "numeric_delta", "collection_contains", "semantic"] as const;
 const Kind = z.enum(OUTCOME_KINDS);
@@ -46,15 +47,6 @@ export function loadCases(dir = CASES_DIR): EvalCase[] {
   return cases;
 }
 
-export interface CaseResult {
-  id: string;
-  passed: boolean;
-  failures: string[];
-  inputTokens: number;
-  outputTokens: number;
-  costUsd: number;
-}
-
 /** Score one compiled requirement against a case's expectations. */
 export function scoreCase(c: EvalCase, criteria: { expectedOutcome: { kind: string }; ambiguity: unknown }[]): string[] {
   const failures: string[] = [];
@@ -74,15 +66,7 @@ export async function runRequirementCompilerSuite(llm: LlmClient, cases: EvalCas
   for (const c of cases) {
     const usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
     // Count usage through a wrapper so failed compiles are still accounted for.
-    const counting: RequirementLlm = {
-      generateStructured: async <T>(input: GenerateStructuredInput<T>) => {
-        const res = await llm.generateStructured(input);
-        usage.inputTokens += res.usage.inputTokens;
-        usage.outputTokens += res.usage.outputTokens;
-        usage.costUsd += res.usage.estimatedCostUsd;
-        return res;
-      },
-    };
+    const counting = countingLlm(llm, usage);
     let failures: string[];
     try {
       const draft = await compileRequirement(counting, {
@@ -96,11 +80,11 @@ export async function runRequirementCompilerSuite(llm: LlmClient, cases: EvalCas
       });
       failures = scoreCase(c, draft.criteria);
     } catch (err) {
-      failures = [`compile failed: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`];
+      failures = [`compile failed: ${describeError(err)}`];
     }
     const result = { id: c.id, passed: failures.length === 0, failures, ...usage };
     results.push(result);
-    console.log(`${result.passed ? "PASS" : "FAIL"}  ${c.id}${result.passed ? "" : `\n      - ${failures.join("\n      - ")}`}`);
+    report(result);
   }
   return results;
 }

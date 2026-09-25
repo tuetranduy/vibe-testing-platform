@@ -1,0 +1,25 @@
+id: invalid-email
+tags: [validation, test-data]
+# Input reused from requirement-compiler/cases/17-invalid-email.yaml.
+testDataKeys: [invalidEmail]
+requirement:
+  originalText: Submitting the newsletter form with an invalid email shows the error "Please enter a valid email address".
+  criteria:
+    - id: AC-1
+      sourceText: Submitting the newsletter form with an invalid email shows the error "Please enter a valid email address".
+      statement: An invalid email shows the error Please enter a valid email address
+      expectedOutcome:
+        kind: text_matches
+        fact: { key: emailError, checkpoint: after_submit }
+        match: { mode: contains, value: Please enter a valid email address, caseSensitive: false }
+      preconditions:
+        - { kind: test_data, ref: invalidEmail, description: An invalid email address }
+      ambiguity: null
+  facts:
+    - { key: emailError, checkpoint: after_submit, description: Error under the email field, valueType: string }
+expect:
+  requiredStepKinds: [fill, capture_checkpoint]
+  maxSteps: 8
+  blocked: []
+  inputRefs:
+    - { source: testData, key: invalidEmail }

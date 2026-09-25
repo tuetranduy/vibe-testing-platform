@@ -1,0 +1,31 @@
+id: checkout-denied
+tags: [destructive, blocking]
+# Input reused from requirement-compiler/cases/09-checkout.yaml. Default policy: placing the order is denied.
+testDataKeys: [cardNumber, cardExpiry]
+secretNames: [card_cvc]
+requirement:
+  originalText: >-
+    Completing checkout with the test card shows an order confirmation page with an order number, and
+    the cart is empty afterwards.
+  criteria:
+    - id: AC-1
+      sourceText: Completing checkout with the test card shows an order confirmation page with an order number
+      statement: The order confirmation page shows an order number
+      expectedOutcome: { kind: visible, fact: { key: orderNumber, checkpoint: confirmation }, expected: true }
+      preconditions:
+        - { kind: test_data, ref: cardNumber, description: Test card number }
+        - { kind: secret, ref: card_cvc, description: Test card CVC }
+      ambiguity: null
+    - id: AC-2
+      sourceText: the cart is empty afterwards.
+      statement: The cart is empty after checkout
+      expectedOutcome: { kind: visible, fact: { key: emptyCartMessage, checkpoint: cart_after_order }, expected: true }
+      preconditions: []
+      ambiguity: null
+  facts:
+    - { key: orderNumber, checkpoint: confirmation, description: Order number on the confirmation page, valueType: boolean }
+    - { key: emptyCartMessage, checkpoint: cart_after_order, description: Empty cart message, valueType: boolean }
+expect:
+  blocked:
+    - { criterionId: AC-1, reason: DESTRUCTIVE_ACTION_NOT_AUTHORIZED }
+    - { criterionId: AC-2, reason: DESTRUCTIVE_ACTION_NOT_AUTHORIZED }

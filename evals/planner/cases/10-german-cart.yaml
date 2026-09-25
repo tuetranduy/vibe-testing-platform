@@ -1,0 +1,23 @@
+id: german-cart
+tags: [non-english, checkpoints]
+# Input reused from requirement-compiler/cases/10-german-cart.yaml.
+requirement:
+  originalText: Wenn der Nutzer ein Produkt in den Warenkorb legt, erhöht sich die Zahl am Warenkorb-Symbol.
+  criteria:
+    - id: AC-1
+      sourceText: Wenn der Nutzer ein Produkt in den Warenkorb legt, erhöht sich die Zahl am Warenkorb-Symbol.
+      statement: The cart icon count increases after adding a product to the cart
+      expectedOutcome:
+        kind: numeric_compare
+        left: { key: cartCount, checkpoint: after_add }
+        operator: gt
+        right: { key: cartCount, checkpoint: before_add }
+      preconditions: []
+      ambiguity: null
+  facts:
+    - { key: cartCount, checkpoint: before_add, description: Count on the cart icon, valueType: number }
+    - { key: cartCount, checkpoint: after_add, description: Count on the cart icon, valueType: number }
+expect:
+  requiredStepKinds: [click, capture_checkpoint]
+  maxSteps: 10
+  blocked: []

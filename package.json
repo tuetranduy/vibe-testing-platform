@@ -21,6 +21,7 @@
     "stack:down": "docker compose -f infra/compose/docker-compose.yml down"
   },
   "devDependencies": {
+    "@platform/contracts": "workspace:*",
     "@platform/llm": "workspace:*",
     "@platform/testing-engine": "workspace:*",
     "@types/node": "^22.19.0",

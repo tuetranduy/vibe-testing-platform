@@ -14,9 +14,7 @@
   "dependencies": {
     "@platform/contracts": "workspace:*",
     "@platform/llm": "workspace:*",
+    "@platform/security": "workspace:*",
     "zod": "4.4.3"
-  },
-  "devDependencies": {
-    "@platform/security": "workspace:*"
   }
 }

@@ -1,4 +1,4 @@
-import { LlmCallRepository, RequirementRepository, ResultRepository, RunRepository } from "@platform/db";
+import { LlmCallRepository, PlanRepository, RequirementRepository, ResultRepository, RunRepository } from "@platform/db";
 import { FakeTransport } from "@platform/llm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { silentLogger } from "./deps";
@@ -32,6 +32,30 @@ const compiled = {
     { key: "cartCount", checkpoint: "before_add", description: "Cart badge count", valueType: "number" },
     { key: "cartCount", checkpoint: "after_add", description: "Cart badge count", valueType: "number" },
   ],
+};
+
+/** Planner reply for the requirement seedRun confirms (fake analyze: before_add/after_add/cart_page). */
+const planStep = (kind: string, description: string, extra: Record<string, unknown> = {}) => ({
+  kind,
+  description,
+  inputRef: null,
+  checkpoint: null,
+  criterionIds: [],
+  destructive: false,
+  ...extra,
+});
+const planned = {
+  title: "Add a product to the cart",
+  steps: [
+    planStep("navigate", "Open the shop home page"),
+    planStep("search", "Search for the product", { inputRef: { source: "literal", key: "iPhone 17 Pro" } }),
+    planStep("capture_checkpoint", "Capture the cart badge before adding", { checkpoint: "before_add" }),
+    planStep("click", "Click Add to cart", { criterionIds: ["AC-1"] }),
+    planStep("capture_checkpoint", "Capture the cart badge after adding", { checkpoint: "after_add" }),
+    planStep("click", "Open the cart"),
+    planStep("capture_checkpoint", "Capture the cart contents", { checkpoint: "cart_page" }),
+  ],
+  stopConditions: [],
 };
 
 describe("createEngine (Ruling R7)", () => {
@@ -83,7 +107,37 @@ describe("createEngine (Ruling R7)", () => {
     expect(sent).not.toContain("pw-Top-Secret-123");
   });
 
-  it("real engine: plan/explore/verify stay fake for now, generateTest is the R7 null stub", async () => {
+  it("real engine plans with the LLM: plan persisted, plan.created published, PLANNING llm_calls row, no secret sent", async () => {
+    const transport = new FakeTransport().enqueue({ json: planned, usage: { inputTokens: 2000, outputTokens: 500 } });
+    const engine = createEngine(
+      { LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5", ANTHROPIC_API_KEY: "sk-test" },
+      { db: h.tdb.db, logger: silentLogger, transport },
+    );
+    const run = await seedRun(h, { lifecycle: "PLANNING", secrets: { password: "pw-Plan-Secret-456" } });
+
+    await executeRunJob(h.deps(engine.stages), run.id);
+
+    const plan = (await new PlanRepository(h.tdb.db).find(run.id))!;
+    expect(plan.scenarios[0]!.criterionIds).toEqual(["AC-1", "AC-2"]);
+    expect(plan.scenarios[0]!.steps.filter((s) => s.kind === "capture_checkpoint").map((s) => s.checkpoint)).toEqual([
+      "before_add",
+      "after_add",
+      "cart_page",
+    ]);
+    expect(plan.blockedCriteria).toEqual([]);
+    const created = (await eventsOf(h, run.id)).find((e) => e.type === "plan.created")!;
+    expect(created.message).toBe("Plan created with 7 steps");
+
+    const calls = await new LlmCallRepository(h.tdb.db).listByRun(run.id);
+    expect(calls).toMatchObject([{ stage: "PLANNING", inputTokens: 2000, outputTokens: 500, status: "SUCCESS" }]);
+
+    const sent = JSON.stringify(transport.requests.map(({ signal: _s, ...r }) => r));
+    expect(sent).toContain("password");
+    expect(sent).not.toContain("pw-Plan-Secret-456");
+    expect(JSON.stringify(plan)).not.toContain("pw-Plan-Secret-456");
+  });
+
+  it("real engine: explore/verify stay fake for now, generateTest is the R7 null stub", async () => {
     const engine = createEngine(
       { LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5", ANTHROPIC_API_KEY: "sk-test" },
       { db: h.tdb.db, logger: silentLogger, transport: new FakeTransport() },
@@ -95,7 +149,12 @@ describe("createEngine (Ruling R7)", () => {
     const engine = createEngine(
       { LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5", ANTHROPIC_API_KEY: "sk-test" },
       // Even a fallback configured to PASS must not leak a verdict into a real run.
-      { db: h.tdb.db, logger: silentLogger, transport: new FakeTransport(), fake: { provisionalStatus: "PASS" } },
+      {
+        db: h.tdb.db,
+        logger: silentLogger,
+        transport: new FakeTransport().enqueue({ json: planned }),
+        fake: { provisionalStatus: "PASS" },
+      },
     );
     const run = await seedRun(h, { lifecycle: "PLANNING" });
 

@@ -14,7 +14,7 @@ export interface EngineSelection {
 
 /**
  * Ruling R7: LLM_PROVIDER=fake keeps the full fake engine (demo/compose work without a key);
- * otherwise the real stages (currently: analyze) over the fake engine for the stages not built yet.
+ * otherwise the real stages (currently: analyze, plan) over the fake engine for the stages not built yet.
  * Throws at startup for providers not implemented in V1.
  */
 export function createEngine(
