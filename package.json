@@ -22,9 +22,11 @@
   },
   "devDependencies": {
     "@platform/contracts": "workspace:*",
+    "@platform/demo-shop": "workspace:*",
     "@platform/llm": "workspace:*",
     "@platform/testing-engine": "workspace:*",
     "@types/node": "^22.19.0",
+    "playwright-core": "1.56.1",
     "tsx": "^4.23.0",
     "typescript": "~5.9.3",
     "vitest": "^4.1.11",
