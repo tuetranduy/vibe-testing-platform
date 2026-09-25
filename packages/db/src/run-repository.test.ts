@@ -108,6 +108,32 @@ describe("RunRepository", () => {
     expect(page3.nextCursor).toBeNull();
   });
 
+  it("pages through runs created in the same millisecond without skipping any", async () => {
+    const t = `t_burst_${Date.now()}`;
+    await tdb.db.execute(sql`INSERT INTO tenants (id, name) VALUES (${t}, 'burst')`);
+    const created = await Promise.all(Array.from({ length: 200 }, () => create(t)));
+    const seen = new Set<string>();
+    let cursor: string | null = null;
+    do {
+      const page = await runs.list(t, { limit: 3, cursor });
+      for (const r of page.items) seen.add(r.id);
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(seen.size).toBe(created.length);
+  });
+
+  it("finds QUEUED runs older than a cutoff and runs past their deadline", async () => {
+    const q = await create();
+    expect((await runs.findQueuedSince(new Date(Date.now() + 1000))).map((r) => r.id)).toContain(q.id);
+    expect((await runs.findQueuedSince(new Date(Date.now() - 60_000))).map((r) => r.id)).not.toContain(q.id);
+    const a = await create();
+    await runs.transition(a.id, "QUEUED", "ANALYZING_REQUIREMENT");
+    await runs.transition(a.id, "ANALYZING_REQUIREMENT", "PLANNING");
+    await runs.markExecutionStarted(a.id, { startedAt: new Date(), deadlineAt: new Date(Date.now() - 5_000) });
+    expect((await runs.findPastDeadline(new Date())).map((r) => r.id)).toContain(a.id);
+    expect((await runs.findPastDeadline(new Date(Date.now() - 60_000))).map((r) => r.id)).not.toContain(a.id);
+  });
+
   it("marks cancel requests on non-terminal runs only", async () => {
     const run = await create();
     await runs.transition(run.id, "QUEUED", "ANALYZING_REQUIREMENT");

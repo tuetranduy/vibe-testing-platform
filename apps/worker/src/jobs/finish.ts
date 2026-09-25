@@ -1,5 +1,7 @@
 import { isTerminalLifecycle } from "@platform/contracts";
-import { RunRepository, SecretRepository, StaleTransitionError } from "@platform/db";
+import { EventRepository, RunRepository, SecretRepository, StaleTransitionError, type TestRun } from "@platform/db";
+import { createRunEventPublisher } from "@platform/event-bus";
+import { redactByKey } from "@platform/security";
 import { CancelledError, errorCategoryOf, errorMessageOf } from "@platform/testing-engine";
 import type { WorkerDeps } from "../deps";
 import type { RunContextHandle } from "../run-context";
@@ -40,4 +42,27 @@ export async function failRun(deps: WorkerDeps, handle: RunContextHandle, err: u
 export async function purgeSecretsIfTerminal(deps: WorkerDeps, runId: string): Promise<void> {
   const run = await new RunRepository(deps.db).findById(runId);
   if (run && isTerminalLifecycle(run.lifecycle)) await new SecretRepository(deps.db).purge(runId);
+}
+
+/**
+ * The run context itself could not be built (e.g. secrets fail to decrypt, DB/Redis error).
+ * End the run as ERRORED so it doesn't sit in QUEUED / PLANNING forever.
+ */
+export async function failBeforeContext(deps: WorkerDeps, run: TestRun, err: unknown): Promise<void> {
+  const category = errorCategoryOf(err);
+  const message = "Run could not be started by the worker";
+  deps.logger.error({ runId: run.id, category, err: errorMessageOf(err) }, message);
+  try {
+    await new RunRepository(deps.db).transition(run.id, run.lifecycle, "ERRORED", { errorCategory: category, errorMessage: message });
+    await new SecretRepository(deps.db).purge(run.id);
+    await createRunEventPublisher({ events: new EventRepository(deps.db), redis: deps.redis, redact: redactByKey }).publish({
+      runId: run.id,
+      stage: "ERRORED",
+      type: "run.errored",
+      message: `Run failed: ${category}`,
+      payload: { category, message },
+    });
+  } catch (e) {
+    if (!(e instanceof StaleTransitionError)) throw e;
+  }
 }

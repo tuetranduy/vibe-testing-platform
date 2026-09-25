@@ -43,6 +43,8 @@ const workers = await startWorkers(
       heartbeatMs: 10_000,
       staleAfterMs: 60_000,
       confirmationTtlHours: env.CONFIRMATION_TTL_HOURS,
+      queuedStaleAfterMs: 10 * 60_000,
+      deadlineGraceMs: 60_000,
       timeScale: 1,
     },
     db: handle.db,

@@ -17,6 +17,10 @@ export interface WorkerConfig {
   /** A run whose heartbeat is older than this is considered lost (WORKER_LOST). */
   staleAfterMs: number;
   confirmationTtlHours: number;
+  /** A QUEUED run older than this whose analyze job isn't pending was never picked up. */
+  queuedStaleAfterMs: number;
+  /** Grace after `deadlineAt` before the reaper times out a run whose worker didn't. */
+  deadlineGraceMs: number;
   /** Multiplies every run-time budget; 1 in production, tiny in tests. */
   timeScale: number;
 }

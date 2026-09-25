@@ -15,6 +15,7 @@ export class FakeQueue implements RunQueue {
   analyze: string[] = [];
   execute: string[] = [];
   waiting = new Set<string>();
+  analyzePending = new Set<string>();
   async enqueueAnalyze(runId: string) {
     this.analyze.push(runId);
   }
@@ -23,6 +24,9 @@ export class FakeQueue implements RunQueue {
   }
   async isExecuteWaiting(runId: string) {
     return this.waiting.has(runId);
+  }
+  async isAnalyzePending(runId: string) {
+    return this.analyzePending.has(runId);
   }
   async close() {}
 }
@@ -51,6 +55,8 @@ export async function createHarness(): Promise<WorkerHarness> {
         heartbeatMs: 20,
         staleAfterMs: 60_000,
         confirmationTtlHours: 24,
+        queuedStaleAfterMs: 10 * 60_000,
+        deadlineGraceMs: 60_000,
         // maxRunSeconds 60 → 600 ms total; exploration budget 360 ms.
         timeScale: 0.01,
       },

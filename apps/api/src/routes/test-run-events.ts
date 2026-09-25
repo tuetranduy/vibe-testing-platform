@@ -49,8 +49,27 @@ export async function testRunEventRoutes(app: FastifyInstance, deps: ApiDeps): P
       raw.end();
     };
     req.raw.on("close", close);
+    const runs = new RunRepository(deps.db);
+    const graceMs = Math.max(2_000, deps.config.sseHeartbeatMs);
+    const settled = (changedAt: Date) => Date.now() - changedAt.getTime() >= graceMs;
+    // Heartbeat: keep the connection alive, and re-check the database so a lost live message
+    // (Redis reconnect, crash between persist and publish) can never leave the stream hanging.
     const heartbeat = setInterval(() => {
-      if (!closed) raw.write(": ping\n\n");
+      if (closed) return;
+      raw.write(": ping\n\n");
+      if (live) {
+        enqueue(async () => {
+          await backfill();
+          if (closed) return;
+          const current = await runs.getById(runId);
+          // The terminal event is persisted just after the terminal transition; give it a grace
+          // period before concluding its live message was lost.
+          if (isTerminalLifecycle(current.lifecycle) && settled(current.lifecycleChangedAt)) {
+            await backfill();
+            close();
+          }
+        });
+      }
     }, deps.config.sseHeartbeatMs);
 
     const send = (e: TestEvent) => {
@@ -76,35 +95,42 @@ export async function testRunEventRoutes(app: FastifyInstance, deps: ApiDeps): P
       });
     };
 
-    unsubscribe = await deps.hub.subscribe(runId, (e) => {
-      if (!live) {
-        buffer.push(e);
-        return;
-      }
-      enqueue(async () => {
-        if (e.sequence > lastSent + 1) await backfill();
-        send(e);
+    try {
+      unsubscribe = await deps.hub.subscribe(runId, (e) => {
+        if (!live) {
+          buffer.push(e);
+          return;
+        }
+        enqueue(async () => {
+          if (e.sequence > lastSent + 1) await backfill();
+          send(e);
+        });
       });
-    });
+    } catch (err) {
+      req.log.error({ err, runId }, "sse subscribe failed");
+      close();
+      return;
+    }
 
     enqueue(async () => {
       await backfill();
-      buffer.sort((a, b) => a.sequence - b.sequence);
-      for (const e of buffer.splice(0)) {
-        if (e.sequence > lastSent + 1) await backfill();
-        send(e);
+      // Events that arrive while we backfill land in `buffer` again, so drain until it stays empty;
+      // `live` flips with no await in between, so nothing can slip past.
+      while (buffer.length > 0 && !closed) {
+        const batch = buffer.splice(0).sort((a, b) => a.sequence - b.sequence);
+        for (const e of batch) {
+          if (e.sequence > lastSent + 1) await backfill();
+          send(e);
+        }
       }
       live = true;
       // A run that is already terminal but whose terminal event we've already delivered (or never
       // will receive) must not hang the client.
-      if (!closed && isTerminalLifecycle(run.lifecycle)) {
-        const latest = await new RunRepository(deps.db).getById(runId);
-        if (isTerminalLifecycle(latest.lifecycle)) {
-          await backfill();
-          close();
-        }
+      if (!closed && isTerminalLifecycle(run.lifecycle) && settled(run.lifecycleChangedAt)) {
+        await backfill();
+        close();
       }
     });
-    if (closed) void unsubscribe();
+    if (closed) void unsubscribe?.();
   });
 }

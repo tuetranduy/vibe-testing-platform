@@ -28,6 +28,9 @@ export class FakeQueue implements RunQueue {
   async isExecuteWaiting() {
     return false;
   }
+  async isAnalyzePending() {
+    return false;
+  }
   async close() {}
 }
 

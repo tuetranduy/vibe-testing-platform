@@ -1,4 +1,5 @@
 import { EventRepository, ResultRepository, RunRepository, SecretRepository } from "@platform/db";
+import { encryptSecret } from "@platform/security";
 import { ModelProviderError } from "@platform/testing-engine";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createFakeStages, createHarness, eventsOf, requestCancel, seedRun, type WorkerHarness } from "../test-support";
@@ -153,6 +154,39 @@ describe("execute-run cancellation, errors, deadlines", () => {
     expect(after.lifecycle).toBe("ERRORED");
     expect(after.errorCategory).toBe("TIMEOUT");
     expect(stages.browsers[0]!.closeCount).toBe(1);
+    expect(await new SecretRepository(h.tdb.db).listActive(run.id)).toHaveLength(0);
+  });
+
+  it("a stage that ignores the signal can't outlive the hard deadline (report overruns → TIMEOUT)", async () => {
+    const run = await seedRun(h, { lifecycle: "PLANNING" });
+    // total budget 600 ms; the report stage blocks for 1.2 s without looking at the signal.
+    await executeRunJob(h.deps(createFakeStages({ explorationSteps: 1, stuckMs: { report: 1200 } })), run.id);
+    const after = await new RunRepository(h.tdb.db).getById(run.id);
+    expect(after.lifecycle).toBe("ERRORED");
+    expect(after.errorCategory).toBe("TIMEOUT");
+    expect(after.verdict).toBeNull();
+  });
+
+  it("does not start planning for a run already marked for cancellation", async () => {
+    const run = await seedRun(h, { lifecycle: "PLANNING" });
+    await requestCancel(h, run.id, false);
+    let planned = 0;
+    await executeRunJob(h.deps(createFakeStages({ onStage: (s) => void (s === "plan" && planned++) })), run.id);
+    expect(planned).toBe(0);
+    expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("CANCELLED");
+  });
+
+  it("errors the run (instead of leaving it stuck) when the context can't be built", async () => {
+    const run = await seedRun(h, { lifecycle: "PLANNING" });
+    // A secret encrypted with a different key can't be decrypted.
+    await new SecretRepository(h.tdb.db).insertMany(run.id, [
+      { name: "password", ...encryptSecret("pw-123456", { runId: run.id, name: "password" }, Buffer.alloc(32, 1)) },
+    ]);
+    await executeRunJob(h.deps(createFakeStages()), run.id);
+    const after = await new RunRepository(h.tdb.db).getById(run.id);
+    expect(after.lifecycle).toBe("ERRORED");
+    expect(after.errorCategory).toBe("INTERNAL");
+    expect((await eventsOf(h, run.id)).at(-1)!.type).toBe("run.errored");
     expect(await new SecretRepository(h.tdb.db).listActive(run.id)).toHaveLength(0);
   });
 

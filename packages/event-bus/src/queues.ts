@@ -20,6 +20,8 @@ export interface RunQueue {
   enqueueExecute(runId: string): Promise<void>;
   /** True while the execute-run job for this run is waiting/delayed (not yet picked up). */
   isExecuteWaiting(runId: string): Promise<boolean>;
+  /** True while the analyze-run job for this run is waiting or being processed. */
+  isAnalyzePending(runId: string): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -37,6 +39,10 @@ export function createRunQueue(connection: ConnectionOptions): RunQueue {
     async isExecuteWaiting(runId) {
       const state = await queue.getJobState(executeJobId(runId));
       return state === "waiting" || state === "delayed" || state === "prioritized" || state === "waiting-children";
+    },
+    async isAnalyzePending(runId) {
+      const state = await queue.getJobState(analyzeJobId(runId));
+      return ["waiting", "delayed", "prioritized", "waiting-children", "active"].includes(state);
     },
     close: () => queue.close(),
   };

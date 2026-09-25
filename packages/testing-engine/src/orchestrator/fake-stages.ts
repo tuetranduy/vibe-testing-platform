@@ -38,6 +38,10 @@ export interface FakeEngineOptions {
   /** Provisional status for every non-blocked criterion. */
   provisionalStatus?: "PASS" | "FAIL" | "INCONCLUSIVE";
   analyzeDelayMs?: number;
+  /** Called when a stage starts (after failAt). */
+  onStage?: (stage: keyof EngineStages) => void | Promise<void>;
+  /** Delay a stage WITHOUT honoring any signal (simulates a stage that overruns the deadline). */
+  stuckMs?: Partial<Record<keyof EngineStages, number>>;
 }
 
 const sleep = (ms: number, signal: AbortSignal) =>
@@ -59,12 +63,18 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
   const maybeFail = (stage: keyof EngineStages) => {
     if (opts.failAt?.stage === stage) throw opts.failAt.error;
   };
+  const enter = async (stage: keyof EngineStages) => {
+    maybeFail(stage);
+    await opts.onStage?.(stage);
+    const stuck = opts.stuckMs?.[stage];
+    if (stuck) await new Promise((r) => setTimeout(r, stuck));
+  };
 
   const stages: EngineStages & { browsers: FakeBrowser[] } = {
     browsers,
 
     async analyze(ctx): Promise<RequirementDraft> {
-      maybeFail("analyze");
+      await enter("analyze");
       if (opts.analyzeDelayMs) await sleep(opts.analyzeDelayMs, ctx.signal);
       const text = ctx.request.requirement;
       return {
@@ -106,7 +116,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
     },
 
     async plan(ctx, requirement): Promise<TestPlan> {
-      maybeFail("plan");
+      await enter("plan");
       const ids = requirement.criteria.map((c) => c.id);
       return {
         runId: ctx.runId,
@@ -132,7 +142,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
     },
 
     async explore(ctx, plan): Promise<ExplorationOutcome> {
-      maybeFail("explore");
+      await enter("explore");
       const browser: FakeBrowser = {
         closeCount: 0,
         async close() {
@@ -240,7 +250,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
     },
 
     async generateTest(ctx, input): Promise<GeneratedTest | null> {
-      maybeFail("generateTest");
+      await enter("generateTest");
       const compiled = input.provisional.filter((r) => r.status === "PASS" || r.status === "FAIL").map((r) => r.criterionId);
       return {
         id: `gt_${ctx.runId}`,
@@ -256,7 +266,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
     },
 
     async runTest(_ctx, test): Promise<RerunResult> {
-      maybeFail("runTest");
+      await enter("runTest");
       const status = opts.provisionalStatus === "FAIL" ? "ASSERTION_FAILED" : "PASSED";
       return {
         status: status === "PASSED" ? "PASSED" : "FAILED",
@@ -267,7 +277,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
     },
 
     async report(ctx, input): Promise<TestReport> {
-      maybeFail("report");
+      await enter("report");
       // Minimal stand-in for Task 18 reconciliation: rerun-confirmed PASS/FAIL, else provisional.
       const criteria: CriterionResult[] = input.provisional.map((p) => {
         const rerunOutcome = input.rerun?.perCriterion[p.criterionId] ?? "UNAVAILABLE";

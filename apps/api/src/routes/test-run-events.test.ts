@@ -174,6 +174,54 @@ describe("GET /v1/test-runs/:runId/events", () => {
     s.close();
   });
 
+  it("does not drop an event published while a buffered gap is being filled", async () => {
+    const run = await newRun();
+    const pub = publisher();
+    const events = new EventRepository(t.tdb.db);
+    await pub.publish(stageEvent(run.id, 1));
+    const original = EventRepository.prototype.listAfter;
+    let call = 0;
+    vi.spyOn(EventRepository.prototype, "listAfter").mockImplementation(async function (this: EventRepository, ...args) {
+      if (args[0] === run.id) {
+        call++;
+        if (call === 1) {
+          // Initial backfill: 2 and 3 persist, but only 3's live message arrives (out of order).
+          const rows = await original.apply(this, args);
+          await events.append(pub.prepare(stageEvent(run.id, 2)));
+          await pub.notify(await events.append(pub.prepare(stageEvent(run.id, 3))));
+          await new Promise((r) => setTimeout(r, 50));
+          return rows;
+        }
+        if (call === 2) {
+          // Gap-filling backfill: the terminal event is published meanwhile.
+          const rows = await original.apply(this, args);
+          await pub.publish({ runId: run.id, stage: "COMPLETED", type: "run.completed", message: "Done", payload: { verdict: "PASSED" } });
+          await new Promise((r) => setTimeout(r, 50));
+          return rows;
+        }
+      }
+      return original.apply(this, args);
+    });
+    const s = openStream(run.id);
+    expect(await s.done).toBe(200);
+    expect(s.events().map((e) => e.sequence)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("closes via the heartbeat DB check when the terminal event's live message is lost", { timeout: 15_000 }, async () => {
+    const run = await newRun();
+    const s = openStream(run.id);
+    await vi.waitFor(() => expect(s.frames.some((f) => f.comment === "connected")).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    const pub = publisher();
+    await new RunRepository(t.tdb.db).transition(run.id, "QUEUED", "CANCELLED", { cancelReason: "USER_REQUESTED" });
+    // Persist without the Redis notification.
+    await new EventRepository(t.tdb.db).append(
+      pub.prepare({ runId: run.id, stage: "CANCELLED", type: "run.cancelled", message: "Cancelled", payload: { reason: "USER_REQUESTED" } }),
+    );
+    expect(await s.done).toBe(200);
+    expect(s.events().map((e) => e.type)).toEqual(["run.cancelled"]);
+  });
+
   it("sends heartbeat comments", async () => {
     const run = await newRun();
     const s = openStream(run.id);
@@ -201,6 +249,7 @@ describe("GET /v1/test-runs/:runId/events", () => {
     expect(await s.done).toBe(200);
     expect(s.events().map((e) => e.sequence)).toEqual([1, 2]);
     // Reconnecting after the terminal event also closes immediately.
+    await t.tdb.pool.query("UPDATE test_runs SET lifecycle_changed_at = now() - interval '1 minute' WHERE id = $1", [run.id]);
     const again = openStream(run.id, { headers: { "last-event-id": "2" } });
     expect(await again.done).toBe(200);
     expect(again.events()).toEqual([]);

@@ -5,6 +5,8 @@ import type { WorkerDeps } from "../deps";
 
 export interface ReapResult {
   workerLost: string[];
+  timedOut: string[];
+  neverStarted: string[];
   confirmationExpired: string[];
   secretsPurged: string[];
 }
@@ -26,7 +28,19 @@ export async function reapJob(deps: WorkerDeps): Promise<ReapResult> {
     redact: redactByKey,
     logger: deps.logger,
   });
-  const result: ReapResult = { workerLost: [], confirmationExpired: [], secretsPurged: [] };
+  const result: ReapResult = { workerLost: [], timedOut: [], neverStarted: [], confirmationExpired: [], secretsPurged: [] };
+
+  const errorRun = async (run: TestRun, category: "WORKER_LOST" | "TIMEOUT" | "INTERNAL", message: string) => {
+    await runs.transition(run.id, run.lifecycle, "ERRORED", { errorCategory: category, errorMessage: message });
+    await secrets.purge(run.id);
+    await publisher.publish({
+      runId: run.id,
+      stage: "ERRORED",
+      type: "run.errored",
+      message: `Run failed: ${category}`,
+      payload: { category, message },
+    });
+  };
 
   const safely = async (run: TestRun, fn: () => Promise<void>) => {
     try {
@@ -40,19 +54,25 @@ export async function reapJob(deps: WorkerDeps): Promise<ReapResult> {
   for (const run of await runs.findStale(new Date(now.getTime() - deps.config.staleAfterMs))) {
     if (run.lifecycle === "PLANNING" && (await deps.queue.isExecuteWaiting(run.id))) continue;
     await safely(run, async () => {
-      await runs.transition(run.id, run.lifecycle, "ERRORED", {
-        errorCategory: "WORKER_LOST",
-        errorMessage: "No heartbeat from the worker",
-      });
-      await secrets.purge(run.id);
-      await publisher.publish({
-        runId: run.id,
-        stage: "ERRORED",
-        type: "run.errored",
-        message: "Run failed: worker lost",
-        payload: { category: "WORKER_LOST", message: "No heartbeat from the worker" },
-      });
+      await errorRun(run, "WORKER_LOST", "No heartbeat from the worker");
       result.workerLost.push(run.id);
+    });
+  }
+
+  // Hard deadline backstop: the worker enforces it, this catches a worker that doesn't.
+  for (const run of await runs.findPastDeadline(new Date(now.getTime() - deps.config.deadlineGraceMs))) {
+    await safely(run, async () => {
+      await errorRun(run, "TIMEOUT", "Hard deadline exceeded");
+      result.timedOut.push(run.id);
+    });
+  }
+
+  // QUEUED runs whose analyze job is gone (worker died before picking it up, enqueue lost, ...).
+  for (const run of await runs.findQueuedSince(new Date(now.getTime() - deps.config.queuedStaleAfterMs))) {
+    if (await deps.queue.isAnalyzePending(run.id)) continue;
+    await safely(run, async () => {
+      await errorRun(run, "INTERNAL", "Run was never picked up by a worker");
+      result.neverStarted.push(run.id);
     });
   }
 

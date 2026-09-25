@@ -2,7 +2,7 @@ import { RunRepository } from "@platform/db";
 import { runExecution } from "@platform/testing-engine";
 import type { WorkerDeps } from "../deps";
 import { createRunContext } from "../run-context";
-import { failRun, purgeSecretsIfTerminal } from "./finish";
+import { failBeforeContext, failRun, purgeSecretsIfTerminal } from "./finish";
 
 /** execute-run: PLANNING → … → COMPLETED, or CANCELLED / ERRORED. */
 export async function executeRunJob(deps: WorkerDeps, runId: string): Promise<void> {
@@ -19,7 +19,13 @@ export async function executeRunJob(deps: WorkerDeps, runId: string): Promise<vo
   const deadlineAt = new Date(startedAt.getTime() + totalBudgetMs);
   await runs.markExecutionStarted(runId, { deadlineAt, startedAt });
 
-  const handle = await createRunContext(deps, run, { deadlineAt, totalBudgetMs });
+  let handle;
+  try {
+    handle = await createRunContext(deps, run, { deadlineAt, totalBudgetMs });
+  } catch (err) {
+    await failBeforeContext(deps, run, err);
+    return;
+  }
   try {
     const { verdict } = await runExecution(handle.ctx, handle.ports, deps.stages);
     deps.logger.info({ runId, verdict }, "run completed");

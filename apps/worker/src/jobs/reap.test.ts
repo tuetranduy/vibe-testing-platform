@@ -70,6 +70,29 @@ describe("reaper", () => {
     expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("AWAITING_CONFIRMATION");
   });
 
+  it("errors QUEUED runs that were never picked up, but not ones still waiting in the queue", async () => {
+    const lost = await seedRun(h);
+    const waiting = await seedRun(h);
+    h.queue.analyzePending.add(waiting.id);
+    const deps = h.deps(createFakeStages(), { now: () => new Date(Date.now() + 11 * 60_000) });
+    const r = await reapJob(deps);
+    expect(r.neverStarted).toContain(lost.id);
+    expect(r.neverStarted).not.toContain(waiting.id);
+    expect((await new RunRepository(h.tdb.db).getById(lost.id)).errorCategory).toBe("INTERNAL");
+    expect((await new RunRepository(h.tdb.db).getById(waiting.id)).lifecycle).toBe("QUEUED");
+    h.queue.analyzePending.delete(waiting.id);
+  });
+
+  it("times out active runs past their hard deadline (+ grace)", async () => {
+    const run = await seedRun(h, { lifecycle: "PLANNING" });
+    const runs = new RunRepository(h.tdb.db);
+    await runs.markExecutionStarted(run.id, { startedAt: minutesAgo(10), deadlineAt: minutesAgo(5) });
+    await runs.heartbeat(run.id); // the worker is alive but stuck
+    const r = await reapJob(h.deps(createFakeStages()));
+    expect(r.timedOut).toContain(run.id);
+    expect((await runs.getById(run.id)).errorCategory).toBe("TIMEOUT");
+  });
+
   it("purges leftover secrets of terminal runs", async () => {
     const run = await seedRun(h, { secrets: { password: "pw-123456" } });
     await new RunRepository(h.tdb.db).transition(run.id, "QUEUED", "CANCELLED", { cancelReason: "USER_REQUESTED" });

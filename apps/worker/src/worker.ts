@@ -47,7 +47,7 @@ export async function startWorkers(
     async (job) => {
       if (job.name === JOB_REAP) {
         const r = await reapJob(deps);
-        if (r.workerLost.length || r.confirmationExpired.length || r.secretsPurged.length) {
+        if (Object.values(r).some((ids) => ids.length > 0)) {
           deps.logger.info(r, "reaper acted");
         }
       }

@@ -36,6 +36,30 @@ export interface RunPorts {
   enqueueExecute(): Promise<void>;
 }
 
+/**
+ * Races a stage against the run signal so a stage that ignores cancellation or the hard deadline
+ * can't keep the run alive (Section 2.7). The abandoned stage's resources are released by the
+ * worker's cleanup hooks.
+ */
+export function guard<T>(ctx: StageContext, work: Promise<T>): Promise<T> {
+  const { signal } = ctx;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (v) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(v);
+      },
+      (e) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(e);
+      },
+    );
+  });
+}
+
 const STAGE_LABEL: Partial<Record<RunLifecycle, string>> = {
   ANALYZING_REQUIREMENT: "Analyzing requirement",
   PLANNING: "Planning test",
@@ -62,7 +86,7 @@ export async function runAnalysis(ctx: StageContext, ports: RunPorts, stages: En
   await started(ports, "ANALYZING_REQUIREMENT");
   await ctx.boundary();
 
-  const draft = await stages.analyze(ctx);
+  const draft = await guard(ctx, stages.analyze(ctx));
   await ctx.boundary();
   const requirement = await ports.saveRequirement(draft);
   const n = requirement.criteria.length;
@@ -75,6 +99,7 @@ export async function runAnalysis(ctx: StageContext, ports: RunPorts, stages: En
     },
   });
   await completed(ports, "ANALYZING_REQUIREMENT");
+  await ctx.boundary();
 
   if (ctx.request.options.autoConfirmCriteria) {
     const confirmed = await ports.confirmRequirement(requirement.revision);
@@ -83,6 +108,7 @@ export async function runAnalysis(ctx: StageContext, ports: RunPorts, stages: En
       message: `Criteria revision ${confirmed.revision} confirmed automatically`,
       payload: { revision: confirmed.revision },
     });
+    await ctx.boundary();
     // Enqueuing execute-run resets heartbeatAt so the reaper leaves it alone while it waits.
     await ports.transition("PLANNING", { heartbeatAt: ctx.now() });
     await ports.enqueueExecute();
@@ -99,11 +125,12 @@ export interface ExecutionResult {
 /** execute-run: PLANNING → … → COMPLETED. Throws on cancel / deadline / infrastructure errors. */
 export async function runExecution(ctx: StageContext, ports: RunPorts, stages: EngineStages): Promise<ExecutionResult> {
   const startedAt = ctx.now();
+  await ctx.boundary();
   const requirement = await ports.getConfirmedRequirement();
 
   // PLANNING
   await started(ports, "PLANNING");
-  const plan = await stages.plan(ctx, requirement);
+  const plan = await guard(ctx, stages.plan(ctx, requirement));
   await ports.savePlan(plan);
   const scenario = plan.scenarios[0]!;
   await ports.publish({
@@ -134,7 +161,7 @@ export async function runExecution(ctx: StageContext, ports: RunPorts, stages: E
     // EXPLORING
     await ports.transition("EXPLORING");
     await started(ports, "EXPLORING");
-    exploration = await stages.explore(ctx, plan, requirement);
+    exploration = await guard(ctx, stages.explore(ctx, plan, requirement));
     await completed(ports, "EXPLORING");
     await ctx.boundary();
 
@@ -157,7 +184,7 @@ export async function runExecution(ctx: StageContext, ports: RunPorts, stages: E
     if (ctx.request.options.generatePlaywright && compilable) {
       await ports.transition("GENERATING_TEST");
       await started(ports, "GENERATING_TEST");
-      generatedTest = await stages.generateTest(ctx, { requirement, plan, exploration, provisional });
+      generatedTest = await guard(ctx, stages.generateTest(ctx, { requirement, plan, exploration, provisional }));
       if (generatedTest) {
         await ports.publish({
           type: "test.generated",
@@ -171,7 +198,7 @@ export async function runExecution(ctx: StageContext, ports: RunPorts, stages: E
       if (ctx.request.options.rerunGeneratedTest && generatedTest) {
         await ports.transition("RUNNING_PLAYWRIGHT");
         await started(ports, "RUNNING_PLAYWRIGHT");
-        rerun = await stages.runTest(ctx, generatedTest);
+        rerun = await guard(ctx, stages.runTest(ctx, generatedTest));
         await ports.publish({
           type: "playwright.completed",
           message: `Playwright rerun ${rerun.status.toLowerCase()}`,
@@ -191,7 +218,10 @@ export async function runExecution(ctx: StageContext, ports: RunPorts, stages: E
 
   // GENERATING_REPORT
   await started(ports, "GENERATING_REPORT");
-  const report = await stages.report(ctx, { requirement, plan, exploration, provisional, generatedTest, rerun, startedAt });
+  const report = await guard(
+    ctx,
+    stages.report(ctx, { requirement, plan, exploration, provisional, generatedTest, rerun, startedAt }),
+  );
   await ports.saveResults(report.criteria);
   for (const r of report.criteria) {
     await ports.publish({
@@ -202,6 +232,7 @@ export async function runExecution(ctx: StageContext, ports: RunPorts, stages: E
   }
   const verdict = aggregateVerdict(report.criteria);
   await completed(ports, "GENERATING_REPORT");
+  await ctx.boundary(); // the hard deadline applies up to the very end
   await ports.transition("COMPLETED", { verdict });
   await ports.publish({ type: "run.completed", message: `Run completed: ${verdict}`, payload: { verdict } });
   return { verdict, report: { ...report, verdict, lifecycle: "COMPLETED" } };

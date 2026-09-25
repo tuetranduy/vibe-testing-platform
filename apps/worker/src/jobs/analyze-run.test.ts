@@ -1,7 +1,8 @@
 import { RequirementRepository, RunRepository, SecretRepository } from "@platform/db";
 import { ModelProviderError } from "@platform/testing-engine";
+import { encryptSecret } from "@platform/security";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createFakeStages, createHarness, eventsOf, seedRun, type WorkerHarness } from "../test-support";
+import { createFakeStages, createHarness, eventsOf, requestCancel, seedRun, type WorkerHarness } from "../test-support";
 import { analyzeRunJob } from "./analyze-run";
 
 let h: WorkerHarness;
@@ -58,6 +59,26 @@ describe("analyze-run", () => {
     const errored = (await eventsOf(h, run.id)).find((e) => e.type === "run.errored")!;
     expect(errored.payload).toEqual({ category: "MODEL_PROVIDER", message: "provider 503 for [REDACTED]" });
     expect(await new SecretRepository(h.tdb.db).listActive(run.id)).toHaveLength(0);
+  });
+
+  it("honours a cancel requested while criteria are being saved (no Redis signal)", async () => {
+    const run = await seedRun(h);
+    const stages = createFakeStages({ onStage: (s) => (s === "analyze" ? requestCancel(h, run.id, false) : undefined) });
+    await analyzeRunJob(h.deps(stages), run.id);
+    const after = await new RunRepository(h.tdb.db).getById(run.id);
+    expect(after.lifecycle).toBe("CANCELLED");
+    expect((await eventsOf(h, run.id)).at(-1)!.type).toBe("run.cancelled");
+  });
+
+  it("errors a QUEUED run whose secrets can't be decrypted instead of leaving it QUEUED", async () => {
+    const run = await seedRun(h);
+    await new SecretRepository(h.tdb.db).insertMany(run.id, [
+      { name: "password", ...encryptSecret("pw-123456", { runId: run.id, name: "password" }, Buffer.alloc(32, 1)) },
+    ]);
+    await analyzeRunJob(h.deps(createFakeStages()), run.id);
+    const after = await new RunRepository(h.tdb.db).getById(run.id);
+    expect(after.lifecycle).toBe("ERRORED");
+    expect(after.errorCategory).toBe("INTERNAL");
   });
 
   it("times out analysis after ANALYSIS_TIMEOUT_SECONDS → ERRORED / TIMEOUT", async () => {
