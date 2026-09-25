@@ -10,6 +10,19 @@ export async function buildApp(deps: ApiDeps, opts: FastifyServerOptions = {}): 
   const app = Fastify({ bodyLimit: 1_000_000, ...opts });
   registerErrorHandler(app);
 
+  // Accept an empty body with content-type: application/json (e.g. POST …/cancel from proxies).
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
+    const text = typeof body === "string" ? body : body.toString("utf8");
+    if (text.trim() === "") return done(null, undefined);
+    try {
+      done(null, JSON.parse(text));
+    } catch {
+      const err = Object.assign(new Error("Body is not valid JSON"), { statusCode: 400, code: "INVALID_JSON" });
+      done(err, undefined);
+    }
+  });
+
   app.get("/healthz", async () => ({ ok: true }));
 
   await app.register(async (v1) => {
