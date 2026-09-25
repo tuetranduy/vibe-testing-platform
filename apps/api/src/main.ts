@@ -7,6 +7,18 @@ import { Redis } from "ioredis";
 import { buildApp } from "./app";
 import { createCancelSignal } from "./services/cancel-signal";
 
+async function retry(fn: () => Promise<void>, what: string, attempts = 30): Promise<void> {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i >= attempts) throw err;
+      console.warn(`${what} not ready (attempt ${i}/${attempts}): ${(err as Error).message}`);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+}
+
 const env = loadEnvOrExit();
 const handle = createDb(env.DATABASE_URL);
 if (process.env.RUN_MIGRATIONS_ON_START !== "false") await runMigrations(handle.db);
@@ -16,6 +28,9 @@ const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 3 });
 const subscriber = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 const queueConnection = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 const queue = createRunQueue(queueConnection);
+
+const storage = createArtifactStorage(env);
+await retry(() => storage.ensureReady(), "artifact storage");
 
 const app = await buildApp(
   {
@@ -32,7 +47,7 @@ const app = await buildApp(
     redis,
     hub: new RunEventHub(subscriber),
     queue,
-    storage: createArtifactStorage(env),
+    storage,
     cancelSignal: createCancelSignal(redis),
     resolve: defaultResolver,
   },

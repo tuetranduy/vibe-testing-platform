@@ -2,6 +2,7 @@ import { loadEnvOrExit } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
 import { createRunQueue } from "@platform/event-bus";
 import { createFakeStages } from "@platform/testing-engine";
+import { writeFileSync } from "node:fs";
 import { Redis } from "ioredis";
 import { CancelWatcher } from "./cancel-watcher";
 import type { WorkerLogger } from "./deps";
@@ -55,8 +56,20 @@ const workers = await startWorkers(
 );
 logger.info({ concurrency: env.WORKER_CONCURRENCY }, "worker started");
 
+// Liveness file for the container healthcheck.
+const alive = () => {
+  try {
+    writeFileSync("/tmp/worker-alive", String(Date.now()));
+  } catch {
+    /* read-only fs outside containers is fine */
+  }
+};
+alive();
+const aliveTimer = setInterval(alive, 10_000);
+
 const shutdown = async () => {
   logger.info({}, "worker shutting down");
+  clearInterval(aliveTimer);
   await workers.close();
   await queue.close();
   cancelWatcher.close();

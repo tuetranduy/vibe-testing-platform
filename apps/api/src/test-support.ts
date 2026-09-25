@@ -39,6 +39,7 @@ export class FakeStorage implements ArtifactStorage {
     return `https://storage.test/${objectKey}?ttl=${ttl}`;
   }
   async delete() {}
+  async ensureReady() {}
 }
 
 /** public.test → public IP; private.test → 10.0.0.5; everything else fails. */

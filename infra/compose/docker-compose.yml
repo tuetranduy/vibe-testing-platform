@@ -1,4 +1,33 @@
+# Full local stack: `pnpm stack:up` (or `docker compose -f infra/compose/docker-compose.yml up -d --build --wait`).
+# Infra only (for running api/worker/web with pnpm on your machine): `pnpm infra:up`.
+# Override any ${VAR} below in infra/compose/.env (see .env.example at the repo root).
 name: ai-testing-platform
+
+x-app-env: &app-env
+  # "development" so the demo shop allowlist and the fake LLM provider are permitted.
+  NODE_ENV: development
+  DATABASE_URL: postgresql://platform:platform@postgres:5432/platform
+  REDIS_URL: redis://redis:6379
+  ARTIFACT_STORAGE_TYPE: s3
+  ARTIFACT_BUCKET: artifacts
+  S3_ENDPOINT: http://minio:9000
+  S3_REGION: us-east-1
+  S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+  S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  S3_FORCE_PATH_STYLE: "true"
+  LLM_PROVIDER: ${LLM_PROVIDER:-fake}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  BROWSER_MODE: local
+  API_TOKEN: ${API_TOKEN:-dev-api-token-change-me-please}
+  API_PORT: "3001"
+  API_URL: http://api:3001
+  DEFAULT_TENANT_ID: t_default
+  # Local-only default. Generate your own: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+  SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+  TARGET_PRIVATE_ALLOWLIST: demo-shop:4000
+  RUN_MIGRATIONS_ON_START: "false"
+  LOG_LEVEL: info
 
 services:
   postgres:
@@ -24,12 +53,14 @@ services:
       timeout: 3s
       retries: 20
 
+  # MinIO community images are no longer updated upstream; any S3-compatible server works here.
+  # The api creates the `artifacts` bucket on start-up.
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports: ["9000:9000", "9001:9001"]
     volumes: [miniodata:/data]
     healthcheck:
@@ -37,17 +68,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      minio: { condition: service_healthy }
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/artifacts &&
-      echo bucket ready"
-    restart: "no"
 
   demo-shop:
     build:
@@ -61,6 +81,53 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
+  migrate:
+    build:
+      context: ../..
+      target: migrate
+    environment: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  api:
+    build:
+      context: ../..
+      target: api
+    environment: *app-env
+    ports: ["3001:3001"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../..
+      target: worker
+    environment:
+      <<: *app-env
+      FAKE_ENGINE_STEP_DELAY_MS: "500"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../..
+      target: web
+    environment:
+      NODE_ENV: production
+      API_URL: http://api:3001
+      API_TOKEN: ${API_TOKEN:-dev-api-token-change-me-please}
+    ports: ["3000:3000"]
+    depends_on:
+      api: { condition: service_healthy }
+    restart: unless-stopped
 
 volumes:
   pgdata:

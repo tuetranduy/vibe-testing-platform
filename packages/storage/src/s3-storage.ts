@@ -1,5 +1,12 @@
 import { pipeline } from "node:stream";
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  CreateBucketCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { assertValidObjectKey, buildObjectKey } from "./object-key";
@@ -38,6 +45,21 @@ export function createS3Storage(opts: S3StorageOptions): ArtifactStorage {
   });
 
   return {
+    async ensureReady() {
+      try {
+        await client.send(new HeadBucketCommand({ Bucket: bucket }));
+        return;
+      } catch {
+        /* missing or not yet reachable: try to create it */
+      }
+      try {
+        await client.send(new CreateBucketCommand({ Bucket: bucket }));
+      } catch (err) {
+        const name = (err as { name?: string }).name;
+        if (name === "BucketAlreadyOwnedByYou" || name === "BucketAlreadyExists") return;
+        throw wrapStorageError(err, "init", bucket);
+      }
+    },
     async put(input) {
       const objectKey = buildObjectKey(input);
       const Metadata = { sensitivity: input.sensitivity, "artifact-type": input.type };

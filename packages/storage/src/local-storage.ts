@@ -85,6 +85,13 @@ export function createLocalStorage(opts: LocalStorageOptions): ArtifactStorage {
   }
 
   return {
+    async ensureReady() {
+      try {
+        await mkdir(rootDir, { recursive: true });
+      } catch (err) {
+        throw wrapStorageError(err, "init", rootDir);
+      }
+    },
     async put(input) {
       const objectKey = buildObjectKey(input);
       const finalPath = resolveLocalObjectPath(rootDir, objectKey);
