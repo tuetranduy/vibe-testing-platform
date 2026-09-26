@@ -17,7 +17,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <a className="brand" href="/">
               AI Testing Platform
             </a>
-            <nav aria-label="Main">
+            <nav aria-label="Main" className="app-nav">
+              <a href="/runs">Test runs</a>
               <a href="/runs/new">New test</a>
             </nav>
           </div>

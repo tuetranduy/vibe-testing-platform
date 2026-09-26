@@ -2,11 +2,15 @@ import {
   ApiErrorSchema,
   CreateTestRunResponseSchema,
   NormalizedRequirementSchema,
+  TestReportSchema,
+  TestRunListResponseSchema,
   TestRunSummarySchema,
   type ApiError,
   type CreateTestRunRequestInput,
   type CreateTestRunResponse,
   type NormalizedRequirement,
+  type TestReport,
+  type TestRunListResponse,
   type TestRunSummary,
 } from "@platform/contracts";
 import { z } from "zod";
@@ -75,6 +79,16 @@ async function request<T>(
 
 export const createRun = (body: CreateTestRunRequestInput, idempotencyKey: string): Promise<CreateTestRunResponse> =>
   request(CreateTestRunResponseSchema, BASE, { method: "POST", body, headers: { "idempotency-key": idempotencyKey } });
+
+/** The history, newest first; pass the previous page's `nextCursor` for the next page. */
+export const listRuns = (cursor: string | null = null, limit = 50): Promise<TestRunListResponse> => {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (cursor) q.set("cursor", cursor);
+  return request(TestRunListResponseSchema, `${BASE}?${q}`);
+};
+
+/** The final report (COMPLETED) or a partial one (ERRORED / CANCELLED); 409 while the run is still going. */
+export const getReport = (runId: string): Promise<TestReport> => request(TestReportSchema, `${runPath(runId)}/report`);
 
 export const getRun = (runId: string): Promise<TestRunSummary> => request(TestRunSummarySchema, runPath(runId));
 

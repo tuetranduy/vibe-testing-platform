@@ -6,9 +6,11 @@ import { ApiRequestError, cancelRun, getRun, type ConfirmResult } from "../lib/a
 import { initialProgress, lifecycleRank, progressReducer, type ProgressState } from "../lib/progress-reducer";
 import { connectRunEvents, type ConnectionStatus } from "../lib/run-events";
 import { CriteriaReview } from "./CriteriaReview";
+import { Disclosure } from "./Disclosure";
 import { Icon, type IconName } from "./Icon";
 import { LiveEvidence } from "./LiveEvidence";
 import { RunProgress } from "./RunProgress";
+import { RunReport } from "./RunReport";
 import { RunTimeline } from "./RunTimeline";
 import { CANCEL_REASON_TEXT, ERROR_CATEGORY_LABEL, LIFECYCLE_LABEL, VERDICT_LABEL } from "./format";
 
@@ -244,10 +246,25 @@ export function RunView({ runId }: { runId: string }) {
         </section>
       ) : lifecycle === "AWAITING_CONFIRMATION" ? (
         <CriteriaReview runId={runId} onConfirmed={onConfirmed} />
+      ) : terminal ? (
+        <>
+          <RunReport
+            runId={runId}
+            artifacts={progress.artifacts}
+            steps={progress.steps}
+            cancelReason={progress.outcome?.kind === "cancelled" ? progress.outcome.reason : summary.cancelReason}
+            fallback={<Outcome lifecycle={lifecycle} summary={summary} progress={progress} />}
+          />
+          <Disclosure title="Run activity" hint="The stages and timeline of this run.">
+            <div className="stack">
+              <RunProgress progress={progress} />
+              <RunTimeline items={progress.timeline} />
+            </div>
+          </Disclosure>
+        </>
       ) : (
         <>
-          {terminal && <Outcome lifecycle={lifecycle} summary={summary} progress={progress} />}
-          {confirmation && !terminal && (
+          {confirmation && (
             <div role="status" aria-labelledby="confirmed-title" className="banner banner-info">
               <Icon name="check" />
               <div>
@@ -278,7 +295,7 @@ export function RunView({ runId }: { runId: string }) {
   );
 }
 
-/** Completed (placeholder until the report view), cancelled and errored states. */
+/** The outcome from the run summary / terminal event: shown when the report itself can't be loaded. */
 function Outcome({ lifecycle, summary, progress }: { lifecycle: RunLifecycle; summary: TestRunSummary; progress: ProgressState }) {
   const o = progress.outcome;
   if (lifecycle === "COMPLETED") {
