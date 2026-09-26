@@ -46,6 +46,14 @@ export interface EgressProxy {
 }
 
 /**
+ * Reserved sink for Stagehand's in-browser OTel trace export, which cannot be disabled (Ruling R22).
+ * `@platform/stagehand-adapter` points `telemetry.traces.endpoint` here by default
+ * (`DEFAULT_TELEMETRY_ENDPOINT`); denying it as a background service keeps it silent (no
+ * `egress.blocked` event) and it never resolves (`.invalid`, RFC 6761).
+ */
+export const STAGEHAND_TELEMETRY_SINK_HOST = "stagehand-telemetry.invalid";
+
+/**
  * Chromium background endpoints seen by the Stagehand spike (caveat 4) and their siblings. Denied
  * regardless of what they resolve to: they are never part of the site under test and would leak
  * that a test browser is running.
@@ -71,6 +79,7 @@ const BACKGROUND_SERVICE_HOSTS = new Set([
   "sb-ssl.google.com",
   "tools.google.com",
   "update.googleapis.com",
+  STAGEHAND_TELEMETRY_SINK_HOST,
 ]);
 const BACKGROUND_SERVICE_PATTERNS = [/^clients\d*\.google\.com$/];
 

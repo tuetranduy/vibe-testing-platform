@@ -71,6 +71,7 @@ export const ObservedFactSchema = z
       })
       .nullable(), // required when provenance = DOM_VERIFIED (except key "url")
     modelValue: FactValueSchema.optional(), // what the model extracted, kept for audit
+    domValue: FactValueSchema.optional(), // the DOM reading when it disagreed with the model (MODEL_EXTRACTED), kept for audit
     stepId: z.string(),
   })
   .refine((f) => f.provenance !== "DOM_VERIFIED" || f.key === "url" || f.read !== null, {

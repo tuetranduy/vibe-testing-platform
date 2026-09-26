@@ -24,6 +24,7 @@
     "@platform/contracts": "workspace:*",
     "@platform/demo-shop": "workspace:*",
     "@platform/llm": "workspace:*",
+    "@platform/stagehand-adapter": "workspace:*",
     "@platform/testing-engine": "workspace:*",
     "@types/node": "^22.19.0",
     "playwright-core": "1.56.1",

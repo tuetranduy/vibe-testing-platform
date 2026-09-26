@@ -164,7 +164,8 @@ describe("browser sandbox (real Chromium, demo shop)", () => {
   afterAll(async () => {
     await shop.close();
     await fixture.close();
-    expect(sandboxProcesses()).toEqual([]);
+    // Only this file's run ids: other integration files run their own sandboxes in parallel.
+    expect(sandboxProcesses().filter((l) => /platform-sandbox-(run_sandbox_it|run_race_\d+)-/.test(l))).toEqual([]);
   });
 
   async function open(extra: Partial<RunSandboxDeps> = {}): Promise<RunSandbox> {
