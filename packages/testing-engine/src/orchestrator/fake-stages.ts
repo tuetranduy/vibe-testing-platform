@@ -14,6 +14,7 @@ import type {
   TestPlan,
   TestReport,
 } from "@platform/contracts";
+import type { GeneratedTestStore } from "../compiler/generate-stage";
 import { aggregateVerdict } from "../verification/aggregate";
 import type { EngineStages, RequirementDraft, StageContext } from "./stages";
 
@@ -42,6 +43,12 @@ export interface FakeEngineOptions {
   onStage?: (stage: keyof EngineStages) => void | Promise<void>;
   /** Delay a stage WITHOUT honoring any signal (simulates a stage that overruns the deadline). */
   stuckMs?: Partial<Record<keyof EngineStages, number>>;
+  /**
+   * Where the generated test is persisted, like the real stage's port (Ruling R28). The worker
+   * passes the `generated_tests` store so the API's report shows the fake run's test; unset, the
+   * test is only returned.
+   */
+  generatedTestStore?: (ctx: StageContext) => GeneratedTestStore;
 }
 
 const sleep = (ms: number, signal: AbortSignal) =>
@@ -252,7 +259,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
     async generateTest(ctx, input): Promise<GeneratedTest | null> {
       await enter("generateTest");
       const compiled = input.provisional.filter((r) => r.status === "PASS" || r.status === "FAIL").map((r) => r.criterionId);
-      return {
+      const test: GeneratedTest = {
         id: `gt_${ctx.runId}`,
         source: `import { test } from "@playwright/test";\n// fake generated test for ${compiled.join(", ")}\n`,
         helpersSource: "export {};\n",
@@ -263,6 +270,8 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
           .map((r) => ({ criterionId: r.criterionId, reason: `provisional ${r.status}` })),
         notes: [],
       };
+      await opts.generatedTestStore?.(ctx).save(test);
+      return test;
     },
 
     async runTest(_ctx, test): Promise<RerunResult> {

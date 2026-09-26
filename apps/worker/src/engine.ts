@@ -67,7 +67,11 @@ export interface EngineDeps {
  * Throws at startup for providers not implemented in V1.
  */
 export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSelection {
-  if (config.LLM_PROVIDER === "fake") return { kind: "fake", stages: createFakeStages(deps.fake), llm: null };
+  if (config.LLM_PROVIDER === "fake") {
+    // The fake test is persisted like the real one, so the report (read by the API) includes it.
+    const fake: FakeEngineOptions = { generatedTestStore: createGenerateTestDeps(deps.db).store, ...deps.fake };
+    return { kind: "fake", stages: createFakeStages(fake), llm: null };
+  }
 
   const transport =
     deps.transport ?? createTransport({ provider: config.LLM_PROVIDER, anthropicApiKey: config.ANTHROPIC_API_KEY });
