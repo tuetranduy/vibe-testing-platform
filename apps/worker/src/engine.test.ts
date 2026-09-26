@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@platform/db";
 import { FakeTransport } from "@platform/llm";
 import { createLocalStorage } from "@platform/storage";
+import type { RunnerProcessInput, SpawnRunner } from "@platform/testing-engine";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { silentLogger } from "./deps";
 import { createEngine } from "./engine";
@@ -33,12 +34,43 @@ afterAll(async () => {
 });
 
 const REAL = { LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5", ANTHROPIC_API_KEY: "sk-test" } as const;
-/** Real-engine deps with a browserless sandbox/explorer (the real one is covered by tests/integration). */
+/**
+ * A browserless rerun child (the real one is covered by sandbox/runner-process.test.ts): every
+ * compiled `[AC-n]` step of the workspace's run.spec.ts passes.
+ */
+function fakeRerunSpawn(): SpawnRunner & { calls: RunnerProcessInput[] } {
+  const calls: RunnerProcessInput[] = [];
+  const spawn = (async (input: RunnerProcessInput) => {
+    calls.push(input);
+    const source = readFileSync(path.join(input.cwd, "run.spec.ts"), "utf8");
+    const ids = [...source.matchAll(/test\.step\("\[(AC-\d+)\] "/g)].map((m) => m[1]!);
+    const steps = ids.map((id) => ({ title: `[${id}] statement`, duration: 1 }));
+    const results = { suites: [{ specs: [{ tests: [{ results: [{ status: "passed", errors: [], steps, attachments: [] }] }] }] }], errors: [] };
+    writeFileSync(path.join(input.cwd, "results.json"), JSON.stringify(results));
+    return { exitCode: 0, signal: null };
+  }) as SpawnRunner & { calls: RunnerProcessInput[] };
+  spawn.calls = calls;
+  return spawn;
+}
+
+/** Real-engine deps with a browserless sandbox/explorer (the real one is covered by tests/integration) and rerun child. */
 const realDeps = (transport: FakeTransport, extra: Record<string, unknown> = {}, page: Parameters<typeof fakeExploration>[0] = {}) => {
   const exploration = fakeExploration(page);
+  const rerunSpawn = fakeRerunSpawn();
+  const rerunDir = path.join(artifactDir, "runs");
   return {
     exploration,
-    deps: { db: h.tdb.db, logger: silentLogger, transport, storage: createLocalStorage({ rootDir: artifactDir }), exploration: exploration.deps, ...extra },
+    rerunSpawn,
+    rerunDir,
+    deps: {
+      db: h.tdb.db,
+      logger: silentLogger,
+      transport,
+      storage: createLocalStorage({ rootDir: artifactDir }),
+      exploration: exploration.deps,
+      rerun: { spawn: rerunSpawn, workspace: { baseDir: rerunDir } },
+      ...extra,
+    },
   };
 };
 
@@ -160,7 +192,7 @@ describe("createEngine (Ruling R7)", () => {
     expect(JSON.stringify(plan)).not.toContain("pw-Plan-Secret-456");
   });
 
-  it("real engine generates the Playwright test (Task 16): persisted once, test.generated published once; no rerun until Task 17 (R39)", async () => {
+  it("real engine generates the Playwright test (Task 16) and reruns it in the sandbox (Task 17); outcomes are reconciled only by Task 18", async () => {
     const page = {
       facts: {
         "cartCount@before_add": { value: 0, dom: true },
@@ -168,7 +200,8 @@ describe("createEngine (Ruling R7)", () => {
         "cartItems@cart_page": { value: ["iPhone 17 Pro"], dom: false },
       },
     };
-    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), {}, page).deps);
+    const real = realDeps(new FakeTransport().enqueue({ json: planned }), {}, page);
+    const engine = createEngine(REAL, real.deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
     await executeRunJob(h.deps(engine.stages), run.id);
@@ -185,10 +218,17 @@ describe("createEngine (Ruling R7)", () => {
     expect(events.filter((e) => e.type === "test.generated").map((e) => e.payload)).toEqual([
       { compiledCriteria: ["AC-1"], notCompiled: test.notCompiled },
     ]);
-    expect(events.find((e) => e.type === "playwright.completed")?.payload).toEqual({ status: "ERRORED", durationMs: 0 });
-    // No rerun confirmation is fabricated: the DOM-backed PASS stands as EXPLORATION_ONLY.
+    // The rerun ran the persisted test in its own workspace, behind the rerun proxy, and was cleaned up.
+    expect(real.rerunSpawn.calls).toHaveLength(1);
+    expect(real.rerunSpawn.calls[0]!.cwd).toBe(path.join(real.rerunDir, run.id));
+    expect(existsSync(path.join(real.rerunDir, run.id))).toBe(false);
+    const completed = events.filter((e) => e.type === "playwright.completed");
+    expect(completed).toHaveLength(1); // published by the orchestrator only (R34)
+    expect(completed[0]!.payload).toMatchObject({ status: "PASSED" });
+    // Until Task 18 reconciles, no rerun confirmation is claimed: the DOM-backed PASS stands as EXPLORATION_ONLY.
     const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
     expect(results.find((r) => r.criterionId === "AC-1")).toMatchObject({ status: "PASS", verdictSource: "EXPLORATION_ONLY", rerunOutcome: "UNAVAILABLE" });
+    expect((await new RunRepository(h.tdb.db).findById(run.id))!.lifecycle).toBe("COMPLETED");
   });
 
   it("the real engine needs artifact storage (fails fast at startup)", () => {

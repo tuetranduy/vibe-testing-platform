@@ -6,6 +6,7 @@ import {
   NormalizedRequirementSchema,
   ObservedFactSchema,
   PlannedStepSchema,
+  RerunResultSchema,
   RunLifecycleSchema,
   RunVerdictSchema,
   TEST_EVENT_TYPES,
@@ -349,5 +350,14 @@ describe("exploration and results", () => {
       durationMs: null,
     };
     expect(TestReportSchema.safeParse(report).success).toBe(true);
+  });
+});
+
+describe("RerunResultSchema", () => {
+  it("carries the ids of the uploaded rerun evidence, defaulting to none (Ruling R27)", () => {
+    const base = { status: "FAILED", perCriterion: { "AC-1": "ASSERTION_FAILED" }, durationMs: 1200 };
+    expect(RerunResultSchema.parse(base)).toEqual({ ...base, errorText: {}, artifactIds: [] });
+    expect(RerunResultSchema.parse({ ...base, artifactIds: ["art_1", "art_2"] }).artifactIds).toEqual(["art_1", "art_2"]);
+    expect(RerunResultSchema.safeParse({ ...base, artifactIds: [1] }).success).toBe(false);
   });
 });

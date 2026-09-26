@@ -273,6 +273,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
         perCriterion: Object.fromEntries(test.compiledCriteria.map((id) => [id, status])),
         durationMs: 5,
         errorText: {},
+        artifactIds: [],
       };
     },
 

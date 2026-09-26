@@ -4,4 +4,6 @@ export * from "./requirement";
 export * from "./planner";
 export * from "./exploration";
 export * from "./compiler";
+export * from "./playwright-runner";
+export * from "./evidence";
 export * from "./shared/locator-policy";

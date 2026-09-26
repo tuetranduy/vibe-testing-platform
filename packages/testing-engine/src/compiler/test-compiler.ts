@@ -153,6 +153,11 @@ function navigateUrl(step: ExplorationStep): string | null {
   return null;
 }
 
+/** The environment variable a generated test reads a secret from; the rerun sets exactly these (Task 17). */
+export function secretEnvName(name: string): string {
+  return `SECRET_${SecretNameSchema.parse(name).toUpperCase()}`;
+}
+
 export function compilePlaywrightTest(input: CompileTestInput): CompiledTest {
   return new Compiler(input).compile();
 }
@@ -553,7 +558,7 @@ class Compiler {
   /** The value a fill step types: a secret from the environment, else a run-data input. */
   private inputValue(step: ExplorationStep): string {
     const ref = step.inputRef!;
-    if (ref.source === "secret") return `${this.helper("secret")}(process.env.${ident(`SECRET_${SecretNameSchema.parse(ref.key).toUpperCase()}`)})`;
+    if (ref.source === "secret") return `${this.helper("secret")}(process.env.${ident(secretEnvName(ref.key))})`;
     const value = ref.source === "testData" ? String(this.input.testData[ref.key] ?? "") : ref.key;
     const key = ident(`input${Object.keys(this.data.inputs).length + 1}`);
     this.data.inputs[key] = value;

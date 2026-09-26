@@ -1,7 +1,15 @@
+import os from "node:os";
+import path from "node:path";
 import { z } from "zod";
 
 const intWithDefault = (def: number, min = 1, max = 1_000_000) =>
   z.coerce.number().int().min(min).max(max).default(def);
+
+/** An absolute directory other than the filesystem root (it is created, and runs below it are deleted). */
+const absoluteDir = z
+  .string()
+  .min(1)
+  .refine((v) => path.isAbsolute(v) && path.resolve(v) !== path.parse(path.resolve(v)).root, "must be an absolute directory (not /)");
 
 const EnvSchema = z
   .object({
@@ -37,6 +45,17 @@ const EnvSchema = z
     API_PORT: intWithDefault(3001, 1, 65535),
     API_URL: z.string().default("http://localhost:3001"),
     LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
+    /**
+     * Playwright rerun (Ruling R32): per-run workspaces are `<dir>/<runId>/`, deleted and recreated
+     * for each rerun and removed after its evidence is uploaded. `/work/runs` in the Docker image.
+     */
+    RUNNER_WORKSPACE_DIR: absoluteDir.default(path.join(os.tmpdir(), "platform-runs")),
+    /**
+     * The `node_modules` directory that holds `@playwright/test` (the runner image's pre-installed
+     * one); each workspace's `node_modules` links to it. Default: resolved at runtime from the
+     * worker's own `@playwright/test` install.
+     */
+    RUNNER_NODE_MODULES_DIR: absoluteDir.optional(),
     TARGET_PRIVATE_ALLOWLIST: z
       .string()
       .optional()

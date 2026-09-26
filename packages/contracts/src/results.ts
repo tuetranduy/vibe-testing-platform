@@ -73,5 +73,7 @@ export const RerunResultSchema = z.object({
   perCriterion: z.record(CriterionIdSchema, RerunOutcomeSchema),
   durationMs: z.number().int(),
   errorText: z.record(CriterionIdSchema, z.string()).default({}),
+  /** Ids of the uploaded rerun evidence (trace, screenshot, video), for reconciliation (Ruling R27). */
+  artifactIds: z.array(z.string()).default([]),
 });
 export type RerunResult = z.infer<typeof RerunResultSchema>;

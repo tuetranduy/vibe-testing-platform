@@ -1,3 +1,5 @@
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadEnv } from "./env";
 
@@ -85,5 +87,20 @@ describe("loadEnv", () => {
 
   it("rejects a short API_TOKEN", () => {
     expect(() => loadEnv({ ...validEnv, API_TOKEN: "abc" })).toThrow(/API_TOKEN/);
+  });
+
+  it("Playwright rerun workspace: RUNNER_WORKSPACE_DIR defaults under the OS temp dir; RUNNER_NODE_MODULES_DIR is optional (Ruling R32)", () => {
+    const env = loadEnv(validEnv);
+    expect(env.RUNNER_WORKSPACE_DIR).toBe(path.join(os.tmpdir(), "platform-runs"));
+    expect(env.RUNNER_NODE_MODULES_DIR).toBeUndefined();
+    const docker = loadEnv({ ...validEnv, RUNNER_WORKSPACE_DIR: "/work/runs", RUNNER_NODE_MODULES_DIR: "/opt/runner/node_modules" });
+    expect(docker.RUNNER_WORKSPACE_DIR).toBe("/work/runs");
+    expect(docker.RUNNER_NODE_MODULES_DIR).toBe("/opt/runner/node_modules");
+  });
+
+  it("rejects relative runner directories (the workspace is deleted and recreated per run)", () => {
+    expect(() => loadEnv({ ...validEnv, RUNNER_WORKSPACE_DIR: "work/runs" })).toThrow(/RUNNER_WORKSPACE_DIR/);
+    expect(() => loadEnv({ ...validEnv, RUNNER_WORKSPACE_DIR: "/" })).toThrow(/RUNNER_WORKSPACE_DIR/);
+    expect(() => loadEnv({ ...validEnv, RUNNER_NODE_MODULES_DIR: "./node_modules" })).toThrow(/RUNNER_NODE_MODULES_DIR/);
   });
 });
