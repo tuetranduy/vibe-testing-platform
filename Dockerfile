@@ -27,6 +27,11 @@ HEALTHCHECK --interval=10s --timeout=3s --retries=12 \
 CMD ["pnpm", "--filter", "@platform/api", "start"]
 
 FROM source AS worker
+# Real engine (Ruling R7/R23): Playwright's Chromium, matching the workspace's playwright-core
+# pin, plus its OS deps, in a fixed path readable by the node user the container runs as.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN pnpm --filter @platform/worker exec playwright-core install --with-deps chromium \
+    && chown -R node:node /ms-playwright
 USER node
 HEALTHCHECK --interval=10s --timeout=3s --retries=6 \
   CMD node -e "process.exit(Date.now()-require('fs').statSync('/tmp/worker-alive').mtimeMs<30000?0:1)"
