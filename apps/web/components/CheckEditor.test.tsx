@@ -49,6 +49,17 @@ describe("CheckEditor", () => {
     expect(field).toHaveAccessibleDescription(/enter a number/i);
   });
 
+  it("a number field accepts a negative value, with a keyboard that has a minus key", async () => {
+    const { onSave, user } = setup({ kind: "numeric_delta", before: ref("cartCount", "before_add"), after: ref("cartCount", "after_add"), delta: 1 });
+    const field = screen.getByLabelText(/difference/i);
+    // iOS's "decimal" keypad has no minus key, so a decrease could not be typed on an iPhone.
+    expect(field.getAttribute("inputmode") ?? "text").toBe("text");
+    await user.clear(field);
+    await user.type(field, "-1");
+    await user.click(screen.getByRole("button", { name: /save check/i }));
+    expect(onSave).toHaveBeenCalledWith({ kind: "numeric_delta", before: ref("cartCount", "before_add"), after: ref("cartCount", "after_add"), delta: -1 });
+  });
+
   it("text check: mode, value and case", async () => {
     const { onSave, user } = setup({ kind: "text_matches", fact: ref("message", "after_add"), match: { mode: "contains", value: "added", caseSensitive: false } });
     await user.selectOptions(screen.getByLabelText(/how it matches/i), "equals");
