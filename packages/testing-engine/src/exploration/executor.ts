@@ -484,7 +484,9 @@ class ExplorationRun {
     } catch (err) {
       this.rethrowIfFatal(err);
       // The recorder keeps the value out of its errors; redact once more for the run's secrets.
-      await this.record({ ...base, outcome: "FAILED", error: firstLine(err).split(value).join("[REDACTED]") });
+      const message = firstLine(err);
+      // An empty value would put [REDACTED] between every character; there is nothing to redact.
+      await this.record({ ...base, outcome: "FAILED", error: value === "" ? message : message.split(value).join("[REDACTED]") });
       return "failed";
     }
     await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true });
