@@ -19,6 +19,19 @@ interface Props {
   onEditingChange?: (editing: boolean) => void;
 }
 
+/** JSON with object keys sorted (and JSON's number form: 1.0 → 1, -0 → 0), to tell whether a check changed. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    return `{${Object.keys(o)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 const PRECONDITION: Record<AcceptanceCriterion["preconditions"][number]["kind"], string> = {
   authenticated: "Needs a signed-in user",
   test_data: "Needs test data",
@@ -87,6 +100,12 @@ export function CriterionCard({ criterion: c, facts, busy, canRemove, onSave, on
           busy={busy}
           serverError={serverError}
           onSave={async (outcome) => {
+            // Nothing changed: nothing to save (the API would refuse a wording-only revision).
+            if (canonical(outcome) === canonical(c.expectedOutcome)) {
+              setEditing(false);
+              setServerError(null);
+              return;
+            }
             const err = await onSave(outcome);
             setServerError(err);
             if (err === null) setEditing(false);

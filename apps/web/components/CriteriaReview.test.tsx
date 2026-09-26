@@ -156,6 +156,22 @@ describe("CriteriaReview", () => {
     expect(await screen.findByText(/revision 2/i)).toBeInTheDocument();
   });
 
+  it("saving a check that wasn't changed sends nothing and just closes the editor", async () => {
+    const user = userEvent.setup();
+    const fetch = routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    await user.click(within(cards[1]!).getByRole("button", { name: "Edit check AC-2" }));
+    const delta = within(cards[1]!).getByLabelText(/difference/i);
+    await user.clear(delta);
+    await user.type(delta, "1.0"); // the same value, typed differently
+    await user.click(within(cards[1]!).getByRole("button", { name: /save check/i }));
+    expect(within(cards[1]!).queryByRole("button", { name: /save check/i })).not.toBeInTheDocument();
+    expect(within(cards[1]!).getByRole("button", { name: "Edit check AC-2" })).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(1); // only the initial GET
+    expect(screen.getByRole("button", { name: /confirm and start/i })).toBeEnabled();
+  });
+
   it("an AI-judged criterion has no check editor, only Remove", async () => {
     routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()) });
     render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
@@ -179,6 +195,9 @@ describe("CriteriaReview", () => {
     render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
     const cards = await screen.findAllByRole("article");
     await user.click(within(cards[1]!).getByRole("button", { name: "Edit check AC-2" }));
+    const delta = within(cards[1]!).getByLabelText(/difference/i);
+    await user.clear(delta);
+    await user.type(delta, "2");
     await user.click(within(cards[1]!).getByRole("button", { name: /save check/i }));
     expect(await within(cards[1]!).findByRole("alert")).toHaveTextContent("Only the check's values can change, not what it reads");
     expect(within(cards[1]!).getByRole("button", { name: /save check/i })).toBeInTheDocument();
