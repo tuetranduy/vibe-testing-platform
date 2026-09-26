@@ -1,4 +1,4 @@
-import type { RunLifecycle, StoredTestRunRequest, TestEvent } from "@platform/contracts";
+import type { FactValue, RunLifecycle, StoredTestRunRequest, TestEvent } from "@platform/contracts";
 import { EventRepository, RequirementRepository, RunRepository, SecretRepository, type TestRun } from "@platform/db";
 import { TEST_TENANT_ID, createTestDatabase, type TestDatabase } from "@platform/db/testing";
 import { runCancelChannel, type RunQueue } from "@platform/event-bus";
@@ -148,12 +148,19 @@ export async function requestCancel(h: WorkerHarness, runId: string, viaRedis = 
 
 export { createFakeStages, type FakeEngineOptions };
 
+/** A value the fake page shows for `key@checkpoint`, and whether the DOM read confirms it. */
+export interface FakeFactValue {
+  value: FactValue;
+  dom: boolean;
+}
+
 /**
  * A scripted stand-in for the sandbox + Stagehand explorer + recorder, so the real explore stage
  * runs without a browser: every observe finds one element, every click succeeds, extract answers
- * null for every requested fact.
+ * null for every requested fact. `facts` (keyed `key@checkpoint`) scripts what the page shows: a
+ * `dom: true` value is confirmed by the DOM read (DOM_VERIFIED), otherwise it stays MODEL_EXTRACTED.
  */
-export function fakeExploration(): { deps: Partial<ExploreStageDeps>; log: string[] } {
+export function fakeExploration(opts: { facts?: Record<string, FakeFactValue> } = {}): { deps: Partial<ExploreStageDeps>; log: string[] } {
   const log: string[] = [];
   let url = "about:blank";
   const page = { url: () => url, isClosed: () => false, waitForLoadState: async () => {} } as unknown as Page;
@@ -193,7 +200,12 @@ export function fakeExploration(): { deps: Partial<ExploreStageDeps>; log: strin
     record: async () => ref,
     fill: async () => void log.push("fill"),
     select: async () => void log.push("select"),
-    captureFact: async (_page, input) => factFromReadings({ ...input, dom: null }),
+    captureFact: async (_page, input) => {
+      const scripted = opts.facts?.[`${input.key}@${input.checkpoint}`];
+      if (!scripted) return factFromReadings({ ...input, dom: null });
+      const dom = scripted.dom ? { value: scripted.value, read: { element: input.element ?? ref, mode: input.mode ?? "text" } } : null;
+      return factFromReadings({ ...input, modelValue: scripted.value, dom });
+    },
   };
   return {
     log,

@@ -14,6 +14,12 @@ describe("aggregateVerdict (Section 2.4)", () => {
     [["INCONCLUSIVE"], "INCONCLUSIVE"],
     [["PASS", "PASS"], "PASSED"],
     [["PASS"], "PASSED"],
+    [["FAIL"], "FAILED"],
+    [["INCONCLUSIVE", "BLOCKED", "FAIL"], "FAILED"],
+    [["BLOCKED"], "BLOCKED"],
+    [["INCONCLUSIVE", "PASS", "BLOCKED"], "BLOCKED"],
+    [["INCONCLUSIVE", "INCONCLUSIVE"], "INCONCLUSIVE"],
+    [["PASS", "PASS", "PASS"], "PASSED"],
   ])("%j → %s", (statuses, verdict) => {
     expect(aggregateVerdict(s(...statuses))).toBe(verdict);
   });

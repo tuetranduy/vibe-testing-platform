@@ -1,7 +1,8 @@
-import type { ProvisionalResult } from "@platform/contracts";
 import { createExploreStage, type ExploreStageDeps } from "../exploration/explore-stage";
 import { createPlanStage } from "../planner/planner";
 import { createAnalyzeStage, type RequirementLlm } from "../requirement/compiler";
+import { applyNoRerunEvidenceRule } from "../verification/interim-reconcile";
+import { verifyStage } from "../verification/verify-stage";
 import type { EngineStages } from "./stages";
 
 export interface RealStageDeps {
@@ -20,19 +21,21 @@ export function createRealStages(deps: RealStageDeps, fallback: EngineStages): E
     analyze: createAnalyzeStage(deps.llm), // Task 10
     plan: createPlanStage(deps.llm), // Task 12
     explore: createExploreStage(deps.exploration), // Task 14
-    // Fake until Task 15. The fake verifier ignores the recorded facts, so its PASS/FAIL would be
-    // fabricated evidence (§2.3: no PASS without deterministic evidence) — never let one through.
-    verify: (ctx, requirement, plan, exploration) =>
-      fallback.verify(ctx, requirement, plan, exploration).map(withoutFabricatedVerdict),
+    verify: verifyStage, // Task 15
     // R7: no generated test until Milestone C, so the rerun is UNAVAILABLE.
     generateTest: async () => null,
     runTest: (ctx, test) => fallback.runTest(ctx, test),
-    report: (ctx, input) => fallback.report(ctx, input), // fake until Milestone C
+    // Fake until Milestone C. INTERIM (Ruling R26, until Task 18): before it runs, Section 2.3's no-rerun
+    // rows apply — a PASS/FAIL not backed only by DOM_VERIFIED facts becomes INCONCLUSIVE /
+    // UNVERIFIED_EVIDENCE. Each criterion keeps the verifier's status as its `provisional` record.
+    report: async (ctx, input) => {
+      const provisional = applyNoRerunEvidenceRule(input.provisional, input.exploration?.facts ?? []);
+      const report = await fallback.report(ctx, { ...input, provisional });
+      const original = new Map(input.provisional.map((p) => [p.criterionId, { status: p.status, reason: p.reason }]));
+      return {
+        ...report,
+        criteria: report.criteria.map((c) => ({ ...c, provisional: original.get(c.criterionId) ?? c.provisional })),
+      };
+    },
   };
-}
-
-/** Interim guard while verify is fake: a decided status becomes INCONCLUSIVE / FACT_NOT_OBSERVED. */
-function withoutFabricatedVerdict(r: ProvisionalResult): ProvisionalResult {
-  if (r.status !== "PASS" && r.status !== "FAIL") return r;
-  return { ...r, status: "INCONCLUSIVE", reason: "FACT_NOT_OBSERVED", factRefs: [], actual: null };
 }

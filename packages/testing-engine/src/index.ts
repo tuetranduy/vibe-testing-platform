@@ -1,5 +1,5 @@
 export * from "./orchestrator";
-export * from "./verification/aggregate";
+export * from "./verification";
 export * from "./requirement";
 export * from "./planner";
 export * from "./exploration";
