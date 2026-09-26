@@ -32,12 +32,13 @@ During criteria review (`AWAITING_CONFIRMATION`, D5) a user can change a criteri
 | A criterion is missing (removed) | allowed (the schema still requires ≥ 1 criterion) |
 | A criterion `id` not in the latest revision (added) | 400 |
 | `sourceText` or `preconditions` of a criterion changed | 400 |
-| The requirement's `facts` list changed | 400 |
+| A fact added, or an existing fact's `description`/`valueType` changed | 400 (dropping facts that no remaining criterion references is allowed; the schema still rejects dropping a referenced one) |
 | `expectedOutcome.kind` changed | 400 |
 | Any fact reference inside `expectedOutcome` changed (key or checkpoint) | 400 |
 | An editable parameter changed (table below) | allowed → **edited criterion** |
 | `statement` changed while the check is unchanged | 400 `STATEMENT_ONLY_EDIT` |
 | `ambiguity` changed on an unedited criterion | 400 |
+| An edited `text_matches` check in `regex` mode whose pattern does not compile (`new RegExp`) | 400 |
 
 Editable parameters (same kind only):
 
