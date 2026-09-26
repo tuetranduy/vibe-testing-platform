@@ -268,6 +268,26 @@ describe("PUT /v1/test-runs/:runId/criteria", () => {
     expect(paths).toContain("criteria");
   });
 
+  it("returns 409 while the requirement is still being analyzed, and never saves the body", async () => {
+    const { runId } = (await post(validBody({ requirement: ORIGINAL_TEXT }))).json();
+    const runs = new RunRepository(t.tdb.db);
+    await runs.transition(runId, "QUEUED", "ANALYZING_REQUIREMENT");
+    const requirements = new RequirementRepository(t.tdb.db);
+    await requirements.createRevision(runId, baseRequirement()); // the worker saved revision 1, not yet AWAITING_CONFIRMATION
+    const current = getCriteriaBody(await getCriteria(runId));
+
+    const res = await putCriteria(runId, { ...current, criteria: [{ ...current.criteria[0]!, statement: "Anything at all" }, current.criteria[1]!] });
+    expect(res.statusCode).toBe(409);
+    expect((await requirements.findLatest(runId))!.revision).toBe(1);
+  });
+
+  it("returns 409 before any criteria exist", async () => {
+    const { runId } = (await post(validBody({ requirement: ORIGINAL_TEXT }))).json();
+    const res = await putCriteria(runId, { ...baseRequirement(), runId, revision: 1, confirmedAt: null });
+    expect(res.statusCode).toBe(409);
+    expect(await new RequirementRepository(t.tdb.db).findLatest(runId)).toBeNull();
+  });
+
   it("returns 409 after the run's criteria are confirmed", async () => {
     const runId = await setupAwaitingConfirmation();
     const current = getCriteriaBody(await getCriteria(runId));
