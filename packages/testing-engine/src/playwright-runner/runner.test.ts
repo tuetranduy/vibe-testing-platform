@@ -233,6 +233,9 @@ describe("buildPlaywrightConfig", () => {
       expect.arrayContaining(["--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"]),
     );
     expect(JSON.stringify(config.use.launchOptions.args)).not.toContain("proxy-bypass");
+    // Chromium's own sandbox stays on: Playwright adds --no-sandbox unless chromiumSandbox is true.
+    expect(config.use.launchOptions.chromiumSandbox).toBe(true);
+    expect(JSON.stringify(config)).not.toContain("no-sandbox");
   });
 
   it.each(["http://localhost:1234", "https://127.0.0.1:1234", "http://10.0.0.1:3128", "http://127.0.0.1", "http://127.0.0.1:1234/x", "socks5://127.0.0.1:1080"])(
