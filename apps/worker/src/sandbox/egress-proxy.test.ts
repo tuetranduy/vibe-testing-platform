@@ -371,7 +371,14 @@ describe("egress proxy", () => {
   });
 
   describe("browser background services", () => {
-    it.each(["clients2.google.com", "accounts.google.com", "content-autofill.googleapis.com", "update.googleapis.com", "safebrowsing.googleapis.com"])(
+    it.each([
+      "clients2.google.com",
+      "accounts.google.com",
+      "content-autofill.googleapis.com",
+      "update.googleapis.com",
+      "safebrowsing.googleapis.com",
+      "stagehand-telemetry.invalid", // Stagehand's in-browser OTel export (Ruling R22)
+    ])(
       "denies %s even though it resolves publicly, without resolving it",
       async (host) => {
         const resolve = fakeResolver({ [host]: [PUBLIC_IP] });

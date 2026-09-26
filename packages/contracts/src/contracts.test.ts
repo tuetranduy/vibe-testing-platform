@@ -293,6 +293,20 @@ describe("exploration and results", () => {
     expect(ObservedFactSchema.safeParse({ ...base, read: { element: el, mode: "number" } }).success).toBe(true);
   });
 
+  it("keeps a disagreeing DOM reading next to the model value on MODEL_EXTRACTED facts", () => {
+    const fact = {
+      key: "cartCount",
+      checkpoint: "after_add",
+      value: 2,
+      provenance: "MODEL_EXTRACTED",
+      read: { element: el, mode: "number" },
+      modelValue: 2,
+      domValue: 1,
+      stepId: "s1",
+    };
+    expect(ObservedFactSchema.parse(fact)).toMatchObject({ value: 2, modelValue: 2, domValue: 1 });
+  });
+
   it("requires verdictSource exactly for PASS/FAIL", () => {
     const r = {
       criterionId: "AC-1",
