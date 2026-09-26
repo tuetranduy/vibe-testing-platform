@@ -1,6 +1,6 @@
 "use client";
 
-import type { NormalizedRequirement } from "@platform/contracts";
+import { describeExpectedOutcome, type NormalizedRequirement } from "@platform/contracts";
 import { useCallback, useEffect, useState } from "react";
 import { ApiRequestError, confirmCriteria, getCriteria, updateCriteria, type ConfirmResult } from "../lib/api";
 import { CriterionCard } from "./CriterionCard";
@@ -25,12 +25,6 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
   const [error, setError] = useState<string | null>(null);
   /** Criteria whose editor is open: confirming would freeze the old text, so it waits for them. */
   const [editing, setEditing] = useState<ReadonlySet<string>>(new Set());
-  /**
-   * Each criterion's statement as this review first loaded it. The API keeps only the latest
-   * revision, so "reworded" means "differs from what this page loaded" — the note is honest for
-   * edits made here, and the check itself is shown on every card regardless.
-   */
-  const [loaded, setLoaded] = useState<ReadonlyMap<string, string>>(new Map());
   const editingChange = useCallback(
     (id: string, open: boolean) =>
       setEditing((prev) => {
@@ -46,11 +40,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
   useEffect(() => {
     let live = true;
     getCriteria(runId).then(
-      (r) => {
-        if (!live) return;
-        setRequirement(r);
-        setLoaded(new Map(r.criteria.map((c) => [c.id, c.statement])));
-      },
+      (r) => live && setRequirement(r),
       (err: unknown) => live && setLoadError(messageOf(err)),
     );
     return () => {
@@ -58,17 +48,20 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
     };
   }, [runId]);
 
-  /** Saves the full requirement with `criteria` replaced (the API takes whole revisions). */
-  async function save(criteria: NormalizedRequirement["criteria"]): Promise<boolean> {
-    if (!requirement) return false;
+  /**
+   * Saves the full requirement with `criteria` replaced (the API takes whole revisions); resolves
+   * to null, or the error to show (the API's per-field issues when it gives them).
+   */
+  async function save(criteria: NormalizedRequirement["criteria"]): Promise<string | null> {
+    if (!requirement) return "The criteria aren't loaded yet.";
     setSaving(true);
     setError(null);
     try {
       setRequirement(await updateCriteria(runId, { ...requirement, criteria }));
-      return true;
+      return null;
     } catch (err) {
-      setError(messageOf(err));
-      return false;
+      if (err instanceof ApiRequestError && err.issues?.length) return err.issues.map((i) => i.message).join(" ");
+      return messageOf(err);
     } finally {
       setSaving(false);
     }
@@ -114,7 +107,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
       <div className="section-head">
         <h2 id="review-title">Review the acceptance criteria</h2>
         <p className="muted">
-          These are what the run will check. Edit or remove any that are wrong — they&apos;re frozen once you confirm. Revision{" "}
+          These are what the run will check. Adjust a check&apos;s values or remove a criterion — they&apos;re frozen once you confirm. Revision{" "}
           {requirement.revision}.
         </p>
         <p className="summary-line">
@@ -140,11 +133,18 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
             key={c.id}
             criterion={c}
             facts={requirement.facts}
-            reworded={loaded.has(c.id) && loaded.get(c.id) !== c.statement}
             busy={saving || confirming}
             canRemove={criteria.length > 1}
-            onSave={(statement) => save(criteria.map((x) => (x.id === c.id ? { ...x, statement } : x)))}
-            onRemove={() => void save(criteria.filter((x) => x.id !== c.id))}
+            onSave={(outcome) =>
+              save(
+                criteria.map((x) =>
+                  x.id === c.id
+                    ? { ...x, expectedOutcome: outcome, statement: describeExpectedOutcome(outcome, requirement.facts), ambiguity: null }
+                    : x,
+                ),
+              )
+            }
+            onRemove={() => void save(criteria.filter((x) => x.id !== c.id)).then((err) => err && setError(err))}
             onEditingChange={(open) => editingChange(c.id, open)}
           />
         ))}

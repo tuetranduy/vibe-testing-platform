@@ -440,6 +440,7 @@ fieldset.field > legend {
 }
 
 input:not([type="checkbox"]):not([type="radio"]),
+select,
 textarea {
   width: 100%;
   min-width: 0;
@@ -459,6 +460,7 @@ textarea::placeholder {
   color: color-mix(in srgb, var(--text-muted) 80%, transparent);
 }
 input:focus-visible,
+select:focus-visible,
 textarea:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 0;
@@ -890,6 +892,11 @@ input[type="radio"] {
   flex-direction: column;
   gap: 4px;
   font-size: 0.9375rem;
+}
+.check-editor {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 12px;
 }
 .criterion-check-title {
   font-weight: 600;

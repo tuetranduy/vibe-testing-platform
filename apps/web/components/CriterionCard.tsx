@@ -1,19 +1,19 @@
 "use client";
 
-import { describeExpectedOutcome, type AcceptanceCriterion, type FactRequest } from "@platform/contracts";
+import { describeExpectedOutcome, type AcceptanceCriterion, type ExpectedOutcome, type FactRequest } from "@platform/contracts";
 import { useEffect, useRef, useState } from "react";
+import { CheckEditor } from "./CheckEditor";
 import { Icon } from "./Icon";
 
 interface Props {
   criterion: AcceptanceCriterion;
   /** The requirement's fact descriptions, to name what the check reads. */
   facts: readonly FactRequest[];
-  /** The statement differs from the one this review loaded with. */
-  reworded: boolean;
   /** Another save is in flight: edits are paused. */
   busy: boolean;
   canRemove: boolean;
-  onSave: (statement: string) => Promise<boolean>;
+  /** Saves an edited check; resolves to null when saved, or the error to show in the editor. */
+  onSave: (outcome: ExpectedOutcome) => Promise<string | null>;
   onRemove: () => void;
   /** The editor opened (true) or closed (false); also false when the card goes away. */
   onEditingChange?: (editing: boolean) => void;
@@ -25,17 +25,18 @@ const PRECONDITION: Record<AcceptanceCriterion["preconditions"][number]["kind"],
   secret: "Needs a secret",
 };
 
-export function CriterionCard({ criterion: c, facts, reworded, busy, canRemove, onSave, onRemove, onEditingChange }: Props) {
+export function CriterionCard({ criterion: c, facts, busy, canRemove, onSave, onRemove, onEditingChange }: Props) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(c.statement);
-  const [error, setError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
-  // Cards are keyed by id, so saving another criterion keeps this card's draft; only a change to
-  // its own statement (its own save) resets it.
-  const [statement, setStatement] = useState(c.statement);
-  if (statement !== c.statement) {
-    setStatement(c.statement);
-    setDraft(c.statement);
+  // Cards are keyed by id, so saving another criterion keeps this card's open editor; only a
+  // change to its own check (its own save) closes it.
+  const checkKey = JSON.stringify(c.expectedOutcome);
+  const [seenCheck, setSeenCheck] = useState(checkKey);
+  if (seenCheck !== checkKey) {
+    setSeenCheck(checkKey);
+    setEditing(false);
+    setServerError(null);
   }
 
   const reportEditing = useRef(onEditingChange);
@@ -48,17 +49,6 @@ export function CriterionCard({ criterion: c, facts, reworded, busy, canRemove, 
     return () => reportEditing.current?.(false);
   }, [editing]);
   const aiJudged = c.expectedOutcome.kind === "semantic";
-  const boxId = `criterion-${c.id}-statement`;
-
-  async function save() {
-    const text = draft.trim();
-    if (text.length < 3 || text.length > 1000) {
-      setError("Use 3 to 1000 characters.");
-      return;
-    }
-    setError(null);
-    if (await onSave(text)) setEditing(false);
-  }
 
   return (
     <article className={`card criterion${c.ambiguity ? " criterion-unclear" : aiJudged ? " criterion-ai" : ""}`} aria-labelledby={`${c.id}-title`}>
@@ -80,59 +70,33 @@ export function CriterionCard({ criterion: c, facts, reworded, busy, canRemove, 
         </div>
       </header>
 
-      {editing ? (
-        <div className="field">
-          <label htmlFor={boxId} className="visually-hidden">
-            Criterion {c.id}
-          </label>
-          <textarea
-            id={boxId}
-            rows={3}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? `${boxId}-error` : undefined}
-            autoFocus
-            onFocus={(e) => e.currentTarget.setSelectionRange(e.currentTarget.value.length, e.currentTarget.value.length)}
-          />
-          {error && (
-            <p id={`${boxId}-error`} className="field-error">
-              <Icon name="error" /> {error}
-            </p>
-          )}
-          <div className="actions">
-            <button type="button" className="button button-primary" onClick={save} disabled={busy}>
-              {busy ? "Saving…" : "Save"}
-            </button>
-            <button
-              type="button"
-              className="button button-quiet"
-              onClick={() => {
-                setEditing(false);
-                setDraft(c.statement);
-                setError(null);
-              }}
-              disabled={busy}
-            >
-              Discard
-            </button>
-          </div>
-        </div>
-      ) : (
-        <p className="criterion-statement">{c.statement}</p>
-      )}
+      <p className="criterion-statement">{c.statement}</p>
 
       <div className="criterion-check" role="group" aria-labelledby={`${c.id}-check`}>
         <p id={`${c.id}-check`} className="criterion-check-title">
           What will be checked
         </p>
         <p>{describeExpectedOutcome(c.expectedOutcome, facts)}</p>
-        {(editing || reworded) && (
-          <p className="hint">
-            <Icon name="info" /> Rewording changes the description only; the check above is unchanged.
-          </p>
-        )}
       </div>
+
+      {editing && c.expectedOutcome.kind !== "semantic" && (
+        <CheckEditor
+          criterionId={c.id}
+          outcome={c.expectedOutcome}
+          facts={facts}
+          busy={busy}
+          serverError={serverError}
+          onSave={async (outcome) => {
+            const err = await onSave(outcome);
+            setServerError(err);
+            if (err === null) setEditing(false);
+          }}
+          onDiscard={() => {
+            setEditing(false);
+            setServerError(null);
+          }}
+        />
+      )}
 
       <p className="criterion-source">
         From your requirement: <q>{c.sourceText}</q>
@@ -171,6 +135,7 @@ export function CriterionCard({ criterion: c, facts, reworded, busy, canRemove, 
             Only a model can judge this, so it will be reported as <strong>Inconclusive</strong>; the model&apos;s opinion is shown as a
             note, never as a result.
           </p>
+          <p>Judged by AI only — it can only be removed.</p>
         </div>
       )}
 
@@ -201,18 +166,11 @@ export function CriterionCard({ criterion: c, facts, reworded, busy, canRemove, 
 
       {!editing && !removing && (
         <div className="actions">
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => {
-              setDraft(c.statement);
-              setEditing(true);
-            }}
-            disabled={busy}
-            aria-label={`Edit ${c.id}`}
-          >
-            Edit
-          </button>
+          {!aiJudged && (
+            <button type="button" className="button button-secondary" onClick={() => setEditing(true)} disabled={busy} aria-label={`Edit check ${c.id}`}>
+              Edit check
+            </button>
+          )}
           <button
             type="button"
             className="button button-quiet"
