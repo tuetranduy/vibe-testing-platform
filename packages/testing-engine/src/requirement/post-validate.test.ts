@@ -69,4 +69,39 @@ describe("postValidate thresholds", () => {
     );
     expect(r.ok && r.draft.criteria[0]!.expectedOutcome.kind).toBe("semantic");
   });
+
+  const single = (text: string, expectedOutcome: CompilerOutput["criteria"][number]["expectedOutcome"], valueType: "number" | "string"): CompilerOutput => ({
+    criteria: [{ sourceText: text, statement: "Check", expectedOutcome, preconditions: [], ambiguity: null }],
+    facts: [{ key: "value", checkpoint: "page", description: "Value", valueType }],
+  });
+
+  it("treats 0 as always stated (\"not empty\" → gt 0)", () => {
+    const text = "The cart is not empty after adding a product.";
+    const r = postValidate(
+      single(text, { kind: "numeric_compare", left: { key: "value", checkpoint: "page" }, operator: "gt", right: 0 }, "number"),
+      { originalText: text, testData: {} },
+    );
+    if (!r.ok) throw new Error(r.issues.join());
+    expect(r.draft.criteria[0]!.expectedOutcome.kind).toBe("numeric_compare");
+    expect(r.draft.criteria[0]!.ambiguity).toBeNull();
+  });
+
+  it("does not scan regex text_matches patterns for digits", () => {
+    const text = "The order confirmation shows an order number.";
+    const r = postValidate(
+      single(text, { kind: "text_matches", fact: { key: "value", checkpoint: "page" }, match: { mode: "regex", value: "Order #\\d{6,8}", caseSensitive: false } }, "string"),
+      { originalText: text, testData: {} },
+    );
+    if (!r.ok) throw new Error(r.issues.join());
+    expect(r.draft.criteria[0]!.expectedOutcome.kind).toBe("text_matches");
+  });
+
+  it("still flags a non-zero number invented in a numeric_compare", () => {
+    const text = "The cart is not empty after adding a product.";
+    const r = postValidate(
+      single(text, { kind: "numeric_compare", left: { key: "value", checkpoint: "page" }, operator: "gte", right: 2 }, "number"),
+      { originalText: text, testData: {} },
+    );
+    expect(r.ok && r.draft.criteria[0]!.expectedOutcome.kind).toBe("semantic");
+  });
 });

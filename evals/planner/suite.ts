@@ -19,7 +19,7 @@ import type { LlmClient } from "@platform/llm";
 import { planTest } from "@platform/testing-engine";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { countingLlm, describeError, report, type CaseResult } from "../usage";
+import { describeError, report, type CaseResult, type UsageMeter } from "../usage";
 
 const StepKind = PlannedStepSchema.shape.kind;
 
@@ -106,14 +106,14 @@ export function scorePlan(c: PlannerEvalCase, plan: TestPlan): string[] {
   return failures;
 }
 
-export async function runPlannerSuite(llm: LlmClient, cases: PlannerEvalCase[]): Promise<CaseResult[]> {
+export async function runPlannerSuite(llm: LlmClient, cases: PlannerEvalCase[], meter: UsageMeter): Promise<CaseResult[]> {
   const results: CaseResult[] = [];
   for (const c of cases) {
-    const usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+    const runId = `eval_${c.id}`;
     let failures: string[];
     try {
-      const plan = await planTest(countingLlm(llm, usage), {
-        runId: `eval_${c.id}`,
+      const plan = await planTest(llm, {
+        runId,
         requirement: confirmedRequirement(c),
         targetUrl: c.targetUrl,
         testDataKeys: c.testDataKeys,
@@ -127,7 +127,8 @@ export async function runPlannerSuite(llm: LlmClient, cases: PlannerEvalCase[]):
     } catch (err) {
       failures = [`plan failed: ${describeError(err)}`];
     }
-    const result = { id: c.id, passed: failures.length === 0, failures, ...usage };
+    // Every request the client made for this case, including those of a plan that threw.
+    const result = { id: c.id, passed: failures.length === 0, failures, ...meter.take(runId) };
     results.push(result);
     report(result);
   }

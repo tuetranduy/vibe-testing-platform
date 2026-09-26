@@ -27,7 +27,10 @@ What a case checks (`evals/requirement-compiler/cases/*.yaml`): the compiled cri
 `expect.criteriaCount`, every `expect.requiredOutcomeKinds` entry is matched by at least one criterion
 (a list entry means "any of these kinds"), and when `mustFlagAmbiguous` is true at least one criterion
 carries an ambiguity. A compile that throws (e.g. `ContractError` after the correction round) fails
-the case. The runner exits 0 regardless of the score.
+the case. The runner exits 0 regardless of the score. A case may give `testData` values (else each
+`testDataKeys` entry gets the placeholder `"value"`); they only feed the invented-threshold check, the
+model sees keys only. Token and cost totals count every provider request, including the attempts of a
+case that ended in an error.
 
 ## planner
 

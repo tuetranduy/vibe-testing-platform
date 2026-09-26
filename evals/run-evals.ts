@@ -6,19 +6,19 @@
 import { AnthropicTransport, LlmClient } from "@platform/llm";
 import { loadPlannerCases, runPlannerSuite } from "./planner/suite";
 import { loadCases, runRequirementCompilerSuite } from "./requirement-compiler/suite";
-import type { CaseResult } from "./usage";
+import { createUsageMeter, type CaseResult, type UsageMeter } from "./usage";
 
 interface LoadedSuite {
   count: number;
-  run(llm: LlmClient): Promise<CaseResult[]>;
+  run(llm: LlmClient, meter: UsageMeter): Promise<CaseResult[]>;
 }
 
 /** `load` validates the cases (throws on an invalid case file) before any model call. */
 const suite =
-  <C>(load: () => C[], run: (llm: LlmClient, cases: C[]) => Promise<CaseResult[]>) =>
+  <C>(load: () => C[], run: (llm: LlmClient, cases: C[], meter: UsageMeter) => Promise<CaseResult[]>) =>
   (): LoadedSuite => {
     const cases = load();
-    return { count: cases.length, run: (llm) => run(llm, cases) };
+    return { count: cases.length, run: (llm, meter) => run(llm, cases, meter) };
   };
 
 const SUITES: Record<string, () => LoadedSuite> = {
@@ -50,10 +50,12 @@ async function main(): Promise<number> {
   }
 
   const model = process.env.LLM_MODEL || DEFAULT_MODEL;
-  const llm = new LlmClient({ transport: new AnthropicTransport({ apiKey }), model });
+  // Usage is counted per provider request (failed attempts included) through the call-record sink.
+  const meter = createUsageMeter();
+  const llm = new LlmClient({ transport: new AnthropicTransport({ apiKey }), model, recordCall: meter.sink });
   console.log(`provider: anthropic, model: ${model}\n`);
   const started = Date.now();
-  const results = await loaded.run(llm);
+  const results = await loaded.run(llm, meter);
 
   const passed = results.filter((r) => r.passed).length;
   const sum = (k: "inputTokens" | "outputTokens" | "costUsd") => results.reduce((a, r) => a + r[k], 0);

@@ -40,14 +40,15 @@ export function postValidate(
 }
 
 /**
- * Any number in an expected outcome that the requirement (or a testData value) does not state is an
+ * Any non-zero number in an expected outcome that the requirement (or a testData value) does not state is an
  * invented threshold: the outcome becomes `semantic` (AI-judged, never PASS/FAIL) and is flagged.
  * Facts only the rewritten outcomes used are dropped.
  */
 export function replaceUnstatedThresholds(draft: RequirementDraft, stated: Set<number>): RequirementDraft {
   const orphanCandidates = new Set<string>();
   const criteria = draft.criteria.map((c): AcceptanceCriterion => {
-    const invented = numbersIn(c.expectedOutcome).some((n) => !stated.has(Math.abs(n)));
+    // 0 is always stated: "not empty", "no errors", "appears" compare against zero without saying so.
+    const invented = numbersIn(c.expectedOutcome).some((n) => n !== 0 && !stated.has(Math.abs(n)));
     if (!invented) return c;
     for (const { ref } of factRefsOf(c.expectedOutcome)) orphanCandidates.add(`${ref.key}@${ref.checkpoint}`);
     const suggestions = [...new Set([c.statement.slice(0, 300), ...(c.ambiguity?.suggestions ?? [])])].slice(0, 3);
@@ -67,7 +68,10 @@ export function replaceUnstatedThresholds(draft: RequirementDraft, stated: Set<n
   return { ...draft, criteria, facts };
 }
 
-/** Numbers an outcome asserts: numeric literals plus digits inside expected strings. */
+/**
+ * Numbers an outcome asserts: numeric literals plus digits inside expected strings. Regex patterns are
+ * not scanned: their digits are quantifiers and classes (`\d{6}`), not asserted values.
+ */
 function numbersIn(outcome: ExpectedOutcome): number[] {
   switch (outcome.kind) {
     case "numeric_compare":
@@ -75,7 +79,7 @@ function numbersIn(outcome: ExpectedOutcome): number[] {
     case "numeric_delta":
       return [outcome.delta];
     case "text_matches":
-      return numbersInText(outcome.match.value);
+      return outcome.match.mode === "regex" ? [] : numbersInText(outcome.match.value);
     case "collection_contains":
       return typeof outcome.item === "string" ? numbersInText(outcome.item) : [];
     case "visible":

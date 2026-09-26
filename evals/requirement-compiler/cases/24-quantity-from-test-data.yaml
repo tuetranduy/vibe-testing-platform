@@ -3,7 +3,10 @@ tags: [numbers, multi-criterion]
 input: >-
   Setting the quantity field to the configured quantity and adding the product updates the cart count
   to that quantity. The subtotal is updated too.
-testDataKeys: [quantity]
+# A real value, not the "value" placeholder: post-validation accepts a quantity number only when testData
+# states it. The model sees the key only, never the value.
+testData:
+  quantity: 2
 secretNames: []
 expect:
   criteriaCount: { min: 2, max: 3 }
