@@ -1,4 +1,5 @@
 import { defaultResolver } from "@platform/security";
+import { checkWorkspaceConfig, type WorkspaceConfig } from "@platform/testing-engine";
 import type { WorkerLogger } from "../deps";
 import { findFreePort, launchSandboxedBrowser, type BrowserExtension } from "./browser-launcher";
 import { startEgressProxy } from "./egress-proxy";
@@ -44,5 +45,33 @@ export async function preflightBrowserSandbox(deps: SandboxPreflightDeps): Promi
     return false;
   } finally {
     await closeProxy?.().catch(() => {});
+  }
+}
+
+export interface RunnerPreflightDeps {
+  logger: Pick<WorkerLogger, "info" | "error">;
+  /** RUNNER_WORKSPACE_DIR and RUNNER_NODE_MODULES_DIR, as the rerun stage uses them. */
+  workspace: WorkspaceConfig;
+}
+
+/**
+ * Start-up check for the rerun (Task 17): @playwright/test's CLI resolves from the runner's
+ * node_modules (RUNNER_NODE_MODULES_DIR, or the worker's own install) and the workspace base dir
+ * (RUNNER_WORKSPACE_DIR) is writable. Like the browser sandbox preflight, a failure is logged and
+ * never thrown: the worker keeps serving runs, but every rerun ends ERRORED (criteria fall back to
+ * their exploration evidence) until it is fixed. It does not launch the rerun's browser: a missing
+ * browser or an unusable Chromium sandbox is logged by the first rerun.
+ */
+export async function preflightRunner(deps: RunnerPreflightDeps): Promise<boolean> {
+  try {
+    await checkWorkspaceConfig(deps.workspace);
+    deps.logger.info({ workspaceDir: deps.workspace.baseDir }, "rerun runner preflight passed");
+    return true;
+  } catch (err) {
+    deps.logger.error(
+      { err },
+      "rerun runner preflight failed: the worker keeps running, but every Playwright rerun will end ERRORED (criteria fall back to exploration evidence) until this is fixed",
+    );
+    return false;
   }
 }

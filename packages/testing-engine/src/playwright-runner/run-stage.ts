@@ -1,7 +1,7 @@
 import { RerunResultSchema, type GeneratedTest, type RerunResult } from "@platform/contracts";
 import { collectEvidence, type EvidenceStore } from "../evidence/collector";
 import type { EngineStages, StageContext } from "../orchestrator/stages";
-import { runGeneratedTest, type RunGeneratedTestResult, type SpawnRunner } from "./runner";
+import { redactedCause, runGeneratedTest, type RerunLogger, type RunGeneratedTestResult, type SpawnRunner } from "./runner";
 import { removeWorkspace, type WorkspaceConfig } from "./workspace";
 
 /** The rerun's own egress proxy (Ruling R31), started by the worker for RUNNING_PLAYWRIGHT. */
@@ -19,6 +19,8 @@ export interface RunTestStageDeps {
   evidence(ctx: StageContext): EvidenceStore;
   actionTimeoutMs?: number;
   expectTimeoutMs?: number;
+  /** Receives the (redacted) cause of an infrastructure failure: proxy, workspace, spawn, browser. */
+  logger?: RerunLogger | undefined;
 }
 
 const once = (fn: () => Promise<void>) => {
@@ -32,7 +34,8 @@ const once = (fn: () => Promise<void>) => {
  * ids (Ruling R27). It does not publish `playwright.completed`: `runExecution` does (Ruling R34).
  *
  * Ruling R41: a rerun that fails on its own is ERRORED and the run goes on to its report; only the
- * run signal (cancel / hard deadline) throws its reason, once the child is killed. Cleanups are
+ * run signal (cancel / hard deadline) throws its reason, once the child is killed. Infrastructure
+ * failures are logged with their cause (the run's redactor applied); the run records a template. Cleanups are
  * registered on the context, so an abandoned stage still kills the child (the runner watches the
  * run signal), then deletes the workspace and closes the proxy.
  */
@@ -47,8 +50,9 @@ export function createRunTestStage(deps: RunTestStageDeps): EngineStages["runTes
     let proxy: RerunProxy;
     try {
       proxy = await deps.openProxy(ctx);
-    } catch {
+    } catch (err) {
       if (ctx.signal.aborted) throw ctx.signal.reason;
+      deps.logger?.error({ runId: ctx.runId, err: redactedCause(err, ctx.redact) }, "the rerun's network guard could not be started (egress proxy)");
       return RerunResultSchema.parse({
         status: "ERRORED",
         perCriterion: Object.fromEntries(test.compiledCriteria.map((id) => [id, "NOT_REACHED"])),

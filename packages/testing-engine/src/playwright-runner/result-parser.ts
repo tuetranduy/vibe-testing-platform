@@ -17,6 +17,9 @@ import type { LocalArtifact } from "../evidence/collector";
  * - a step that never ended (Playwright keeps `duration: -1` until step-end; a dying worker never
  *   sends it, and the step has no error) did not complete → NOT_REACHED, and the run is `crashed`;
  *   so is a test failed with "worker process exited unexpectedly" (OOM, native crash): R41 ERRORED.
+ * - a test failed because its browser could not be launched (`browserType.launch: …`: a missing
+ *   browser, no usable Chromium sandbox) is `launchError`: an infrastructure failure, R41 ERRORED,
+ *   never a FAILED rerun with every criterion NOT_REACHED.
  *
  * Attachments are kept only for the trace, screenshot and video, and only inside the workspace's
  * output directory. Anything unreadable → RunResultsError (the rerun is then ERRORED).
@@ -44,6 +47,8 @@ export interface ParsedRunResults {
   artifacts: LocalArtifact[];
   /** Run-level errors (config, load, worker crash), cleaned. */
   runErrors: string[];
+  /** The browser could not be launched: that error, cleaned; null otherwise. */
+  launchError: string | null;
 }
 
 interface JsonStep {
@@ -75,6 +80,7 @@ const ReportSchema = z.object({ suites: z.array(SuiteSchema), errors: z.array(Er
 const STEP_TITLE = /^\[(AC-\d{1,3})\] /;
 const TEST_TIMEOUT = /Test timeout of \d+ms exceeded/;
 const WORKER_EXIT = /worker process exited unexpectedly/;
+const BROWSER_LAUNCH = /\bbrowserType\.launch(?:PersistentContext)?:/;
 const ATTACHMENT_TYPES: Record<string, LocalArtifact["type"]> = { trace: "TRACE", screenshot: "SCREENSHOT", video: "VIDEO" };
 export const OUTPUT_DIR = "test-results";
 const MAX_ERROR_TEXT = 1000;
@@ -171,6 +177,7 @@ export function parseRunResults(raw: string, opts: { compiledCriteria: string[];
   });
 
   const stoppedBy = result?.errors.at(-1)?.message;
+  const launchFailure = result?.errors.find((e) => BROWSER_LAUNCH.test(e.message ?? ""))?.message;
   for (const id of opts.compiledCriteria) {
     if (perCriterion[id]) continue;
     perCriterion[id] = "NOT_REACHED";
@@ -185,5 +192,6 @@ export function parseRunResults(raw: string, opts: { compiledCriteria: string[];
     errorText,
     artifacts: result ? artifactsOf(result, opts.workspaceDir) : [],
     runErrors: report.errors.map((e) => cleanErrorText(e.message ?? "Error")),
+    launchError: launchFailure === undefined ? null : cleanErrorText(launchFailure),
   };
 }

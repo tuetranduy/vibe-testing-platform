@@ -388,13 +388,79 @@ describe("runGeneratedTest", () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// Infrastructure failures: logged with their (redacted) cause, the run records a template message
+// ---------------------------------------------------------------------------------------------
+
+function captureLog() {
+  const logged: { obj: Record<string, unknown>; msg?: string | undefined }[] = [];
+  return { logged, logger: { error: (obj: object, msg?: string) => void logged.push({ obj: obj as Record<string, unknown>, msg }) } };
+}
+
+describe("runGeneratedTest: infrastructure failures are logged", () => {
+  const SECRET = "pw-Logged-Secret-7";
+
+  it("a runner node_modules without @playwright/test → ERRORED, the cause (the configured dir) logged", async () => {
+    const { logged, logger } = captureLog();
+    const spawn = fakeSpawn(writesResults({}));
+    const nodeModulesDir = path.join(base, "no-playwright-here");
+    const out = await runGeneratedTest(runInput(generated(["AC-1"])), { spawn, workspace: { baseDir: base, nodeModulesDir }, logger });
+    expect(out.status).toBe("ERRORED");
+    expect(out.errorText["AC-1"]).toMatch(/workspace could not be prepared/);
+    expect(spawn.calls).toEqual([]);
+    expect(logged).toEqual([{ obj: { runId: "run_1", err: { name: "Error", message: expect.stringContaining(nodeModulesDir) } }, msg: expect.stringMatching(/rerun workspace could not be prepared/) }]);
+  });
+
+  it("an unwritable workspace base dir → ERRORED, the cause logged", async () => {
+    const { logged, logger } = captureLog();
+    const file = path.join(base, "not-a-dir");
+    writeFileSync(file, "");
+    const out = await runGeneratedTest(runInput(generated(["AC-1"])), { spawn: fakeSpawn(writesResults({})), workspace: { baseDir: file }, logger });
+    expect(out.status).toBe("ERRORED");
+    expect(logged).toHaveLength(1);
+    expect((logged[0]!.obj.err as { message: string }).message).toMatch(/ENOTDIR|EEXIST|not a directory/i);
+  });
+
+  it("the spawn fails → the cause is logged with the run's secret values redacted", async () => {
+    const { logged, logger } = captureLog();
+    const spawn = fakeSpawn(async () => Promise.reject(new Error(`spawn node ENOENT (env ${SECRET})`)));
+    const out = await runGeneratedTest(runInput(generated(["AC-1"]), { secrets: { password: SECRET } }), { spawn, workspace: { baseDir: base }, logger });
+    expect(out.status).toBe("ERRORED");
+    expect(logged).toHaveLength(1);
+    expect(logged[0]!.msg).toMatch(/Playwright runner could not be started/i);
+    expect(JSON.stringify(logged)).not.toContain(SECRET);
+    expect((logged[0]!.obj.err as { message: string }).message).toContain("spawn node ENOENT");
+  });
+
+  it("the browser cannot be launched (missing browser, no usable sandbox) → ERRORED (R41), never FAILED; the launch error is logged, the run gets a template message", async () => {
+    const { logged, logger } = captureLog();
+    const launch = "Error: browserType.launch: Executable doesn't exist at /ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell";
+    const spawn = fakeSpawn(writesResults({ status: "failed", steps: [], errors: [launch] }));
+    const out = await runGeneratedTest(runInput(generated(["AC-1", "AC-2"])), { spawn, workspace: { baseDir: base }, logger });
+    expect(out.status).toBe("ERRORED");
+    expect(out.perCriterion).toEqual({ "AC-1": "NOT_REACHED", "AC-2": "NOT_REACHED" });
+    expect(out.errorText["AC-1"]).toBe("The rerun's browser could not be started");
+    expect(logged).toHaveLength(1);
+    expect((logged[0]!.obj.err as { message: string }).message).toContain("Executable doesn't exist");
+  });
+
+  it("the run's own abort and the rerun budget are not infrastructure failures: nothing logged", async () => {
+    const { logged, logger } = captureLog();
+    await runGeneratedTest(runInput(generated(["AC-1"]), { timeoutMs: 200 }), { spawn: fakeSpawn(untilAborted), workspace: { baseDir: base }, logger });
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled"));
+    await runGeneratedTest(runInput(generated(["AC-1"]), { signal: controller.signal }), { spawn: fakeSpawn(untilAborted), workspace: { baseDir: base }, logger });
+    expect(logged).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
 // The RUNNING_PLAYWRIGHT stage
 // ---------------------------------------------------------------------------------------------
 
 describe("createRunTestStage", () => {
   const SECRET = "pw-Stage-Secret-9";
 
-  function harness(opts: { spawn: SpawnRunner; openProxy?: () => Promise<RerunProxy>; signal?: AbortSignal }) {
+  function harness(opts: { spawn: SpawnRunner; openProxy?: () => Promise<RerunProxy>; signal?: AbortSignal; logger?: { error(obj: object, msg?: string): void } }) {
     const events: EventDraft[] = [];
     const cleanups: (() => Promise<void> | void)[] = [];
     const uploads: (EvidenceUpload & { workspaceExisted: boolean })[] = [];
@@ -420,6 +486,7 @@ describe("createRunTestStage", () => {
       spawn: opts.spawn,
       workspace: { baseDir: base },
       evidence: () => store,
+      ...(opts.logger ? { logger: opts.logger } : {}),
     });
     const runCleanups = async () => {
       for (const fn of cleanups.reverse()) await fn();
@@ -469,11 +536,13 @@ describe("createRunTestStage", () => {
     expect(h.uploads).toEqual([]);
   });
 
-  it("a proxy that cannot start → rerun ERRORED (R41), nothing spawned", async () => {
+  it("a proxy that cannot start → rerun ERRORED (R41), nothing spawned; the cause is logged, redacted", async () => {
     const spawn = fakeSpawn(writesResults({}));
-    const h = harness({ spawn, openProxy: async () => Promise.reject(new Error("EADDRINUSE")) });
+    const { logged, logger } = captureLog();
+    const h = harness({ spawn, openProxy: async () => Promise.reject(new Error(`EADDRINUSE ${SECRET}`)), logger });
     const rerun = await h.stage(h.ctx, generated(["AC-1", "AC-2"]));
     expect(rerun).toMatchObject({ status: "ERRORED", perCriterion: { "AC-1": "NOT_REACHED", "AC-2": "NOT_REACHED" }, artifactIds: [] });
     expect(spawn.calls).toEqual([]);
+    expect(logged).toEqual([{ obj: { runId: "run_1", err: { name: "Error", message: "EADDRINUSE [REDACTED]" } }, msg: expect.stringMatching(/rerun's network guard could not be started/i) }]);
   });
 });

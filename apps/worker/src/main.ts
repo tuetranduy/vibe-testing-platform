@@ -6,9 +6,9 @@ import { writeFileSync } from "node:fs";
 import { Redis } from "ioredis";
 import { CancelWatcher } from "./cancel-watcher";
 import type { WorkerLogger } from "./deps";
-import { createEngine } from "./engine";
+import { createEngine, rerunWorkspaceConfig } from "./engine";
 import { stagehandExtension } from "./exploration";
-import { preflightBrowserSandbox } from "./sandbox/preflight";
+import { preflightBrowserSandbox, preflightRunner } from "./sandbox/preflight";
 import { startWorkers } from "./worker";
 
 const env = loadEnvOrExit();
@@ -61,6 +61,9 @@ else {
   // Launch + close the sandboxed Chromium once. A failure is logged (never fatal): analyze/plan keep
   // working and exploring runs end ERRORED / BROWSER_PROVIDER.
   await preflightBrowserSandbox({ logger, resolveExtension: stagehandExtension });
+  // The rerun's runner: @playwright/test resolves and the workspace dir is writable. Logged, never
+  // fatal: reruns end ERRORED and criteria fall back to their exploration evidence.
+  await preflightRunner({ logger, workspace: rerunWorkspaceConfig(env) });
 }
 const stages = engine.stages;
 
