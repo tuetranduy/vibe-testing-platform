@@ -1,4 +1,5 @@
 import type { ClientLLM } from "@browserbasehq/stagehand";
+import { ContractError } from "@platform/contracts";
 import type { JsonSchema, LlmClient, LlmContentPart, LlmMessage } from "@platform/llm";
 
 /**
@@ -57,7 +58,7 @@ function toParts(content: GenerateRequest["messages"][number]["content"]): LlmCo
   return parts.map((p): LlmContentPart => {
     if (p.type === "text") return { type: "text", text: p.text };
     if (p.type === "image") return { type: "image", data: p.data, mimeType: p.mimeType };
-    throw new Error(`Stagehand requested an unsupported message part: ${p.type}`);
+    throw new ContractError(`Stagehand requested an unsupported message part: ${p.type}`);
   });
 }
 
@@ -69,6 +70,10 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+const objectCheck = (v: unknown): string[] => (isRecord(v) ? [] : ["(root): the response must be a JSON object"]);
+const textEnvelopeCheck = (v: unknown): string[] =>
+  isRecord(v) && typeof v.text === "string" ? [] : ['(root): the response must be {"text": string}'];
+
 export function createClientLlmBridge(opts: ClientLlmBridgeOptions): ClientLlmBridge {
   let usage: BridgeUsage = { calls: 0, inputTokens: 0, outputTokens: 0 };
   let firstError: unknown;
@@ -78,13 +83,16 @@ export function createClientLlmBridge(opts: ClientLlmBridgeOptions): ClientLlmBr
     const rf = "responseFormat" in req ? req.responseFormat : undefined;
     const json = rf?.type === "json_schema" ? rf : undefined;
     if (!json && "tools" in req && Array.isArray(req.tools) && req.tools.length > 0) {
-      throw new Error("Stagehand requested tool use, which the ClientLLM bridge does not support");
+      throw new ContractError("Stagehand requested tool use, which the ClientLLM bridge does not support");
     }
     const result = await opts.llm.generateJson({
       system: req.systemPrompt ?? "",
       messages: toMessages(req),
       jsonSchema: json ? (json.schema as JsonSchema) : TEXT_ENVELOPE_SCHEMA,
       schemaName: json ? json.name : "Text",
+      // Stagehand's structuredContent must be an object: a non-object gets the correction round
+      // and then fails as ContractError with INVALID_OUTPUT records.
+      check: json ? objectCheck : textEnvelopeCheck,
       stage: "EXPLORING",
       runId: opts.runId,
       signal: opts.signal,
@@ -102,8 +110,7 @@ export function createClientLlmBridge(opts: ClientLlmBridgeOptions): ClientLlmBr
       outputTokens: result.usage.outputTokens,
       totalTokens: result.usage.inputTokens + result.usage.outputTokens,
     };
-    if (json) {
-      if (!isRecord(result.data)) throw new Error(`Model output for "${json.name}" is not a JSON object`);
+    if (json && isRecord(result.data)) {
       return {
         role: "assistant",
         content: { type: "text", text: JSON.stringify(result.data) },
@@ -113,6 +120,7 @@ export function createClientLlmBridge(opts: ClientLlmBridgeOptions): ClientLlmBr
         structuredContent: result.data,
       } as GenerateResult;
     }
+    if (json) throw new ContractError(`Model output for "${json.name}" is not a JSON object`); // unreachable: checked above
     const text = isRecord(result.data) && typeof result.data.text === "string" ? result.data.text : "";
     return { role: "assistant", content: { type: "text", text }, stopReason: "stop", usage: tokens, outputFormat: "text" } as GenerateResult;
   };

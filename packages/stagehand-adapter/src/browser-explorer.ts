@@ -120,8 +120,8 @@ export interface ExplorerStartInput {
   page: SandboxedPage;
   runId: string;
   signal: AbortSignal;
-  /** The run redactor applied to every model request. Defaults to identity. */
-  redact?: (value: unknown) => unknown;
+  /** The run redactor (by key and value) applied to every model request and forwarded log. Required: no fail-open default. */
+  redact: (value: unknown) => unknown;
   /** Model retries never back off past this instant. */
   deadlineAt?: Date | null;
 }

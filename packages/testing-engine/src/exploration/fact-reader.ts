@@ -20,12 +20,19 @@ export type FactReadMode = NonNullable<ObservedFact["read"]>["mode"];
  * - value: form field value
  * - text_list: whitespace-collapsed visible text of each child element, empty ones dropped
  */
-export function modeForValueType(valueType: FactRequest["valueType"]): FactReadMode {
+
+/**
+ * Default DOM read mode for a requested value type, or null when there is none. Booleans have no
+ * default (Ruling R24): "is disabled", "is checked", "is in stock" are not visibility, so a boolean
+ * fact is DOM-read only in a mode the caller chooses explicitly ("visible" for facts behind a
+ * `visible` expected outcome); otherwise it stays MODEL_EXTRACTED.
+ */
+export function modeForValueType(valueType: FactRequest["valueType"]): FactReadMode | null {
   switch (valueType) {
     case "number":
       return "number";
     case "boolean":
-      return "visible";
+      return null;
     case "string_list":
       return "text_list";
     case "string":
@@ -181,15 +188,17 @@ export interface FactCaptureInput {
   modelValue: FactValue;
   /** Where the model says the value is shown, recorded with `recordElement`; null if not located. */
   element: ElementRef | null;
-  mode: FactReadMode;
+  /** How to read it from the DOM, chosen by the caller; null = no deterministic read (MODEL_EXTRACTED). */
+  mode: FactReadMode | null;
 }
 
 /** Reads the DOM at the recorded element and applies the provenance rules. */
 export async function captureFact(page: Page, input: FactCaptureInput): Promise<ObservedFact> {
   let dom: DomReading | null = null;
-  if (input.element) {
-    const reading = await readFact(page, input.element, input.mode).catch(() => null);
-    if (reading) dom = { value: reading.value, read: { element: reading.element, mode: input.mode } };
+  const mode = input.mode;
+  if (input.element && mode) {
+    const reading = await readFact(page, input.element, mode).catch(() => null);
+    if (reading) dom = { value: reading.value, read: { element: reading.element, mode } };
   }
   return factFromReadings({ key: input.key, checkpoint: input.checkpoint, stepId: input.stepId, modelValue: input.modelValue, dom });
 }

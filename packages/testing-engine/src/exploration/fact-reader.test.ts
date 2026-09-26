@@ -66,11 +66,14 @@ describe("factValuesEqual (model value vs DOM value, normalized)", () => {
 });
 
 describe("modeForValueType", () => {
-  it("maps requested value types to DOM read modes", () => {
+  it("maps requested value types to default DOM read modes", () => {
     expect(modeForValueType("number")).toBe("number");
     expect(modeForValueType("string")).toBe("text");
-    expect(modeForValueType("boolean")).toBe("visible");
     expect(modeForValueType("string_list")).toBe("text_list");
+  });
+
+  it("booleans have no default deterministic read (Ruling R24): 'visible' only when the caller asks", () => {
+    expect(modeForValueType("boolean")).toBeNull();
   });
 });
 

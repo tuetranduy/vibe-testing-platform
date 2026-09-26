@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { localBrowser, Stagehand, type Action, type Page as StagehandPage } from "@browserbasehq/stagehand";
 import type { Frame, Page, Request as PwRequest } from "playwright-core";
+import { BrowserProviderError, CancelledError, EngineError } from "@platform/contracts";
 import type { ZodType } from "zod";
 import {
   ExplorerSessionClosedError,
@@ -75,8 +76,12 @@ export interface StagehandExplorerOptions {
   cache?: StagehandCacheOption;
   /** Which loaded extension is Stagehand's; defaults to the only one loaded. */
   extensionId?: string;
-  /** Stagehand's own stderr log level. */
-  logLevel?: "off" | "error" | "warn" | "info" | "debug";
+  /**
+   * Receives Stagehand runtime logs, redacted with the run redactor. Stagehand's own logging is
+   * always "off": at any other level it writes every log (data included) unredacted to stderr
+   * before `onLog` runs (dist/index.mjs `handleStagehandNotification`). With "off", neither
+   * happens; failures reach callers as exceptions instead.
+   */
   logger?: { warn(obj: object, msg?: string): void };
   domSettleTimeoutMs?: number;
   /** Per act/observe/extract call. */
@@ -100,6 +105,26 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new ExplorerSessionClosedError("exploration aborted");
+}
+
+/**
+ * Infrastructure failures (Stagehand runtime, CDP, Playwright) become BrowserProviderError
+ * (`BROWSER_PROVIDER`), keeping the original as `cause`. Typed engine errors (model provider,
+ * contract, deadline), cancellation, policy blocks, closed-session misuse and Zod validation
+ * errors pass through unchanged.
+ */
+export function toExplorerError(err: unknown, what: string): unknown {
+  if (
+    err instanceof EngineError ||
+    err instanceof CancelledError ||
+    err instanceof NavigationBlockedError ||
+    err instanceof ExplorerSessionClosedError ||
+    (err as { name?: unknown } | null)?.name === "ZodError"
+  ) {
+    return err;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return new BrowserProviderError(`${what} failed: ${message.split("\n")[0]!.slice(0, 500)}`, { cause: err });
 }
 
 /** Rejects as soon as the signal fires; `work` keeps running (its owner is torn down separately). */
@@ -185,15 +210,23 @@ class StagehandExplorerSession implements ExplorerSession {
     });
   }
 
-  /** Serializes operations so model usage and navigation blocks belong to exactly one of them. */
-  private run<T>(fn: () => Promise<T>): Promise<T> {
+  /**
+   * Serializes operations so model usage and navigation blocks belong to exactly one of them, and
+   * maps failures: the abort reason when the run signal fired, else `toExplorerError`.
+   */
+  private run<T>(what: string, fn: () => Promise<T>): Promise<T> {
     const next = this.queue.then(async () => {
       if (this.closed) throw new ExplorerSessionClosedError("explorer session is closed");
       if (this.signal.aborted) throw abortReason(this.signal);
       this.bridge.takeUsage();
       this.bridge.takeError();
       this.blocks.length = 0;
-      return raceAbort(fn(), this.signal);
+      try {
+        return await raceAbort(fn(), this.signal);
+      } catch (err) {
+        if (this.signal.aborted) throw abortReason(this.signal);
+        throw toExplorerError(err, what);
+      }
     });
     this.queue = next.catch(() => {});
     return next;
@@ -249,7 +282,7 @@ class StagehandExplorerSession implements ExplorerSession {
   }
 
   navigate(url: string): Promise<NavigateResult> {
-    return this.run(async () => {
+    return this.run("navigate", async () => {
       const errorPage = this.watchErrorCommit();
       try {
         try {
@@ -285,18 +318,18 @@ class StagehandExplorerSession implements ExplorerSession {
   }
 
   observe(instruction: string): Promise<ObserveResult> {
-    return this.run(async () => {
+    return this.run("Stagehand observe", async () => {
       const res = await this.stagehand(() => this.sh.observe(instruction, { page: this.shPage, timeout: this.opts.operationTimeoutMs }));
       return { elements: res.data.map(toObserved), llm: this.stepUsage(res.metadata.cache.status) };
     });
   }
 
   act(instruction: string): Promise<ActResult> {
-    return this.run(() => this.doAct(instruction));
+    return this.run("Stagehand act", () => this.doAct(instruction));
   }
 
   actOn(element: ObservedElement): Promise<ActResult> {
-    return this.run(() => this.doAct(toAction(element)));
+    return this.run("Stagehand act", () => this.doAct(toAction(element)));
   }
 
   /**
@@ -364,7 +397,7 @@ class StagehandExplorerSession implements ExplorerSession {
   }
 
   extract<T>(instruction: string, schema: ZodType<T>): Promise<ExtractResult<T>> {
-    return this.run(async () => {
+    return this.run("Stagehand extract", async () => {
       const res = await this.stagehand(() => this.sh.extract(instruction, schema, { page: this.shPage, timeout: this.opts.operationTimeoutMs }));
       // Stagehand parses with the schema already; parse again so T is exactly the caller's output type.
       return { data: schema.parse(res.data), llm: this.stepUsage(res.metadata.cache.status) };
@@ -372,7 +405,7 @@ class StagehandExplorerSession implements ExplorerSession {
   }
 
   screenshot(): Promise<Buffer> {
-    return this.run(async () => Buffer.from(await this.page.screenshot({ type: "png" })));
+    return this.run("screenshot", async () => Buffer.from(await this.page.screenshot({ type: "png" })));
   }
 
   close(): Promise<void> {
@@ -395,14 +428,14 @@ export class StagehandExplorer implements BrowserExplorer {
     if (signal.aborted) throw abortReason(signal);
     const extensionId = this.opts.extensionId ?? (handle.extensionIds.length === 1 ? handle.extensionIds[0] : undefined);
     if (!extensionId || !handle.extensionIds.includes(extensionId)) {
-      throw new Error("The sandboxed browser must have the Stagehand extension loaded (pass extensionId when several are loaded)");
+      throw new BrowserProviderError("The sandboxed browser must have the Stagehand extension loaded (pass extensionId when several are loaded)");
     }
 
     const bridge = createClientLlmBridge({
       llm: this.opts.llm,
       runId: input.runId,
       signal,
-      redact: input.redact ?? ((v) => v),
+      redact: input.redact,
       deadlineAt: input.deadlineAt ?? null,
       maxTokens: this.opts.maxTokens,
     });
@@ -422,17 +455,20 @@ export class StagehandExplorer implements BrowserExplorer {
         systemPrompt: GUARDRAIL_SYSTEM_PROMPT,
         telemetry: { traces: { endpoint: this.opts.telemetryEndpoint ?? DEFAULT_TELEMETRY_ENDPOINT, headers: {} } },
         logging: {
-          level: this.opts.logLevel ?? "error",
+          level: "off", // see StagehandExplorerOptions.logger: any other level writes unredacted to stderr
           format: "json",
-          // Only the message: log data may carry page content.
-          onLog: (log) => logger?.warn({ stagehandLevel: log.level }, `stagehand: ${log.message.slice(0, 300)}`),
+          // Defensive: never reached while the level is "off"; redacted if a Stagehand version ever calls it.
+          onLog: (log) => {
+            const safe = input.redact({ message: log.message.slice(0, 300), data: log.data }) as { message: string; data: unknown };
+            logger?.warn({ stagehandLevel: log.level, data: safe.data }, `stagehand: ${safe.message}`);
+          },
         },
         cache,
         ...(this.opts.domSettleTimeoutMs !== undefined ? { domSettleTimeoutMs: this.opts.domSettleTimeoutMs } : {}),
       });
       const targetId = await targetIdOf(handle.page);
       const shPage = (await browser.context.pages()).find((p) => p.pageId === targetId);
-      if (!shPage) throw new Error("Stagehand does not see the sandbox page");
+      if (!shPage) throw new BrowserProviderError("Stagehand does not see the sandbox page");
       await browser.context.setActivePage(shPage);
       return { sh, shPage };
     };
@@ -461,7 +497,8 @@ export class StagehandExplorer implements BrowserExplorer {
         (c) => c.sh.close(),
         () => sh?.close(),
       ).catch(() => {});
-      throw err;
+      if (signal.aborted) throw abortReason(signal);
+      throw toExplorerError(err, "Stagehand connect");
     }
   }
 }

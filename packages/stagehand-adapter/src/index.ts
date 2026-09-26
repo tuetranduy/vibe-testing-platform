@@ -6,6 +6,7 @@ export {
   STAGEHAND_TELEMETRY_HOST,
   StagehandExplorer,
   resolveStagehandExtensionDir,
+  toExplorerError,
   type StagehandCacheOption,
   type StagehandExplorerOptions,
 } from "./stagehand-explorer";

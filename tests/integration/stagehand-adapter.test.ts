@@ -229,7 +229,7 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
   }
 
   async function startSession(sandbox: RunSandbox, llm: LlmClient): Promise<ExplorerSession> {
-    const session = await new StagehandExplorer({ llm, logLevel: "off", connectTimeoutMs: 90_000 }).start({
+    const session = await new StagehandExplorer({ llm, connectTimeoutMs: 90_000 }).start({
       page: sandbox,
       runId: RUN_ID,
       signal: new AbortController().signal,
@@ -249,6 +249,17 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
   it(
     "navigates, observes and acts on 'Add to cart', reads the cart badge as DOM_VERIFIED 1, and records model usage",
     async () => {
+      // Stagehand's own logging is off: nothing (unredacted) reaches stderr from it.
+      const stderr: string[] = [];
+      const write = process.stderr.write.bind(process.stderr);
+      process.stderr.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
+        stderr.push(String(chunk));
+        return (write as (...a: unknown[]) => boolean)(chunk, ...rest);
+      }) as typeof process.stderr.write;
+      cleanups.push(() => {
+        process.stderr.write = write;
+      });
+
       const { sandbox } = await openSandbox();
       const { transport, records, llm } = llmClient();
       const session = await startSession(sandbox, llm);
@@ -305,6 +316,7 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
 
       const shot = await session.screenshot();
       expect(shot.subarray(1, 4).toString("latin1")).toBe("PNG");
+      expect(stderr.filter((l) => /stagehand|"level"/i.test(l))).toEqual([]);
     },
     120_000,
   );
@@ -437,7 +449,7 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
       cleanups.push(() => browser.close());
 
       const { llm } = llmClient();
-      const session = await new StagehandExplorer({ llm, logLevel: "off", connectTimeoutMs: 90_000 }).start({ page: browser, runId: RUN_ID, signal: new AbortController().signal });
+      const session = await new StagehandExplorer({ llm, connectTimeoutMs: 90_000 }).start({ page: browser, runId: RUN_ID, signal: new AbortController().signal, redact });
       await session.navigate(`${target}products/1`);
       await session.observe("find the add to cart button");
       await session.close(); // flushes the trace exporter
