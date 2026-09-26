@@ -126,6 +126,8 @@ services:
       NODE_ENV: production
       API_URL: http://api:3001
       API_TOKEN: ${API_TOKEN:-dev-api-token-change-me-please}
+      # The Host names the UI is served on; the API proxy rejects every other Host (DNS rebinding).
+      WEB_ALLOWED_HOSTS: ${WEB_ALLOWED_HOSTS:-localhost:3000,127.0.0.1:3000}
     ports: ["3000:3000"]
     depends_on:
       api: { condition: service_healthy }
