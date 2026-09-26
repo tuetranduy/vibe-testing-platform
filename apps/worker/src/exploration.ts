@@ -77,20 +77,23 @@ export interface ExplorationDepsInput {
   overrides?: Partial<ExploreStageDeps>;
 }
 
+let extension: BrowserExtension | undefined;
+
+/** The Stagehand runtime extension (Ruling R9), resolved once; throws when it cannot be found. */
+export function stagehandExtension(): BrowserExtension {
+  if (!extension) {
+    const dir = resolveStagehandExtensionDir();
+    extension = { dir, id: computeExtensionId(dir) };
+  }
+  return extension;
+}
+
 /**
  * The real explore stage's dependencies (Ruling R12): the run sandbox (Task 13) with the Stagehand
  * runtime extension preloaded (Ruling R9), the Stagehand explorer, and the run's persistence.
  */
 export function createExplorationDeps(input: ExplorationDepsInput): ExploreStageDeps {
   const { db, storage, logger, config } = input;
-  let extension: BrowserExtension | undefined;
-  const stagehandExtension = (): BrowserExtension => {
-    if (!extension) {
-      const dir = resolveStagehandExtensionDir();
-      extension = { dir, id: computeExtensionId(dir) };
-    }
-    return extension;
-  };
   const overrides = input.overrides ?? {};
   return {
     openSandbox:
@@ -108,6 +111,8 @@ export function createExplorationDeps(input: ExplorationDepsInput): ExploreStage
         start: (startInput) => new StagehandExplorer({ llm: input.llm, extensionId: stagehandExtension().id, logger }).start(startInput),
       },
     store: overrides.store ?? ((ctx) => createExplorationStore({ db, storage, config }, ctx)),
+    // Start-up failures (e.g. Chromium's stderr tail) are logged here; the run records a template message.
+    logger: overrides.logger ?? logger,
     ...(overrides.recorder ? { recorder: overrides.recorder } : {}),
     ...(overrides.pollIntervalMs !== undefined ? { pollIntervalMs: overrides.pollIntervalMs } : {}),
   };
