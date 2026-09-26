@@ -4,7 +4,8 @@
  *
  * A criterion *depends on* the steps up to and including the last `capture_checkpoint` step whose
  * checkpoint its facts read. A criterion without facts (`semantic`) depends on the steps up to the
- * last step that references it in `criterionIds`, or on none. Steps after that point never block it.
+ * last step that references it in `criterionIds`; if no step references it, it depends on the whole
+ * scenario (erring toward blocking). Steps after that point never block it.
  *
  * Reason precedence (first match wins; the order of `BlockReason`):
  *   1. MISSING_SECRET — a secret precondition, or a dependent step's secret inputRef, is not provided;
@@ -64,7 +65,10 @@ export function applyBlocking(input: BlockingInput): BlockingResult {
   return { steps: kept.length > 0 ? kept : [openTarget(input.targetUrl)], blockedCriteria };
 }
 
-/** Index of the last step the criterion depends on (-1: none). */
+/**
+ * Index of the last step the criterion depends on (-1: none), within the full (untruncated) scenario.
+ * A criterion with no needed checkpoints that no step references depends on every step.
+ */
 export function dependencyEnd(criterion: AcceptanceCriterion, steps: PlannedStep[]): number {
   const needed = new Set(neededCheckpoints(criterion));
   let end = -1;
@@ -75,6 +79,7 @@ export function dependencyEnd(criterion: AcceptanceCriterion, steps: PlannedStep
         : s.criterionIds.includes(criterion.id);
     if (relevant) end = i;
   });
+  if (end < 0 && needed.size === 0) return steps.length - 1;
   return end;
 }
 

@@ -70,10 +70,32 @@ describe("applyBlocking", () => {
 
   it("a semantic criterion depends on the steps up to the last step that references it", () => {
     n = 0;
-    const steps = [s("navigate", "Open home"), s("click", "Click Delete account", { criterionIds: ["AC-1"] })];
+    const steps = [
+      s("navigate", "Open home", { criterionIds: ["AC-2"] }),
+      s("click", "Click Delete account", { criterionIds: ["AC-1"] }),
+    ];
     expect(reasons(applyBlocking(input([criterion("AC-1", null), criterion("AC-2", null)], steps)))).toEqual([
       ["AC-1", "DESTRUCTIVE_ACTION_NOT_AUTHORIZED"],
     ]);
+  });
+
+  it("a semantic criterion no step references depends on the whole scenario: a destructive step blocks it", () => {
+    n = 0;
+    const steps = [s("navigate", "Open the account page"), s("click", "Click Delete account"), s("other", "Look at the page")];
+    const r = applyBlocking(input([criterion("AC-1", null)], steps));
+    expect(reasons(r)).toEqual([["AC-1", "DESTRUCTIVE_ACTION_NOT_AUTHORIZED"]]);
+    expect(r.steps.map((x) => x.id)).toEqual(["PS-1"]);
+  });
+
+  it("a semantic criterion no step references depends on the whole scenario: a missing secret blocks it", () => {
+    n = 0;
+    const steps = [
+      s("navigate", "Open the login page"),
+      s("fill", "Enter the password", { inputRef: { source: "secret", key: "password" } }),
+      s("login", "Click Log in"),
+    ];
+    expect(reasons(applyBlocking(input([criterion("AC-1", null)], steps)))).toEqual([["AC-1", "MISSING_SECRET"]]);
+    expect(reasons(applyBlocking(input([criterion("AC-1", null)], steps, { secretNames: ["password"] })))).toEqual([]);
   });
 
   it("a test_data precondition without a ref, or with an unknown key, blocks MISSING_TEST_DATA", () => {
