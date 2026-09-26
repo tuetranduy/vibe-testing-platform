@@ -1,0 +1,96 @@
+import {
+  ApiErrorSchema,
+  CreateTestRunResponseSchema,
+  NormalizedRequirementSchema,
+  TestRunSummarySchema,
+  type ApiError,
+  type CreateTestRunRequestInput,
+  type CreateTestRunResponse,
+  type NormalizedRequirement,
+  type TestRunSummary,
+} from "@platform/contracts";
+import { z } from "zod";
+
+/**
+ * Typed browser client for the platform API. Every call goes through this app's own `/api` proxy
+ * (app/api/[...path]/route.ts), which adds the API token on the server; the browser never has it.
+ */
+const BASE = "/api/v1/test-runs";
+
+export class ApiRequestError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: string,
+    message: string,
+    public readonly issues?: ApiError["issues"],
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
+const ConfirmResultSchema = z.object({ revision: z.number().int(), warnings: z.array(z.string()) });
+export type ConfirmResult = z.infer<typeof ConfirmResultSchema>;
+const ArtifactUrlSchema = z.object({ url: z.string(), expiresAt: z.string() });
+export type ArtifactUrl = z.infer<typeof ArtifactUrlSchema>;
+
+const seg = (s: string) => encodeURIComponent(s);
+export const runPath = (runId: string) => `${BASE}/${seg(runId)}`;
+export const runEventsPath = (runId: string) => `${runPath(runId)}/events`;
+
+async function request<T>(
+  schema: z.ZodType<T>,
+  path: string,
+  init: { method?: "GET" | "POST" | "PUT"; body?: unknown; headers?: Record<string, string> } = {},
+): Promise<T> {
+  const headers: Record<string, string> = { accept: "application/json", ...init.headers };
+  if (init.body !== undefined) headers["content-type"] = "application/json";
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: init.method ?? "GET",
+      headers,
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      cache: "no-store",
+    });
+  } catch {
+    throw new ApiRequestError(0, "NETWORK_ERROR", "Could not reach the server. Check your connection and try again.");
+  }
+  const text = await res.text();
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    /* non-JSON body */
+  }
+  if (!res.ok) {
+    const err = ApiErrorSchema.safeParse(data);
+    if (err.success) throw new ApiRequestError(res.status, err.data.code, err.data.message, err.data.issues);
+    throw new ApiRequestError(res.status, `HTTP_${res.status}`, `The server answered ${res.status}.`);
+  }
+  const parsed = schema.safeParse(data);
+  if (!parsed.success) throw new ApiRequestError(res.status, "BAD_RESPONSE", "The server sent an unexpected response.");
+  return parsed.data;
+}
+
+export const createRun = (body: CreateTestRunRequestInput, idempotencyKey: string): Promise<CreateTestRunResponse> =>
+  request(CreateTestRunResponseSchema, BASE, { method: "POST", body, headers: { "idempotency-key": idempotencyKey } });
+
+export const getRun = (runId: string): Promise<TestRunSummary> => request(TestRunSummarySchema, runPath(runId));
+
+export const cancelRun = (runId: string): Promise<TestRunSummary> =>
+  request(TestRunSummarySchema, `${runPath(runId)}/cancel`, { method: "POST" });
+
+export const getCriteria = (runId: string): Promise<NormalizedRequirement> =>
+  request(NormalizedRequirementSchema, `${runPath(runId)}/criteria`);
+
+/** Saves a new criteria revision; the API takes the full requirement. */
+export const updateCriteria = (runId: string, requirement: NormalizedRequirement): Promise<NormalizedRequirement> =>
+  request(NormalizedRequirementSchema, `${runPath(runId)}/criteria`, { method: "PUT", body: requirement });
+
+export const confirmCriteria = (runId: string): Promise<ConfirmResult> =>
+  request(ConfirmResultSchema, `${runPath(runId)}/criteria/confirm`, { method: "POST" });
+
+/** Prefer `fetchArtifactUrl` (lib/artifacts.ts), which applies the reveal rule. */
+export const getArtifactUrl = (runId: string, artifactId: string, reveal: boolean): Promise<ArtifactUrl> =>
+  request(ArtifactUrlSchema, `${runPath(runId)}/artifacts/${seg(artifactId)}/url${reveal ? "?reveal=true" : ""}`);

@@ -1,0 +1,190 @@
+import type { TestEvent, TestRunSummary } from "@platform/contracts";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ev } from "../test/events";
+import { json, requirementFixture, summaryFixture } from "../test/fixtures";
+import type { RunEventsOptions } from "../lib/run-events";
+import { RunView } from "./RunView";
+
+/** Fake event stream: the test pushes events into whatever RunView subscribed with. */
+const streams: { opts: RunEventsOptions; closed: boolean }[] = [];
+vi.mock("../lib/run-events", () => ({
+  connectRunEvents: (opts: RunEventsOptions) => {
+    const s = { opts, closed: false };
+    streams.push(s);
+    return { close: () => void (s.closed = true), latestSequence: 0, done: new Promise(() => {}) };
+  },
+}));
+
+const emit = (...events: TestEvent[]) =>
+  act(() => {
+    for (const e of events) streams.at(-1)!.opts.onEvent(e);
+  });
+
+type Handler = (init: RequestInit | undefined) => Response | Promise<Response>;
+function routeFetch(routes: Record<string, Handler>) {
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const key = `${init?.method ?? "GET"} ${String(input)}`;
+    const handler = routes[key];
+    if (!handler) throw new Error(`unexpected request ${key}`);
+    return handler(init);
+  });
+  vi.stubGlobal("fetch", fetch);
+  return fetch;
+}
+
+const RUN = "/api/v1/test-runs/run_1";
+const summaries = (...list: TestRunSummary[]) => () => json(200, list.length > 1 ? list.shift()! : list[0]!);
+
+beforeEach(() => void (streams.length = 0));
+
+const toExploring = [
+  ev(1, "run.created", { targetHost: "shop.example.com" }, { stage: "QUEUED", message: "Test run created for shop.example.com" }),
+  ev(2, "stage.started", { stage: "ANALYZING_REQUIREMENT" }, { message: "Analyzing requirement started" }),
+  ev(3, "stage.completed", { stage: "ANALYZING_REQUIREMENT" }, { message: "Analyzing requirement completed" }),
+  ev(4, "criteria.confirmed", { revision: 1 }, { stage: "AWAITING_CONFIRMATION", message: "Criteria revision 1 confirmed" }),
+  ev(5, "stage.started", { stage: "PLANNING" }, { message: "Planning test started" }),
+  ev(6, "stage.completed", { stage: "PLANNING" }, { message: "Planning test completed" }),
+  ev(7, "stage.started", { stage: "EXPLORING" }, { message: "Exploring website started" }),
+];
+
+describe("RunView", () => {
+  it("shows the analyzing state while the requirement is analyzed", async () => {
+    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "ANALYZING_REQUIREMENT" })) });
+    render(<RunView runId="run_1" />);
+    expect(await screen.findByRole("heading", { name: /analyzing your requirement/i })).toBeInTheDocument();
+    expect(streams).toHaveLength(1);
+    expect(streams[0]!.opts.runId).toBe("run_1");
+  });
+
+  it("moves from analyzing to criteria review once the run awaits confirmation", async () => {
+    routeFetch({
+      [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "ANALYZING_REQUIREMENT" }), summaryFixture({ lifecycle: "AWAITING_CONFIRMATION" })),
+      [`GET ${RUN}/criteria`]: () => json(200, requirementFixture()),
+    });
+    render(<RunView runId="run_1" />);
+    await screen.findByRole("heading", { name: /analyzing your requirement/i });
+    await emit(ev(1, "stage.completed", { stage: "ANALYZING_REQUIREMENT" }));
+    expect(await screen.findByRole("heading", { name: /review the acceptance criteria/i })).toBeInTheDocument();
+    expect(await screen.findAllByRole("article")).toHaveLength(3);
+  });
+
+  it("after confirming, shows the server warnings and switches to the progress view", async () => {
+    const user = userEvent.setup();
+    routeFetch({
+      [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "AWAITING_CONFIRMATION" })),
+      [`GET ${RUN}/criteria`]: () => json(200, requirementFixture()),
+      [`POST ${RUN}/criteria/confirm`]: () =>
+        json(202, { revision: 1, warnings: ["Criterion AC-2 will be reported as Inconclusive", "Criterion AC-3 will be reported as Inconclusive"] }),
+    });
+    render(<RunView runId="run_1" />);
+    await screen.findAllByRole("article");
+    await user.click(screen.getByRole("button", { name: /confirm and start/i }));
+
+    const notice = await screen.findByRole("status", { name: /criteria confirmed/i });
+    expect(within(notice).getByText("Criterion AC-2 will be reported as Inconclusive")).toBeInTheDocument();
+    expect(within(notice).getByText("Criterion AC-3 will be reported as Inconclusive")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: /stages/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /confirm and start/i })).not.toBeInTheDocument();
+  });
+
+  it("shows live progress: stage list, timeline and latest screenshot", async () => {
+    routeFetch({
+      [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "PLANNING" })),
+      [`GET ${RUN}/artifacts/art_1/url`]: () => json(200, { url: "https://s3.test/a.png", expiresAt: "2026-09-26T10:05:00.000Z" }),
+    });
+    render(<RunView runId="run_1" />);
+    await screen.findByRole("list", { name: /stages/i });
+    await emit(
+      ...toExploring,
+      ev(8, "step.recorded", { stepId: "st_1", index: 0, kind: "navigate", outcome: "SUCCESS", blockReason: null }, { stage: "EXPLORING", message: "Step 1: navigate succeeded" }),
+      ev(9, "artifact.created", { artifactId: "art_1", type: "SCREENSHOT", sensitivity: "STANDARD" }, { stage: "EXPLORING", message: "Screenshot saved at checkpoint before_add" }),
+    );
+
+    const stages = screen.getByRole("list", { name: /stages/i });
+    expect(within(stages).getByText(/exploring website/i).closest("li")).toHaveTextContent(/in progress/i);
+    expect(within(stages).getByText(/planning test/i).closest("li")).toHaveTextContent(/done/i);
+    expect(within(stages).getByText(/verifying criteria/i).closest("li")).toHaveTextContent(/pending/i);
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow");
+
+    const timeline = screen.getByRole("list", { name: /timeline/i });
+    expect(within(timeline).getByText("Step 1: navigate succeeded")).toBeInTheDocument();
+    expect(within(timeline).getByText("Step 1")).toBeInTheDocument(); // step reference
+    expect(await screen.findByRole("img", { name: /before_add/ })).toHaveAttribute("src", "https://s3.test/a.png");
+  });
+
+  it("cancels a running run after confirmation", async () => {
+    const user = userEvent.setup();
+    const fetch = routeFetch({
+      [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING" })),
+      [`POST ${RUN}/cancel`]: () => json(202, summaryFixture({ lifecycle: "EXPLORING" })),
+    });
+    render(<RunView runId="run_1" />);
+    await user.click(await screen.findByRole("button", { name: /^cancel run$/i }));
+    expect(fetch).not.toHaveBeenCalledWith(`${RUN}/cancel`, expect.anything()); // asks first
+    const dialog = screen.getByRole("group", { name: /cancel this run/i });
+    await user.click(within(dialog).getByRole("button", { name: /yes, cancel/i }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(`${RUN}/cancel`, expect.objectContaining({ method: "POST" })));
+    expect(await screen.findByRole("button", { name: /cancelling/i })).toBeDisabled();
+
+    await emit(ev(10, "run.cancelled", { reason: "USER_REQUESTED" }, { stage: "CANCELLED", message: "Run cancelled by user" }));
+    expect(await screen.findByRole("heading", { name: /run cancelled/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /cancel/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps the run going when the user backs out of cancelling", async () => {
+    const user = userEvent.setup();
+    const fetch = routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING" })) });
+    render(<RunView runId="run_1" />);
+    await user.click(await screen.findByRole("button", { name: /^cancel run$/i }));
+    await user.click(screen.getByRole("button", { name: /keep running/i }));
+    expect(screen.getByRole("button", { name: /^cancel run$/i })).toBeEnabled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a cancelled run with its reason", async () => {
+    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "CANCELLED", cancelReason: "CONFIRMATION_EXPIRED" })) });
+    render(<RunView runId="run_1" />);
+    expect(await screen.findByRole("heading", { name: /run cancelled/i })).toBeInTheDocument();
+    expect(screen.getByText(/weren.t confirmed in time/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /cancel run/i })).not.toBeInTheDocument();
+  });
+
+  it("shows an errored run with its category and the template message only", async () => {
+    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING" })) });
+    render(<RunView runId="run_1" />);
+    await screen.findByRole("list", { name: /stages/i });
+    await emit(
+      ...toExploring,
+      ev(8, "run.errored", { category: "BROWSER_PROVIDER", message: "chromium: No usable sandbox! at /tmp/x" }, { stage: "ERRORED", message: "Run stopped: browser failed" }),
+    );
+    expect(await screen.findByRole("heading", { name: /run stopped because of an error/i })).toBeInTheDocument();
+    expect(screen.getByText(/browser error/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Run stopped: browser failed").length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toContain("No usable sandbox");
+    expect(within(screen.getByRole("list", { name: /stages/i })).getByText(/exploring website/i).closest("li")).toHaveTextContent(/stopped/i);
+  });
+
+  it("shows the verdict of a completed run", async () => {
+    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "COMPLETED", verdict: "FAILED" })) });
+    render(<RunView runId="run_1" />);
+    expect(await screen.findByRole("heading", { name: /run completed/i })).toBeInTheDocument();
+    expect(screen.getByText(/verdict: failed/i)).toBeInTheDocument();
+  });
+
+  it("reports a missing run", async () => {
+    routeFetch({ [`GET ${RUN}`]: () => json(404, { code: "NOT_FOUND", message: "Not found" }) });
+    render(<RunView runId="run_1" />);
+    expect(await screen.findByRole("heading", { name: /run not found/i })).toBeInTheDocument();
+    expect(streams).toHaveLength(0);
+  });
+
+  it("closes the event stream when unmounted", async () => {
+    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING" })) });
+    const { unmount } = render(<RunView runId="run_1" />);
+    await screen.findByRole("list", { name: /stages/i });
+    unmount();
+    expect(streams.every((s) => s.closed)).toBe(true);
+  });
+});
