@@ -9,11 +9,11 @@ Plan: [`docs/ai-testing-platform-implementation-plan.md`](docs/ai-testing-platfo
 
 **Milestone B (Tasks 10–15) is implemented**: with `LLM_PROVIDER=anthropic` (+ `ANTHROPIC_API_KEY`, optional `LLM_MODEL`, default `claude-sonnet-5`) the worker runs the real discovery engine — the requirement is compiled into acceptance criteria (Task 10, confirmable/editable through the API per D5), the test plan is built with deterministic blocking for missing secrets, missing test data, and destructive actions (Task 12), and the plan is explored with Stagehand v4 inside the browser sandbox: the worker launches its own Chromium behind the egress guard proxy (Task 13, `apps/worker/src/sandbox/`) with the Stagehand runtime extension preloaded (`@platform/stagehand-adapter`, Task 14), then the verifier turns the recorded steps and facts into provisional PASS/FAIL/BLOCKED/INCONCLUSIVE results (Task 15). `LLM_PROVIDER=fake` (the default for local dev and compose) still runs the fully deterministic **fake** engine (`packages/testing-engine/src/orchestrator/fake-stages.ts`), so the Milestone A demo and compose keep working without an API key (Ruling R7).
 
-Generated-test compilation, the sandboxed Playwright rerun, and reconciliation (Tasks 16–18, Milestone C) are still stubs: `generateTest` returns `null` (rerun `UNAVAILABLE`) and the report stage is the fake one, so real runs' reports don't yet carry rerun-confirmed evidence. The web UI is a placeholder until Task 19.
+**Milestone C (Tasks 16–18) is implemented**: after verification the real engine compiles the discovered golden path into a Playwright test (Task 16, `packages/testing-engine/src/compiler`: `run.spec.ts` + `helpers.ts` + `run-data.json`, semantic locators, every run value in the JSON file, secrets read from `SECRET_*` environment variables; the source passes an allowlist AST guard and typechecks against `@playwright/test`), then reruns it in a sandbox (Task 17): a Playwright child process in a per-run workspace under `RUNNER_WORKSPACE_DIR`, with an environment allow-list (only this run's `SECRET_*`, `PATH`, `PLAYWRIGHT_BROWSERS_PATH`, and `TMPDIR` pointed into the workspace) and its own egress proxy (same private allowlist as exploration). Trace, screenshot and video are kept only when the rerun fails; traces are scrubbed of every secret value (plain, URL-encoded, base64, JSON/HTML-escaped) before upload, and every artifact of a run with secrets is `SECRET_BEARING`. Reconciliation (Task 18, `src/reconciliation`) combines each criterion's provisional result with its rerun outcome: a discovery PASS/FAIL the rerun confirms has `verdictSource: PLAYWRIGHT_RERUN`; a disagreement is `INCONCLUSIVE / DISCOVERY_RERUN_DISAGREE`; without a rerun outcome, PASS/FAIL stands (`EXPLORATION_ONLY`) only when every referenced fact was read from the DOM, else `INCONCLUSIVE / UNVERIFIED_EVIDENCE` — so no PASS exists without deterministic evidence. `GET /v1/test-runs/:runId/report` returns the reconciled `TestReport` (`packages/contracts/src/report.ts`): per criterion the status, `verdictSource`, `rerunOutcome`, the provisional status, `expected` / `actual`, `evidenceArtifactIds`, `relatedStepIds` (and an AI note for semantic criteria); the summary (incl. `confirmedByRerun`), the verdict, the generated test's source, the rerun's status and duration, diagnostics and LLM usage. It answers `409 REPORT_NOT_READY` until the run is terminal, and a `partial: true` report for `ERRORED` / `CANCELLED` runs. Artifacts are fetched through `GET /v1/test-runs/:runId/artifacts/:artifactId/url` (`?reveal=true` for `SECRET_BEARING` ones). The web UI is a placeholder until Task 19.
 
 **First run against the real provider: 2026-09-26** (`claude-sonnet-5`). The eval baselines are recorded in `evals/BASELINE.md`; `pnpm test:live` and `scripts/milestone-b-demo.sh` (local API + real-engine worker) pass. The integration and live test projects transpile TypeScript the way `tsx` does (esbuild `keepNames`), because functions sent into the browser with `evaluate` fail there with "`__name` is not defined" when they declare a named inner function.
 
-**Real exploration does not run in the Docker worker yet.** Chromium's own sandbox needs Linux user namespaces, which Docker's default container confinement (seccomp profile and capability set) denies, so in the compose `worker` container Chromium aborts with "No usable sandbox!" and exploring runs end `ERRORED / BROWSER_PROVIDER` (with a real provider configured, the worker's start-up preflight logs the failure). How to allow it is an open security decision: a seccomp profile that permits user namespaces for the worker (preferred), `cap_add: SYS_ADMIN` (broad), or Chromium's `--no-sandbox` (not recommended: the browser runs untrusted pages). Until then, run the real engine with a **local worker** — see [Real engine (Milestone B)](#real-engine-milestone-b).
+**Real exploration and the Playwright rerun do not run in the Docker worker yet.** Chromium's own sandbox needs Linux user namespaces, which Docker's default container confinement (seccomp profile and capability set) denies, so in the compose `worker` container Chromium aborts with "No usable sandbox!" and exploring runs end `ERRORED / BROWSER_PROVIDER` (with a real provider configured, the worker's start-up preflight logs the failure). The rerun's Chromium (launched by `@playwright/test` in the runner child process) needs the same sandbox, so the same caveat applies to it. How to allow it is an open security decision: a seccomp profile that permits user namespaces for the worker (preferred), `cap_add: SYS_ADMIN` (broad), or Chromium's `--no-sandbox` (not recommended: the browser runs untrusted pages). Until then, run the real engine with a **local worker** — see [Real engine (Milestone B)](#real-engine-milestone-b).
 
 ## Run everything with Docker
 
@@ -59,6 +59,11 @@ The real engine's browser sandbox (Task 13) launches Playwright's own Chromium d
 ```bash
 pnpm --filter @platform/worker exec playwright-core install chromium
 ```
+
+Environment variables added by the Playwright rerun (Task 17), both optional absolute paths: `RUNNER_WORKSPACE_DIR`
+(per-run workspaces `<dir>/<runId>/`, deleted after each rerun; default `<os tmpdir>/platform-runs`, `/work/runs` in the
+Docker image) and `RUNNER_NODE_MODULES_DIR` (the `node_modules` holding `@playwright/test` that workspaces link to;
+default: the one `@platform/testing-engine` resolves).
 
 The apps don't read `.env` themselves; export it into each terminal first:
 
@@ -108,6 +113,32 @@ is confirmed through the API and ends `COMPLETED`; run 2 (login without the pass
 `BLOCKED / MISSING_SECRET`; run 3 (delete the account) has one `BLOCKED / DESTRUCTIVE_ACTION_NOT_AUTHORIZED`.
 It refuses to continue if the fake engine answers (it recognises the fake engine's fixed criteria).
 
+### Milestone C demo
+
+Same route as Milestone B (compose infrastructure, local API, local real-engine worker), then:
+
+```bash
+./scripts/milestone-c-demo.sh   # targets http://localhost:4000/ by default; two live runs, auto-confirmed
+```
+
+It asserts, exiting non-zero on the first mismatch (and stopping with an explanation if the fake engine answers):
+
+1. **Healthy shop** (add iPhone 17 Pro to the cart, then open the cart): the run ends `COMPLETED`; `test.generated` and
+   `playwright.completed` were published; the report has `generatedTest.source`, `summary.confirmedByRerun ≥ 1`, and
+   every PASS criterion has a `verdictSource` and references only facts whose last `fact.observed` reading is
+   `DOM_VERIFIED` (never a PASS on model-extracted facts). The reconciled report JSON is printed.
+2. **`?bug=empty_cart` + a login with the password secret**: the criterion "the cart lists iPhone 17 Pro" ends
+   `FAIL / PLAYWRIGHT_RERUN` with non-empty `expected`, `actual`, `evidenceArtifactIds` and `relatedStepIds`; every
+   artifact of the run is `SECRET_BEARING`; the artifact URL route refuses the rerun `TRACE` without `reveal=true`
+   (403), and the trace downloaded with it contains the password in none of its forms (plain, URL- and
+   form-encoded, base64 / base64url) while it does record the password field's fill, with the value `[REDACTED]`.
+
+**Live run, 2026-09-26: not completed.** The first run ended `ERRORED / MODEL_PROVIDER` at `ANALYZING_REQUIREMENT`:
+the Anthropic API answered 400 "Your credit balance is too low", so no run could reach the generated test. The
+script's non-LLM checks were exercised separately: its report and evidence checks against earlier runs' reports
+through the API, and its trace checks against a real scrubbed rerun trace (the password fill recorded as
+`"value":"[REDACTED]"`, no form of the password present). Re-run the script once the provider account has credit.
+
 ## Tests
 
 ```bash
@@ -128,9 +159,9 @@ pnpm eval planner                # same, for the planner prompt
 ## Layout
 
 ```text
-apps/api                     Fastify API: auth, runs, cancel, criteria (get/update/confirm), SSE events, artifact URLs
+apps/api                     Fastify API: auth, runs, cancel, criteria (get/update/confirm), SSE events, artifact URLs, report
 apps/worker                  BullMQ jobs (analyze-run, execute-run, reap) + the browser sandbox
-apps/worker/src/sandbox      egress guard proxy, Chromium launcher, navigation guard (Task 13)
+apps/worker/src/sandbox      egress guard proxy, Chromium launcher, navigation guard (Task 13), Playwright runner child process (Task 17)
 apps/web                     Next.js UI (placeholder until Task 19)
 packages/contracts           Zod schemas: the single source of truth
 packages/config              env schema (validated at start-up)
@@ -140,13 +171,14 @@ packages/storage             artifact storage (local, S3)
 packages/event-bus           event publisher, Redis fan-out, queue names
 packages/llm                 provider-neutral LLM client (redaction, retries, LlmCall records), Anthropic adapter
 packages/stagehand-adapter    Stagehand v4 explorer, ClientLLM bridge, the runtime extension (Task 14)
-packages/testing-engine       orchestrator + engine stages: requirement compiler, planner, exploration, verifier (Tasks 10-15) real; generateTest/runTest/report still fake until Milestone C
+packages/testing-engine       orchestrator + engine stages: requirement compiler, planner, exploration, verifier (Tasks 10-15), test compiler, Playwright rerun + evidence, reconciliation + report (Tasks 16-18)
 evals                         `pnpm eval <suite>` harness and cases; BASELINE.md records scores
 tests/integration             real-Chromium/sandbox/Stagehand-adapter tests + the `@live` Stagehand smoke test
 tests/fixtures/demo-shop      deterministic test target
 spikes/stagehand-v4           Task 0 spike code (see docs/spikes/stagehand-v4.md)
 scripts/milestone-a-demo.sh   Milestone A demo (fake engine, lifecycle + SSE + cancel + crash recovery)
 scripts/milestone-b-demo.sh   Milestone B demo (real engine, local worker: criteria confirmation, planner blocking, exploration)
+scripts/milestone-c-demo.sh   Milestone C demo (real engine, local worker: generated test, sandboxed rerun, scrubbed trace, reconciled report)
 ```
 
 ## Deviations from the plan
