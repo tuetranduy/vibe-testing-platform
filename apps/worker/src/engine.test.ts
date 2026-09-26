@@ -243,7 +243,8 @@ describe("createEngine (Ruling R7)", () => {
     expect(existsSync(path.join(real.rerunDir, run.id))).toBe(false);
     const completed = events.filter((e) => e.type === "playwright.completed");
     expect(completed).toHaveLength(1); // published by the orchestrator only (R34)
-    expect(completed[0]!.payload).toMatchObject({ status: "PASSED" });
+    // Each criterion's rerun outcome is persisted with it, for partial reports (Ruling R43).
+    expect(completed[0]!.payload).toEqual({ status: "PASSED", durationMs: expect.any(Number), perCriterion: { "AC-1": "PASSED" } });
     // The rerun confirmed the compiled criterion; the one it could not compile rests on unverified evidence.
     const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
     expect(results.find((r) => r.criterionId === "AC-1")).toMatchObject({ status: "PASS", verdictSource: "PLAYWRIGHT_RERUN", rerunOutcome: "PASSED" });

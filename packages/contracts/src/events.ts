@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CheckpointSchema, CriterionIdSchema, FactKeySchema, IsoDateTime } from "./common";
-import { ArtifactSensitivitySchema, ArtifactTypeSchema, StatusReasonSchema } from "./results";
+import { ArtifactSensitivitySchema, ArtifactTypeSchema, RerunOutcomeSchema, StatusReasonSchema } from "./results";
 import {
   BlockReasonSchema,
   CancelReasonSchema,
@@ -80,7 +80,16 @@ export const TestEventSchema = z.discriminatedUnion("type", [
       notCompiled: z.array(z.object({ criterionId: CriterionIdSchema, reason: z.string() })),
     }),
   ),
-  ev("playwright.completed", z.object({ status: z.enum(["PASSED", "FAILED", "ERRORED"]), durationMs: z.number().int() })),
+  ev(
+    "playwright.completed",
+    z.object({
+      status: z.enum(["PASSED", "FAILED", "ERRORED"]),
+      durationMs: z.number().int(),
+      // Each compiled criterion's rerun outcome (ids + enum only), so a partial report can still
+      // reconcile against the rerun (Ruling R43). Defaulted: events persisted before it still parse.
+      perCriterion: z.record(CriterionIdSchema, RerunOutcomeSchema).default({}),
+    }),
+  ),
   ev("egress.blocked", z.object({ host: z.string(), reason: z.string().max(300) })),
   ev("run.completed", z.object({ verdict: RunVerdictSchema })),
   ev("run.cancelled", z.object({ reason: CancelReasonSchema })),

@@ -202,7 +202,8 @@ export async function runExecution(ctx: StageContext, ports: RunPorts, stages: E
         await ports.publish({
           type: "playwright.completed",
           message: `Playwright rerun ${rerun.status.toLowerCase()}`,
-          payload: { status: rerun.status, durationMs: rerun.durationMs },
+          // perCriterion (ids + outcomes) lets a partial report reconcile against the rerun (Ruling R43).
+          payload: { status: rerun.status, durationMs: rerun.durationMs, perCriterion: rerun.perCriterion },
         });
         await completed(ports, "RUNNING_PLAYWRIGHT");
         await ctx.boundary();

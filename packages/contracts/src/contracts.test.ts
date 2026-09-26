@@ -262,6 +262,19 @@ describe("TestEventSchema", () => {
     expect(r.payload).not.toHaveProperty("value");
   });
 
+  it("playwright.completed carries each criterion's rerun outcome (Ruling R43); older events without it still parse", () => {
+    const base = { ...envelope, stage: "RUNNING_PLAYWRIGHT", type: "playwright.completed" };
+    const current = TestEventSchema.parse({
+      ...base,
+      payload: { status: "FAILED", durationMs: 12, perCriterion: { "AC-1": "ASSERTION_FAILED", "AC-2": "NOT_REACHED" } },
+    });
+    expect(current.payload).toEqual({ status: "FAILED", durationMs: 12, perCriterion: { "AC-1": "ASSERTION_FAILED", "AC-2": "NOT_REACHED" } });
+    const older = TestEventSchema.parse({ ...base, payload: { status: "PASSED", durationMs: 5 } });
+    expect(older.payload).toEqual({ status: "PASSED", durationMs: 5, perCriterion: {} });
+    expect(TestEventSchema.safeParse({ ...base, payload: { status: "FAILED", durationMs: 1, perCriterion: { "AC-1": "FAILED" } } }).success).toBe(false);
+    expect(TestEventSchema.safeParse({ ...base, payload: { status: "FAILED", durationMs: 1, perCriterion: { "criterion one": "PASSED" } } }).success).toBe(false);
+  });
+
   it("lists every type and knows the terminal ones", () => {
     expect(TEST_EVENT_TYPES).toHaveLength(19);
     expect(isTerminalEvent({ type: "run.completed" })).toBe(true);

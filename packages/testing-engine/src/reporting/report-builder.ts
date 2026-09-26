@@ -9,9 +9,10 @@
  *   The diagnostics model lives in ./diagnostics.ts and reaches the stage only as a port.
  *
  * No PASS without deterministic evidence, on every path: every criterion goes through `reconcile`
- * (Section 2.3) — with rerun UNAVAILABLE when there was no rerun, the criterion was not compiled, or
- * (partial reports) the rerun's per-criterion outcome was never persisted. Diagnostics run only after
- * the statuses, summary and verdict are decided, and can add notes, never statuses (D3, Ruling R37).
+ * (Section 2.3) — with the rerun's outcome for that criterion (partial reports: from the persisted
+ * `playwright.completed` event, Ruling R43), or UNAVAILABLE when there was no rerun or the criterion was
+ * not compiled. Diagnostics run only after the statuses, summary and verdict are decided, within their
+ * own time-box (R43), and can add notes, never statuses (D3, Ruling R37).
  */
 import {
   CriterionResultSchema,
@@ -58,11 +59,16 @@ export interface ReconcileCriteriaInput {
   facts: readonly ObservedFact[];
   /** Persisted or in-memory results: provisional ones are reconciled, final ones are kept as they are. */
   results: readonly (ProvisionalResult | CriterionResult)[];
-  /** null → every criterion's rerun outcome is UNAVAILABLE. */
-  rerun: RerunResult | null;
+  /**
+   * The rerun: its per-criterion outcomes (a criterion it does not list is UNAVAILABLE), and — in the
+   * worker — its error text and evidence. null (no rerun) → every rerun outcome is UNAVAILABLE.
+   */
+  rerun: ReconcileRerun | null;
   /** The run redactor, for the rerun's error text (Playwright messages can quote the page). */
   redact?: (text: string) => string;
 }
+
+export type ReconcileRerun = Pick<RerunResult, "perCriterion"> & Partial<Pick<RerunResult, "errorText" | "artifactIds">>;
 
 const isFinal = (r: ProvisionalResult | CriterionResult): r is CriterionResult => "rerunOutcome" in r;
 const refKey = (r: { key: string; checkpoint: string }) => `${r.key}@${r.checkpoint}`;
@@ -108,7 +114,7 @@ export function reconcileCriteria(input: ReconcileCriteriaInput): CriterionResul
       relatedStepIds: related.map((s) => s.id),
       aiNote: null,
     });
-    const errorText = input.rerun?.errorText[p.criterionId];
+    const errorText = input.rerun?.errorText?.[p.criterionId];
     if (!errorText || (outcome !== "ASSERTION_FAILED" && outcome !== "NOT_REACHED")) return result;
     const actual = `${result.actual ?? "Not observed"} | Rerun: ${errorText}`;
     return CriterionResultSchema.parse({ ...result, actual: clip(redact(actual)) });
@@ -215,8 +221,11 @@ export interface PersistedRunSources {
   /** `criterion_results` rows: final results, or provisional-only ones when the run ended early. */
   results: (ProvisionalResult | CriterionResult)[];
   generatedTest: GeneratedTest | null;
-  /** From the persisted `playwright.completed` event (no column holds it). */
-  playwright: PlaywrightSummary | null;
+  /**
+   * From the last persisted `playwright.completed` event (no column holds it), with each criterion's
+   * rerun outcome (Ruling R43). null → there was no rerun.
+   */
+  playwright: (PlaywrightSummary & { perCriterion: Record<string, RerunOutcome> }) | null;
   /** `diagnostic_findings` rows. */
   diagnostics: ReportFinding[];
   /** `llm_calls` rows. */
@@ -228,14 +237,17 @@ export type ReportSourceLoader = (runId: string) => Promise<PersistedRunSources>
 /**
  * `buildReport(runId)` over a loader. COMPLETED runs: the persisted final results and verdict.
  * ERRORED / CANCELLED: a partial report with whatever exists; provisional-only rows are reconciled with
- * rerun UNAVAILABLE (the per-criterion rerun outcomes are not persisted before the report stage).
+ * each criterion's rerun outcome from the persisted `playwright.completed` event (Ruling R43, amending
+ * R36), UNAVAILABLE when there was no rerun or the criterion was not compiled. The rerun's evidence ids
+ * are not persisted per run, so a partial report's evidence is the exploration screenshots.
  * Tenant scoping and "is the run terminal?" are the caller's (the API route's) checks.
  */
 export function createReportBuilder(load: ReportSourceLoader): { buildReport(runId: string): Promise<TestReport> } {
   return {
     async buildReport(runId) {
       const s = await load(runId);
-      const criteria = reconcileCriteria({ requirement: s.requirement, plan: s.plan, steps: s.steps, facts: s.facts, results: s.results, rerun: null });
+      const rerun = s.playwright && { perCriterion: s.playwright.perCriterion };
+      const criteria = reconcileCriteria({ requirement: s.requirement, plan: s.plan, steps: s.steps, facts: s.facts, results: s.results, rerun });
       return assembleReport({
         runId: s.run.runId,
         lifecycle: s.run.lifecycle,
@@ -245,7 +257,7 @@ export function createReportBuilder(load: ReportSourceLoader): { buildReport(run
         requirement: s.requirement,
         criteria,
         generatedTest: s.generatedTest,
-        playwright: s.playwright,
+        playwright: s.playwright && { status: s.playwright.status, durationMs: s.playwright.durationMs },
         diagnostics: s.diagnostics,
         llmCalls: s.llmCalls,
         startedAt: s.run.startedAt,
@@ -296,10 +308,47 @@ export interface ReportStageDeps {
   /** Ruling R37: on when the real engine has an LLM; tests toggle it by passing / omitting it. */
   diagnostics?: Diagnostics;
   logger?: { warn(obj: object, msg?: string): void };
+  /** Upper bound for the diagnostics call (default 60 s). */
+  diagnosticsTimeoutMs?: number;
 }
 
 const MAX_FINDING = 2000;
 const MAX_NOTE = 1000;
+const DIAGNOSTICS_TIMEOUT_MS = 60_000;
+
+/**
+ * Ruling R43: diagnostics get their own time-box — the diagnostics timeout, and at most half the time
+ * left before the run's hard deadline, so the other half remains to persist and publish the report.
+ * Running out of time is then a diagnostics failure, never the run's TIMEOUT (which would leave only
+ * provisional results persisted). ≤ 0 → no time for diagnostics.
+ */
+function diagnosticsBudgetMs(ctx: StageContext, deps: ReportStageDeps): number {
+  const timeout = deps.diagnosticsTimeoutMs ?? DIAGNOSTICS_TIMEOUT_MS;
+  if (!ctx.deadlineAt) return timeout;
+  return Math.min(timeout, Math.floor((ctx.deadlineAt.getTime() - ctx.now().getTime()) / 2));
+}
+
+/** Settles with `work`, or rejects with the signal's reason when it fires first (a port that ignores its signal). */
+function within<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    work.catch(() => {}); // abandoned: its own failure is not the outcome
+    return Promise.reject(signal.reason);
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (v) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(v);
+      },
+      (e) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(e);
+      },
+    );
+  });
+}
 
 /**
  * The real GENERATING_REPORT stage: reconcile every criterion → summary + verdict → diagnostics
@@ -307,8 +356,9 @@ const MAX_NOTE = 1000;
  * The orchestrator persists the final criterion results and publishes the final `criterion.evaluated`
  * events and `run.completed` (Ruling R34).
  *
- * A diagnostics failure (provider error, invalid output) never fails the run: the report is built
- * without diagnostics and a warning is logged. Cancellation / the hard deadline still end the run.
+ * A diagnostics failure (provider error, invalid output, its time-box running out — Ruling R43) never
+ * fails the run: the report is built without diagnostics and a warning is logged. Cancellation / the
+ * run's own hard deadline still end the run.
  */
 export function createReportStage(deps: ReportStageDeps): EngineStages["report"] {
   return async (ctx, input) => {
@@ -328,12 +378,17 @@ export function createReportStage(deps: ReportStageDeps): EngineStages["report"]
     const playwright = input.rerun && { status: input.rerun.status, durationMs: input.rerun.durationMs };
 
     let diagnosed: DiagnosticsResult = { findings: [], notes: [] };
-    if (deps.diagnostics && needsDiagnostics(input.requirement, decided)) {
+    const diagnose = deps.diagnostics && needsDiagnostics(input.requirement, decided) ? deps.diagnostics : null;
+    const budgetMs = diagnose ? diagnosticsBudgetMs(ctx, deps) : 0;
+    if (diagnose && budgetMs <= 0) {
+      deps.logger?.warn({ runId: ctx.runId }, "no time left for report diagnostics; reporting without them");
+    } else if (diagnose) {
+      const signal = ctx.budgetSignal(budgetMs);
       try {
-        diagnosed = await deps.diagnostics({
+        const work = diagnose({
           runId: ctx.runId,
-          signal: ctx.signal,
-          deadlineAt: ctx.deadlineAt,
+          signal,
+          deadlineAt: new Date(ctx.now().getTime() + budgetMs),
           redact: ctx.redact,
           requirement: input.requirement,
           plan: input.plan,
@@ -344,6 +399,7 @@ export function createReportStage(deps: ReportStageDeps): EngineStages["report"]
           facts,
           playwright,
         });
+        diagnosed = await within(work, signal);
       } catch (err) {
         if (ctx.signal.aborted) throw ctx.signal.reason;
         deps.logger?.warn({ runId: ctx.runId, err: err instanceof Error ? err.message : String(err) }, "report diagnostics failed; reporting without them");

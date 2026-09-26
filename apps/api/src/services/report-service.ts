@@ -48,7 +48,11 @@ export async function loadReportSources(db: Database, runId: string): Promise<Pe
     facts,
     results,
     generatedTest,
-    playwright: playwright && { status: playwright.payload.status, durationMs: playwright.payload.durationMs },
+    playwright: playwright && {
+      status: playwright.payload.status,
+      durationMs: playwright.payload.durationMs,
+      perCriterion: playwright.payload.perCriterion, // {} for events persisted before Ruling R43
+    },
     diagnostics,
     llmCalls,
   };

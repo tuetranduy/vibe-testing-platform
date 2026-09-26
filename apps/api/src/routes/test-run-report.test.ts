@@ -209,7 +209,7 @@ describe("GET /v1/test-runs/:runId/report", () => {
       notCompiled: [{ criterionId: "AC-2", reason: "Fact cartItems@cart_page was extracted by the model, not read from the page" }],
       notes: [],
     });
-    await new EventRepository(t.tdb.db).append({ runId: run.id, stage: "RUNNING_PLAYWRIGHT", type: "playwright.completed", message: "Playwright rerun failed", payload: { status: "FAILED", durationMs: 4321 } });
+    await new EventRepository(t.tdb.db).append({ runId: run.id, stage: "RUNNING_PLAYWRIGHT", type: "playwright.completed", message: "Playwright rerun failed", payload: { status: "FAILED", durationMs: 4321, perCriterion: { "AC-1": "ASSERTION_FAILED" } } });
     await new DiagnosticFindingRepository(t.tdb.db).insertMany(run.id, [{ criterionId: "AC-1", summary: "The badge did not change." }]);
     const calls = new LlmCallRepository(t.tdb.db);
     const call = { runId: run.id, provider: "fake", model: "m", latencyMs: 5, status: "SUCCESS" };
@@ -269,6 +269,29 @@ describe("GET /v1/test-runs/:runId/report", () => {
       ["AC-2", "INCONCLUSIVE", "UNVERIFIED_EVIDENCE", null, "UNAVAILABLE"],
     ]);
     expect(report.criteria[0]).toMatchObject({ relatedStepIds: [steps[0]!.id, steps[1]!.id], evidenceArtifactIds: ["art_s0", "art_s1"] });
+  });
+
+  it("ERRORED after a rerun → each criterion's outcome comes from the persisted playwright.completed event (Ruling R43)", async () => {
+    // e.g. the hard deadline hit during GENERATING_REPORT: only provisional rows were saved, but the rerun had run.
+    const run = await runAt("ERRORED");
+    await seedExploration(run.id);
+    await new ResultRepository(t.tdb.db).upsert(run.id, provisional("AC-1", "PASS", [after, before]));
+    await new ResultRepository(t.tdb.db).upsert(run.id, provisional("AC-2", "PASS", [items]));
+    await new EventRepository(t.tdb.db).append({
+      runId: run.id,
+      stage: "RUNNING_PLAYWRIGHT",
+      type: "playwright.completed",
+      message: "Playwright rerun failed",
+      payload: { status: "FAILED", durationMs: 99, perCriterion: { "AC-1": "ASSERTION_FAILED" } },
+    });
+
+    const report = TestReportSchema.parse((await getReport(run.id)).json());
+    expect(report).toMatchObject({ partial: true, verdict: null, playwright: { status: "FAILED", durationMs: 99 } });
+    // The DOM-backed PASS the rerun failed is a disagreement — never PASS / EXPLORATION_ONLY next to a failed rerun.
+    expect(report.criteria.map((c) => [c.criterionId, c.status, c.reason, c.verdictSource, c.rerunOutcome])).toEqual([
+      ["AC-1", "INCONCLUSIVE", "DISCOVERY_RERUN_DISAGREE", null, "ASSERTION_FAILED"],
+      ["AC-2", "INCONCLUSIVE", "UNVERIFIED_EVIDENCE", null, "UNAVAILABLE"],
+    ]);
   });
 
   it("CANCELLED → partial with whatever exists (here: the unconfirmed criteria, no results)", async () => {
