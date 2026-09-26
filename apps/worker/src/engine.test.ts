@@ -142,6 +142,23 @@ describe("createEngine (Ruling R7)", () => {
     expect(engine.llm).toBeNull();
   });
 
+  it("LLM_PROVIDER=fake persists its generated test, so the run's report can show it", async () => {
+    const engine = createEngine(
+      { LLM_PROVIDER: "fake", LLM_MODEL: "claude-sonnet-5" },
+      { db: h.tdb.db, logger: silentLogger, fake: { stepDelayMs: 0, explorationSteps: 4 } },
+    );
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
+
+    await executeRunJob(h.deps(engine.stages), run.id);
+
+    expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("COMPLETED");
+    const stored = await new GeneratedTestRepository(h.tdb.db).findByRun(run.id);
+    expect(stored).toMatchObject({ compiledCriteria: ["AC-1", "AC-2"], notCompiled: [] });
+    expect(stored!.source).toContain("@playwright/test");
+    const generated = (await eventsOf(h, run.id)).find((e) => e.type === "test.generated")!;
+    expect(generated.payload).toMatchObject({ compiledCriteria: stored!.compiledCriteria });
+  });
+
   it("LLM_PROVIDER=openai fails fast at startup", () => {
     expect(() =>
       createEngine({ LLM_PROVIDER: "openai", LLM_MODEL: "gpt-x", OPENAI_API_KEY: "k" }, { db: h.tdb.db, logger: silentLogger }),
