@@ -304,4 +304,43 @@ describe("SSE streams on shutdown", () => {
       await own.close();
     }
   });
+
+  it("a stream still being set up when shutdown starts ends at once instead of holding close() open", async () => {
+    const own = await createTestApi({ sseHeartbeatMs: 60_000 });
+    const ac = new AbortController();
+    try {
+      await own.app.listen({ port: 0, host: "127.0.0.1" });
+      const addr = own.app.server.address();
+      const ownBase = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+      const run = await new RunRepository(own.tdb.db).create({ tenantId: TEST_TENANT_ID, targetUrl: "https://x.com", request });
+
+      // Hold the handler inside its run lookup until shutdown has begun.
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      let entered!: () => void;
+      const inLookup = new Promise<void>((r) => (entered = r));
+      const original = RunRepository.prototype.getRequired;
+      vi.spyOn(RunRepository.prototype, "getRequired").mockImplementation(async function (this: RunRepository, ...args) {
+        entered();
+        await gate;
+        return original.apply(this, args);
+      });
+
+      const response = fetch(`${ownBase}/v1/test-runs/${run.id}/events`, { headers: auth, signal: ac.signal });
+      await inLookup;
+      const closing = own.app.close().then(() => "closed" as const);
+      await new Promise((r) => setTimeout(r, 50)); // preClose has run
+      release();
+
+      const outcome = await Promise.race([closing, new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 3_000))]);
+      expect(outcome).toBe("closed");
+      // The client saw the stream end (and reconnects with Last-Event-ID), not an error.
+      const res = await response;
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe(": connected\n\n");
+    } finally {
+      ac.abort();
+      await own.close();
+    }
+  });
 });
