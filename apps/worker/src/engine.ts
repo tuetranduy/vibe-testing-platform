@@ -109,5 +109,5 @@ export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSele
     ...(deps.rerun ? { overrides: deps.rerun } : {}),
   });
   const report = createReportDeps({ db: deps.db, logger: deps.logger, llm });
-  return { kind: "real", stages: createRealStages({ llm, exploration, generateTest: createGenerateTestDeps(deps.db), runTest, report }), llm };
+  return { kind: "real", stages: createRealStages({ llm, exploration, generateTest: createGenerateTestDeps(deps.db, deps.logger), runTest, report }), llm };
 }

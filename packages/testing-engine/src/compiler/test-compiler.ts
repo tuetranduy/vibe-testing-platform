@@ -264,7 +264,8 @@ class Compiler {
     const reads: FactRead[] = [];
     for (const { ref, path } of factRefsOf(outcome)) {
       const label = `Fact ${refKey(ref)}`;
-      const fact = this.input.facts.find((f) => f.key === ref.key && f.checkpoint === ref.checkpoint);
+      // A fact recorded more than once: the last reading counts, as for the verifier and reconcile.
+      const fact = this.input.facts.findLast((f) => f.key === ref.key && f.checkpoint === ref.checkpoint);
       if (!fact) return `${label} was not recorded`;
       if (fact.provenance !== "DOM_VERIFIED") return `${label} was extracted by the model, not read from the page`;
       const position = this.checkpointAt.get(fact.stepId);

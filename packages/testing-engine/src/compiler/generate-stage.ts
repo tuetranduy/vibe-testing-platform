@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { GeneratedTestSchema, type GeneratedTest } from "@platform/contracts";
 import type { EngineStages, StageContext } from "../orchestrator/stages";
+import { redactedCause, type FailureLogger } from "../shared/log-cause";
 import { assertSafeSource } from "./ast-guard";
 import { compilePlaywrightTest } from "./test-compiler";
 
@@ -12,6 +13,8 @@ export interface GeneratedTestStore {
 /** Injected dependencies of the real GENERATING_TEST stage. */
 export interface GenerateTestStageDeps {
   store(ctx: StageContext): GeneratedTestStore;
+  /** Receives the (redacted) cause when the flow cannot be compiled (Ruling R45). */
+  logger?: FailureLogger | undefined;
 }
 
 export function newGeneratedTestId(): string {
@@ -27,22 +30,35 @@ export function newGeneratedTestId(): string {
  *
  * No criterion compiled → null: there is nothing to rerun, and every criterion keeps its
  * rerun outcome UNAVAILABLE.
+ *
+ * Ruling R45: a compiler failure (an exception, the guard rejecting the source after redaction)
+ * degrades like a rerun failure (R41): its cause is logged (redacted) and the stage returns null, so
+ * the criteria reconcile with rerun UNAVAILABLE — an optional confirmation step must not cost the
+ * run its verdict. The run's own abort still propagates; persistence failures are infrastructure
+ * errors and propagate too.
  */
 export function createGenerateTestStage(deps: GenerateTestStageDeps): EngineStages["generateTest"] {
   return async (ctx, input) => {
-    const compiled = compilePlaywrightTest({
-      requirement: input.requirement,
-      plan: input.plan,
-      steps: input.exploration.steps,
-      facts: input.exploration.facts,
-      provisional: input.provisional,
-      targetUrl: ctx.request.targetUrl,
-      secretNames: ctx.request.secretNames,
-      testData: ctx.request.testData,
-    });
-    if (compiled.compiledCriteria.length === 0) return null;
-    const test = GeneratedTestSchema.parse(ctx.redact({ id: newGeneratedTestId(), ...compiled }));
-    assertSafeSource(test.source); // what is persisted (after redaction) must pass the guard too
+    let test: GeneratedTest;
+    try {
+      const compiled = compilePlaywrightTest({
+        requirement: input.requirement,
+        plan: input.plan,
+        steps: input.exploration.steps,
+        facts: input.exploration.facts,
+        provisional: input.provisional,
+        targetUrl: ctx.request.targetUrl,
+        secretNames: ctx.request.secretNames,
+        testData: ctx.request.testData,
+      });
+      if (compiled.compiledCriteria.length === 0) return null;
+      test = GeneratedTestSchema.parse(ctx.redact({ id: newGeneratedTestId(), ...compiled }));
+      assertSafeSource(test.source); // what is persisted (after redaction) must pass the guard too
+    } catch (err) {
+      if (ctx.signal.aborted) throw ctx.signal.reason;
+      deps.logger?.error({ runId: ctx.runId, err: redactedCause(err, ctx.redact) }, "generated test could not be compiled; the run goes on without a rerun");
+      return null;
+    }
     await deps.store(ctx).save(test);
     return test;
   };

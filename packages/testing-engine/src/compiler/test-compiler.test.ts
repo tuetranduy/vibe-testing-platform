@@ -475,6 +475,21 @@ describe("compilePlaywrightTest: assertions", () => {
     }
   });
 
+  it("a fact recorded more than once at a checkpoint: the LAST reading counts (as for the verifier, reconcile and relatedStepIds)", () => {
+    // First reading model-extracted, the last one read from the DOM through another element.
+    const recorded = shopFacts();
+    const toast = recorded.find((f) => f.key === "toast")!;
+    const facts = [...recorded.filter((f) => f !== toast), { ...toast, provenance: "MODEL_EXTRACTED" as const }, { ...toast, read: { element: byTestId("toast-v2"), mode: "visible" as const } }];
+    const out = compile({ facts });
+    expect(out.compiledCriteria).toContain("AC-2");
+    expect(Object.values(dataOf(out.dataJson).locators)).toContainEqual({ value: "toast-v2" });
+    expect(Object.values(dataOf(out.dataJson).locators)).not.toContainEqual({ value: "toast" });
+
+    // And the other way round: a DOM reading superseded by a model-extracted one is not compiled.
+    const superseded = compile({ facts: [...shopFacts(), { ...toast, provenance: "MODEL_EXTRACTED" as const }] });
+    expect(superseded.notCompiled).toContainEqual({ criterionId: "AC-2", reason: "Fact toast@after_add was extracted by the model, not read from the page" });
+  });
+
   it("not compiled: a fact read in a mode the assertion cannot replay, or captured off the replayed flow", () => {
     const facts = shopFacts().map((f) =>
       f.key === "message" ? { ...f, read: { ...f.read!, mode: "count" as const } } : f.key === "miniCart" ? { ...f, stepId: "st_elsewhere" } : f,
@@ -735,5 +750,33 @@ describe("createGenerateTestStage", () => {
     const facts = shopFacts().map((f) => ({ ...f, provenance: "MODEL_EXTRACTED" as const }));
     expect(await stage(ctxWith({}, []), stageInput(shopFlow(), facts))).toBeNull();
     expect(saved).toEqual([]);
+  });
+
+  // Ruling R45: a generateTest failure degrades like a rerun failure — logged, no generated test.
+  const breaksSource = (v: unknown) => {
+    const t = v as { source?: string };
+    return typeof t.source === "string" ? { ...t, source: `${t.source}\nrequire("child_process"); // ${SECRET}` } : v;
+  };
+
+  it("a compiler failure (here: the redacted source fails the guard) → null, nothing persisted; the cause logged, redacted (R45)", async () => {
+    const saved: unknown[] = [];
+    const logged: { obj: Record<string, unknown>; msg?: string | undefined }[] = [];
+    const logger = { error: (obj: object, msg?: string) => void logged.push({ obj: obj as Record<string, unknown>, msg }) };
+    const stage = createGenerateTestStage({ store: () => ({ save: async (t) => void saved.push(t) }), logger });
+    const ctx = { ...ctxWith({}, []), signal: new AbortController().signal, redact: breaksSource } as unknown as StageContext;
+
+    expect(await stage(ctx, stageInput())).toBeNull();
+    expect(saved).toEqual([]);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({ obj: { runId: "run_1", err: { name: "GeneratedSourceRejectedError" } }, msg: expect.stringMatching(/generated test could not be compiled/) });
+  });
+
+  it("the run's own abort still propagates from GENERATING_TEST (R45)", async () => {
+    const controller = new AbortController();
+    const reason = new Error("run cancelled");
+    controller.abort(reason);
+    const stage = createGenerateTestStage({ store: () => ({ save: async () => {} }) });
+    const ctx = { ...ctxWith({}, []), signal: controller.signal, redact: breaksSource } as unknown as StageContext;
+    await expect(stage(ctx, stageInput())).rejects.toBe(reason);
   });
 });

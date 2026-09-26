@@ -8,8 +8,8 @@ import { HELPERS_SOURCE } from "../compiler/helpers-template";
 import type { EvidenceStore, EvidenceUpload } from "../evidence/collector";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
 import { buildPlaywrightConfig } from "./config-template";
-import { runGeneratedTest, type RunnerProcessInput, type RunnerProcessResult, type SpawnRunner } from "./runner";
-import { createRunTestStage, type RerunProxy } from "./run-stage";
+import { runGeneratedTest, testTimeoutFor, type RunnerProcessInput, type RunnerProcessResult, type SpawnRunner } from "./runner";
+import { createRunTestStage, rerunTimeoutMs, type RerunProxy } from "./run-stage";
 import { defaultRunnerNodeModulesDir, prepareWorkspace, removeWorkspace, workspaceDir } from "./workspace";
 
 /**
@@ -128,6 +128,11 @@ const runInput = (test: GeneratedTest, over: Partial<Parameters<typeof runGenera
   ...over,
 });
 const title = (id: string) => `[${id}] Statement of ${id}`;
+
+function captureLog() {
+  const logged: { obj: Record<string, unknown>; msg?: string | undefined }[] = [];
+  return { logged, logger: { error: (obj: object, msg?: string) => void logged.push({ obj: obj as Record<string, unknown>, msg }) } };
+}
 
 // ---------------------------------------------------------------------------------------------
 // Step 1: workspace
@@ -263,6 +268,23 @@ describe("runGeneratedTest", () => {
     expect(existsSync(path.join(base, "run_1"))).toBe(false);
   });
 
+  it.each([
+    ["helpers.ts that is not the fixed template", { helpersSource: `${HELPERS_SOURCE}\nrequire("child_process").execSync("id");\n` }],
+    ["run-data.json that is not JSON", { dataJson: "{ nope" }],
+    ["run-data.json that is not an object", { dataJson: "[]" }],
+    ["a targetUrl that is not http(s)", { dataJson: JSON.stringify({ targetUrl: "file:///etc/passwd", criteria: {} }) }],
+    ["a missing targetUrl", { dataJson: JSON.stringify({ criteria: {} }) }],
+    ["a later URL that is not http(s)", { dataJson: JSON.stringify({ targetUrl: "https://shop.test/", urls: { url1: "javascript:alert(1)" }, criteria: {} }) }],
+  ])("a stored test with %s never runs → ERRORED (R42: the whole workspace is checked, not only the source)", async (_what, over) => {
+    const { logged, logger } = captureLog();
+    const spawn = fakeSpawn(writesResults({}));
+    const out = await runGeneratedTest(runInput({ ...generated(["AC-1"]), ...over }), { spawn, workspace: { baseDir: base }, logger });
+    expect(out).toMatchObject({ status: "ERRORED", perCriterion: { "AC-1": "NOT_REACHED" } });
+    expect(out.errorText["AC-1"]).toMatch(/safety check/);
+    expect(spawn.calls).toEqual([]);
+    expect(logged).toHaveLength(1);
+  });
+
   it("writes the workspace and spawns the Playwright CLI there with only this run's SECRET_* variables", async () => {
     const spawn = fakeSpawn(writesResults({ steps: [{ title: title("AC-1") }] }, 0));
     const test = generated(["AC-1"]);
@@ -277,7 +299,7 @@ describe("runGeneratedTest", () => {
     expect(call!.tmpDir).toBe(path.join(dir, "tmp"));
     const files = spawn.snapshot[0]!;
     expect(files["run.spec.ts"]).toBe(test.source);
-    expect(files["helpers.ts"]).toBe(test.helpersSource);
+    expect(files["helpers.ts"]).toBe(HELPERS_SOURCE);
     expect(files["run-data.json"]).toBe(test.dataJson);
     expect(files["playwright.config.js"]).toContain(JSON.stringify(PROXY));
     // Secret values never touch the workspace files.
@@ -391,11 +413,6 @@ describe("runGeneratedTest", () => {
 // Infrastructure failures: logged with their (redacted) cause, the run records a template message
 // ---------------------------------------------------------------------------------------------
 
-function captureLog() {
-  const logged: { obj: Record<string, unknown>; msg?: string | undefined }[] = [];
-  return { logged, logger: { error: (obj: object, msg?: string) => void logged.push({ obj: obj as Record<string, unknown>, msg }) } };
-}
-
 describe("runGeneratedTest: infrastructure failures are logged", () => {
   const SECRET = "pw-Logged-Secret-7";
 
@@ -460,7 +477,7 @@ describe("runGeneratedTest: infrastructure failures are logged", () => {
 describe("createRunTestStage", () => {
   const SECRET = "pw-Stage-Secret-9";
 
-  function harness(opts: { spawn: SpawnRunner; openProxy?: () => Promise<RerunProxy>; signal?: AbortSignal; logger?: { error(obj: object, msg?: string): void } }) {
+  function harness(opts: { spawn: SpawnRunner; openProxy?: () => Promise<RerunProxy>; signal?: AbortSignal; logger?: { error(obj: object, msg?: string): void }; deadlineAt?: Date; now?: Date; onSave?: () => void }) {
     const events: EventDraft[] = [];
     const cleanups: (() => Promise<void> | void)[] = [];
     const uploads: (EvidenceUpload & { workspaceExisted: boolean })[] = [];
@@ -468,6 +485,7 @@ describe("createRunTestStage", () => {
     const store: EvidenceStore = {
       async save(upload) {
         uploads.push({ ...upload, workspaceExisted: existsSync(path.join(base, "run_1")) });
+        opts.onSave?.();
         return { artifactId: `art_${uploads.length}` };
       },
     };
@@ -480,6 +498,8 @@ describe("createRunTestStage", () => {
       redact: (v: unknown) => JSON.parse(JSON.stringify(v).replaceAll(SECRET, "[REDACTED]")),
       publish: async (e: EventDraft) => void events.push(e),
       addCleanup: (fn: () => Promise<void> | void) => void cleanups.push(fn),
+      deadlineAt: opts.deadlineAt ?? null,
+      now: () => opts.now ?? new Date(),
     } as unknown as StageContext;
     const stage = createRunTestStage({
       openProxy: opts.openProxy ?? (async () => proxy),
@@ -534,6 +554,42 @@ describe("createRunTestStage", () => {
     expect(h.proxy.closed).toBeGreaterThanOrEqual(1);
     expect(existsSync(path.join(base, "run_1"))).toBe(false);
     expect(h.uploads).toEqual([]);
+  });
+
+  it("the rerun budget is capped by the time left before the run's deadline, minus a reserve for the report", async () => {
+    const now = new Date("2026-09-26T10:00:00.000Z");
+    const spawn = fakeSpawn(writesResults({ steps: [{ title: title("AC-1") }] }, 0));
+    // 20 s left, rerunMs 60 s: the reserve is a quarter of what is left (5 s) → a 15 s rerun budget.
+    const h = harness({ spawn, now, deadlineAt: new Date(now.getTime() + 20_000) });
+    await h.stage(h.ctx, generated(["AC-1"]));
+    expect(spawn.snapshot[0]!["playwright.config.js"]).toContain(`"timeout": ${testTimeoutFor(15_000)}`);
+    expect(rerunTimeoutMs({ budgets: { explorationMs: 1, rerunMs: 60_000 }, deadlineAt: new Date(now.getTime() + 600_000), now: () => now })).toBe(60_000);
+    expect(rerunTimeoutMs({ budgets: { explorationMs: 1, rerunMs: 60_000 }, deadlineAt: new Date(now.getTime() + 80_000), now: () => now })).toBe(60_000);
+    expect(rerunTimeoutMs({ budgets: { explorationMs: 1, rerunMs: 60_000 }, deadlineAt: new Date(now.getTime() + 70_000), now: () => now })).toBe(52_500);
+    // The reserve never exceeds 30 s.
+    expect(rerunTimeoutMs({ budgets: { explorationMs: 1, rerunMs: 600_000 }, deadlineAt: new Date(now.getTime() + 400_000), now: () => now })).toBe(370_000);
+  });
+
+  it("no time left before the deadline (a long planning phase) → rerun ERRORED, not run ERRORED/TIMEOUT; nothing spawned", async () => {
+    const now = new Date("2026-09-26T10:00:00.000Z");
+    const spawn = fakeSpawn(writesResults({}));
+    const h = harness({ spawn, now, deadlineAt: new Date(now.getTime() - 1_000) });
+    const rerun = await h.stage(h.ctx, generated(["AC-1"]));
+    expect(rerun).toMatchObject({ status: "ERRORED", perCriterion: { "AC-1": "NOT_REACHED" } });
+    expect(rerun.errorText["AC-1"]).toMatch(/time budget/);
+    expect(spawn.calls).toEqual([]);
+  });
+
+  it("the run signal fires while the evidence uploads → no further upload or event; the stage throws the abort reason", async () => {
+    const controller = new AbortController();
+    const reason = new Error("run cancelled");
+    const spawn = fakeSpawn(writesResults({ status: "failed", steps: [{ title: title("AC-1"), error: "Error: [AC-1] no" }], errors: ["Error: [AC-1] no"], attachments: ["screenshot", "video"] }));
+    const h = harness({ spawn, signal: controller.signal, onSave: () => controller.abort(reason) });
+    await expect(h.stage(h.ctx, generated(["AC-1"]))).rejects.toBe(reason);
+    expect(h.uploads.map((u) => u.type)).toEqual(["SCREENSHOT"]);
+    expect(h.events).toEqual([]);
+    await h.runCleanups();
+    expect(existsSync(path.join(base, "run_1"))).toBe(false);
   });
 
   it("a proxy that cannot start → rerun ERRORED (R41), nothing spawned; the cause is logged, redacted", async () => {
