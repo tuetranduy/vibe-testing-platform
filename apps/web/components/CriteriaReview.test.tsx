@@ -73,6 +73,73 @@ describe("CriteriaReview", () => {
     expect(screen.getByText(/revision 2/i)).toBeInTheDocument();
   });
 
+  it("won't confirm while an edit is open, and says which one", async () => {
+    const user = userEvent.setup();
+    const fetch = routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    await user.click(within(cards[1]!).getByRole("button", { name: /edit/i }));
+    await user.type(within(cards[1]!).getByLabelText(/criterion AC-2/i), " by exactly 1");
+
+    const confirm = screen.getByRole("button", { name: /confirm and start/i });
+    expect(confirm).toBeDisabled();
+    expect(screen.getByText("Save or discard your edit to AC-2 first.")).toBeInTheDocument();
+    expect(confirm).toHaveAccessibleDescription(/save or discard your edit to AC-2 first/i);
+
+    await user.click(within(cards[0]!).getByRole("button", { name: /edit/i }));
+    expect(screen.getByText("Save or discard your edits to AC-1 and AC-2 first.")).toBeInTheDocument();
+
+    await user.click(within(cards[0]!).getByRole("button", { name: /discard/i }));
+    await user.click(within(cards[1]!).getByRole("button", { name: /discard/i }));
+    expect(confirm).toBeEnabled();
+    expect(screen.queryByText(/save or discard/i)).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(1); // nothing was sent
+  });
+
+  it("keeps another card's open draft when a different criterion is saved", async () => {
+    const user = userEvent.setup();
+    routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`PUT ${CRITERIA}`]: (init) => json(200, { ...JSON.parse(String(init!.body)), revision: 2 }),
+    });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    // An unsaved draft on AC-2 …
+    await user.click(within(cards[1]!).getByRole("button", { name: /edit/i }));
+    const draft = within(cards[1]!).getByLabelText(/criterion AC-2/i);
+    await user.clear(draft);
+    await user.type(draft, "The cart count increases by exactly 1");
+    // … while AC-1 is edited and saved.
+    await user.click(within(cards[0]!).getByRole("button", { name: /edit/i }));
+    const box = within(cards[0]!).getByLabelText(/criterion AC-1/i);
+    await user.clear(box);
+    await user.type(box, "The cart badge goes up");
+    await user.click(within(cards[0]!).getByRole("button", { name: /save/i }));
+    await screen.findByText(/revision 2/i);
+
+    const after = screen.getAllByRole("article");
+    expect(within(after[0]!).getByText("The cart badge goes up")).toBeInTheDocument();
+    expect(within(after[1]!).getByLabelText(/criterion AC-2/i)).toHaveValue("The cart count increases by exactly 1");
+    expect(screen.getByRole("button", { name: /confirm and start/i })).toBeDisabled();
+    expect(screen.getByText("Save or discard your edit to AC-2 first.")).toBeInTheDocument();
+  });
+
+  it("confirm is available again once the open edit is saved", async () => {
+    const user = userEvent.setup();
+    routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`PUT ${CRITERIA}`]: (init) => json(200, { ...JSON.parse(String(init!.body)), revision: 2 }),
+    });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    await user.click(within(cards[1]!).getByRole("button", { name: /edit/i }));
+    await user.type(within(cards[1]!).getByLabelText(/criterion AC-2/i), " by exactly 1");
+    expect(screen.getByRole("button", { name: /confirm and start/i })).toBeDisabled();
+    await user.click(within(cards[1]!).getByRole("button", { name: /save/i }));
+    expect(await screen.findByText("The cart count increases by the right amount by exactly 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /confirm and start/i })).toBeEnabled();
+  });
+
   it("removing a criterion sends PUT without it", async () => {
     const user = userEvent.setup();
     let sent: NormalizedRequirement | null = null;

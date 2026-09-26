@@ -1,7 +1,7 @@
 "use client";
 
 import type { AcceptanceCriterion } from "@platform/contracts";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 
 interface Props {
@@ -11,6 +11,8 @@ interface Props {
   canRemove: boolean;
   onSave: (statement: string) => Promise<boolean>;
   onRemove: () => void;
+  /** The editor opened (true) or closed (false); also false when the card goes away. */
+  onEditingChange?: (editing: boolean) => void;
 }
 
 const PRECONDITION: Record<AcceptanceCriterion["preconditions"][number]["kind"], string> = {
@@ -19,10 +21,27 @@ const PRECONDITION: Record<AcceptanceCriterion["preconditions"][number]["kind"],
   secret: "Needs a secret",
 };
 
-export function CriterionCard({ criterion: c, busy, canRemove, onSave, onRemove }: Props) {
+export function CriterionCard({ criterion: c, busy, canRemove, onSave, onRemove, onEditingChange }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(c.statement);
   const [error, setError] = useState<string | null>(null);
+  // Cards are keyed by id, so saving another criterion keeps this card's draft; only a change to
+  // its own statement (its own save) resets it.
+  const [statement, setStatement] = useState(c.statement);
+  if (statement !== c.statement) {
+    setStatement(c.statement);
+    setDraft(c.statement);
+  }
+
+  const reportEditing = useRef(onEditingChange);
+  useEffect(() => {
+    reportEditing.current = onEditingChange;
+  });
+  useEffect(() => {
+    if (!editing) return;
+    reportEditing.current?.(true);
+    return () => reportEditing.current?.(false);
+  }, [editing]);
   const aiJudged = c.expectedOutcome.kind === "semantic";
   const boxId = `criterion-${c.id}-statement`;
 

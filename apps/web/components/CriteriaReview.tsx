@@ -1,7 +1,7 @@
 "use client";
 
 import type { NormalizedRequirement } from "@platform/contracts";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ApiRequestError, confirmCriteria, getCriteria, updateCriteria, type ConfirmResult } from "../lib/api";
 import { CriterionCard } from "./CriterionCard";
 import { Icon } from "./Icon";
@@ -12,6 +12,9 @@ interface Props {
   onConfirmed: (result: ConfirmResult) => void;
 }
 
+/** "AC-2" / "AC-1 and AC-2" / "AC-1, AC-2 and AC-3" */
+const listIds = (ids: string[]) => (ids.length <= 1 ? ids.join("") : `${ids.slice(0, -1).join(", ")} and ${ids.at(-1)}`);
+
 const messageOf = (err: unknown) => (err instanceof ApiRequestError ? err.message : "Something went wrong. Please try again.");
 
 export function CriteriaReview({ runId, onConfirmed }: Props) {
@@ -20,6 +23,19 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Criteria whose editor is open: confirming would freeze the old text, so it waits for them. */
+  const [editing, setEditing] = useState<ReadonlySet<string>>(new Set());
+  const editingChange = useCallback(
+    (id: string, open: boolean) =>
+      setEditing((prev) => {
+        if (prev.has(id) === open) return prev;
+        const next = new Set(prev);
+        if (open) next.add(id);
+        else next.delete(id);
+        return next;
+      }),
+    [],
+  );
 
   useEffect(() => {
     let live = true;
@@ -81,6 +97,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
   const { criteria } = requirement;
   const unclear = criteria.filter((c) => c.ambiguity !== null).length;
   const aiJudged = criteria.filter((c) => c.expectedOutcome.kind === "semantic").length;
+  const openEdits = criteria.map((c) => c.id).filter((id) => editing.has(id));
 
   return (
     <section className="stack" aria-labelledby="review-title">
@@ -110,20 +127,32 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
       <div className="criteria-list">
         {criteria.map((c) => (
           <CriterionCard
-            key={`${c.id}-${requirement.revision}`}
+            key={c.id}
             criterion={c}
             busy={saving || confirming}
             canRemove={criteria.length > 1}
             onSave={(statement) => save(criteria.map((x) => (x.id === c.id ? { ...x, statement } : x)))}
             onRemove={() => void save(criteria.filter((x) => x.id !== c.id))}
+            onEditingChange={(open) => editingChange(c.id, open)}
           />
         ))}
       </div>
 
       <div className="form-actions">
-        <button type="button" className="button button-primary" onClick={confirm} disabled={confirming || saving}>
+        <button
+          type="button"
+          className="button button-primary"
+          onClick={confirm}
+          disabled={confirming || saving || openEdits.length > 0}
+          aria-describedby={openEdits.length > 0 ? "confirm-blocked" : undefined}
+        >
           {confirming ? "Starting…" : "Confirm and start"}
         </button>
+        {openEdits.length > 0 && (
+          <p id="confirm-blocked" className="hint">
+            <Icon name="info" /> Save or discard your {openEdits.length === 1 ? "edit" : "edits"} to {listIds(openEdits)} first.
+          </p>
+        )}
         {(unclear > 0 || aiJudged > 0) && (
           <p className="hint">
             <Icon name="info" /> Unclear and model-judged criteria will be reported as Inconclusive.
