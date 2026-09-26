@@ -117,4 +117,32 @@ describe("collectEvidence", () => {
     const store: EvidenceStore = { save: async () => Promise.reject(Object.assign(new Error("S3 down"), { name: "StorageError" })) };
     await expect(collectEvidence(ctx, [artifact("SCREENSHOT", file("a.png", "x"), "image/png")], { store, secretValues: [] })).rejects.toThrow("S3 down");
   });
+
+  it("stops at the run signal: no upload and no event after an abort (cancel / deadline mid-collection)", async () => {
+    const uploads: EvidenceUpload[] = [];
+    const events: EventDraft[] = [];
+    const controller = new AbortController();
+    const store: EvidenceStore = {
+      async save(upload) {
+        uploads.push(upload);
+        controller.abort(new Error("run cancelled")); // the run is cancelled while the first file uploads
+        return { artifactId: `art_${uploads.length}` };
+      },
+    };
+    const ctx = { publish: async (e: EventDraft) => void events.push(e), signal: controller.signal };
+    const files = [
+      artifact("SCREENSHOT", file("test-failed-1.png", "png-bytes"), "image/png"),
+      artifact("VIDEO", file("video.webm", "webm-bytes"), "video/webm"),
+      artifact("TRACE", trace(), "application/zip"),
+    ];
+    await collectEvidence(ctx, files, { store, secretValues: [SECRET] });
+    expect(uploads.map((u) => u.type)).toEqual(["SCREENSHOT"]);
+    expect(events).toEqual([]);
+
+    // Already aborted: nothing at all.
+    const none = recorder();
+    expect(await collectEvidence({ ...none.ctx, signal: controller.signal }, files, { store: none.store, secretValues: [] })).toEqual([]);
+    expect(none.uploads).toEqual([]);
+    expect(none.events).toEqual([]);
+  });
 });

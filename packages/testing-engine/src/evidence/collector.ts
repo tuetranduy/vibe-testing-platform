@@ -12,6 +12,10 @@ import { TraceScrubError, scrubTrace } from "./trace-scrubber";
  *
  * A trace that cannot be scrubbed is never uploaded as is: it is dropped with `artifact.omitted`.
  * Storage failures propagate (infrastructure error, like exploration screenshots).
+ *
+ * The run signal (cancel / hard deadline) is checked per file, before its upload and before its
+ * event: after an abort nothing more is uploaded or published, and the ids stored so far are
+ * returned (the stage then throws the abort reason).
  */
 
 /** A file of the rerun, inside its workspace (validated by the result parser). */
@@ -45,13 +49,20 @@ export interface CollectEvidenceOptions {
 
 const LABEL: Record<LocalArtifact["type"], string> = { TRACE: "trace", SCREENSHOT: "screenshot", VIDEO: "video" };
 
-export async function collectEvidence(ctx: Pick<StageContext, "publish">, artifacts: LocalArtifact[], opts: CollectEvidenceOptions): Promise<string[]> {
+export async function collectEvidence(
+  ctx: Pick<StageContext, "publish"> & { signal?: AbortSignal | undefined },
+  artifacts: LocalArtifact[],
+  opts: CollectEvidenceOptions,
+): Promise<string[]> {
+  const aborted = () => ctx.signal?.aborted === true;
   const sensitivity: ArtifactSensitivity = opts.secretValues.length > 0 ? "SECRET_BEARING" : "STANDARD";
-  const omitted = (type: LocalArtifact["type"], reason: string) =>
-    ctx.publish({ type: "artifact.omitted", message: `Rerun ${LABEL[type]} omitted`, payload: { type, reason } });
+  const omitted = async (type: LocalArtifact["type"], reason: string) => {
+    if (!aborted()) await ctx.publish({ type: "artifact.omitted", message: `Rerun ${LABEL[type]} omitted`, payload: { type, reason } });
+  };
 
   const ids: string[] = [];
   for (const artifact of artifacts) {
+    if (aborted()) break;
     let body: Uint8Array;
     try {
       // A regular file only: never follow a link out of the workspace.
@@ -70,6 +81,7 @@ export async function collectEvidence(ctx: Pick<StageContext, "publish">, artifa
         continue;
       }
     }
+    if (aborted()) break;
     const sha256 = createHash("sha256").update(body).digest("hex");
     const { artifactId } = await opts.store.save({
       type: artifact.type,
@@ -80,6 +92,7 @@ export async function collectEvidence(ctx: Pick<StageContext, "publish">, artifa
       sensitivity,
     });
     ids.push(artifactId);
+    if (aborted()) break;
     await ctx.publish({
       type: "artifact.created",
       message: `Rerun ${LABEL[artifact.type]} stored`,

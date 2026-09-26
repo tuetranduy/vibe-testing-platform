@@ -3,8 +3,10 @@ import path from "node:path";
 import type { GeneratedTest, RerunOutcome, RerunResult } from "@platform/contracts";
 import { createValueRedactor } from "@platform/security";
 import { checkGeneratedSource } from "../compiler/ast-guard";
+import { HELPERS_SOURCE } from "../compiler/helpers-template";
 import { secretEnvName } from "../compiler/test-compiler";
 import type { LocalArtifact } from "../evidence/collector";
+import { redactedCause, type FailureLogger } from "../shared/log-cause";
 import { CONFIG_FILE, RESULTS_FILE, buildPlaywrightConfig } from "./config-template";
 import { RunResultsError, parseRunResults, type ParsedRunResults } from "./result-parser";
 import { prepareWorkspace, type Workspace, type WorkspaceConfig } from "./workspace";
@@ -14,7 +16,9 @@ import { prepareWorkspace, type Workspace, type WorkspaceConfig } from "./worksp
  * started through a spawn port (the worker's sandbox/runner-process.ts: env allow-list, own process
  * group), with Chromium behind the rerun's egress proxy, and reads the per-criterion outcomes.
  *
- * - Ruling R42: the source is re-checked with the AST guard first; a rejected source never runs.
+ * - Ruling R42: the stored test is re-checked before anything is written: the source with the AST
+ *   guard, helpers.ts against the fixed template (the workspace gets the template itself), and
+ *   run-data.json (a JSON object whose `targetUrl` and `urls` are http(s)). A rejected test never runs.
  * - Ruling R41: a rerun that fails on its own (guard, workspace, spawn, crash, unreadable results,
  *   the budget, the abort signal) is status ERRORED, returned — never thrown. Criteria whose `[AC-n]`
  *   step completed keep their outcome, the others are NOT_REACHED. The caller (the stage) decides
@@ -68,15 +72,7 @@ export interface RunGeneratedTestInput {
 }
 
 /** Receives the cause of a rerun infrastructure failure. Only the log sees it. */
-export interface RerunLogger {
-  error(obj: object, msg?: string): void;
-}
-
-/** An error as the log records it: name and message, secret values redacted, bounded. */
-export function redactedCause(err: unknown, redact: (value: unknown) => unknown): { name: string; message: string } {
-  const e = err instanceof Error ? err : new Error(String(err));
-  return { name: e.name, message: String(redact(e.message)).slice(0, 4_000) };
-}
+export type RerunLogger = FailureLogger;
 
 export interface RunGeneratedTestDeps {
   spawn: SpawnRunner;
@@ -100,6 +96,40 @@ export interface RunGeneratedTestResult {
 export const DEFAULT_ACTION_TIMEOUT_MS = 10_000;
 /** Kept out of Playwright's test timeout for starting the runner and writing results. */
 const RUNNER_OVERHEAD_MS = 10_000;
+
+const isHttpUrl = (value: unknown): boolean => {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Why a stored test must not run (Ruling R42), or an empty list: the source fails the AST guard,
+ * helpers.ts is not the fixed template, or run-data.json is not the compiler's shape where it
+ * matters (a JSON object; `targetUrl` and every `urls` value http(s): they are the pages opened).
+ */
+export function checkGeneratedTest(test: Pick<GeneratedTest, "source" | "helpersSource" | "dataJson">): string[] {
+  const issues = [...checkGeneratedSource(test.source)];
+  if (test.helpersSource !== HELPERS_SOURCE) issues.push("helpers.ts is not the fixed helpers template");
+  let data: unknown;
+  try {
+    data = JSON.parse(test.dataJson);
+  } catch {
+    return [...issues, "run-data.json is not valid JSON"];
+  }
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return [...issues, "run-data.json is not a JSON object"];
+  const { targetUrl, urls } = data as { targetUrl?: unknown; urls?: unknown };
+  if (!isHttpUrl(targetUrl)) issues.push("run-data.json targetUrl is not an http(s) URL");
+  if (urls !== undefined) {
+    if (typeof urls !== "object" || urls === null || Array.isArray(urls)) issues.push("run-data.json urls is not an object");
+    else for (const [key, value] of Object.entries(urls)) if (!isHttpUrl(value)) issues.push(`run-data.json urls.${key} is not an http(s) URL`);
+  }
+  return issues;
+}
 
 /** Playwright's test timeout inside a rerun budget. */
 export function testTimeoutFor(budgetMs: number): number {
@@ -135,12 +165,13 @@ export async function runGeneratedTest(input: RunGeneratedTestInput, deps: RunGe
   const redact = createValueRedactor(Object.values(input.secrets));
   const logFailure = (msg: string, cause: unknown) => deps.logger?.error({ runId: input.runId, err: redactedCause(cause, redact) }, msg);
 
-  const issues = checkGeneratedSource(input.test.source);
+  const issues = checkGeneratedTest(input.test);
   if (issues.length > 0) {
     logFailure("generated test rejected by the safety check; not run", new Error(issues.join("; ")));
     return errored(REASON.rejected);
   }
   if (input.signal.aborted) return errored(REASON.aborted);
+  if (input.timeoutMs <= 0) return errored(REASON.budget);
 
   let workspace: Workspace;
   let env: Record<string, string>;
@@ -154,7 +185,7 @@ export async function runGeneratedTest(input: RunGeneratedTestInput, deps: RunGe
     });
     workspace = await prepareWorkspace(deps.workspace, input.runId, {
       source: input.test.source,
-      helpersSource: input.test.helpersSource,
+      helpersSource: HELPERS_SOURCE,
       dataJson: input.test.dataJson,
       config,
     });

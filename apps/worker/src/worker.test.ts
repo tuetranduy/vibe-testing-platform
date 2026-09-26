@@ -26,11 +26,15 @@ describe("BullMQ wiring", () => {
     try {
       const run = await seedRun(h, { options: { autoConfirmCriteria: true } });
       await queue.enqueueAnalyze(run.id);
+      // Generous: under a loaded machine (the full suite runs real Chromium) the queues can be slow.
+      // The orchestrator transitions to COMPLETED, then publishes run.completed: wait for both.
       await vi.waitFor(
-        async () => expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("COMPLETED"),
-        { timeout: 15_000, interval: 100 },
+        async () => {
+          expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("COMPLETED");
+          expect((await eventsOf(h, run.id)).at(-1)!.type).toBe("run.completed");
+        },
+        { timeout: 30_000, interval: 100 },
       );
-      expect((await eventsOf(h, run.id)).at(-1)!.type).toBe("run.completed");
       // Duplicate enqueue is deduplicated by jobId.
       await queue.enqueueExecute(run.id);
       expect(await queue.isExecuteWaiting(run.id)).toBe(false);
@@ -38,5 +42,5 @@ describe("BullMQ wiring", () => {
       await workers.close();
       await queue.close();
     }
-  });
+  }, 45_000);
 });
