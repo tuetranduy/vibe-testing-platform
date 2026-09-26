@@ -1,11 +1,16 @@
 "use client";
 
-import type { AcceptanceCriterion } from "@platform/contracts";
+import type { AcceptanceCriterion, FactRequest } from "@platform/contracts";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
+import { describeOutcome } from "./outcome-text";
 
 interface Props {
   criterion: AcceptanceCriterion;
+  /** The requirement's fact descriptions, to name what the check reads. */
+  facts: readonly FactRequest[];
+  /** The statement differs from the one this review loaded with. */
+  reworded: boolean;
   /** Another save is in flight: edits are paused. */
   busy: boolean;
   canRemove: boolean;
@@ -21,7 +26,7 @@ const PRECONDITION: Record<AcceptanceCriterion["preconditions"][number]["kind"],
   secret: "Needs a secret",
 };
 
-export function CriterionCard({ criterion: c, busy, canRemove, onSave, onRemove, onEditingChange }: Props) {
+export function CriterionCard({ criterion: c, facts, reworded, busy, canRemove, onSave, onRemove, onEditingChange }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(c.statement);
   const [error, setError] = useState<string | null>(null);
@@ -116,6 +121,18 @@ export function CriterionCard({ criterion: c, busy, canRemove, onSave, onRemove,
       ) : (
         <p className="criterion-statement">{c.statement}</p>
       )}
+
+      <div className="criterion-check" role="group" aria-labelledby={`${c.id}-check`}>
+        <p id={`${c.id}-check`} className="criterion-check-title">
+          What will be checked
+        </p>
+        <p>{describeOutcome(c.expectedOutcome, facts)}</p>
+        {(editing || reworded) && (
+          <p className="hint">
+            <Icon name="info" /> Rewording changes the description only; the check above is unchanged.
+          </p>
+        )}
+      </div>
 
       <p className="criterion-source">
         From your requirement: <q>{c.sourceText}</q>

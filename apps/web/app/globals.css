@@ -881,6 +881,21 @@ input[type="radio"] {
   font-size: 1.0625rem;
   font-weight: 500;
 }
+.criterion-check {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9375rem;
+}
+.criterion-check-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
 .criterion-source {
   color: var(--text-muted);
   font-size: 0.875rem;

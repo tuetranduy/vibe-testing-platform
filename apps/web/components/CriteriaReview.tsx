@@ -25,6 +25,12 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
   const [error, setError] = useState<string | null>(null);
   /** Criteria whose editor is open: confirming would freeze the old text, so it waits for them. */
   const [editing, setEditing] = useState<ReadonlySet<string>>(new Set());
+  /**
+   * Each criterion's statement as this review first loaded it. The API keeps only the latest
+   * revision, so "reworded" means "differs from what this page loaded" — the note is honest for
+   * edits made here, and the check itself is shown on every card regardless.
+   */
+  const [loaded, setLoaded] = useState<ReadonlyMap<string, string>>(new Map());
   const editingChange = useCallback(
     (id: string, open: boolean) =>
       setEditing((prev) => {
@@ -40,7 +46,11 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
   useEffect(() => {
     let live = true;
     getCriteria(runId).then(
-      (r) => live && setRequirement(r),
+      (r) => {
+        if (!live) return;
+        setRequirement(r);
+        setLoaded(new Map(r.criteria.map((c) => [c.id, c.statement])));
+      },
       (err: unknown) => live && setLoadError(messageOf(err)),
     );
     return () => {
@@ -129,6 +139,8 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
           <CriterionCard
             key={c.id}
             criterion={c}
+            facts={requirement.facts}
+            reworded={loaded.has(c.id) && loaded.get(c.id) !== c.statement}
             busy={saving || confirming}
             canRemove={criteria.length > 1}
             onSave={(statement) => save(criteria.map((x) => (x.id === c.id ? { ...x, statement } : x)))}
