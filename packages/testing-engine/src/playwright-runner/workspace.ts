@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { CONFIG_FILE, SPEC_FILE } from "./config-template";
@@ -50,6 +50,32 @@ export function defaultRunnerNodeModulesDir(): string {
   return path.resolve(pkg, "..", "..");
 }
 
+/** The runner's node_modules (configured or default), checked to hold @playwright/test's CLI. Throws otherwise. */
+export function runnerNodeModulesDir(config: WorkspaceConfig): string {
+  const nodeModules = config.nodeModulesDir ?? defaultRunnerNodeModulesDir();
+  if (!existsSync(path.join(nodeModules, PLAYWRIGHT_TEST, "cli.js"))) {
+    throw new Error(`The runner's node_modules (${nodeModules}) has no @playwright/test`);
+  }
+  return nodeModules;
+}
+
+/**
+ * Start-up check (the worker's runner preflight): @playwright/test resolves from the runner's
+ * node_modules, and the base dir can be created and written (a probe dir is made and removed).
+ * Throws the first problem.
+ */
+export async function checkWorkspaceConfig(config: WorkspaceConfig): Promise<void> {
+  runnerNodeModulesDir(config);
+  if (!path.isAbsolute(config.baseDir)) throw new Error("The rerun workspace base directory must be absolute");
+  await mkdir(config.baseDir, { recursive: true });
+  const probe = await mkdtemp(path.join(config.baseDir, ".preflight-"));
+  try {
+    await writeFile(path.join(probe, "probe"), "");
+  } finally {
+    await rm(probe, { recursive: true, force: true });
+  }
+}
+
 export function workspaceDir(config: WorkspaceConfig, runId: string): string {
   if (!RUN_ID.test(runId)) throw new Error(`Invalid run id for a rerun workspace: ${JSON.stringify(runId)}`);
   if (!path.isAbsolute(config.baseDir)) throw new Error("The rerun workspace base directory must be absolute");
@@ -58,10 +84,7 @@ export function workspaceDir(config: WorkspaceConfig, runId: string): string {
 
 export async function prepareWorkspace(config: WorkspaceConfig, runId: string, files: WorkspaceFiles): Promise<Workspace> {
   const dir = workspaceDir(config, runId);
-  const nodeModules = config.nodeModulesDir ?? defaultRunnerNodeModulesDir();
-  if (!existsSync(path.join(nodeModules, PLAYWRIGHT_TEST, "cli.js"))) {
-    throw new Error(`The runner's node_modules (${nodeModules}) has no @playwright/test`);
-  }
+  const nodeModules = runnerNodeModulesDir(config);
   await rm(dir, { recursive: true, force: true, maxRetries: 3 });
   await mkdir(config.baseDir, { recursive: true });
   await mkdir(dir, { mode: 0o700 });

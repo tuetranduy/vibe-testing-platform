@@ -11,6 +11,7 @@ import {
   type ExploreStageDeps,
   type FakeEngineOptions,
   type RunTestStageDeps,
+  type WorkspaceConfig,
 } from "@platform/testing-engine";
 import type { WorkerLogger } from "./deps";
 import { createExplorationDeps } from "./exploration";
@@ -31,6 +32,14 @@ export type EngineConfig = Pick<Env, "LLM_PROVIDER" | "LLM_MODEL"> &
       | "RUNNER_NODE_MODULES_DIR"
     >
   >;
+
+/** Where reruns get their workspaces (Ruling R32): RUNNER_WORKSPACE_DIR / RUNNER_NODE_MODULES_DIR, with defaults. */
+export function rerunWorkspaceConfig(config: Pick<EngineConfig, "RUNNER_WORKSPACE_DIR" | "RUNNER_NODE_MODULES_DIR">): WorkspaceConfig {
+  return {
+    baseDir: config.RUNNER_WORKSPACE_DIR ?? path.join(os.tmpdir(), "platform-runs"),
+    nodeModulesDir: config.RUNNER_NODE_MODULES_DIR,
+  };
+}
 
 export interface EngineSelection {
   kind: "fake" | "real";
@@ -86,6 +95,7 @@ export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSele
     config: { privateAllowlist, ...retention },
     ...(deps.exploration ? { overrides: deps.exploration } : {}),
   });
+  const workspace = rerunWorkspaceConfig(config);
   const runTest = createRunTestDeps({
     db: deps.db,
     storage: deps.storage,
@@ -93,8 +103,8 @@ export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSele
     config: {
       privateAllowlist,
       ...retention,
-      workspaceDir: config.RUNNER_WORKSPACE_DIR ?? path.join(os.tmpdir(), "platform-runs"),
-      nodeModulesDir: config.RUNNER_NODE_MODULES_DIR,
+      workspaceDir: workspace.baseDir,
+      nodeModulesDir: workspace.nodeModulesDir,
     },
     ...(deps.rerun ? { overrides: deps.rerun } : {}),
   });

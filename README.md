@@ -102,7 +102,7 @@ pnpm --filter @platform/api dev
 # terminal 2
 set -a; . ./.env; set +a
 LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... pnpm --filter @platform/worker dev
-# expect "using the real test engine" and "browser sandbox preflight passed" in its log
+# expect "using the real test engine", "browser sandbox preflight passed" and "rerun runner preflight passed" in its log
 
 # terminal 3
 ./scripts/milestone-b-demo.sh   # targets http://localhost:4000/ by default

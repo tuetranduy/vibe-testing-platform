@@ -315,6 +315,28 @@ describe("createEngine (Ruling R7)", () => {
     expect(((sandboxLog!.obj as { err: Error }).err).message).toContain("--no-sandbox");
   });
 
+  it("real engine: a misconfigured rerun (RUNNER_NODE_MODULES_DIR without @playwright/test) → rerun ERRORED, the run still completes on exploration evidence; the cause is in the worker log", async () => {
+    const page = { facts: { "cartCount@before_add": { value: 0, dom: true }, "cartCount@after_add": { value: 1, dom: true } } };
+    const logged: { level: string; obj: object; msg?: string }[] = [];
+    const at = (level: string) => (obj: object, msg?: string) => void logged.push({ level, obj, msg });
+    const logger = { info: at("info"), warn: at("warn"), error: at("error") };
+    const real = realDeps(new FakeTransport().enqueue({ json: planned }, noDiagnostics), { logger }, page);
+    const nodeModulesDir = path.join(artifactDir, "no-runner-node-modules");
+    const engine = createEngine(REAL, { ...real.deps, rerun: { spawn: real.rerunSpawn, workspace: { baseDir: real.rerunDir, nodeModulesDir } } });
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
+
+    await executeRunJob(h.deps(engine.stages), run.id);
+
+    expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("COMPLETED");
+    expect(real.rerunSpawn.calls).toEqual([]);
+    const events = await eventsOf(h, run.id);
+    expect(events.find((e) => e.type === "playwright.completed")?.payload).toMatchObject({ status: "ERRORED", perCriterion: { "AC-1": "NOT_REACHED" } });
+    const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
+    expect(results.find((r) => r.criterionId === "AC-1")).toMatchObject({ status: "PASS", verdictSource: "EXPLORATION_ONLY", rerunOutcome: "NOT_REACHED" });
+    const cause = logged.find((l) => l.level === "error" && /rerun workspace could not be prepared/.test(l.msg ?? ""));
+    expect(cause).toMatchObject({ obj: { runId: run.id, err: { message: expect.stringContaining(nodeModulesDir) } } });
+  });
+
   it("real engine verifies from recorded facts: nothing observed → INCONCLUSIVE / FACT_NOT_OBSERVED (a fallback set to PASS has no say)", async () => {
     // The fake page shows nothing (extract answers null): no criterion can be decided.
     const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), { fake: { provisionalStatus: "PASS" } }).deps);

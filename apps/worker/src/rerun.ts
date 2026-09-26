@@ -41,7 +41,8 @@ export interface RerunDepsInput {
  * The real RUNNING_PLAYWRIGHT stage's dependencies (Task 17): the rerun's own egress proxy (Ruling
  * R31: same private allowlist as exploration, blocks published as `egress.blocked` the same way;
  * closed by the stage and by its registered cleanup), the runner child process (env allow-list,
- * process-group kill), the workspace location, and the evidence store.
+ * process-group kill), the workspace location, the evidence store, and the worker logger for the
+ * cause of an infrastructure failure (the run itself records only a template message).
  */
 export function createRunTestDeps(input: RerunDepsInput): RunTestStageDeps {
   const { db, storage, logger, config } = input;
@@ -58,6 +59,8 @@ export function createRunTestDeps(input: RerunDepsInput): RunTestStageDeps {
     spawn: overrides.spawn ?? createRunnerSpawn({ logger }),
     workspace: overrides.workspace ?? { baseDir: config.workspaceDir, nodeModulesDir: config.nodeModulesDir },
     evidence: overrides.evidence ?? ((ctx) => createRerunEvidenceStore({ db, storage, config }, ctx)),
+    // Infrastructure failures (proxy, workspace, spawn, browser launch) reach the worker log with their cause.
+    logger: overrides.logger ?? logger,
     ...(overrides.actionTimeoutMs !== undefined ? { actionTimeoutMs: overrides.actionTimeoutMs } : {}),
     ...(overrides.expectTimeoutMs !== undefined ? { expectTimeoutMs: overrides.expectTimeoutMs } : {}),
   };
