@@ -4,6 +4,7 @@ import { createRunEventPublisher, type RunEventPublisher } from "@platform/event
 import { redactByKey } from "@platform/security";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
+import { applyCriteriaEdit } from "./criteria-edit";
 
 const ENQUEUE_FAILED = "Queue unavailable after confirmation";
 
@@ -45,8 +46,10 @@ export class CriteriaService {
 
   /**
    * Saves a new revision from a full NormalizedRequirement-shaped body. `runId`, `revision` and
-   * `confirmedAt` are taken from the URL / server, never the body. `originalText` must be unchanged;
-   * everything else (RequirementRepository.createRevision's lifecycle/frozen guards) maps to 409.
+   * `confirmedAt` are taken from the URL / server, never the body. `originalText` must be unchanged.
+   * Criteria may be removed and a criterion's check values edited; the server writes the statement
+   * of every edited criterion (applyCriteriaEdit), anything else is 400. Outside
+   * AWAITING_CONFIRMATION, RequirementRepository.createRevision's lifecycle/frozen guards map to 409.
    */
   async update(runId: string, body: unknown): Promise<NormalizedRequirement> {
     const tenantId = this.deps.config.defaultTenantId;
@@ -65,11 +68,23 @@ export class CriteriaService {
       ]);
     }
 
-    const updated = await this.requirements.createRevision(runId, {
-      originalText: req.originalText,
-      criteria: req.criteria,
-      facts: req.facts,
-    });
+    // Review edits (spec 2026-09-26-criteria-check-edit): only while the run waits for confirmation.
+    // In any other state createRevision's lifecycle/frozen guards answer 409, as before.
+    let criteria = req.criteria;
+    let facts = req.facts;
+    if (latest && !latest.confirmedAt && run.lifecycle === "AWAITING_CONFIRMATION") {
+      const edit = applyCriteriaEdit(latest, req);
+      if (!edit.ok) {
+        const message =
+          edit.code === "STATEMENT_ONLY_EDIT"
+            ? "A criterion's wording can only change together with its check"
+            : "Only a criterion's check values can change during review";
+        throw new HttpError(400, edit.code, message, edit.issues);
+      }
+      ({ criteria, facts } = edit);
+    }
+
+    const updated = await this.requirements.createRevision(runId, { originalText: req.originalText, criteria, facts });
 
     await this.publisher().publish({
       runId,
