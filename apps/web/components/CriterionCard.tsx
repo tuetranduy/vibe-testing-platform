@@ -42,6 +42,13 @@ export function CriterionCard({ criterion: c, facts, busy, canRemove, onSave, on
   const [editing, setEditing] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+  // When the editor closes, its buttons disappear: give focus back to "Edit check".
+  const editButton = useRef<HTMLButtonElement>(null);
+  const wasEditing = useRef(false);
+  useEffect(() => {
+    if (wasEditing.current && !editing) editButton.current?.focus();
+    wasEditing.current = editing;
+  }, [editing]);
   // Cards are keyed by id, so saving another criterion keeps this card's open editor; only a
   // change to its own check (its own save) closes it.
   const checkKey = JSON.stringify(c.expectedOutcome);
@@ -186,7 +193,14 @@ export function CriterionCard({ criterion: c, facts, busy, canRemove, onSave, on
       {!editing && !removing && (
         <div className="actions">
           {!aiJudged && (
-            <button type="button" className="button button-secondary" onClick={() => setEditing(true)} disabled={busy} aria-label={`Edit check ${c.id}`}>
+            <button
+              ref={editButton}
+              type="button"
+              className="button button-secondary"
+              onClick={() => setEditing(true)}
+              disabled={busy}
+              aria-label={`Edit check ${c.id}`}
+            >
               Edit check
             </button>
           )}

@@ -1,7 +1,7 @@
 "use client";
 
 import { describeExpectedOutcome, type ExpectedOutcome, type FactRequest } from "@platform/contracts";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "./Icon";
 
 export type EditableOutcome = Exclude<ExpectedOutcome, { kind: "semantic" }>;
@@ -103,6 +103,11 @@ function build(o: EditableOutcome, d: Draft): { outcome: ExpectedOutcome } | { e
  */
 export function CheckEditor({ criterionId, outcome, facts, busy, serverError, onSave, onDiscard }: Props) {
   const uid = useId();
+  const root = useRef<HTMLDivElement>(null);
+  // The "Edit check" button that opened the editor is gone now: start on the first control.
+  useEffect(() => {
+    root.current?.querySelector<HTMLElement>("input, select, textarea, button")?.focus();
+  }, []);
   const [draft, setDraft] = useState<Draft>(() => draftOf(outcome));
   const [shown, setShown] = useState<Partial<Record<Field, string>>>({});
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
@@ -140,7 +145,7 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
   const textField = (label: string) => input("text", label, draft.text, (v) => set({ text: v }));
 
   return (
-    <div className="check-editor stack" role="group" aria-label={`Edit the check of ${criterionId}`}>
+    <div ref={root} className="check-editor stack" role="group" aria-label={`Edit the check of ${criterionId}`}>
       {outcome.kind === "visible" && (
         <fieldset className="field">
           <legend>The element should be</legend>

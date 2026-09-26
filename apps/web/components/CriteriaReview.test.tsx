@@ -172,6 +172,17 @@ describe("CriteriaReview", () => {
     expect(screen.getByRole("button", { name: /confirm and start/i })).toBeEnabled();
   });
 
+  it("moves focus into the editor when it opens, and back to Edit check when it closes", async () => {
+    const user = userEvent.setup();
+    routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    await user.click(within(cards[1]!).getByRole("button", { name: "Edit check AC-2" }));
+    expect(within(cards[1]!).getByLabelText(/difference/i)).toHaveFocus();
+    await user.click(within(cards[1]!).getByRole("button", { name: /discard/i }));
+    expect(within(cards[1]!).getByRole("button", { name: "Edit check AC-2" })).toHaveFocus();
+  });
+
   it("an AI-judged criterion has no check editor, only Remove", async () => {
     routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()) });
     render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
