@@ -174,7 +174,8 @@ describe("PUT /v1/test-runs/:runId/criteria", () => {
     const body = res.json();
     expect(body.revision).toBe(2);
     expect(body.criteria).toHaveLength(1);
-    expect(body.criteria[0].statement).toBe("A confirmation banner appears");
+    // The check changed, so the server wrote the wording from it (the client's text is ignored).
+    expect(body.criteria[0].statement).toBe("Confirmation text (at “after add”) contains “added” (ignoring case).");
     expect(body.criteria[0].expectedOutcome.match.value).toBe("added");
 
     const events = await new EventRepository(t.tdb.db).listAfter(runId, 0);
@@ -182,6 +183,69 @@ describe("PUT /v1/test-runs/:runId/criteria", () => {
     expect(updated).toBeDefined();
     expect(updated!.payload).toEqual({ revision: 2 });
     expect(updated!.message).toBe("Criteria revision 2 saved");
+  });
+
+  /** "The cart holds 1 item": a numeric check against a literal. */
+  function oneItemRequirement(): Draft {
+    const base = baseRequirement();
+    return {
+      ...base,
+      criteria: [
+        {
+          id: "AC-1",
+          sourceText: "The cart count should increase.",
+          statement: "The cart holds 1 item",
+          expectedOutcome: { kind: "numeric_compare", left: { key: "cartCount", checkpoint: "after_add" }, operator: "eq", right: 1 },
+          preconditions: [],
+          ambiguity: null,
+        },
+      ],
+      facts: base.facts.filter((f) => f.key === "cartCount"),
+    };
+  }
+
+  /** The latest revision with criterion `index`'s check replaced by `patch` applied to it. */
+  function withCheck(current: NormalizedRequirement, index: number, patch: Record<string, unknown>) {
+    return {
+      ...current,
+      criteria: current.criteria.map((c, i) => (i === index ? { ...c, expectedOutcome: { ...c.expectedOutcome, ...patch } } : c)),
+    };
+  }
+
+  it("regression: rewording '1 item' to '2 items' is refused; changing the check to 2 saves a check and wording that both say 2", async () => {
+    const runId = await setupAwaitingConfirmation(oneItemRequirement());
+    const current = getCriteriaBody(await getCriteria(runId));
+
+    const reworded = await putCriteria(runId, { ...current, criteria: [{ ...current.criteria[0]!, statement: "The cart holds 2 items" }] });
+    expect(reworded.statusCode).toBe(400);
+    expect(reworded.json()).toMatchObject({ code: "STATEMENT_ONLY_EDIT", issues: [{ path: ["criteria", 0, "statement"] }] });
+    expect(getCriteriaBody(await getCriteria(runId)).revision).toBe(1); // nothing saved
+
+    const edited = await putCriteria(runId, withCheck(current, 0, { right: 2 }));
+    expect(edited.statusCode).toBe(200);
+    const saved = edited.json();
+    expect(saved.revision).toBe(2);
+    expect(saved.criteria[0].expectedOutcome.right).toBe(2);
+    expect(saved.criteria[0].statement).toBe("Cart badge count (at “after add”) equals 2.");
+  });
+
+  it("clears ambiguity on an edited criterion and keeps it on an unedited one", async () => {
+    const runId = await setupAwaitingConfirmation(requirementWithWarnings());
+    const current = getCriteriaBody(await getCriteria(runId));
+    const res = await putCriteria(runId, withCheck(current, 0, { operator: "gte" }));
+    expect(res.statusCode).toBe(200);
+    const saved = res.json();
+    expect(saved.criteria[0].ambiguity).toBeNull();
+    expect(saved.criteria[0].statement).toBe("Cart badge count (at “after add”) is at least Cart badge count (at “before add”).");
+    expect(saved.criteria[1]).toEqual(current.criteria[1]);
+  });
+
+  it("rejects changing what a check reads with 400 VALIDATION_FAILED and an issue path", async () => {
+    const runId = await setupAwaitingConfirmation();
+    const current = getCriteriaBody(await getCriteria(runId));
+    const res = await putCriteria(runId, withCheck(current, 0, { left: { key: "cartCount", checkpoint: "before_add" } }));
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: "VALIDATION_FAILED", issues: [{ path: ["criteria", 0, "expectedOutcome"] }] });
   });
 
   it("rejects a body whose originalText differs from the stored one, with 400", async () => {
