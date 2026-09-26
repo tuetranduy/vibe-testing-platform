@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { json } from "../test/fixtures";
+import { json, requirementFixture, summaryFixture } from "../test/fixtures";
 import { NewTestForm } from "./NewTestForm";
 
 const push = vi.fn();
@@ -260,5 +260,33 @@ describe("NewTestForm", () => {
     expect(screen.getByRole("button", { name: /starting/i })).toBeDisabled();
     resolve(json(202, { runId: "run_9", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_9/events" }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_9"));
+  });
+});
+
+describe("NewTestForm starting over from a run", () => {
+  it("pre-fills the URL and the full requirement, and asks for test data and secrets again", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL) =>
+        String(url).endsWith("/criteria") ? json(200, requirementFixture()) : json(200, summaryFixture({ lifecycle: "CANCELLED" })),
+      ),
+    );
+    render(<NewTestForm from="run_1" />);
+    expect(await screen.findByDisplayValue("https://shop.example.com/")).toBeInTheDocument();
+    expect(screen.getByLabelText(/requirement/i)).toHaveValue(requirementFixture().originalText);
+    expect(screen.getByText(/test data and secrets must be entered again/i)).toBeInTheDocument();
+  });
+
+  it("stays empty with a notice when the earlier run can't be loaded", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(404, { code: "NOT_FOUND", message: "Not found" })));
+    render(<NewTestForm from="run_missing" />);
+    expect(await screen.findByText(/couldn't load the earlier run/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/website url/i)).toHaveValue("");
+  });
+
+  it("without `from` it loads nothing", () => {
+    const fetch = mockFetch();
+    render(<NewTestForm />);
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

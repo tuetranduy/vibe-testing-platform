@@ -7,6 +7,9 @@ import { json, reportFixture, requirementFixture, summaryFixture } from "../test
 import type { RunEventsOptions } from "../lib/run-events";
 import { RunView } from "./RunView";
 
+// The criteria review can navigate (start over), so it needs the App Router.
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
 /** Fake event stream: the test pushes events into whatever RunView subscribed with. */
 const streams: { opts: RunEventsOptions; closed: boolean }[] = [];
 vi.mock("../lib/run-events", () => ({
