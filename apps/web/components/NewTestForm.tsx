@@ -10,6 +10,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
 import { ApiRequestError, createRun } from "../lib/api";
+import { newIdempotencyKey } from "../lib/uuid";
 import { Icon } from "./Icon";
 
 interface DataRow {
@@ -194,13 +195,19 @@ export function NewTestForm() {
     // names stay so they can be re-entered after an error.
     setSecrets((rows) => rows.map((r) => ({ ...r, value: "" })));
     try {
-      const created = await createRun(body, crypto.randomUUID());
+      const created = await createRun(body, newIdempotencyKey());
       router.push(`/runs/${encodeURIComponent(created.runId)}`);
     } catch (err) {
       setPending(false);
       setSecretsCleared(secrets.some((r) => r.value));
       if (!(err instanceof ApiRequestError)) {
-        setBanner({ title: "The test couldn't be started", message: "Something went wrong. Please try again." });
+        // A bug in the page, not a server answer: keep it visible to whoever debugs it. The error
+        // comes from our own code, never from the request body, so it carries no secret values.
+        console.error("New test: unexpected client-side error", err);
+        setBanner({
+          title: "The test couldn't be started",
+          message: "Something went wrong in the browser (details are in the console). Please try again.",
+        });
         return;
       }
       if (err.code === "TARGET_NOT_ALLOWED") {
