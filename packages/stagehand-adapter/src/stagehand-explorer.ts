@@ -21,6 +21,7 @@ import {
 } from "./browser-explorer";
 import { createClientLlmBridge, type ClientLlmBridge, type StructuredLlm } from "./client-llm";
 import { GUARDRAIL_SYSTEM_PROMPT } from "./guardrails";
+import { DEFAULT_TELEMETRY_ENDPOINT } from "./telemetry";
 
 /**
  * Stagehand v4 explorer (spike GO): Stagehand's MV3 runtime is preloaded into the sandboxed
@@ -28,12 +29,7 @@ import { GUARDRAIL_SYSTEM_PROMPT } from "./guardrails";
  * discovers and acts; navigation, screenshots and secret fills are ours (Playwright).
  */
 
-/**
- * Reserved host for Stagehand's in-browser OTel export (Ruling R22: it can't be turned off). The
- * worker's egress proxy denies it silently as a background host (no `egress.blocked` event).
- */
-export const STAGEHAND_TELEMETRY_HOST = "stagehand-telemetry.invalid";
-export const DEFAULT_TELEMETRY_ENDPOINT = `https://${STAGEHAND_TELEMETRY_HOST}/v1/traces`;
+export { DEFAULT_TELEMETRY_ENDPOINT, STAGEHAND_TELEMETRY_HOST } from "./telemetry";
 
 const EXTENSION_SUBPATH = path.join("node_modules", "@browserbasehq", "stagehand", "dist", "extension");
 

@@ -196,3 +196,18 @@ export async function fillElement(page: Page, target: ElementTarget, value: stri
     throw new Error(`recorder: fill failed: ${safe.slice(0, 300)}`);
   }
 }
+
+/**
+ * Deterministic `<select>` choice by our own code (the value comes from test data, a secret or the
+ * requirement, never from the model). Matches an option by value or label. Never logs the value.
+ */
+export async function selectElementOption(page: Page, target: ElementTarget, value: string, opts: RecorderOptions = {}): Promise<void> {
+  const handle = await resolveHandle(page, target, opts);
+  try {
+    await handle.selectOption(value, { timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+  } catch (err) {
+    const firstLine = (err instanceof Error ? err.message : String(err)).split("\n")[0] ?? "";
+    const safe = value ? firstLine.split(value).join("[REDACTED]") : firstLine;
+    throw new Error(`recorder: select failed: ${safe.slice(0, 300)}`);
+  }
+}

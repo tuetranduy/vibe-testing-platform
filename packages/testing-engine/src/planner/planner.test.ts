@@ -633,11 +633,18 @@ function executionPorts(requirement: NormalizedRequirement) {
   return { ports, events, transitions, saved: () => saved, results: () => results };
 }
 
+/** Real analyze/plan stages; exploration stays fake here (the real explore stage is tested in exploration/). */
+function realPlanStages(llm: Parameters<typeof createRealStages>[0]["llm"]) {
+  const fake = createFakeStages();
+  const unused = { openSandbox: async () => ({}) as never, explorer: { start: async () => ({}) as never }, store: () => ({}) as never };
+  return { ...createRealStages({ llm, exploration: unused }, fake), explore: fake.explore };
+}
+
 describe("plan stage behind runExecution (real planner, fake later stages)", () => {
   it("persists the planner's plan and publishes plan.created with its step count and blocked criteria", async () => {
     const { llm } = setup({ json: loginPlan() });
     const p = executionPorts(loginRequirement());
-    await runExecution(stageContext(storedRequest("staging", false, { email: "a@example.com" })), p.ports, createRealStages({ llm }, createFakeStages()));
+    await runExecution(stageContext(storedRequest("staging", false, { email: "a@example.com" })), p.ports, realPlanStages(llm));
 
     expect(kinds(p.saved()!)).toContain("login");
     const created = p.events.find((e) => e.type === "plan.created")!;
@@ -651,7 +658,7 @@ describe("plan stage behind runExecution (real planner, fake later stages)", () 
     out.steps = [step("click", "Click the Delete account button"), ...out.steps];
     const { llm } = setup({ json: out });
     const p = executionPorts(deleteRequirement());
-    await runExecution(stageContext(storedRequest("production", true)), p.ports, createRealStages({ llm }, createFakeStages()));
+    await runExecution(stageContext(storedRequest("production", true)), p.ports, realPlanStages(llm));
 
     expect(p.transitions).toEqual(["GENERATING_REPORT", "COMPLETED"]);
     expect(p.saved()!.scenarios[0]!.steps).toHaveLength(1);

@@ -17,6 +17,7 @@
     "@platform/event-bus": "workspace:*",
     "@platform/llm": "workspace:*",
     "@platform/security": "workspace:*",
+    "@platform/stagehand-adapter": "workspace:*",
     "@platform/storage": "workspace:*",
     "@platform/testing-engine": "workspace:*",
     "bullmq": "^6.3.8",

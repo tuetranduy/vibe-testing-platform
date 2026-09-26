@@ -5,7 +5,7 @@ import type net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { startDemoShop, type RunningDemoShop } from "@platform/demo-shop";
-import { LlmClient, type LlmCallRecord, type LlmTransport, type LlmTransportRequest, type LlmTransportResponse } from "@platform/llm";
+import { LlmClient, type LlmCallRecord } from "@platform/llm";
 import {
   DEFAULT_TELEMETRY_ENDPOINT,
   NavigationBlockedError,
@@ -23,6 +23,7 @@ import { computeExtensionId, launchSandboxedBrowser } from "../../apps/worker/sr
 import { createEgressEventReporter } from "../../apps/worker/src/sandbox/egress-events";
 import { isBackgroundServiceHost, startEgressProxy, STAGEHAND_TELEMETRY_SINK_HOST, type EgressBlockEvent } from "../../apps/worker/src/sandbox/egress-proxy";
 import { openRunSandbox, type RunSandbox } from "../../apps/worker/src/sandbox/run-sandbox";
+import { ScriptedTransport, type ScriptTarget } from "./support/scripted-llm";
 
 /**
  * Stagehand v4 through the real browser sandbox (Task 13) against the in-process demo shop, with a
@@ -37,74 +38,17 @@ const SECRET = "Sup3r-Secret-Value!";
 const MODEL = "claude-sonnet-5";
 
 // ---------------------------------------------------------------------------------------------
-// Scripted model
+// Scripted model (shared helper: ./support/scripted-llm)
 // ---------------------------------------------------------------------------------------------
 
-function promptOf(req: LlmTransportRequest): string {
-  return [req.system, ...req.messages.flatMap((m) => (typeof m.content === "string" ? [m.content] : m.content.map((p) => (p.type === "text" ? p.text : ""))))].join("\n");
-}
-
-/** `[<frame>-<backendNodeId>] <role>: <name>` lines of Stagehand's serialized a11y tree. */
-function findElementId(tree: string, role: string, nameIncludes: string): string | undefined {
-  const re = /\[(\d+-\d+)\]\s+([^:\n[]+?)(?::\s*([^\n]*))?$/gm;
-  for (const m of tree.matchAll(re)) {
-    if (m[2]?.trim() === role && (m[3] ?? "").toLowerCase().includes(nameIncludes.toLowerCase())) return m[1];
-  }
-  return undefined;
-}
-
-interface Target {
-  /** Substring of the instruction that selects this target. */
-  when: string;
-  role: string;
-  name: string;
-  method: string;
-}
-
 /** Matched against the whole prompt, so each `when` is a phrase only our instructions contain. */
-const TARGETS: Target[] = [
+const TARGETS: ScriptTarget[] = [
   { when: "the add to cart button", role: "button", name: "Add to cart", method: "click" },
   { when: "the cart badge", role: "status", name: "Cart items", method: "click" },
   { when: "the search box", role: "searchbox", name: "", method: "fill" },
   { when: "the get file link", role: "link", name: "Get file", method: "click" },
   { when: "the visit example.org link", role: "link", name: "Visit example.org", method: "click" },
 ];
-
-class ScriptedTransport implements LlmTransport {
-  readonly provider = "scripted";
-  readonly requests: LlmTransportRequest[] = [];
-
-  async complete(req: LlmTransportRequest): Promise<LlmTransportResponse> {
-    this.requests.push(req);
-    const prompt = promptOf(req);
-    const lower = prompt.toLowerCase();
-    const target = TARGETS.find((t) => lower.includes(t.when));
-    const pick = () => {
-      const id = target ? findElementId(prompt, target.role, target.name) : undefined;
-      return id && target ? { elementId: id, description: `${target.role} ${target.name}`.trim(), method: target.method, arguments: target.method === "fill" ? ["model-chosen"] : [] } : null;
-    };
-    let json: unknown;
-    switch (req.schemaName) {
-      case "Act":
-        json = { action: pick(), twoStep: false };
-        break;
-      case "Observation": {
-        const el = pick();
-        json = { elements: el ? [el] : [] };
-        break;
-      }
-      case "Extraction":
-        json = { cartCount: Number(/Cart \((\d+)\)/.exec(prompt)?.[1] ?? "-1") };
-        break;
-      case "Metadata":
-        json = { progress: "extracted", completed: true };
-        break;
-      default:
-        json = { text: "ok" };
-    }
-    return { text: JSON.stringify(json), model: req.model, usage: { inputTokens: Math.ceil(prompt.length / 4), outputTokens: 17 } };
-  }
-}
 
 // ---------------------------------------------------------------------------------------------
 // Fixtures and sandbox helpers
@@ -203,7 +147,7 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
   });
 
   function llmClient() {
-    const transport = new ScriptedTransport();
+    const transport = new ScriptedTransport(TARGETS);
     const records: LlmCallRecord[] = [];
     const llm = new LlmClient({ transport, model: MODEL, recordCall: (c) => void records.push(c), logger: silent, retry: { maxRetries: 0 } });
     return { transport, records, llm };

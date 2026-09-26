@@ -1,4 +1,5 @@
 import type { ProvisionalResult } from "@platform/contracts";
+import { createExploreStage, type ExploreStageDeps } from "../exploration/explore-stage";
 import { createPlanStage } from "../planner/planner";
 import { createAnalyzeStage, type RequirementLlm } from "../requirement/compiler";
 import type { EngineStages } from "./stages";
@@ -6,6 +7,8 @@ import type { EngineStages } from "./stages";
 export interface RealStageDeps {
   /** Structured-output LLM port shared by the analyze and plan stages. */
   llm: RequirementLlm;
+  /** Browser sandbox, explorer and persistence for the explore stage (Task 14). */
+  exploration: ExploreStageDeps;
 }
 
 /**
@@ -16,8 +19,8 @@ export function createRealStages(deps: RealStageDeps, fallback: EngineStages): E
   return {
     analyze: createAnalyzeStage(deps.llm), // Task 10
     plan: createPlanStage(deps.llm), // Task 12
-    explore: (ctx, plan, requirement) => fallback.explore(ctx, plan, requirement), // fake until Task 14
-    // Fake until Task 15. The fake explorer observes nothing real, so its PASS/FAIL would be
+    explore: createExploreStage(deps.exploration), // Task 14
+    // Fake until Task 15. The fake verifier ignores the recorded facts, so its PASS/FAIL would be
     // fabricated evidence (§2.3: no PASS without deterministic evidence) — never let one through.
     verify: (ctx, requirement, plan, exploration) =>
       fallback.verify(ctx, requirement, plan, exploration).map(withoutFabricatedVerdict),

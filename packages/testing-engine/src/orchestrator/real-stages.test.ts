@@ -12,10 +12,11 @@ const plan = {
 } as unknown as TestPlan;
 const exploration = { steps: [], facts: [], stopReason: "COMPLETED" as const };
 const llm = { generateStructured: async () => ({}) as never };
+const explorationDeps = { openSandbox: async () => ({}) as never, explorer: { start: async () => ({}) as never }, store: () => ({}) as never };
 
 describe("createRealStages", () => {
   it.each(["PASS", "FAIL"] as const)("downgrades a fake %s to INCONCLUSIVE/FACT_NOT_OBSERVED; BLOCKED stays", (status) => {
-    const stages = createRealStages({ llm }, createFakeStages({ provisionalStatus: status }));
+    const stages = createRealStages({ llm, exploration: explorationDeps }, createFakeStages({ provisionalStatus: status }));
     const results = stages.verify({} as StageContext, requirement, plan, exploration);
     expect(results.map((r) => [r.criterionId, r.status, r.reason])).toEqual([
       ["AC-1", "INCONCLUSIVE", "FACT_NOT_OBSERVED"],

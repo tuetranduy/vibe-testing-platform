@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./browser-explorer": "./src/browser-explorer.ts",
+    "./telemetry": "./src/telemetry.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
