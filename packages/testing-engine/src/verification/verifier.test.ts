@@ -278,6 +278,13 @@ describe("collection_contains", () => {
     expect(run(byRef, { values: { selected: "iPhone 17 Pro", items: ["iPhone 17 Pro"] } }).factRefs).toEqual([items, selected]);
   });
 
+  it("an item fact that is not a string (a number, a boolean) → INCONCLUSIVE / FACT_NOT_OBSERVED, never FAIL", () => {
+    const byRef = { ...rule, item: selected };
+    expect(statusOf(run(byRef, { values: { selected: 17, items: ["iPhone 16 Pro"] } }))).toEqual(["INCONCLUSIVE", "FACT_NOT_OBSERVED"]);
+    expect(statusOf(run(byRef, { values: { selected: 17, items: ["iPhone 17 Pro"] } }))).toEqual(["INCONCLUSIVE", "FACT_NOT_OBSERVED"]);
+    expect(statusOf(run(byRef, { values: { selected: true, items: ["true"] } }))).toEqual(["INCONCLUSIVE", "FACT_NOT_OBSERVED"]);
+  });
+
   it("builds expected / actual from templates", () => {
     expect(run(rule, { values: { items: ["iPhone 17 Pro"] } })).toMatchObject({
       expected: 'Cart items cart page has an item containing "iPhone 17 Pro"',
@@ -320,8 +327,10 @@ describe("text_matches", () => {
     expect(statusOf(r)).toEqual(["INCONCLUSIVE", "AMBIGUOUS_CRITERION"]);
   });
 
-  it("a number value is compared as text; a list or null is not text", () => {
-    expect(verify(match("equals", "3"), { title: 3 })).toBe("PASS");
+  it("only a string is text: a number, list or null value → INCONCLUSIVE / FACT_NOT_OBSERVED, never FAIL", () => {
+    expect(statusOf(run(match("equals", "3"), { values: { title: 3 } }))).toEqual(["INCONCLUSIVE", "FACT_NOT_OBSERVED"]);
+    // "price equals '1,299.00'" over a number fact read as 1299 must not become a FAIL.
+    expect(statusOf(run(match("equals", "1,299.00"), { values: { title: 1299 } }))).toEqual(["INCONCLUSIVE", "FACT_NOT_OBSERVED"]);
     expect(statusOf(run(match("equals", "3"), { values: { title: ["3"] } }))).toEqual(["INCONCLUSIVE", "FACT_NOT_OBSERVED"]);
     expect(statusOf(run(match("equals", "3"), { values: { title: null } }))).toEqual(["INCONCLUSIVE", "FACT_NOT_OBSERVED"]);
   });
@@ -355,6 +364,15 @@ describe("visible", () => {
       "INCONCLUSIVE",
       "FACT_NOT_OBSERVED",
     ]);
+  });
+
+  it.each(["yes", "no", "true", "false", 1, 0] as const)("only a boolean counts: %j → INCONCLUSIVE / FACT_NOT_OBSERVED, never FAIL", (value) => {
+    for (const expected of [true, false]) {
+      expect(statusOf(run({ kind: "visible", fact: banner, expected }, { values: { banner: value } }))).toEqual([
+        "INCONCLUSIVE",
+        "FACT_NOT_OBSERVED",
+      ]);
+    }
   });
 });
 

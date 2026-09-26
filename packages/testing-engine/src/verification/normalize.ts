@@ -1,5 +1,5 @@
 import type { FactValue } from "@platform/contracts";
-import { asBoolean, asNumber, collapseText, foldText, numbersEqual } from "../shared/fact-values";
+import { asNumber, collapseText, foldText, numbersEqual } from "../shared/fact-values";
 
 /**
  * Value normalization for the verifier (pure). Comparisons are over normalized text:
@@ -7,7 +7,8 @@ import { asBoolean, asNumber, collapseText, foldText, numbersEqual } from "../sh
  * - `text_matches` honours `caseSensitive` for equals / contains / regex;
  * - `collection_contains` in `contains` mode is case- and whitespace-insensitive; in `equals` mode it
  *   compares whole items after whitespace normalization, case kept.
- * A value of the wrong type for a rule reads as null here, and the verifier reports it as not observed.
+ * A value of the wrong type for a rule reads as null here (no coercion between types, except a string
+ * that is wholly a number for numeric rules), and the verifier reports it as not observed.
  */
 
 export { collapseText, foldText, numbersEqual };
@@ -31,14 +32,20 @@ export function numberOf(v: FactValue): number | null {
   return asNumber(v);
 }
 
-/** A boolean (or "true"/"false"/"yes"/"no"). Anything else → null. */
-export const booleanOf = (v: FactValue): boolean | null => asBoolean(v);
+/**
+ * A boolean. Anything else → null: no coercion of "yes"/"true" strings or numbers, since a value of
+ * the wrong type for the rule is not observed (INCONCLUSIVE), never evidence for PASS/FAIL.
+ */
+export function booleanOf(v: FactValue): boolean | null {
+  return typeof v === "boolean" ? v : null;
+}
 
-/** Text of a string or finite number. Null / booleans / lists → null. */
+/**
+ * A string. Anything else → null: a number is not coerced to text (a number fact read as 1299 must
+ * not FAIL "equals '1,299.00'"); the wrong type is not observed (INCONCLUSIVE), never FAIL.
+ */
 export function textOf(v: FactValue): string | null {
-  if (typeof v === "string") return v;
-  if (typeof v === "number" && Number.isFinite(v)) return String(v);
-  return null;
+  return typeof v === "string" ? v : null;
 }
 
 /** A list of strings. Anything else → null. */
