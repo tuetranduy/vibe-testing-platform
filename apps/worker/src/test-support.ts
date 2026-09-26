@@ -18,7 +18,8 @@ import { CancelWatcher } from "./cancel-watcher";
 import { silentLogger, type WorkerDeps } from "./deps";
 
 export const SECRETS_KEY = Buffer.alloc(32, 5);
-export const REDIS_URL = process.env.TEST_REDIS_URL ?? "redis://localhost:6379";
+// A dedicated logical DB by default: tests never touch DB 0, where a developer's worker takes jobs.
+export const REDIS_URL = process.env.TEST_REDIS_URL ?? "redis://localhost:6379/15";
 
 export class FakeQueue implements RunQueue {
   analyze: string[] = [];

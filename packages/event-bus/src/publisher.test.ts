@@ -8,7 +8,8 @@ import { runEventsChannel } from "./channels";
 import { createRunEventPublisher } from "./publisher";
 import { RunEventHub } from "./subscriber";
 
-const REDIS_URL = process.env.TEST_REDIS_URL ?? "redis://localhost:6379";
+// A dedicated logical DB by default: tests never touch DB 0, where a developer's worker takes jobs.
+const REDIS_URL = process.env.TEST_REDIS_URL ?? "redis://localhost:6379/15";
 
 let tdb: TestDatabase;
 let redis: Redis;
