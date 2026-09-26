@@ -123,12 +123,12 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
     onSave(built.outcome);
   }
 
-  const input = (field: Field, label: string, value: string, onChange: (v: string) => void, numeric = false) => (
+  // Numbers use the default (text) keyboard: iOS's "decimal" keypad has no minus key.
+  const input = (field: Field, label: string, value: string, onChange: (v: string) => void) => (
     <div className="field">
       <label htmlFor={id(field)}>{label}</label>
       <input
         id={id(field)}
-        inputMode={numeric ? "decimal" : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-invalid={shown[field] ? true : undefined}
@@ -141,7 +141,7 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
       )}
     </div>
   );
-  const numberField = (label: string) => input("number", label, draft.number, (v) => set({ number: v }), true);
+  const numberField = (label: string) => input("number", label, draft.number, (v) => set({ number: v }));
   const textField = (label: string) => input("text", label, draft.text, (v) => set({ text: v }));
 
   return (
