@@ -1,9 +1,13 @@
 import type { NormalizedRequirement } from "@platform/contracts";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
-import { json, requirementFixture } from "../test/fixtures";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { json, requirementFixture, summaryFixture } from "../test/fixtures";
 import { CriteriaReview } from "./CriteriaReview";
+
+const push = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+beforeEach(() => push.mockReset());
 
 type Handler = (init: RequestInit | undefined) => Response | Promise<Response>;
 
@@ -268,5 +272,50 @@ describe("CriteriaReview", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/cannot be confirmed/i);
     expect(screen.getByRole("button", { name: /confirm and start/i })).toBeEnabled();
     expect(onConfirmed).not.toHaveBeenCalled();
+  });
+
+  const CANCEL = "/api/v1/test-runs/run_1/cancel";
+
+  it("start over: asks first, cancels the run, then opens the pre-filled new-test form", async () => {
+    const user = userEvent.setup();
+    const fetch = routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`POST ${CANCEL}`]: () => json(200, summaryFixture({ lifecycle: "CANCELLED", cancelReason: "USER_REQUESTED" })),
+    });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    await screen.findAllByRole("article");
+    await user.click(screen.getByRole("button", { name: /start over with a revised requirement/i }));
+    expect(screen.getByText(/test data and secrets must be entered again/i)).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(1); // nothing cancelled yet
+    await user.click(screen.getByRole("button", { name: /yes, start over/i }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/new?from=run_1"));
+    expect(fetch.mock.calls.map(([u, i]) => `${i?.method ?? "GET"} ${String(u)}`)).toContain(`POST ${CANCEL}`);
+  });
+
+  it("start over still opens the form when the run can no longer be cancelled (409)", async () => {
+    const user = userEvent.setup();
+    routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`POST ${CANCEL}`]: () => json(409, { code: "CONFLICT", message: "Run is CANCELLED" }),
+    });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    await screen.findAllByRole("article");
+    await user.click(screen.getByRole("button", { name: /start over with a revised requirement/i }));
+    await user.click(screen.getByRole("button", { name: /yes, start over/i }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/new?from=run_1"));
+  });
+
+  it("start over shows an error and stays when cancelling fails otherwise", async () => {
+    const user = userEvent.setup();
+    routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`POST ${CANCEL}`]: () => json(503, { code: "UNAVAILABLE", message: "Try again" }),
+    });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    await screen.findAllByRole("article");
+    await user.click(screen.getByRole("button", { name: /start over with a revised requirement/i }));
+    await user.click(screen.getByRole("button", { name: /yes, start over/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Try again");
+    expect(push).not.toHaveBeenCalled();
   });
 });

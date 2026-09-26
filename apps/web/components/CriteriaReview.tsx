@@ -1,8 +1,9 @@
 "use client";
 
 import { describeExpectedOutcome, type NormalizedRequirement } from "@platform/contracts";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { ApiRequestError, confirmCriteria, getCriteria, updateCriteria, type ConfirmResult } from "../lib/api";
+import { ApiRequestError, cancelRun, confirmCriteria, getCriteria, updateCriteria, type ConfirmResult } from "../lib/api";
 import { CriterionCard } from "./CriterionCard";
 import { Icon } from "./Icon";
 
@@ -18,7 +19,9 @@ const listIds = (ids: string[]) => (ids.length <= 1 ? ids.join("") : `${ids.slic
 const messageOf = (err: unknown) => (err instanceof ApiRequestError ? err.message : "Something went wrong. Please try again.");
 
 export function CriteriaReview({ runId, onConfirmed }: Props) {
+  const router = useRouter();
   const [requirement, setRequirement] = useState<NormalizedRequirement | null>(null);
+  const [startingOver, setStartingOver] = useState<"ask" | "working" | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -65,6 +68,23 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
     } finally {
       setSaving(false);
     }
+  }
+
+  /** Cancels this run and opens the new-test form pre-filled from it (spec 2026-09-26-criteria-check-edit). */
+  async function startOver() {
+    setStartingOver("working");
+    setError(null);
+    try {
+      await cancelRun(runId);
+    } catch (err) {
+      // 409: the run already ended or its confirmation expired — nothing left to cancel.
+      if (!(err instanceof ApiRequestError && err.status === 409)) {
+        setError(messageOf(err));
+        setStartingOver(null);
+        return;
+      }
+    }
+    router.push(`/runs/new?from=${encodeURIComponent(runId)}`);
   }
 
   async function confirm() {
@@ -169,6 +189,32 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
           <p className="hint">
             <Icon name="info" /> Unclear and model-judged criteria will be reported as Inconclusive.
           </p>
+        )}
+        {startingOver === null ? (
+          <button type="button" className="button button-quiet" onClick={() => setStartingOver("ask")} disabled={confirming || saving}>
+            Start over with a revised requirement
+          </button>
+        ) : (
+          <div role="group" aria-labelledby="start-over-title" className="note note-warning">
+            <p id="start-over-title" className="note-title">
+              Start over?
+            </p>
+            <p>This cancels the current run. You can edit the requirement and start a new one. Test data and secrets must be entered again.</p>
+            <div className="actions">
+              <button type="button" className="button button-danger" onClick={startOver} disabled={startingOver === "working"}>
+                {startingOver === "working" ? "Cancelling…" : "Yes, start over"}
+              </button>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => setStartingOver(null)}
+                disabled={startingOver === "working"}
+                autoFocus
+              >
+                Keep reviewing
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </section>

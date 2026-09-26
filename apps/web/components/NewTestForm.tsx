@@ -8,8 +8,8 @@ import {
   type CreateTestRunRequestInput,
 } from "@platform/contracts";
 import { useRouter } from "next/navigation";
-import { useRef, useState, type FormEvent } from "react";
-import { ApiRequestError, createRun } from "../lib/api";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { ApiRequestError, createRun, getCriteria, getRun } from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
 import { Icon } from "./Icon";
 
@@ -153,11 +153,30 @@ function issuesToErrors(err: ApiRequestError): Errors {
 
 let nextRowId = 1;
 
-export function NewTestForm() {
+/** `from`: an earlier run to start over from (its website and requirement are copied in). */
+export function NewTestForm({ from = null }: { from?: string | null } = {}) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [targetUrl, setTargetUrl] = useState("");
   const [requirement, setRequirement] = useState("");
+  /** Pre-fill when starting over from an earlier run (its URL and full requirement text only). */
+  const [prefill, setPrefill] = useState<"loading" | "loaded" | "failed" | null>(from ? "loading" : null);
+  useEffect(() => {
+    if (!from) return;
+    let live = true;
+    Promise.all([getRun(from), getCriteria(from)]).then(
+      ([run, req]) => {
+        if (!live) return;
+        setTargetUrl((v) => v || run.targetUrl);
+        setRequirement((v) => v || req.originalText);
+        setPrefill("loaded");
+      },
+      () => live && setPrefill("failed"),
+    );
+    return () => {
+      live = false;
+    };
+  }, [from]);
   const [environment, setEnvironment] = useState<"staging" | "production">("staging");
   const [data, setData] = useState<DataRow[]>([]);
   const [secrets, setSecrets] = useState<SecretRow[]>([]);
@@ -256,6 +275,22 @@ export function NewTestForm() {
 
   return (
     <form ref={formRef} className="form" noValidate onSubmit={onSubmit} aria-busy={pending}>
+      {prefill === "loaded" && (
+        <div role="status" className="banner banner-info">
+          <Icon name="info" />
+          <div>
+            <p>Copied the website and requirement from your earlier run. Test data and secrets must be entered again — they are never copied.</p>
+          </div>
+        </div>
+      )}
+      {prefill === "failed" && (
+        <div role="status" className="banner banner-warning">
+          <Icon name="warning" />
+          <div>
+            <p>Couldn&apos;t load the earlier run; fill in the form below.</p>
+          </div>
+        </div>
+      )}
       {banner && (
         <div role="alert" className="banner banner-error">
           <Icon name="warning" />

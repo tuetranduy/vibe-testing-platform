@@ -3,7 +3,8 @@ import { NewTestForm } from "../../../components/NewTestForm";
 
 export const metadata: Metadata = { title: "New test" };
 
-export default function NewTestPage() {
+export default async function NewTestPage({ searchParams }: { searchParams: Promise<{ from?: string | string[] }> }) {
+  const { from } = await searchParams;
   return (
     <div className="narrow stack">
       <div className="section-head">
@@ -13,7 +14,7 @@ export default function NewTestPage() {
           the site, and reports each criterion with its evidence.
         </p>
       </div>
-      <NewTestForm />
+      <NewTestForm from={typeof from === "string" ? from : null} />
     </div>
   );
 }
