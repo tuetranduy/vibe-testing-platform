@@ -152,7 +152,11 @@ const ctx = {
   deadlineAt: null,
   now: () => new Date("2026-09-26T10:05:00.000Z"),
   redact: (v: unknown) => JSON.parse(JSON.stringify(v).replaceAll(SECRET, "[REDACTED]")),
+  budgetSignal(this: StageContext, ms: number) {
+    return AbortSignal.any([this.signal, AbortSignal.timeout(ms)]);
+  },
 } as unknown as StageContext;
+const NOW = ctx.now().getTime();
 
 const input = (over: Partial<ReportInput> = {}): ReportInput => ({
   requirement: FOUR,
@@ -396,6 +400,45 @@ describe("report stage: diagnostics (Ruling R37)", () => {
     await expect(stage({ ...ctx, signal: controller.signal }, input())).rejects.toBe(reason);
   });
 
+  it("diagnostics that exceed their time-box → the report completes without them, statuses unchanged (Ruling R43)", async () => {
+    const warn = vi.fn();
+    const hanging: Diagnostics = () => new Promise(() => {}); // ignores its signal, never settles
+    const off = await createReportStage({ store: fakeStore().store })(ctx, semanticInput());
+    const saved = fakeStore();
+    const report = await createReportStage({ store: saved.store, diagnostics: hanging, diagnosticsTimeoutMs: 20, logger: { warn } })(ctx, semanticInput());
+    expect(statusesOf(report.criteria)).toEqual(statusesOf(off.criteria));
+    expect(report.summary).toEqual(off.summary);
+    expect(report.verdict).toBe(off.verdict);
+    expect(report.diagnostics).toEqual([]);
+    expect(saved.saved).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ runId: "run_1" }), "report diagnostics failed; reporting without them");
+  });
+
+  it("the time-box ends safely before the run's hard deadline: its own signal and an earlier deadline", async () => {
+    const seen: { signal: AbortSignal; deadlineAt: Date | null }[] = [];
+    const diagnostics: Diagnostics = async (i) => {
+      seen.push({ signal: i.signal, deadlineAt: i.deadlineAt });
+      return { findings: [], notes: [] };
+    };
+    // At most half the time left: the other half remains to persist and publish the report.
+    await createReportStage({ store: fakeStore().store, diagnostics })({ ...ctx, deadlineAt: new Date(NOW + 80) }, semanticInput());
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.deadlineAt).toEqual(new Date(NOW + 40));
+    expect(seen[0]!.signal).not.toBe(ctx.signal);
+    // Without a hard deadline the time-box is the diagnostics timeout.
+    await createReportStage({ store: fakeStore().store, diagnostics, diagnosticsTimeoutMs: 5_000 })(ctx, semanticInput());
+    expect(seen[1]!.deadlineAt).toEqual(new Date(NOW + 5_000));
+  });
+
+  it("no time left before the hard deadline → no diagnostics call, the report goes on", async () => {
+    const warn = vi.fn();
+    const diagnostics = vi.fn<Diagnostics>();
+    const report = await createReportStage({ store: fakeStore().store, diagnostics, logger: { warn } })({ ...ctx, deadlineAt: new Date(NOW) }, semanticInput());
+    expect(diagnostics).not.toHaveBeenCalled();
+    expect(report.verdict).toBe("FAILED");
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ runId: "run_1" }), "no time left for report diagnostics; reporting without them");
+  });
+
   it("nothing to diagnose (every criterion PASS, none semantic) → no model call", async () => {
     const { llm, calls } = fakeLlm(reply);
     const all = input({ requirement: requirementOf(FOUR.criteria.slice(0, 3)), provisional: PROVISIONAL.slice(0, 3) });
@@ -422,7 +465,7 @@ const persisted = (over: Partial<PersistedRunSources> = {}): PersistedRunSources
   facts: FACTS,
   results: [],
   generatedTest: null,
-  playwright: { status: "FAILED", durationMs: 1234 },
+  playwright: { status: "FAILED", durationMs: 1234, perCriterion: { "AC-1": "PASSED", "AC-2": "PASSED", "AC-3": "PASSED", "AC-4": "ASSERTION_FAILED" } },
   diagnostics: [{ criterionId: "AC-4", summary: "stored finding" }],
   llmCalls: USAGE,
   ...over,
@@ -491,6 +534,26 @@ describe("buildReport (the API's report over persisted data, Ruling R36)", () =>
     expect(report.criteria[2]).toMatchObject({ relatedStepIds: ["st_1", "st_3"], evidenceArtifactIds: ["art_shot_1", "art_shot_3"] });
     expect(report.summary).toMatchObject({ totalCriteria: 3, passed: 1, failed: 1, inconclusive: 1, confirmedByRerun: 0 });
     expect(report.durationMs).toBeNull();
+  });
+
+  it("a partial report after a rerun takes each criterion's outcome from the persisted playwright.completed event (Ruling R43)", async () => {
+    // Deadline during the report stage: only provisional rows were persisted, but the rerun had run.
+    const report = await createReportBuilder(async () =>
+      persisted({
+        run: { ...persisted().run, lifecycle: "ERRORED", verdict: null, errorCategory: "TIMEOUT", errorMessage: "Run exceeded its deadline" },
+        results: PROVISIONAL,
+        playwright: { status: "FAILED", durationMs: 1234, perCriterion: { "AC-1": "ASSERTION_FAILED", "AC-2": "PASSED", "AC-4": "NOT_REACHED" } },
+      }),
+    ).buildReport("run_1");
+    expect(statusesOf(report.criteria)).toEqual([
+      ["AC-1", "INCONCLUSIVE", "DISCOVERY_RERUN_DISAGREE", null, "ASSERTION_FAILED"], // never PASS / EXPLORATION_ONLY
+      ["AC-2", "PASS", null, "PLAYWRIGHT_RERUN", "PASSED"],
+      ["AC-3", "PASS", null, "EXPLORATION_ONLY", "UNAVAILABLE"], // not compiled
+      ["AC-4", "FAIL", null, "EXPLORATION_ONLY", "NOT_REACHED"],
+    ]);
+    expect(report).toMatchObject({ partial: true, verdict: null, playwright: { status: "FAILED", durationMs: 1234 } });
+    expect(report.playwright).not.toHaveProperty("perCriterion");
+    expect(report.summary.confirmedByRerun).toBe(1);
   });
 
   it("CANCELLED before any result: partial with whatever exists", async () => {

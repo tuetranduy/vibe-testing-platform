@@ -53,7 +53,7 @@ describe("EventRepository", () => {
     const events = new EventRepository(tdb.db);
     expect(await events.findLastOfType(run.id, "playwright.completed")).toBeNull();
     const completed = (status: "PASSED" | "FAILED", durationMs: number) =>
-      events.append({ runId: run.id, stage: "RUNNING_PLAYWRIGHT", type: "playwright.completed", message: "done", payload: { status, durationMs } });
+      events.append({ runId: run.id, stage: "RUNNING_PLAYWRIGHT", type: "playwright.completed", message: "done", payload: { status, durationMs, perCriterion: {} } });
     await completed("FAILED", 10);
     await events.append({ runId: run.id, stage: "GENERATING_REPORT", type: "stage.started", message: "x", payload: { stage: "GENERATING_REPORT" } });
     await completed("PASSED", 20);
