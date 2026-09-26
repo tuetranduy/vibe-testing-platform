@@ -11,6 +11,10 @@ Artifact storage (screenshots, traces, videos, generated tests, Playwright repor
   the serving route must check it with `verifyLocalSignedUrl`.
 - `createArtifactStorage(env)` — picks one by `ARTIFACT_STORAGE_TYPE` (`local` | `s3`) using the
   env names from `packages/config/src/env.ts`.
+- `publicEndpoint` / `S3_PUBLIC_ENDPOINT` (optional, Ruling R54) — signed read URLs are presigned
+  against this endpoint instead of `endpoint`, for when the endpoint the process uses isn't reachable
+  by whoever opens the URL (compose: the api uses `http://s3:9000`, the browser needs
+  `http://localhost:9000`). A separate client signs them, because SigV4 signs the `Host` header.
 
 Object keys: `tenants/<tenantId>/runs/<runId>/<typeDir>/<sanitizedBase>-<16 hex>.<ext>`.
 Signed URL TTL is clamped to `MAX_SIGNED_URL_TTL_SECONDS` (300). Infrastructure failures throw

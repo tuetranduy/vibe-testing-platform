@@ -94,7 +94,10 @@ services:
     build:
       context: ../..
       target: api
-    environment: *app-env
+    environment:
+      <<: *app-env
+      # Signed artifact URLs are opened by the host's browser, which can't resolve `s3` (Ruling R54).
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
     ports: ["3001:3001"]
     depends_on:
       migrate: { condition: service_completed_successfully }

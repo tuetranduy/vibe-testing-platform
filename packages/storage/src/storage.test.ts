@@ -142,6 +142,44 @@ describe("createArtifactStorage", () => {
     }
   });
 
+  it("presigns against S3_PUBLIC_ENDPOINT when set, so the URL is browser-reachable (Ruling R54)", async () => {
+    const base = {
+      ARTIFACT_STORAGE_TYPE: "s3",
+      ARTIFACT_BUCKET: "artifacts",
+      S3_ENDPOINT: "http://s3:9000",
+      S3_ACCESS_KEY_ID: "k",
+      S3_SECRET_ACCESS_KEY: "s",
+    } as const;
+    const key = "tenants/t/runs/r/screenshots/s-0123456789abcdef.png";
+
+    const internal = new URL(await createArtifactStorage(base).getSignedReadUrl(key, 60));
+    expect(internal.origin).toBe("http://s3:9000");
+
+    for (const empty of [undefined, ""]) {
+      const u = new URL(await createArtifactStorage({ ...base, S3_PUBLIC_ENDPOINT: empty }).getSignedReadUrl(key, 60));
+      expect(u.origin).toBe("http://s3:9000");
+    }
+
+    const pub = new URL(
+      await createArtifactStorage({ ...base, S3_PUBLIC_ENDPOINT: "http://localhost:9000" }).getSignedReadUrl(key, 60),
+    );
+    expect(pub.origin).toBe("http://localhost:9000");
+    expect(pub.pathname).toBe(`/artifacts/${key}`);
+    expect(pub.searchParams.get("X-Amz-Expires")).toBe("60");
+    // SigV4 signs the Host header: the signature is computed for the public host, not the internal one.
+    expect(pub.searchParams.get("X-Amz-SignedHeaders")).toBe("host");
+    expect(pub.searchParams.get("X-Amz-Signature")).not.toBe(internal.searchParams.get("X-Amz-Signature"));
+
+    const virtualHosted = new URL(
+      await createArtifactStorage({
+        ...base,
+        S3_FORCE_PATH_STYLE: "false",
+        S3_PUBLIC_ENDPOINT: "https://files.example.com",
+      }).getSignedReadUrl(key, 60),
+    );
+    expect(virtualHosted.host).toBe("artifacts.files.example.com");
+  });
+
   it("defaults region to us-east-1 and path-style to true", async () => {
     const storage = createArtifactStorage({
       ARTIFACT_STORAGE_TYPE: "s3",

@@ -62,6 +62,29 @@ describe.skipIf(!endpoint)("S3 storage (real S3-compatible server)", () => {
     expect(Buffer.from(await resp.arrayBuffer())).toEqual(body);
   });
 
+  it("a URL presigned against publicEndpoint is valid on that host (Ruling R54)", async () => {
+    // Another name for the same server: the URL must carry it AND be signed for it (SigV4 signs Host).
+    const internal = new URL(endpoint!);
+    const alias = new URL(endpoint!);
+    alias.hostname = internal.hostname === "localhost" ? "127.0.0.1" : "localhost";
+    const publicStorage = createS3Storage({ ...opts, publicEndpoint: alias.origin });
+    const body = Buffer.from(`public endpoint ${runId}`);
+    const { objectKey } = await publicStorage.put({
+      tenantId,
+      runId,
+      type: "SCREENSHOT",
+      fileName: "public.png",
+      body,
+      contentType: "image/png",
+      sensitivity: "STANDARD",
+    });
+    const url = new URL(await publicStorage.getSignedReadUrl(objectKey, 60));
+    expect(url.origin).toBe(alias.origin);
+    const resp = await fetch(url);
+    expect(resp.status).toBe(200);
+    expect(Buffer.from(await resp.arrayBuffer())).toEqual(body);
+  });
+
   it("streams a multi-part Readable of unknown length (hash computed while streaming)", async () => {
     // 12 MiB of non-uniform data -> forces a multipart upload (5 MiB parts).
     const chunk = (i: number) => Buffer.alloc(256 * 1024, i % 251);

@@ -20,6 +20,18 @@ const EnvSchema = z
     ARTIFACT_BUCKET: z.string().min(1),
     ARTIFACT_LOCAL_DIR: z.string().default("./.artifacts"),
     S3_ENDPOINT: z.string().optional(),
+    /**
+     * Endpoint that signed artifact URLs are presigned against, when S3_ENDPOINT isn't reachable
+     * from the browser (compose: S3_ENDPOINT=http://s3:9000, S3_PUBLIC_ENDPOINT=http://localhost:9000).
+     * Empty means unset (Ruling R54).
+     */
+    S3_PUBLIC_ENDPOINT: z.preprocess(
+      (v) => (v === "" ? undefined : v),
+      z
+        .string()
+        .refine((v) => /^https?:\/\/[^/\s]+/i.test(v) && URL.canParse(v), "must be an http(s) URL")
+        .optional(),
+    ),
     S3_REGION: z.string().default("us-east-1"),
     S3_ACCESS_KEY_ID: z.string().optional(),
     S3_SECRET_ACCESS_KEY: z.string().optional(),

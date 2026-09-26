@@ -32,6 +32,8 @@ export interface ArtifactStorageConfig {
   ARTIFACT_BUCKET?: string | undefined;
   ARTIFACT_LOCAL_DIR?: string | undefined;
   S3_ENDPOINT?: string | undefined;
+  /** Endpoint signed read URLs are presigned against (browser-reachable); default S3_ENDPOINT (Ruling R54). */
+  S3_PUBLIC_ENDPOINT?: string | undefined;
   S3_REGION?: string | undefined;
   S3_ACCESS_KEY_ID?: string | undefined;
   S3_SECRET_ACCESS_KEY?: string | undefined;
@@ -69,6 +71,7 @@ export function createArtifactStorage(
     return createS3Storage({
       bucket: config.ARTIFACT_BUCKET!,
       endpoint: config.S3_ENDPOINT || undefined,
+      publicEndpoint: config.S3_PUBLIC_ENDPOINT || undefined,
       region: config.S3_REGION || DEFAULT_REGION,
       accessKeyId: config.S3_ACCESS_KEY_ID!,
       secretAccessKey: config.S3_SECRET_ACCESS_KEY!,

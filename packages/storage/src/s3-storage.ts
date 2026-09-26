@@ -16,6 +16,12 @@ export interface S3StorageOptions {
   bucket: string;
   /** Custom endpoint for S3-compatible servers (MinIO: http://localhost:9000). Omit for AWS. */
   endpoint?: string | undefined;
+  /**
+   * Endpoint that signed read URLs are presigned against, when the one this process uses isn't
+   * reachable by whoever follows the URL (compose: the api talks to `http://s3:9000`, a host browser
+   * needs `http://localhost:9000`). Must reach the same server and bucket. Default: `endpoint`.
+   */
+  publicEndpoint?: string | undefined;
   region: string;
   accessKeyId: string;
   secretAccessKey: string;
@@ -32,17 +38,23 @@ export function createS3Storage(opts: S3StorageOptions): ArtifactStorage {
     if (!opts[k]) throw new StorageError(`s3 storage: ${k} is required`, { operation: "config" });
   }
   const { bucket } = opts;
-  const client = new S3Client({
-    region: opts.region,
-    ...(opts.endpoint ? { endpoint: opts.endpoint } : {}),
-    forcePathStyle: opts.forcePathStyle,
-    credentials: { accessKeyId: opts.accessKeyId, secretAccessKey: opts.secretAccessKey },
-    // Only send/validate flexible checksums when an operation requires them. The default
-    // ("WHEN_SUPPORTED") uses aws-chunked trailer encoding that several S3-compatible servers
-    // mishandle; integrity is covered by our own sha256.
-    requestChecksumCalculation: "WHEN_REQUIRED",
-    responseChecksumValidation: "WHEN_REQUIRED",
-  });
+  const makeClient = (endpoint: string | undefined) =>
+    new S3Client({
+      region: opts.region,
+      ...(endpoint ? { endpoint } : {}),
+      forcePathStyle: opts.forcePathStyle,
+      credentials: { accessKeyId: opts.accessKeyId, secretAccessKey: opts.secretAccessKey },
+      // Only send/validate flexible checksums when an operation requires them. The default
+      // ("WHEN_SUPPORTED") uses aws-chunked trailer encoding that several S3-compatible servers
+      // mishandle; integrity is covered by our own sha256.
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
+    });
+  const client = makeClient(opts.endpoint);
+  // SigV4 signs the Host header, so a URL for another host must be signed by a client configured
+  // with that host (rewriting the URL afterwards would break the signature). Presigning is local
+  // computation: this client never sends a request.
+  const signingClient = opts.publicEndpoint ? makeClient(opts.publicEndpoint) : client;
 
   return {
     async ensureReady() {
@@ -115,7 +127,7 @@ export function createS3Storage(opts: S3StorageOptions): ArtifactStorage {
       assertValidObjectKey(objectKey);
       const expiresIn = normalizeTtl(ttlSeconds);
       try {
-        return await getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: objectKey }), { expiresIn });
+        return await getSignedUrl(signingClient, new GetObjectCommand({ Bucket: bucket, Key: objectKey }), { expiresIn });
       } catch (err) {
         throw wrapStorageError(err, "sign", objectKey);
       }
