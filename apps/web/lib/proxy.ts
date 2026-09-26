@@ -5,7 +5,12 @@
  *   reaches the API. Only each endpoint's own query parameters are forwarded.
  * - Adds `Authorization: Bearer ${API_TOKEN}` here, on the server. The browser's Authorization and
  *   Cookie headers (and every other header not listed) are dropped.
- * - Rejects POST/PUT whose Origin isn't this app's own host (CSRF).
+ * - Rejects every request whose Host header isn't in WEB_ALLOWED_HOSTS (Ruling R56): under DNS
+ *   rebinding an attacker's name resolves to this app, and Origin and Host then agree with each
+ *   other — only the allow-list tells them apart. Browsers can't forge Host (X-Forwarded-Host they
+ *   can, so it is ignored).
+ * - Rejects `Sec-Fetch-Site: cross-site` on every method, and POST/PUT whose Origin isn't on an
+ *   allowed host (CSRF).
  * - Streams responses (SSE included) straight through, uncached.
  *
  * API_TOKEN is read from the server's environment at request time; it is never NEXT_PUBLIC_ and is
@@ -36,26 +41,47 @@ const PREFIX = "/api";
 const error = (status: number, code: string, message: string) =>
   Response.json({ code, message }, { status, headers: { "cache-control": "no-store" } });
 
-/** Same-origin check for mutating requests: the Origin's host must equal the request's Host. */
-function sameOrigin(req: Request): boolean {
+const DEFAULT_ALLOWED_HOSTS = "localhost:3000,127.0.0.1:3000";
+
+/** WEB_ALLOWED_HOSTS: comma-separated host[:port] the UI is served on (server env, read per request). */
+function allowedHosts(): Set<string> {
+  const raw = process.env.WEB_ALLOWED_HOSTS || DEFAULT_ALLOWED_HOSTS;
+  return new Set(
+    raw
+      .split(",")
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+/** Mutating requests must come from a page on an allowed host. */
+function allowedOrigin(req: Request, hosts: Set<string>): boolean {
   const origin = req.headers.get("origin");
-  const host = req.headers.get("host") ?? new URL(req.url).host;
   if (!origin || origin === "null") return false;
   try {
-    return new URL(origin).host === host;
+    const url = new URL(origin);
+    return (url.protocol === "http:" || url.protocol === "https:") && hosts.has(url.host);
   } catch {
     return false;
   }
 }
 
 export async function proxy(req: Request, method: Method): Promise<Response> {
+  const hosts = allowedHosts();
+  // Only the Host header: req.url may be derived from X-Forwarded-Host, which a page can set.
+  const host = req.headers.get("host")?.trim().toLowerCase();
+  if (!host || !hosts.has(host)) return error(403, "FORBIDDEN_HOST", "This host is not allowed");
+  if (req.headers.get("sec-fetch-site") === "cross-site") {
+    return error(403, "FORBIDDEN_ORIGIN", "Cross-origin requests are not allowed");
+  }
+
   const url = new URL(req.url);
   // The raw (still percent-encoded) path: an encoded "/" or "." can't match an ID segment.
   const path = url.pathname.startsWith(`${PREFIX}/`) ? url.pathname.slice(PREFIX.length) : "";
   const endpoint = ENDPOINTS.find((e) => e.method === method && e.pattern.test(path));
   if (!endpoint) return error(404, "NOT_FOUND", "Not found");
 
-  if (method !== "GET" && !sameOrigin(req)) {
+  if (method !== "GET" && !allowedOrigin(req, hosts)) {
     return error(403, "FORBIDDEN_ORIGIN", "Cross-origin requests are not allowed");
   }
 

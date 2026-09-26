@@ -26,6 +26,7 @@ const sameOrigin = { origin: WEB, "content-type": "application/json" };
 beforeEach(() => {
   vi.stubEnv("API_URL", "http://api.internal:3001");
   vi.stubEnv("API_TOKEN", TOKEN);
+  vi.stubEnv("WEB_ALLOWED_HOSTS", "web.test:3000");
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -166,11 +167,126 @@ describe("API proxy CSRF (Origin check)", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("accepts an Origin on any allowed host", async () => {
+    vi.stubEnv("WEB_ALLOWED_HOSTS", "web.test:3000,localhost:3000");
+    const calls = stubUpstream();
+    const res = await POST(
+      req("POST", "/api/v1/test-runs/run_1/cancel", { headers: { origin: "http://localhost:3000", "content-type": "application/json" }, body: "{}" }),
+    );
+    expect(res.status).toBe(200);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("rejects a non-http(s) Origin even when its host is allowed", async () => {
+    const calls = stubUpstream();
+    const res = await POST(
+      req("POST", "/api/v1/test-runs/run_1/cancel", { headers: { origin: "chrome-extension://web.test:3000", "content-type": "application/json" }, body: "{}" }),
+    );
+    expect(res.status).toBe(403);
+    expect(calls).toHaveLength(0);
+  });
+
   it("allows a GET without an Origin header", async () => {
     const calls = stubUpstream();
     const res = await GET(req("GET", "/api/v1/test-runs/run_1"));
     expect(res.status).toBe(200);
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe("API proxy host allow-list (DNS rebinding)", () => {
+  const FORBIDDEN_HOST = { code: "FORBIDDEN_HOST", message: "This host is not allowed" };
+  const reqOn = (host: string | null, method: string, path: string, headers: Record<string, string> = {}, body?: string) =>
+    new Request(`http://${host ?? "web.test:3000"}${path}`, {
+      method,
+      headers: host === null ? headers : { host, ...headers },
+      body,
+    });
+
+  it.each([
+    ["GET", "/api/v1/test-runs", GET],
+    ["GET", "/api/v1/test-runs/run_1/report", GET],
+    ["GET", "/api/v1/test-runs/run_1/artifacts/art_1/url?reveal=true", GET],
+    ["GET", "/api/v1/admin", GET], // not even a 404 is given away
+  ] as const)("rejects %s %s on a host that isn't listed", async (method, path, handler) => {
+    const calls = stubUpstream();
+    const res = await handler(reqOn("other.test:3000", method, path));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual(FORBIDDEN_HOST);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects a rebound name even when Origin and Host agree (evil.example:3000 → this app's IP)", async () => {
+    const calls = stubUpstream();
+    const rebound = { origin: "http://evil.example:3000", "content-type": "application/json" };
+    const read = await GET(reqOn("evil.example:3000", "GET", "/api/v1/test-runs/run_1/artifacts/art_1/url?reveal=true", rebound));
+    const create = await POST(reqOn("evil.example:3000", "POST", "/api/v1/test-runs", rebound, "{}"));
+    const confirm = await POST(reqOn("evil.example:3000", "POST", "/api/v1/test-runs/run_1/criteria/confirm", rebound, "{}"));
+    const edit = await PUT(reqOn("evil.example:3000", "PUT", "/api/v1/test-runs/run_1/criteria", rebound, "{}"));
+    for (const res of [read, create, confirm, edit]) {
+      expect(res.status).toBe(403);
+      // Static body: the attacker's host name is never echoed back.
+      expect(await res.text()).not.toContain("evil");
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects a request without a Host header", async () => {
+    const calls = stubUpstream();
+    const res = await GET(reqOn(null, "GET", "/api/v1/test-runs/run_1"));
+    expect(res.status).toBe(403);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("ignores X-Forwarded-Host (a same-origin page can set it; it can't set Host)", async () => {
+    const calls = stubUpstream();
+    const res = await GET(reqOn("evil.example:3000", "GET", "/api/v1/test-runs/run_1", { "x-forwarded-host": "web.test:3000" }));
+    expect(res.status).toBe(403);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("defaults to localhost:3000 and 127.0.0.1:3000 when WEB_ALLOWED_HOSTS is unset", async () => {
+    vi.stubEnv("WEB_ALLOWED_HOSTS", undefined);
+    const calls = stubUpstream();
+    expect((await GET(reqOn("localhost:3000", "GET", "/api/v1/test-runs/run_1"))).status).toBe(200);
+    expect((await GET(reqOn("127.0.0.1:3000", "GET", "/api/v1/test-runs/run_1"))).status).toBe(200);
+    expect((await GET(reqOn("web.test:3000", "GET", "/api/v1/test-runs/run_1"))).status).toBe(403);
+    expect((await GET(reqOn("localhost:4000", "GET", "/api/v1/test-runs/run_1"))).status).toBe(403);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("reads a comma-separated list, ignoring spaces, case and empty entries", async () => {
+    vi.stubEnv("WEB_ALLOWED_HOSTS", " Testing.Example.com , ,10.0.0.5:3000,");
+    const calls = stubUpstream();
+    expect((await GET(reqOn("testing.example.com", "GET", "/api/v1/test-runs/run_1"))).status).toBe(200);
+    expect((await GET(reqOn("TESTING.EXAMPLE.COM", "GET", "/api/v1/test-runs/run_1"))).status).toBe(200);
+    expect((await GET(reqOn("10.0.0.5:3000", "GET", "/api/v1/test-runs/run_1"))).status).toBe(200);
+    // A listed name without a port matches only that exact Host (the default port).
+    expect((await GET(reqOn("testing.example.com:8080", "GET", "/api/v1/test-runs/run_1"))).status).toBe(403);
+    expect(calls).toHaveLength(3);
+  });
+
+  it.each([
+    ["GET", "/api/v1/test-runs/run_1/artifacts/art_1/url?reveal=true", GET],
+    ["POST", "/api/v1/test-runs/run_1/cancel", POST],
+    ["PUT", "/api/v1/test-runs/run_1/criteria", PUT],
+  ] as const)("rejects %s %s marked Sec-Fetch-Site: cross-site", async (method, path, handler) => {
+    const calls = stubUpstream();
+    const headers = { ...sameOrigin, "sec-fetch-site": "cross-site" };
+    const res = await handler(req(method, path, method === "GET" ? { headers } : { headers, body: "{}" }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: "FORBIDDEN_ORIGIN" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each(["same-origin", "none"])("allows Sec-Fetch-Site: %s", async (site) => {
+    const calls = stubUpstream();
+    const get = await GET(req("GET", "/api/v1/test-runs/run_1", { headers: { "sec-fetch-site": site } }));
+    const post = await POST(req("POST", "/api/v1/test-runs/run_1/cancel", { headers: { ...sameOrigin, "sec-fetch-site": site }, body: "{}" }));
+    expect(get.status).toBe(200);
+    expect(post.status).toBe(200);
+    expect(calls).toHaveLength(2);
   });
 });
 
@@ -226,7 +342,7 @@ describe("API proxy responses", () => {
   it("aborts the upstream request when the browser disconnects", async () => {
     const calls = stubUpstream(() => new Response(new ReadableStream(), { headers: { "content-type": "text/event-stream" } }));
     const controller = new AbortController();
-    const r = new Request(`${WEB}/api/v1/test-runs/run_1/events`, { signal: controller.signal });
+    const r = new Request(`${WEB}/api/v1/test-runs/run_1/events`, { headers: { host: "web.test:3000" }, signal: controller.signal });
     await GET(r);
     controller.abort();
     expect(calls[0]!.init.signal?.aborted).toBe(true);
