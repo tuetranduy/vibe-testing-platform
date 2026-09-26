@@ -314,6 +314,20 @@ describe("LlmClient.generateJson (JSON-Schema level, for the Stagehand bridge)",
     expect(res.data).toEqual({ elementId: "1-2" });
     expect(transport.requests).toHaveLength(3);
   });
+
+  it("an optional check gets the correction round; still failing → ContractError with INVALID_OUTPUT records", async () => {
+    const check = (v: unknown) => (typeof v === "object" && v !== null && !Array.isArray(v) ? [] : ["(root): must be a JSON object"]);
+    const ok = setup();
+    ok.transport.enqueue({ json: ["x"] }, { json: { elementId: "1" } });
+    expect((await ok.client.generateJson({ ...base(), jsonSchema: schema, check })).data).toEqual({ elementId: "1" });
+    expect(ok.calls.map((c) => c.status)).toEqual(["INVALID_OUTPUT", "SUCCESS"]);
+    expect(JSON.stringify(ok.transport.requests[1]!.messages)).toContain("must be a JSON object");
+
+    const bad = setup();
+    bad.transport.enqueue({ json: ["x"] }, { json: 42 });
+    await expect(bad.client.generateJson({ ...base(), jsonSchema: schema, check })).rejects.toBeInstanceOf(ContractError);
+    expect(bad.calls.map((c) => c.status)).toEqual(["INVALID_OUTPUT", "INVALID_OUTPUT"]);
+  });
 });
 
 describe("createTransport", () => {

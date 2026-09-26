@@ -52,6 +52,11 @@ export interface GenerateStructuredInput<T> extends LlmCallInput {
 
 export interface GenerateJsonInput extends LlmCallInput {
   jsonSchema: JsonSchema;
+  /**
+   * Deterministic validation of the parsed JSON (the provider constrains the shape, this checks what
+   * the caller relies on). Returned issues trigger the same single correction round as schema failures.
+   */
+  check?: (data: unknown) => string[];
 }
 
 export interface StructuredResult<T> {
@@ -109,7 +114,10 @@ export class LlmClient {
    * Stagehand ClientLLM bridge). The provider constrains the shape; the client only checks it's JSON.
    */
   generateJson(input: GenerateJsonInput): Promise<StructuredResult<unknown>> {
-    return this.run(input, input.jsonSchema, (value) => ({ ok: true, data: value }));
+    return this.run(input, input.jsonSchema, (value) => {
+      const issues = input.check?.(value) ?? [];
+      return issues.length > 0 ? { ok: false, issues } : { ok: true, data: value };
+    });
   }
 
   private async run<T>(

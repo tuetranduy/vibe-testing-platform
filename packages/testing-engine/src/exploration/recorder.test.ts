@@ -2,7 +2,7 @@ import { ElementRefSchema, ObservedFactSchema, type ElementRef, type LocatorCand
 import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LOCATOR_STRATEGY_ORDER } from "../shared/locator-policy";
-import { captureCheckpoint, captureFact, readFact } from "./fact-reader";
+import { captureCheckpoint, captureFact, modeForValueType, readFact } from "./fact-reader";
 import { describeElement, fillElement, recordElement } from "./recorder";
 
 /**
@@ -177,6 +177,21 @@ describe("captureFact / captureCheckpoint (provenance)", () => {
     await page.evaluate(() => document.querySelector("[data-testid=cart-count]")?.remove());
     const gone = await captureFact(page, { ...base, modelValue: 3, element, mode: "number" });
     expect(gone).toMatchObject({ provenance: "MODEL_EXTRACTED", read: null });
+  });
+
+  it("a boolean fact without an explicit visible mode stays MODEL_EXTRACTED even when the element is visible (R24)", async () => {
+    // e.g. "Add to cart is disabled": the model says true; visibility would measure something else.
+    const element = await recordElement(page, "#add");
+    const fact = await captureFact(page, { key: "addDisabled", checkpoint: "c1", stepId: "s1", modelValue: true, element, mode: null });
+    expect(fact).toEqual({ key: "addDisabled", checkpoint: "c1", stepId: "s1", value: true, provenance: "MODEL_EXTRACTED", read: null, modelValue: true });
+    expect(ObservedFactSchema.parse(fact)).toEqual(fact);
+
+    const noDefault = await captureFact(page, { key: "addDisabled", checkpoint: "c1", stepId: "s1", modelValue: true, element, mode: modeForValueType("boolean") });
+    expect(noDefault.provenance).toBe("MODEL_EXTRACTED");
+
+    // Only when the caller asks for a visibility read (a `visible` expectedOutcome) is it DOM-verified.
+    const visible = await captureFact(page, { key: "addShown", checkpoint: "c1", stepId: "s1", modelValue: true, element, mode: "visible" });
+    expect(visible).toMatchObject({ value: true, provenance: "DOM_VERIFIED", read: { mode: "visible" } });
   });
 
   it("the reserved url fact is captured at every checkpoint as DOM_VERIFIED", async () => {

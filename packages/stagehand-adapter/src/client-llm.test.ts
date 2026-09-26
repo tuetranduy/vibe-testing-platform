@@ -1,5 +1,5 @@
 import type { ClientLLM } from "@browserbasehq/stagehand";
-import { CancelledError } from "@platform/contracts";
+import { CancelledError, ContractError } from "@platform/contracts";
 import { FakeTransport, LlmClient, type LlmCallRecord, type LlmTransportRequest } from "@platform/llm";
 import { describe, expect, it } from "vitest";
 import { createClientLlmBridge } from "./client-llm";
@@ -79,13 +79,14 @@ describe("ClientLLM bridge → @platform/llm", () => {
         messages: [{ role: "user", content: { type: "text", text: "x" } }],
         tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }],
       } as unknown as GenerateRequest),
-    ).rejects.toThrow(/tool use/);
+    ).rejects.toThrow(ContractError);
     await expect(
       bridge.client.generate({
         ...actRequest(),
         messages: [{ role: "user", content: { type: "tool_use", id: "1", name: "t", input: {} } }],
       } as GenerateRequest),
     ).rejects.toThrow(/unsupported message part/);
+    expect(bridge.takeError()).toBeInstanceOf(ContractError);
     expect(transport.requests).toHaveLength(0);
   });
 
@@ -141,11 +142,25 @@ describe("ClientLLM bridge → @platform/llm", () => {
     expect(bridge.takeUsage()).toEqual({ calls: 2, inputTokens: 15, outputTokens: 3 });
     expect(bridge.takeUsage()).toEqual({ calls: 0, inputTokens: 0, outputTokens: 0 });
 
-    transport.enqueue({ json: ["not", "an", "object"] });
-    await expect(bridge.client.generate(actRequest())).rejects.toThrow(/not a JSON object/);
-    expect(String(bridge.takeError())).toMatch(/not a JSON object/);
+    transport.enqueue({ json: ["not", "an", "object"] }, { json: 42 });
+    await expect(bridge.client.generate(actRequest())).rejects.toBeInstanceOf(ContractError);
+    expect(bridge.takeError()).toBeInstanceOf(ContractError);
     expect(bridge.takeError()).toBeUndefined();
     expect(bridge.model).toBe("claude-sonnet-5");
+  });
+
+  it("a non-object structured answer gets the correction round, recorded as INVALID_OUTPUT", async () => {
+    const { transport, calls, bridge } = setup();
+    transport.enqueue({ json: "just a string" }, { json: { action: null } });
+    const result = await bridge.client.generate(actRequest());
+    expect(result).toMatchObject({ outputFormat: "json_schema", structuredContent: { action: null } });
+    expect(calls.map((c) => c.status)).toEqual(["INVALID_OUTPUT", "SUCCESS"]);
+    expect(JSON.stringify(transport.requests[1]!.messages)).toContain("must be a JSON object");
+
+    const failing = setup();
+    failing.transport.enqueue({ json: [1] }, { json: [2] });
+    await expect(failing.bridge.client.generate(actRequest())).rejects.toBeInstanceOf(ContractError);
+    expect(failing.calls.map((c) => c.status)).toEqual(["INVALID_OUTPUT", "INVALID_OUTPUT"]);
   });
 
   it("an aborted run signal cancels the call", async () => {
