@@ -222,9 +222,9 @@ pnpm eval planner                # same, for the planner prompt
 ```
 
 - DB tests clone a migrated template database per test file. They use `TEST_DATABASE_URL`, which defaults to the compose Postgres (`postgresql://platform:platform@localhost:5432/platform`). The role needs `CREATEDB`.
-- Redis tests use `TEST_REDIS_URL` (default `redis://localhost:6379`). Some worker tests create real BullMQ queues, so
-  while a dev or compose worker is running on the same Redis, point the tests at another database index
-  (e.g. `TEST_REDIS_URL=redis://localhost:6379/2`) so that worker can't take their jobs.
+- Redis tests use `TEST_REDIS_URL` (default `redis://localhost:6379/15`: a dedicated logical database, so tests never
+  touch DB 0, where a dev or compose worker takes its jobs). Some worker tests create real BullMQ queues and clear
+  their database first (never DB 0), so if you override it, keep it on an index no worker listens on.
 - S3 storage tests run only when `S3_TEST_ENDPOINT` is set (see `packages/storage/README.md`).
 - Demo shop tests: `cd tests/fixtures/demo-shop && npx playwright install chromium && npx playwright test -c playwright.config.ts`.
 - `pnpm test:integration` and `pnpm test:live` run through the top-level `vitest.config.ts` projects (`integration`, `live`); `test:live` includes the Stagehand-through-sandbox smoke test (`tests/integration/stagehand-smoke.live.test.ts`) and any `*.live.test.ts` under `packages/**/src`.

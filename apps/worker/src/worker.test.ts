@@ -9,9 +9,11 @@ let h: WorkerHarness;
 let connection: Redis;
 beforeAll(async () => {
   h = await createHarness();
-  // Isolated Redis logical DB so a locally running worker never picks these jobs up.
-  connection = new Redis(`${REDIS_URL}/15`, { maxRetriesPerRequest: null });
-  await connection.flushdb();
+  // REDIS_URL is the tests' own logical DB (default /15), so a locally running worker never picks
+  // these jobs up. Clear leftover jobs from an earlier run — but never in DB 0, which may be a
+  // developer's live queue if TEST_REDIS_URL points there.
+  connection = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
+  if ((connection.options.db ?? 0) !== 0) await connection.flushdb();
 });
 afterAll(async () => {
   connection?.disconnect();
