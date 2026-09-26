@@ -46,6 +46,60 @@ describe("CriteriaReview", () => {
     expect(within(cards[0]!).queryByText(/needs clarification|ai-judged/i)).not.toBeInTheDocument();
   });
 
+  it("shows what each criterion actually checks, in plain language", async () => {
+    routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    const check = (card: HTMLElement) => within(card).getByRole("group", { name: /what will be checked/i });
+    expect(check(cards[0]!)).toHaveTextContent("Cart badge count (at “after add”) is greater than Cart badge count (at “before add”).");
+    expect(check(cards[1]!)).toHaveTextContent("Cart badge count (at “after add”) is exactly 1 more than Cart badge count (at “before add”).");
+    expect(check(cards[2]!)).toHaveTextContent("Judged by AI only, so it ends Inconclusive: “The page responds quickly”.");
+    expect(screen.queryByText(/rewording changes the description only/i)).not.toBeInTheDocument();
+  });
+
+  it("says a reworded criterion keeps its check: while editing, and after saving", async () => {
+    const user = userEvent.setup();
+    routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`PUT ${CRITERIA}`]: (init) => json(200, { ...JSON.parse(String(init!.body)), revision: 2 }),
+    });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    const NOTE = "Rewording changes the description only; the check above is unchanged.";
+    await user.click(within(cards[1]!).getByRole("button", { name: /edit/i }));
+    expect(within(cards[1]!).getByText(NOTE)).toBeInTheDocument();
+    const box = within(cards[1]!).getByLabelText(/criterion AC-2/i);
+    await user.clear(box);
+    await user.type(box, "The cart count increases by 2");
+    await user.click(within(cards[1]!).getByRole("button", { name: /save/i }));
+    await screen.findByText("The cart count increases by 2");
+
+    const after = screen.getAllByRole("article");
+    expect(within(after[1]!).getByText(NOTE)).toBeInTheDocument();
+    // The check itself is what it was: still "exactly 1 more", whatever the new wording says.
+    expect(within(after[1]!).getByRole("group", { name: /what will be checked/i })).toHaveTextContent("is exactly 1 more than");
+    expect(within(after[0]!).queryByText(NOTE)).not.toBeInTheDocument();
+    expect(within(after[2]!).queryByText(NOTE)).not.toBeInTheDocument();
+  });
+
+  it("drops the reworded note when an edit is discarded or saved back to the original wording", async () => {
+    const user = userEvent.setup();
+    routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`PUT ${CRITERIA}`]: (init) => json(200, { ...JSON.parse(String(init!.body)), revision: 2 }),
+    });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    await user.click(within(cards[0]!).getByRole("button", { name: /edit/i }));
+    await user.click(within(cards[0]!).getByRole("button", { name: /discard/i }));
+    expect(screen.queryByText(/rewording changes the description only/i)).not.toBeInTheDocument();
+
+    await user.click(within(cards[0]!).getByRole("button", { name: /edit/i }));
+    await user.click(within(cards[0]!).getByRole("button", { name: /save/i })); // unchanged text
+    await screen.findByText(/revision 2/i);
+    expect(screen.queryByText(/rewording changes the description only/i)).not.toBeInTheDocument();
+  });
+
   it("editing a criterion sends PUT with the full requirement", async () => {
     const user = userEvent.setup();
     let sent: NormalizedRequirement | null = null;
