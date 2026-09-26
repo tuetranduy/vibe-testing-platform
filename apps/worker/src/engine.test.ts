@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   ArtifactRepository,
   ExplorationStepRepository,
+  GeneratedTestRepository,
   LlmCallRepository,
   ObservedFactRepository,
   PlanRepository,
@@ -159,9 +160,35 @@ describe("createEngine (Ruling R7)", () => {
     expect(JSON.stringify(plan)).not.toContain("pw-Plan-Secret-456");
   });
 
-  it("real engine: generateTest is the R7 null stub", async () => {
-    const engine = createEngine(REAL, realDeps(new FakeTransport()).deps);
-    expect(await engine.stages.generateTest({} as never, {} as never)).toBeNull();
+  it("real engine generates the Playwright test (Task 16): persisted once, test.generated published once; no rerun until Task 17 (R39)", async () => {
+    const page = {
+      facts: {
+        "cartCount@before_add": { value: 0, dom: true },
+        "cartCount@after_add": { value: 1, dom: true },
+        "cartItems@cart_page": { value: ["iPhone 17 Pro"], dom: false },
+      },
+    };
+    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), {}, page).deps);
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
+
+    await executeRunJob(h.deps(engine.stages), run.id);
+
+    const test = (await new GeneratedTestRepository(h.tdb.db).findByRun(run.id))!;
+    expect(test.id).toMatch(/^gt_/);
+    expect(test.compiledCriteria).toEqual(["AC-1"]);
+    expect(test.notCompiled).toEqual([{ criterionId: "AC-2", reason: "Fact cartItems@cart_page was extracted by the model, not read from the page" }]);
+    expect(test.source).toContain("await page.goto(data.targetUrl);");
+    expect(test.source).not.toContain("iPhone");
+    expect(JSON.parse(test.dataJson).inputs).toEqual({ input1: "iPhone 17 Pro" });
+
+    const events = await eventsOf(h, run.id);
+    expect(events.filter((e) => e.type === "test.generated").map((e) => e.payload)).toEqual([
+      { compiledCriteria: ["AC-1"], notCompiled: test.notCompiled },
+    ]);
+    expect(events.find((e) => e.type === "playwright.completed")?.payload).toEqual({ status: "ERRORED", durationMs: 0 });
+    // No rerun confirmation is fabricated: the DOM-backed PASS stands as EXPLORATION_ONLY.
+    const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
+    expect(results.find((r) => r.criterionId === "AC-1")).toMatchObject({ status: "PASS", verdictSource: "EXPLORATION_ONLY", rerunOutcome: "UNAVAILABLE" });
   });
 
   it("the real engine needs artifact storage (fails fast at startup)", () => {

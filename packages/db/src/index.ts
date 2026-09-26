@@ -10,4 +10,5 @@ export * from "./artifact-repository";
 export * from "./result-repository";
 export * from "./llm-call-repository";
 export * from "./exploration-repository";
+export * from "./generated-test-repository";
 export * as schema from "./schema";

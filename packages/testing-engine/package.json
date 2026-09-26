@@ -17,6 +17,10 @@
     "@platform/security": "workspace:*",
     "@platform/stagehand-adapter": "workspace:*",
     "playwright-core": "1.56.1",
+    "typescript": "~5.9.3",
     "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
   }
 }
