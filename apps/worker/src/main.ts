@@ -7,6 +7,8 @@ import { Redis } from "ioredis";
 import { CancelWatcher } from "./cancel-watcher";
 import type { WorkerLogger } from "./deps";
 import { createEngine } from "./engine";
+import { stagehandExtension } from "./exploration";
+import { preflightBrowserSandbox } from "./sandbox/preflight";
 import { startWorkers } from "./worker";
 
 const env = loadEnvOrExit();
@@ -56,6 +58,9 @@ else {
       await new Promise((r) => setTimeout(r, 1000 * attempt));
     }
   }
+  // Launch + close the sandboxed Chromium once. A failure is logged (never fatal): analyze/plan keep
+  // working and exploring runs end ERRORED / BROWSER_PROVIDER.
+  await preflightBrowserSandbox({ logger, resolveExtension: stagehandExtension });
 }
 const stages = engine.stages;
 

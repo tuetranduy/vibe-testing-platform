@@ -1,102 +1,117 @@
 #!/usr/bin/env bash
-# Milestone B demo (Tasks 10-15): real requirement compiler -> criteria confirmation ->
-# real planner -> Stagehand exploration through the sandbox -> deterministic blocking.
+# Milestone B demo (Tasks 10-15): real requirement compiler -> criteria confirmation -> real planner
+# -> Stagehand exploration through the browser sandbox -> deterministic blocking. Every step is
+# ASSERTED: the script exits non-zero with a message on the first mismatch.
 #
-# Precondition: the compose stack must be running with the REAL engine, i.e.
-#   LLM_PROVIDER=anthropic and ANTHROPIC_API_KEY=sk-ant-... set before `docker compose up` /
-#   `pnpm stack:up` (see infra/compose/.env or export them in your shell). LLM_MODEL is optional
-#   (defaults to claude-sonnet-5). With the default LLM_PROVIDER=fake this script refuses to run,
-#   because every run would be handled by the deterministic fake engine instead of the real one.
+# Preconditions (see README "Real engine (Milestone B)"):
+#   - the API is reachable at $API and a worker with the REAL engine consumes its queue:
+#     LLM_PROVIDER=anthropic + ANTHROPIC_API_KEY (LLM_MODEL optional, default claude-sonnet-5);
+#   - no worker on the fake engine (LLM_PROVIDER=fake, the compose default) is consuming the same
+#     queue — e.g. `docker compose -f infra/compose/docker-compose.yml stop worker` first;
+#   - that worker can launch its sandboxed Chromium (locally: Playwright's Chromium installed). The
+#     compose worker can't yet (README: open sandbox decision), so run the worker locally.
+# The script detects the fake engine from run 1's criteria (the fake analyze stage always proposes
+# the same two fixed statements) and stops with an explanation.
 #
-# Usage (compose stack running with a real provider): ./scripts/milestone-b-demo.sh
-# Env: API (default http://localhost:3001), API_TOKEN, TARGET (default http://demo-shop:4000/)
+# Usage: ./scripts/milestone-b-demo.sh
+# Env: API (default http://localhost:3001), API_TOKEN, TARGET (default http://localhost:4000/ — the
+#      demo shop as a local worker reaches it; use http://demo-shop:4000/ for a worker inside compose).
 set -euo pipefail
 API=${API:-http://localhost:3001}
 TOKEN=${API_TOKEN:-dev-api-token-change-me-please}
-TARGET=${TARGET:-http://demo-shop:4000/}
-COMPOSE="docker compose -f $(dirname "$0")/../infra/compose/docker-compose.yml"
+TARGET=${TARGET:-http://localhost:4000/}
+BASE=${TARGET%/}
 H=(-H "authorization: Bearer $TOKEN" -H "content-type: application/json")
 
 say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
+die() { printf '\n\033[31mDEMO FAILED: %s\033[0m\n' "$*" >&2; exit 1; }
 json() { node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const o=JSON.parse(s);console.log($1)})"; }
-create() { curl -sf "${H[@]}" -X POST "$API/v1/test-runs" -d "$1"; }
-run_summary() { curl -sf "${H[@]}" "$API/v1/test-runs/$1"; }
-lifecycle() { run_summary "$1" | json '[o.lifecycle,o.verdict??"",o.errorCategory??"",o.cancelReason??""].filter(Boolean).join(" / ")'; }
-wait_for() { # runId, regex, timeout seconds
-  for _ in $(seq 1 "$3"); do l=$(lifecycle "$1"); if [[ $l =~ $2 ]]; then echo "$l"; return 0; fi; sleep 1; done
-  echo "timed out waiting for $2 (last: $l)"; return 1
+create() { # body -> runId
+  local out
+  out=$(curl -s -w '\n%{http_code}' "${H[@]}" -X POST "$API/v1/test-runs" -d "$1")
+  [[ ${out##*$'\n'} == 202 ]] || die "POST /v1/test-runs returned ${out##*$'\n'}: ${out%$'\n'*}"
+  printf '%s' "${out%$'\n'*}" | json 'o.runId'
 }
-stream_until_terminal() { # runId, max seconds
-  curl -sN --max-time "$2" "${H[@]}" "$API/v1/test-runs/$1/events" | grep '^data:' | cut -c7- | node -e "
-    require('readline').createInterface({input:process.stdin}).on('line',l=>{const e=JSON.parse(l);console.log(String(e.sequence).padStart(3),e.stage.padEnd(22),e.type.padEnd(20),e.message)})"
+lifecycle() { curl -sf "${H[@]}" "$API/v1/test-runs/$1" | json '[o.lifecycle,o.verdict??"",o.errorCategory??"",o.cancelReason??""].filter(Boolean).join(" / ")'; }
+wait_for() { # runId, regex, timeout seconds — fails early if the run ends in another terminal state
+  local l=""
+  for _ in $(seq 1 "$3"); do
+    l=$(lifecycle "$1")
+    if [[ $l =~ $2 ]]; then echo "$l"; return 0; fi
+    if [[ $l =~ ^(COMPLETED|ERRORED|CANCELLED) ]]; then die "run $1 ended as '$l' while waiting for $2"; fi
+    sleep 1
+  done
+  die "timed out after $3 s waiting for run $1 to reach $2 (last: $l)"
+}
+events() { # runId, max seconds -> the run's events as a JSON array (the stream closes after the terminal event)
+  { curl -sN --max-time "$2" "${H[@]}" "$API/v1/test-runs/$1/events" || true; } | { grep '^data:' || true; } | cut -c7- | node -e "
+    const lines=require('fs').readFileSync(0,'utf8').split('\n').filter(Boolean);console.log(JSON.stringify(lines.map(l=>JSON.parse(l))))"
+}
+print_events() { json 'o.map(e=>String(e.sequence).padStart(3)+" "+e.stage.padEnd(22)+" "+e.type.padEnd(20)+" "+e.message).join("\n")'; }
+final_statuses() { json 'o.filter(e=>e.type==="criterion.evaluated"&&!e.payload.provisional).map(e=>e.payload.criterionId+"="+e.payload.status+(e.payload.reason?"/"+e.payload.reason:"")).join(", ")||"(none)"'; }
+assert_blocked() { # runId, reason
+  local ev summary finals
+  summary=$(wait_for "$1" "^(COMPLETED)" 600)
+  ev=$(events "$1" 30)
+  finals=$(printf '%s' "$ev" | final_statuses)
+  echo "summary: $summary"
+  echo "final criteria: $finals"
+  printf '%s' "$ev" | json 'o.filter(e=>e.type==="plan.created").map(e=>"plan.created blockedCriteria: "+JSON.stringify(e.payload.blockedCriteria)).join("\n")'
+  [[ $finals =~ =BLOCKED/$2 ]] || die "run $1: expected a criterion BLOCKED with reason $2, got: $finals"
+  echo "OK: a criterion is BLOCKED / $2"
 }
 
-# --- Precondition: the worker must be on the real engine (LLM_PROVIDER != fake). --------------
-# The API exposes no engine flag, so this checks the worker's own start-up log line
-# ("using the fake test engine" vs "using the real test engine" — apps/worker/src/main.ts).
-if ! curl -sf "$API/healthz" >/dev/null 2>&1; then
-  echo "API is not reachable at $API — is the compose stack up? (pnpm stack:up)" >&2
-  exit 1
-fi
-if $COMPOSE logs worker 2>&1 | tail -100 | grep -q "using the fake test engine"; then
-  cat >&2 <<'EOF'
-The worker is running the fake engine (LLM_PROVIDER=fake, the compose default).
-This demo needs the real engine: restart the stack with a real provider, e.g.
-
-  LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... docker compose -f infra/compose/docker-compose.yml up -d --wait worker
-
-then re-run this script.
-EOF
-  exit 1
-fi
-if ! $COMPOSE logs worker 2>&1 | tail -100 | grep -q "using the real test engine"; then
-  echo "Could not confirm the worker is on the real engine (no start-up log line found); restart the worker and retry." >&2
-  exit 1
-fi
-echo "worker is on the real engine (LLM_PROVIDER=anthropic)."
+curl -sf "$API/healthz" >/dev/null 2>&1 || die "API is not reachable at $API (see README: Real engine (Milestone B))"
 
 say "1. Requirement -> criteria -> manual confirmation -> plan -> Stagehand exploration -> report"
 BODY1=$(printf '{"targetUrl":"%s","requirement":"Search for iPhone 17 Pro, add it to the cart, and the cart count should increase by 1.","options":{"autoConfirmCriteria":false}}' "$TARGET")
-RUN1=$(create "$BODY1" | json 'o.runId')
+RUN1=$(create "$BODY1")
 echo "runId: $RUN1"
-wait_for "$RUN1" "AWAITING_CONFIRMATION" 150
+wait_for "$RUN1" "^AWAITING_CONFIRMATION" 180
 
 say "GET /v1/test-runs/$RUN1/criteria"
-curl -sf "${H[@]}" "$API/v1/test-runs/$RUN1/criteria" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.stringify(JSON.parse(s),null,2)))"
+CRITERIA=$(curl -sf "${H[@]}" "$API/v1/test-runs/$RUN1/criteria")
+printf '%s' "$CRITERIA" | json 'o.criteria.map(c=>c.id+"  ["+c.expectedOutcome.kind+"]  "+c.statement+(c.ambiguity?"  (ambiguous: "+c.ambiguity.reason+")":"")).join("\n")'
+# The fake engine's analyze stage always proposes exactly these two statements (fake-stages.ts).
+FAKE=$(printf '%s' "$CRITERIA" | json 'JSON.stringify(o.criteria.map(c=>c.statement).sort())===JSON.stringify(["The cart count increases after adding a product","The cart lists the selected product"])')
+if [[ $FAKE == true ]]; then
+  curl -sf "${H[@]}" -X POST "$API/v1/test-runs/$RUN1/cancel" >/dev/null || true
+  die "these are the fake engine's fixed criteria: the worker consuming the queue runs LLM_PROVIDER=fake.
+Stop it (e.g. docker compose -f infra/compose/docker-compose.yml stop worker) and start a real-engine
+worker (README: Real engine (Milestone B)), then re-run this script. (Run $RUN1 was cancelled.)"
+fi
 
 say "POST /v1/test-runs/$RUN1/criteria/confirm"
-curl -sf "${H[@]}" -X POST "$API/v1/test-runs/$RUN1/criteria/confirm" | json 'JSON.stringify(o)'
+curl -sf "${H[@]}" -X POST "$API/v1/test-runs/$RUN1/criteria/confirm" | json 'JSON.stringify(o)' || die "confirm failed for run $RUN1"
 
-say "Streaming events until the run reaches a terminal state (this drives the real planner + Stagehand explorer inside the sandbox; may take a few minutes)"
-stream_until_terminal "$RUN1" 600
-echo "summary: $(lifecycle "$RUN1")"
+say "Events until the run is terminal (real planner + Stagehand explorer in the sandbox; may take a few minutes)"
+EV1=$(events "$RUN1" 900)
+printf '%s' "$EV1" | print_events
+SUMMARY1=$(lifecycle "$RUN1")
+echo "summary: $SUMMARY1"
+echo "final criteria: $(printf '%s' "$EV1" | final_statuses)"
+[[ $SUMMARY1 =~ ^COMPLETED ]] || die "run $RUN1: expected COMPLETED after confirmation, got '$SUMMARY1'"
+echo "OK: run 1 reached AWAITING_CONFIRMATION and, once confirmed, COMPLETED"
 
-say "2. Requirement that needs a secret we never provide -> expect BLOCKED / MISSING_SECRET"
-# The demo shop's login form (qa@demo.test / demo-pass-123) needs a "password" secret; the planner
-# names that secret's inputRef even when unresolved (packages/testing-engine/src/planner/prompts.ts),
-# and with no secrets supplied at all, packages/testing-engine/src/planner/blocking.ts always blocks
-# whatever criterion depends on that fill step, deterministically, as MISSING_SECRET.
-BODY2=$(printf '{"targetUrl":"%s","requirement":"A logged-in customer can see their account email on the account page after signing in as qa@demo.test.","secrets":{},"options":{"autoConfirmCriteria":true}}' "${TARGET%/}/login")
-RUN2=$(create "$BODY2" | json 'o.runId')
+say "2. Login without the password secret -> expect a criterion BLOCKED / MISSING_SECRET"
+# The demo shop's login (qa@demo.test / demo-pass-123) needs a password; none is supplied, so the
+# planner blocks every criterion that depends on the login deterministically (planner/blocking.ts).
+# The email is supplied as test data, so MISSING_TEST_DATA can't apply.
+BODY2=$(printf '{"targetUrl":"%s/login","requirement":"Log in with the email from the test data and the password secret; after logging in, the account page shows the email address.","testData":{"email":"qa@demo.test"},"secrets":{},"options":{"autoConfirmCriteria":true}}' "$BASE")
+RUN2=$(create "$BODY2")
 echo "runId: $RUN2"
-wait_for "$RUN2" "(COMPLETED|ERRORED|CANCELLED)" 240
-echo "summary: $(lifecycle "$RUN2")"
-echo "(planner blocking is deterministic once the plan names an unprovided secret's inputRef — see packages/testing-engine/src/planner/blocking.ts; expected: run verdict BLOCKED, with a plan.created/criterion.evaluated event carrying reason MISSING_SECRET)"
-curl -sN --max-time 30 "${H[@]}" "$API/v1/test-runs/$RUN2/events" | grep -o '"reason":"[A-Z_]*"' | sort -u || true
+assert_blocked "$RUN2" MISSING_SECRET
 
-say "3. Requirement that asks to delete the account -> expect BLOCKED / DESTRUCTIVE_ACTION_NOT_AUTHORIZED"
-# The demo shop's /account page has a real "Delete account" button (data-testid=delete-account,
-# tests/fixtures/demo-shop/src/server.js) that never actually deletes anything server-side — it
-# exists purely to be blocked. packages/security/src/action-policy.ts's DESTRUCTIVE_TERMS match
-# "delete" in the planned step's instruction/element text regardless of the model's own opinion
-# (options.allowDestructiveActions defaults to false), so this blocks deterministically.
-BODY3=$(printf '{"targetUrl":"%s","requirement":"After logging in as qa@demo.test, verify that clicking the Delete account button removes the account.","secrets":{"password":"demo-pass-123"},"options":{"autoConfirmCriteria":true}}' "${TARGET%/}/account")
-RUN3=$(create "$BODY3" | json 'o.runId')
+say "3. Delete the account -> expect a criterion BLOCKED / DESTRUCTIVE_ACTION_NOT_AUTHORIZED"
+# The account page's "Delete account" button (never deletes anything server-side) exists to be
+# blocked: "delete" is a destructive term (packages/security action policy) and
+# allowDestructiveActions defaults to false. Email and password are supplied so neither
+# MISSING_TEST_DATA nor MISSING_SECRET can take precedence.
+BODY3=$(printf '{"targetUrl":"%s/login","requirement":"Log in with the email from the test data and the password secret, open the account page and click the Delete account button: the account is deleted.","testData":{"email":"qa@demo.test"},"secrets":{"password":"demo-pass-123"},"options":{"autoConfirmCriteria":true}}' "$BASE")
+RUN3=$(create "$BODY3")
 echo "runId: $RUN3"
-wait_for "$RUN3" "(COMPLETED|ERRORED|CANCELLED)" 240
-echo "summary: $(lifecycle "$RUN3")"
-echo "(destructive-action blocking is a deterministic word match against the planned step's instruction/element text — packages/security/src/action-policy.ts DESTRUCTIVE_TERMS; expected: run verdict BLOCKED, reason DESTRUCTIVE_ACTION_NOT_AUTHORIZED)"
-curl -sN --max-time 30 "${H[@]}" "$API/v1/test-runs/$RUN3/events" | grep -o '"reason":"[A-Z_]*"' | sort -u || true
+assert_blocked "$RUN3" DESTRUCTIVE_ACTION_NOT_AUTHORIZED
 
 say "History (newest first)"
-curl -sf "${H[@]}" "$API/v1/test-runs?limit=5" | json 'o.items.map(i=>i.runId+"  "+i.lifecycle+(i.verdict?" "+i.verdict:"")+(i.errorCategory?" "+i.errorCategory:"")).join("\n")'
+curl -sf "${H[@]}" "$API/v1/test-runs?limit=3" | json 'o.items.map(i=>i.runId+"  "+i.lifecycle+(i.verdict?" "+i.verdict:"")+(i.errorCategory?" "+i.errorCategory:"")).join("\n")'
+printf '\n\033[32mMilestone B demo passed.\033[0m\n'

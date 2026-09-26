@@ -7,11 +7,13 @@ Plan: [`docs/ai-testing-platform-implementation-plan.md`](docs/ai-testing-platfo
 
 **Milestone A (Tasks 0–9) is done**: contracts, database and run state machine, security primitives, artifact storage, demo shop, API (create / get / list / cancel / artifact URLs), live events over SSE, and the worker lifecycle with cancellation, deadlines, and crash recovery.
 
-**Milestone B (Tasks 10–15) is done**: with `LLM_PROVIDER=anthropic` (+ `ANTHROPIC_API_KEY`, optional `LLM_MODEL`, default `claude-sonnet-5`) the worker runs the real discovery engine end to end — the requirement is compiled into acceptance criteria (Task 10, confirmable/editable through the API per D5), the test plan is built with deterministic blocking for missing secrets, missing test data, and destructive actions (Task 12), and the plan is explored with Stagehand v4 inside the browser sandbox: the worker launches its own Chromium behind the egress guard proxy (Task 13, `apps/worker/src/sandbox/`) with the Stagehand runtime extension preloaded (`@platform/stagehand-adapter`, Task 14), then the verifier turns the recorded steps and facts into provisional PASS/FAIL/BLOCKED/INCONCLUSIVE results (Task 15). `LLM_PROVIDER=fake` (the default for local dev and compose) still runs the fully deterministic **fake** engine (`packages/testing-engine/src/orchestrator/fake-stages.ts`), so the Milestone A demo and compose keep working without an API key (Ruling R7).
+**Milestone B (Tasks 10–15) is implemented**: with `LLM_PROVIDER=anthropic` (+ `ANTHROPIC_API_KEY`, optional `LLM_MODEL`, default `claude-sonnet-5`) the worker runs the real discovery engine — the requirement is compiled into acceptance criteria (Task 10, confirmable/editable through the API per D5), the test plan is built with deterministic blocking for missing secrets, missing test data, and destructive actions (Task 12), and the plan is explored with Stagehand v4 inside the browser sandbox: the worker launches its own Chromium behind the egress guard proxy (Task 13, `apps/worker/src/sandbox/`) with the Stagehand runtime extension preloaded (`@platform/stagehand-adapter`, Task 14), then the verifier turns the recorded steps and facts into provisional PASS/FAIL/BLOCKED/INCONCLUSIVE results (Task 15). `LLM_PROVIDER=fake` (the default for local dev and compose) still runs the fully deterministic **fake** engine (`packages/testing-engine/src/orchestrator/fake-stages.ts`), so the Milestone A demo and compose keep working without an API key (Ruling R7).
 
 Generated-test compilation, the sandboxed Playwright rerun, and reconciliation (Tasks 16–18, Milestone C) are still stubs: `generateTest` returns `null` (rerun `UNAVAILABLE`) and the report stage is the fake one, so real runs' reports don't yet carry rerun-confirmed evidence. The web UI is a placeholder until Task 19.
 
-Prompt/model changes are tracked with `pnpm eval requirement-compiler` and `pnpm eval planner` (need `ANTHROPIC_API_KEY`; see `evals/BASELINE.md`). Both eval baselines and the `@live` Stagehand-through-sandbox smoke test (`pnpm test:live`) are **pending an API key** — see `evals/BASELINE.md` for how to record them once one is available.
+**Nothing has run against a real model provider yet.** The engine is covered by unit tests and by real-Chromium integration tests with a scripted LLM (`pnpm test:integration`); the eval baselines (`pnpm eval requirement-compiler`, `pnpm eval planner`), the `@live` Stagehand-through-sandbox smoke test (`pnpm test:live`) and `scripts/milestone-b-demo.sh` are all **pending an `ANTHROPIC_API_KEY`** (see `evals/BASELINE.md`).
+
+**Real exploration does not run in the Docker worker yet.** Chromium's own sandbox needs Linux user namespaces, which Docker's default container confinement (seccomp profile and capability set) denies, so in the compose `worker` container Chromium aborts with "No usable sandbox!" and exploring runs end `ERRORED / BROWSER_PROVIDER` (with a real provider configured, the worker's start-up preflight logs the failure). How to allow it is an open security decision: a seccomp profile that permits user namespaces for the worker (preferred), `cap_add: SYS_ADMIN` (broad), or Chromium's `--no-sandbox` (not recommended: the browser runs untrusted pages). Until then, run the real engine with a **local worker** — see [Real engine (Milestone B)](#real-engine-milestone-b).
 
 ## Run everything with Docker
 
@@ -23,17 +25,9 @@ pnpm stack:up        # or: docker compose -f infra/compose/docker-compose.yml up
 pnpm stack:down
 ```
 
-The `worker` image bundles Playwright's Chromium (matching the workspace's `playwright-core` pin) and its OS
-dependencies, installed under `/ms-playwright` at build time, so the real engine's browser sandbox runs inside
-the container with no extra setup.
-
-To run the real engine instead of the fake one, set `LLM_PROVIDER`, `ANTHROPIC_API_KEY` (and optionally
-`LLM_MODEL`) before bringing the worker up — either in `infra/compose/.env` or on the command line:
-
-```bash
-LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... docker compose -f infra/compose/docker-compose.yml up -d --wait
-./scripts/milestone-b-demo.sh
-```
+The compose stack runs the **fake** engine (`LLM_PROVIDER=fake`). The `worker` image bundles Playwright's
+Chromium (matching the workspace's `playwright-core` pin) and its OS dependencies under `/ms-playwright`, but
+Chromium can't start its sandbox in the container yet (see Status), so use a local worker for the real engine.
 
 | Service | URL |
 |---|---|
@@ -66,15 +60,53 @@ The real engine's browser sandbox (Task 13) launches Playwright's own Chromium d
 pnpm --filter @platform/worker exec playwright-core install chromium
 ```
 
+The apps don't read `.env` themselves; export it into each terminal first:
+
 ```bash
 pnpm install
 cp .env.example .env            # then adjust
 pnpm infra:up                   # postgres, redis, s3, demo-shop
+set -a; . ./.env; set +a        # in every terminal below
 pnpm db:migrate
 pnpm --filter @platform/api dev
 pnpm --filter @platform/worker dev
 pnpm --filter @platform/web dev
 ```
+
+### Real engine (Milestone B)
+
+The working route today: compose for the infrastructure, and the API and the worker on your machine. The API
+runs locally too because the compose API only allowlists `demo-shop:4000`, a name a local worker can't resolve.
+
+```bash
+pnpm install
+pnpm --filter @platform/worker exec playwright-core install chromium   # once per machine
+pnpm infra:up                   # postgres, redis, s3, demo-shop only
+# If the full stack is up (pnpm stack:up), stop its api and worker: the fake worker would take the jobs
+# and the compose API holds port 3001.
+docker compose -f infra/compose/docker-compose.yml stop api worker
+cp .env.example .env            # allowlists localhost:4000 (the demo shop) for dev
+```
+
+```bash
+# terminal 1
+set -a; . ./.env; set +a
+pnpm db:migrate
+pnpm --filter @platform/api dev
+
+# terminal 2
+set -a; . ./.env; set +a
+LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... pnpm --filter @platform/worker dev
+# expect "using the real test engine" and "browser sandbox preflight passed" in its log
+
+# terminal 3
+./scripts/milestone-b-demo.sh   # targets http://localhost:4000/ by default
+```
+
+The demo asserts each outcome and exits non-zero on a mismatch: run 1 stops at `AWAITING_CONFIRMATION`,
+is confirmed through the API and ends `COMPLETED`; run 2 (login without the password secret) has a criterion
+`BLOCKED / MISSING_SECRET`; run 3 (delete the account) has one `BLOCKED / DESTRUCTIVE_ACTION_NOT_AUTHORIZED`.
+It refuses to continue if the fake engine answers (it recognises the fake engine's fixed criteria).
 
 ## Tests
 
@@ -114,7 +146,7 @@ tests/integration             real-Chromium/sandbox/Stagehand-adapter tests + th
 tests/fixtures/demo-shop      deterministic test target
 spikes/stagehand-v4           Task 0 spike code (see docs/spikes/stagehand-v4.md)
 scripts/milestone-a-demo.sh   Milestone A demo (fake engine, lifecycle + SSE + cancel + crash recovery)
-scripts/milestone-b-demo.sh   Milestone B demo (real engine: criteria confirmation, planner blocking, exploration)
+scripts/milestone-b-demo.sh   Milestone B demo (real engine, local worker: criteria confirmation, planner blocking, exploration)
 ```
 
 ## Deviations from the plan
