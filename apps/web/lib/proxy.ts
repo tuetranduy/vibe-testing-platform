@@ -14,8 +14,10 @@
  * - Streams responses (SSE included) straight through, uncached.
  *
  * API_TOKEN is read from the server's environment at request time; it is never NEXT_PUBLIC_ and is
- * never put into a response. This module must only be imported by route handlers.
+ * never put into a response. This module must only be imported by route handlers (`server-only`
+ * fails the build if a client component ever imports it).
  */
+import "server-only";
 
 type Method = "GET" | "POST" | "PUT";
 

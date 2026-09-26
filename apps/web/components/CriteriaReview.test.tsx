@@ -207,9 +207,36 @@ describe("CriteriaReview", () => {
     render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
     const cards = await screen.findAllByRole("article");
     await user.click(within(cards[2]!).getByRole("button", { name: /remove/i }));
+    const ask = within(cards[2]!).getByRole("group", { name: /remove AC-3\?/i });
+    await user.click(within(ask).getByRole("button", { name: /yes, remove/i }));
     await waitFor(() => expect(sent).not.toBeNull());
     expect(sent!.criteria.map((c) => c.id)).toEqual(["AC-1", "AC-2"]);
     await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(2));
+  });
+
+  it("renders repeated suggestions without duplicate React keys", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = requirementFixture();
+    r.criteria[1]!.ambiguity = { reason: "Amount not specified", suggestions: ["Increase by 1", "Increase by 1"] };
+    routeFetch({ [`GET ${CRITERIA}`]: () => json(200, r) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    expect(within(cards[1]!).getAllByText("Increase by 1")).toHaveLength(2);
+    expect(error.mock.calls.flat().join(" ")).not.toMatch(/same key/i);
+  });
+
+  it("asks before removing a criterion, and keeps it when the user backs out", async () => {
+    const user = userEvent.setup();
+    const fetch = routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    await user.click(within(cards[2]!).getByRole("button", { name: /remove AC-3/i }));
+    const ask = within(cards[2]!).getByRole("group", { name: /remove AC-3\?/i });
+    expect(within(ask).getByRole("button", { name: /keep it/i })).toHaveFocus();
+    await user.click(within(ask).getByRole("button", { name: /keep it/i }));
+    expect(within(cards[2]!).queryByRole("group", { name: /remove AC-3\?/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("article")).toHaveLength(3);
+    expect(fetch).toHaveBeenCalledTimes(1); // only the initial GET
   });
 
   it("confirm shows the server warnings and hands them on; the button is disabled while pending", async () => {

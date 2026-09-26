@@ -13,7 +13,7 @@ describe("report formatting", () => {
     }
     expect(Object.keys(STATUS_REASON_TEXT).sort()).toEqual([...reasons].sort()); // nothing extra, nothing missing
     expect(new Set(reasons.map((r) => STATUS_REASON_TEXT[r])).size).toBe(reasons.length);
-    expect(STATUS_REASON_TEXT.MISSING_SECRET).toBe("No password was provided for login");
+    expect(STATUS_REASON_TEXT.MISSING_SECRET).toBe("A secret this check needs (for example a password) was not provided");
   });
 
   it("has a fallback when a result carries no reason", () => {

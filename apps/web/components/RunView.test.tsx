@@ -17,10 +17,15 @@ vi.mock("../lib/run-events", () => ({
   },
 }));
 
-const emit = (...events: TestEvent[]) =>
-  act(() => {
+/** The stream is opened by a passive effect, which can run just after the awaited UI appears. */
+const subscribed = () => waitFor(() => expect(streams.length).toBeGreaterThan(0));
+
+const emit = async (...events: TestEvent[]) => {
+  await subscribed();
+  await act(() => {
     for (const e of events) streams.at(-1)!.opts.onEvent(e);
   });
+};
 
 type Handler = (init: RequestInit | undefined) => Response | Promise<Response>;
 function routeFetch(routes: Record<string, Handler>) {
@@ -67,6 +72,7 @@ describe("RunView", () => {
     routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "ANALYZING_REQUIREMENT" })) });
     render(<RunView runId="run_1" />);
     expect(await screen.findByRole("heading", { name: /analyzing your requirement/i })).toBeInTheDocument();
+    await subscribed();
     expect(streams).toHaveLength(1);
     expect(streams[0]!.opts.runId).toBe("run_1");
   });
@@ -100,6 +106,23 @@ describe("RunView", () => {
     expect(within(notice).getByText("Criterion AC-3 will be reported as Inconclusive")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: /stages/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /confirm and start/i })).not.toBeInTheDocument();
+  });
+
+  it("renders repeated confirmation warnings without duplicate React keys", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const user = userEvent.setup();
+    const warning = "Criterion AC-2 will be reported as Inconclusive";
+    routeFetch({
+      [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "AWAITING_CONFIRMATION" })),
+      [`GET ${RUN}/criteria`]: () => json(200, requirementFixture()),
+      [`POST ${RUN}/criteria/confirm`]: () => json(202, { revision: 1, warnings: [warning, warning] }),
+    });
+    render(<RunView runId="run_1" />);
+    await screen.findAllByRole("article");
+    await user.click(screen.getByRole("button", { name: /confirm and start/i }));
+    const notice = await screen.findByRole("status", { name: /criteria confirmed/i });
+    expect(within(notice).getAllByText(warning)).toHaveLength(2);
+    expect(error.mock.calls.flat().join(" ")).not.toMatch(/same key/i);
   });
 
   it("shows live progress: stage list, timeline and latest screenshot", async () => {
@@ -231,6 +254,45 @@ describe("RunView", () => {
     expect(await within(detail).findByRole("img", { name: /after_add/ })).toHaveAttribute("src", "https://s3.test/after_add.png");
   });
 
+  describe("announces the end of a run it was watching", () => {
+    const liveRegion = () => document.querySelector<HTMLElement>('[role="status"][aria-live="polite"][data-announcer]');
+
+    it.each([
+      ["completed", ev(8, "run.completed", { verdict: "FAILED" }, { stage: "COMPLETED", message: "Run completed: FAILED" }), "Run completed: Failed", reportFixture()],
+      ["cancelled", ev(8, "run.cancelled", { reason: "USER_REQUESTED" }, { stage: "CANCELLED", message: "Run cancelled by user" }), "Run cancelled", partialReport("CANCELLED")],
+      [
+        "errored",
+        ev(8, "run.errored", { category: "BROWSER_PROVIDER", message: "boom" }, { stage: "ERRORED", message: "Run stopped: browser failed" }),
+        "Run stopped because of an error",
+        partialReport("ERRORED"),
+      ],
+    ] as const)("%s", async (_label, terminalEvent, text, report) => {
+      routeFetch({
+        [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING" })),
+        [`GET ${RUN}/report`]: () => json(200, report),
+      });
+      render(<RunView runId="run_1" />);
+      await screen.findByRole("list", { name: /stages/i });
+      // The live region is there (and empty) before anything is announced, so the change is heard.
+      expect(liveRegion()).toBeInTheDocument();
+      expect(liveRegion()).toHaveTextContent(/^$/);
+      await emit(...toExploring, terminalEvent);
+      await waitFor(() => expect(liveRegion()).toHaveTextContent(text));
+      expect(liveRegion()).toHaveAttribute("aria-atomic", "true");
+    });
+
+    it("stays quiet for a run that had already ended when the page opened", async () => {
+      routeFetch({
+        [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "COMPLETED", verdict: "FAILED" })),
+        [`GET ${RUN}/report`]: () => json(200, reportFixture()),
+      });
+      render(<RunView runId="run_1" />);
+      await screen.findByRole("heading", { name: /verdict: failed/i });
+      await emit(ev(3, "run.completed", { verdict: "FAILED" }, { stage: "COMPLETED", message: "Run completed: FAILED" }));
+      expect(liveRegion()).toHaveTextContent(/^$/);
+    });
+  });
+
   it("reports a missing run", async () => {
     routeFetch({ [`GET ${RUN}`]: () => json(404, { code: "NOT_FOUND", message: "Not found" }) });
     render(<RunView runId="run_1" />);
@@ -242,6 +304,7 @@ describe("RunView", () => {
     routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING" })) });
     const { unmount } = render(<RunView runId="run_1" />);
     await screen.findByRole("list", { name: /stages/i });
+    await subscribed();
     unmount();
     expect(streams.every((s) => s.closed)).toBe(true);
   });
