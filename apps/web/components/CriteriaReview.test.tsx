@@ -57,90 +57,19 @@ describe("CriteriaReview", () => {
     expect(screen.queryByText(/rewording changes the description only/i)).not.toBeInTheDocument();
   });
 
-  it("says a reworded criterion keeps its check: while editing, and after saving", async () => {
-    const user = userEvent.setup();
-    routeFetch({
-      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
-      [`PUT ${CRITERIA}`]: (init) => json(200, { ...JSON.parse(String(init!.body)), revision: 2 }),
-    });
-    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
-    const cards = await screen.findAllByRole("article");
-    const NOTE = "Rewording changes the description only; the check above is unchanged.";
-    await user.click(within(cards[1]!).getByRole("button", { name: /edit/i }));
-    expect(within(cards[1]!).getByText(NOTE)).toBeInTheDocument();
-    const box = within(cards[1]!).getByLabelText(/criterion AC-2/i);
-    await user.clear(box);
-    await user.type(box, "The cart count increases by 2");
-    await user.click(within(cards[1]!).getByRole("button", { name: /save/i }));
-    await screen.findByText("The cart count increases by 2");
-
-    const after = screen.getAllByRole("article");
-    expect(within(after[1]!).getByText(NOTE)).toBeInTheDocument();
-    // The check itself is what it was: still "exactly 1 more", whatever the new wording says.
-    expect(within(after[1]!).getByRole("group", { name: /what will be checked/i })).toHaveTextContent("is exactly 1 more than");
-    expect(within(after[0]!).queryByText(NOTE)).not.toBeInTheDocument();
-    expect(within(after[2]!).queryByText(NOTE)).not.toBeInTheDocument();
-  });
-
-  it("drops the reworded note when an edit is discarded or saved back to the original wording", async () => {
-    const user = userEvent.setup();
-    routeFetch({
-      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
-      [`PUT ${CRITERIA}`]: (init) => json(200, { ...JSON.parse(String(init!.body)), revision: 2 }),
-    });
-    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
-    const cards = await screen.findAllByRole("article");
-    await user.click(within(cards[0]!).getByRole("button", { name: /edit/i }));
-    await user.click(within(cards[0]!).getByRole("button", { name: /discard/i }));
-    expect(screen.queryByText(/rewording changes the description only/i)).not.toBeInTheDocument();
-
-    await user.click(within(cards[0]!).getByRole("button", { name: /edit/i }));
-    await user.click(within(cards[0]!).getByRole("button", { name: /save/i })); // unchanged text
-    await screen.findByText(/revision 2/i);
-    expect(screen.queryByText(/rewording changes the description only/i)).not.toBeInTheDocument();
-  });
-
-  it("editing a criterion sends PUT with the full requirement", async () => {
-    const user = userEvent.setup();
-    let sent: NormalizedRequirement | null = null;
-    const fetch = routeFetch({
-      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
-      [`PUT ${CRITERIA}`]: (init) => {
-        sent = JSON.parse(String(init!.body));
-        return json(200, { ...sent!, revision: 2 });
-      },
-    });
-    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
-    const cards = await screen.findAllByRole("article");
-    await user.click(within(cards[1]!).getByRole("button", { name: /edit/i }));
-    const box = within(cards[1]!).getByLabelText(/criterion AC-2/i);
-    await user.clear(box);
-    await user.type(box, "The cart count increases by exactly 1");
-    await user.click(within(cards[1]!).getByRole("button", { name: /save/i }));
-
-    await waitFor(() => expect(sent).not.toBeNull());
-    const expected = requirementFixture();
-    expected.criteria[1]!.statement = "The cart count increases by exactly 1";
-    expect(sent).toEqual(expected);
-    expect(new Headers(fetch.mock.calls[1]![1]!.headers).get("content-type")).toBe("application/json");
-    expect(await screen.findByText("The cart count increases by exactly 1")).toBeInTheDocument();
-    expect(screen.getByText(/revision 2/i)).toBeInTheDocument();
-  });
-
-  it("won't confirm while an edit is open, and says which one", async () => {
+  it("won't confirm while a check editor is open, and says which one", async () => {
     const user = userEvent.setup();
     const fetch = routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()) });
     render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
     const cards = await screen.findAllByRole("article");
-    await user.click(within(cards[1]!).getByRole("button", { name: /edit/i }));
-    await user.type(within(cards[1]!).getByLabelText(/criterion AC-2/i), " by exactly 1");
+    await user.click(within(cards[1]!).getByRole("button", { name: "Edit check AC-2" }));
 
     const confirm = screen.getByRole("button", { name: /confirm and start/i });
     expect(confirm).toBeDisabled();
     expect(screen.getByText("Save or discard your edit to AC-2 first.")).toBeInTheDocument();
     expect(confirm).toHaveAccessibleDescription(/save or discard your edit to AC-2 first/i);
 
-    await user.click(within(cards[0]!).getByRole("button", { name: /edit/i }));
+    await user.click(within(cards[0]!).getByRole("button", { name: "Edit check AC-1" }));
     expect(screen.getByText("Save or discard your edits to AC-1 and AC-2 first.")).toBeInTheDocument();
 
     await user.click(within(cards[0]!).getByRole("button", { name: /discard/i }));
@@ -150,7 +79,7 @@ describe("CriteriaReview", () => {
     expect(fetch).toHaveBeenCalledTimes(1); // nothing was sent
   });
 
-  it("keeps another card's open draft when a different criterion is saved", async () => {
+  it("keeps another card's open check draft when a different criterion is saved", async () => {
     const user = userEvent.setup();
     routeFetch({
       [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
@@ -159,26 +88,24 @@ describe("CriteriaReview", () => {
     render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
     const cards = await screen.findAllByRole("article");
     // An unsaved draft on AC-2 …
-    await user.click(within(cards[1]!).getByRole("button", { name: /edit/i }));
-    const draft = within(cards[1]!).getByLabelText(/criterion AC-2/i);
-    await user.clear(draft);
-    await user.type(draft, "The cart count increases by exactly 1");
-    // … while AC-1 is edited and saved.
-    await user.click(within(cards[0]!).getByRole("button", { name: /edit/i }));
-    const box = within(cards[0]!).getByLabelText(/criterion AC-1/i);
-    await user.clear(box);
-    await user.type(box, "The cart badge goes up");
-    await user.click(within(cards[0]!).getByRole("button", { name: /save/i }));
+    await user.click(within(cards[1]!).getByRole("button", { name: "Edit check AC-2" }));
+    const delta = within(cards[1]!).getByLabelText(/difference/i);
+    await user.clear(delta);
+    await user.type(delta, "3");
+    // … while AC-1's comparison is changed and saved.
+    await user.click(within(cards[0]!).getByRole("button", { name: "Edit check AC-1" }));
+    await user.selectOptions(within(cards[0]!).getByLabelText(/comparison/i), "gte");
+    await user.click(within(cards[0]!).getByRole("button", { name: /save check/i }));
     await screen.findByText(/revision 2/i);
 
     const after = screen.getAllByRole("article");
-    expect(within(after[0]!).getByText("The cart badge goes up")).toBeInTheDocument();
-    expect(within(after[1]!).getByLabelText(/criterion AC-2/i)).toHaveValue("The cart count increases by exactly 1");
+    expect(within(after[0]!).getByRole("group", { name: /what will be checked/i })).toHaveTextContent("is at least");
+    expect(within(after[1]!).getByLabelText(/difference/i)).toHaveValue("3");
     expect(screen.getByRole("button", { name: /confirm and start/i })).toBeDisabled();
     expect(screen.getByText("Save or discard your edit to AC-2 first.")).toBeInTheDocument();
   });
 
-  it("confirm is available again once the open edit is saved", async () => {
+  it("confirm is available again once the open check edit is saved", async () => {
     const user = userEvent.setup();
     routeFetch({
       [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
@@ -186,12 +113,79 @@ describe("CriteriaReview", () => {
     });
     render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
     const cards = await screen.findAllByRole("article");
-    await user.click(within(cards[1]!).getByRole("button", { name: /edit/i }));
-    await user.type(within(cards[1]!).getByLabelText(/criterion AC-2/i), " by exactly 1");
+    await user.click(within(cards[1]!).getByRole("button", { name: "Edit check AC-2" }));
+    const delta = within(cards[1]!).getByLabelText(/difference/i);
+    await user.clear(delta);
+    await user.type(delta, "2");
     expect(screen.getByRole("button", { name: /confirm and start/i })).toBeDisabled();
-    await user.click(within(cards[1]!).getByRole("button", { name: /save/i }));
-    expect(await screen.findByText("The cart count increases by the right amount by exactly 1")).toBeInTheDocument();
+    await user.click(within(cards[1]!).getByRole("button", { name: /save check/i }));
+    await screen.findByText(/revision 2/i);
     expect(screen.getByRole("button", { name: /confirm and start/i })).toBeEnabled();
+  });
+
+  it("editing a check sends PUT with the edited check and its generated wording, and shows the saved revision", async () => {
+    const user = userEvent.setup();
+    let sent: NormalizedRequirement | null = null;
+    routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`PUT ${CRITERIA}`]: (init) => {
+        sent = JSON.parse(String(init!.body));
+        return json(200, { ...sent!, revision: 2 });
+      },
+    });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    await user.click(within(cards[1]!).getByRole("button", { name: "Edit check AC-2" }));
+    const delta = within(cards[1]!).getByLabelText(/difference/i);
+    await user.clear(delta);
+    await user.type(delta, "2");
+    const wording = "Cart badge count (at “after add”) is exactly 2 more than Cart badge count (at “before add”).";
+    expect(within(cards[1]!).getByText(wording)).toBeInTheDocument(); // live preview
+    await user.click(within(cards[1]!).getByRole("button", { name: /save check/i }));
+
+    await waitFor(() => expect(sent).not.toBeNull());
+    const expected = requirementFixture();
+    const ac2 = expected.criteria[1]!;
+    if (ac2.expectedOutcome.kind !== "numeric_delta") throw new Error("fixture changed: AC-2 should be a numeric_delta check");
+    expected.criteria[1] = { ...ac2, expectedOutcome: { ...ac2.expectedOutcome, delta: 2 }, statement: wording, ambiguity: null };
+    expect(sent).toEqual(expected);
+    expect(await screen.findByText(/revision 2/i)).toBeInTheDocument();
+  });
+
+  it("an AI-judged criterion has no check editor, only Remove", async () => {
+    routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    expect(within(cards[2]!).queryByRole("button", { name: /edit check/i })).not.toBeInTheDocument();
+    expect(within(cards[2]!).getByText(/judged by ai only — it can only be removed/i)).toBeInTheDocument();
+    expect(within(cards[2]!).getByRole("button", { name: "Remove AC-3" })).toBeInTheDocument();
+  });
+
+  it("shows the API's 400 inline in the editor and keeps it open", async () => {
+    const user = userEvent.setup();
+    routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`PUT ${CRITERIA}`]: () =>
+        json(400, {
+          code: "VALIDATION_FAILED",
+          message: "Only a criterion's check values can change during review",
+          issues: [{ path: ["criteria", 1, "expectedOutcome"], message: "Only the check's values can change, not what it reads" }],
+        }),
+    });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    await user.click(within(cards[1]!).getByRole("button", { name: "Edit check AC-2" }));
+    await user.click(within(cards[1]!).getByRole("button", { name: /save check/i }));
+    expect(await within(cards[1]!).findByRole("alert")).toHaveTextContent("Only the check's values can change, not what it reads");
+    expect(within(cards[1]!).getByRole("button", { name: /save check/i })).toBeInTheDocument();
+  });
+
+  it("no longer offers free-text rewording", async () => {
+    routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    await screen.findAllByRole("article");
+    expect(screen.queryByRole("button", { name: /^edit AC-/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/rewording changes the description only/i)).not.toBeInTheDocument();
   });
 
   it("removing a criterion sends PUT without it", async () => {
