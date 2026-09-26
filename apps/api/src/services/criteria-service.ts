@@ -49,7 +49,7 @@ export class CriteriaService {
    * `confirmedAt` are taken from the URL / server, never the body. `originalText` must be unchanged.
    * Criteria may be removed and a criterion's check values edited; the server writes the statement
    * of every edited criterion (applyCriteriaEdit), anything else is 400. Outside
-   * AWAITING_CONFIRMATION, RequirementRepository.createRevision's lifecycle/frozen guards map to 409.
+   * AWAITING_CONFIRMATION (or before any revision exists) it is 409.
    */
   async update(runId: string, body: unknown): Promise<NormalizedRequirement> {
     const tenantId = this.deps.config.defaultTenantId;
@@ -68,23 +68,22 @@ export class CriteriaService {
       ]);
     }
 
-    // Review edits (spec 2026-09-26-criteria-check-edit): only while the run waits for confirmation.
-    // In any other state createRevision's lifecycle/frozen guards answer 409, as before.
-    let criteria = req.criteria;
-    let facts = req.facts;
-    if (latest && !latest.confirmedAt && run.lifecycle === "AWAITING_CONFIRMATION") {
-      const edit = applyCriteriaEdit(latest, req);
-      if (!edit.ok) {
-        const message =
-          edit.code === "STATEMENT_ONLY_EDIT"
-            ? "A criterion's wording can only change together with its check"
-            : "Only a criterion's check values can change during review";
-        throw new HttpError(400, edit.code, message, edit.issues);
-      }
-      ({ criteria, facts } = edit);
+    // Review edits (spec 2026-09-26-criteria-check-edit) exist only while the run waits for
+    // confirmation (D5): before that the worker is still writing revision 1, after it they're frozen.
+    // createRevision's row-locked lifecycle/frozen guards still catch a run that moves on meanwhile.
+    if (run.lifecycle !== "AWAITING_CONFIRMATION" || !latest) {
+      throw new HttpError(409, "CONFLICT", `Run is ${run.lifecycle}; criteria can only change while it awaits confirmation`);
+    }
+    const edit = applyCriteriaEdit(latest, req);
+    if (!edit.ok) {
+      const message =
+        edit.code === "STATEMENT_ONLY_EDIT"
+          ? "A criterion's wording can only change together with its check"
+          : "Only a criterion's check values can change during review";
+      throw new HttpError(400, edit.code, message, edit.issues);
     }
 
-    const updated = await this.requirements.createRevision(runId, { originalText: req.originalText, criteria, facts });
+    const updated = await this.requirements.createRevision(runId, { originalText: req.originalText, criteria: edit.criteria, facts: edit.facts });
 
     await this.publisher().publish({
       runId,
