@@ -6,11 +6,12 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { TestDataValueSchema } from "@platform/contracts";
 import type { LlmClient } from "@platform/llm";
 import { compileRequirement } from "@platform/testing-engine";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { countingLlm, describeError, report, type CaseResult } from "../usage";
+import { describeError, report, type CaseResult, type UsageMeter } from "../usage";
 
 const OUTCOME_KINDS = ["visible", "text_matches", "numeric_compare", "numeric_delta", "collection_contains", "semantic"] as const;
 const Kind = z.enum(OUTCOME_KINDS);
@@ -20,6 +21,12 @@ export const EvalCaseSchema = z.object({
   tags: z.array(z.string()).default([]),
   input: z.string().min(10),
   testDataKeys: z.array(z.string()).default([]),
+  /**
+   * Test data values, for cases whose expected numbers come from test data (post-validation accepts a
+   * number only if the requirement or a testData value states it). Keys listed only in `testDataKeys`
+   * get the placeholder "value". Values never reach the model, only their keys.
+   */
+  testData: z.record(z.string(), TestDataValueSchema).default({}),
   secretNames: z.array(z.string()).default([]),
   expect: z.object({
     criteriaCount: z.object({ min: z.number().int().min(1), max: z.number().int().min(1) }),
@@ -61,18 +68,21 @@ export function scoreCase(c: EvalCase, criteria: { expectedOutcome: { kind: stri
   return failures;
 }
 
-export async function runRequirementCompilerSuite(llm: LlmClient, cases: EvalCase[]): Promise<CaseResult[]> {
+/** The case's testData: its explicit values, plus the placeholder "value" for keys listed without one. */
+export function caseTestData(c: EvalCase): Record<string, z.infer<typeof TestDataValueSchema>> {
+  return { ...Object.fromEntries(c.testDataKeys.map((k) => [k, "value"])), ...c.testData };
+}
+
+export async function runRequirementCompilerSuite(llm: LlmClient, cases: EvalCase[], meter: UsageMeter): Promise<CaseResult[]> {
   const results: CaseResult[] = [];
   for (const c of cases) {
-    const usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
-    // Count usage through a wrapper so failed compiles are still accounted for.
-    const counting = countingLlm(llm, usage);
+    const runId = `eval_${c.id}`;
     let failures: string[];
     try {
-      const draft = await compileRequirement(counting, {
-        runId: `eval_${c.id}`,
+      const draft = await compileRequirement(llm, {
+        runId,
         originalText: c.input,
-        testData: Object.fromEntries(c.testDataKeys.map((k) => [k, "value"])),
+        testData: caseTestData(c),
         secretNames: c.secretNames,
         signal: AbortSignal.timeout(180_000),
         deadlineAt: null,
@@ -82,7 +92,8 @@ export async function runRequirementCompilerSuite(llm: LlmClient, cases: EvalCas
     } catch (err) {
       failures = [`compile failed: ${describeError(err)}`];
     }
-    const result = { id: c.id, passed: failures.length === 0, failures, ...usage };
+    // Every request the client made for this case, including those of a compile that threw.
+    const result = { id: c.id, passed: failures.length === 0, failures, ...meter.take(runId) };
     results.push(result);
     report(result);
   }

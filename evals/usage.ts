@@ -1,6 +1,5 @@
-/** Shared bits for eval suites: per-case results and token/cost accounting around the LLM port. */
-import type { GenerateStructuredInput, LlmClient } from "@platform/llm";
-import type { RequirementLlm } from "@platform/testing-engine";
+/** Shared bits for eval suites: per-case results and token/cost accounting around the LLM client. */
+import type { LlmCallSink } from "@platform/llm";
 
 export interface CaseResult {
   id: string;
@@ -13,15 +12,32 @@ export interface CaseResult {
 
 export type Usage = Pick<CaseResult, "inputTokens" | "outputTokens" | "costUsd">;
 
-/** Wraps the client so usage is counted even when the stage under test throws afterwards. */
-export function countingLlm(llm: LlmClient, usage: Usage): RequirementLlm {
+export interface UsageMeter {
+  /** Pass as the LlmClient's `recordCall`: it sees every provider request, per attempt. */
+  sink: LlmCallSink;
+  /** The usage recorded for `runId` so far; resets it. */
+  take(runId: string): Usage;
+}
+
+/**
+ * Counts usage from the client's per-request call records rather than from returned results, so
+ * attempts that end in an error still count: a ContractError after the correction round (both
+ * requests were billed) and provider errors after retries.
+ */
+export function createUsageMeter(): UsageMeter {
+  const byRun = new Map<string, Usage>();
   return {
-    generateStructured: async <T>(input: GenerateStructuredInput<T>) => {
-      const res = await llm.generateStructured(input);
-      usage.inputTokens += res.usage.inputTokens;
-      usage.outputTokens += res.usage.outputTokens;
-      usage.costUsd += res.usage.estimatedCostUsd;
-      return res;
+    sink: (call) => {
+      const u = byRun.get(call.runId) ?? { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+      u.inputTokens += call.inputTokens;
+      u.outputTokens += call.outputTokens;
+      u.costUsd += call.estimatedCostUsd;
+      byRun.set(call.runId, u);
+    },
+    take: (runId) => {
+      const u = byRun.get(runId) ?? { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+      byRun.delete(runId);
+      return u;
     },
   };
 }
