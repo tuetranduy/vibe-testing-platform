@@ -39,15 +39,18 @@ import { SourceWriter, ident, lit, member } from "./source-builder";
  * Assertions: each compiled criterion sits in `await test.step("[AC-n] " + statement, …)` (the
  * `[AC-n]` prefix comes first: the rerun's result parser keys on it) at the latest checkpoint it
  * references, with soft assertions only, messages `"[AC-n] " + statement`, so every reached
- * criterion is evaluated. Facts of earlier checkpoints (and a criterion's other facts) are read
- * into variables at their own checkpoint; the fact at the criterion's checkpoint is re-read until it
- * matches (web-first matcher or `expect.poll`), since the page may still be updating after a click.
- * Reads and comparisons mean what the fact reader and the verifier mean (see helpers-template.ts):
+ * criterion is evaluated. Every checkpoint first waits for the page's load state (bounded, like the
+ * executor's settle). Facts of earlier checkpoints are read into variables at their own checkpoint;
+ * every fact at the criterion's own checkpoint is re-read until the whole assertion matches
+ * (web-first matcher or `expect.poll` over the expression), since the page may still be updating
+ * after a click. Reads and comparisons mean what the fact reader and the verifier mean (see
+ * helpers-template.ts):
  *
  * - visible            → `expect.soft(locator).toBeVisible()` / `toBeHidden()`
  * - text_matches       → `toHaveText` / `toContainText` ({ ignoreCase, useInnerText }); regex and
  *                        the `url` fact are polled over the verifier's normalized text
- * - numeric_compare    → polled number vs the other side (`toBeGreaterThan`, …; eq/neq within 1e-9)
+ * - numeric_compare    → polled number vs the other side (`toBeGreaterThan`, …; eq/neq within 1e-9);
+ *                        both facts at the checkpoint → their polled difference vs 0
  * - numeric_delta      → polled difference `toBeCloseTo(delta)`
  * - collection_contains → polled `listContains(readTextList(…), item)` (verifier matching)
  *
@@ -100,10 +103,10 @@ interface FactRead {
 
 interface CriterionPlan {
   criterion: AcceptanceCriterion;
+  /** Golden-path position of the latest checkpoint the criterion references: where it is asserted. */
   position: number;
+  /** One per FactRef, in `factRefsOf` order. Those at `position` are re-read until they match. */
   reads: FactRead[];
-  /** The fact re-read until it matches (at `position`). */
-  polled: FactRead;
 }
 
 /** Read modes an outcome can replay, per role of the fact in it. */
@@ -118,6 +121,9 @@ const READ_HELPER: Partial<Record<ReadKind, string>> = {
   count: "readCount",
   text_list: "readTextList",
 };
+
+/** The executor's settle bound before a checkpoint is read. */
+const LOAD_SETTLE_TIMEOUT_MS = 10_000;
 
 const FLIPPED = { gt: "lt", gte: "lte", lt: "gt", lte: "gte", eq: "eq", neq: "neq" } as const;
 type Operator = keyof typeof FLIPPED;
@@ -278,10 +284,7 @@ class Compiler {
       const problem = this.problems.get(p);
       if (problem) return `The discovered flow cannot be replayed: ${problem}`;
     }
-    // The fact re-read at the criterion's checkpoint: the "after" side where there is a choice.
-    const preference = outcome.kind === "numeric_delta" ? [...reads].reverse() : reads;
-    const polled = preference.find((r) => r.position === position)!;
-    return { criterion, position, reads, polled };
+    return { criterion, position, reads };
   }
 
   // -------------------------------------------------------------------------------------------
@@ -290,11 +293,12 @@ class Compiler {
 
   private emitFlow(w: SourceWriter, plans: CriterionPlan[]): void {
     const cutoff = Math.max(...plans.map((p) => p.position));
-    // Facts read into variables: every fact that is not the one a criterion re-reads.
+    // Facts read into variables at their own checkpoint: those of a checkpoint before the criterion's.
+    // Facts at the criterion's own checkpoint are re-read inside its poll (the page may still be updating).
     const saved = new Map<number, FactRead[]>();
     for (const plan of plans) {
       for (const read of plan.reads) {
-        if (read === plan.polled) continue;
+        if (read.position === plan.position) continue;
         const list = saved.get(read.position) ?? [];
         if (!list.some((r) => refKey(r.ref) === refKey(read.ref))) list.push(read);
         saved.set(read.position, list);
@@ -320,6 +324,8 @@ class Compiler {
         }
         case "checkpoint":
           w.comment(`Checkpoint ${++checkpoints}`);
+          // Like the executor's settle before it read the page (best effort, bounded).
+          w.line(`await page.waitForLoadState(${lit("load")}, { timeout: ${lit(LOAD_SETTLE_TIMEOUT_MS)} }).catch(() => {});`);
           for (const read of saved.get(position) ?? []) this.emitSavedRead(w, read);
           for (const plan of plans) if (plan.position === position) this.emitCriterion(w, plan);
           return;
@@ -349,11 +355,9 @@ class Compiler {
   private emitSavedRead(w: SourceWriter, read: FactRead): void {
     const name = ident(`fact${this.factVars.size + 1}`);
     this.factVars.set(refKey(read.ref), name);
-    if (read.candidate) {
-      this.withLocator(w, read, `Fact ${refKey(read.ref)}`, (l) => `const ${name} = await ${this.helper(READ_HELPER[read.kind]!)}(${l});`);
-    } else {
-      w.line(`const ${name} = page.url();`);
-    }
+    this.withReads(w, [read], (l) =>
+      read.candidate ? `const ${name} = await ${this.helper(READ_HELPER[read.kind]!)}(${l});` : `const ${name} = page.url();`,
+    );
   }
 
   private emitCriterion(w: SourceWriter, plan: CriterionPlan): void {
@@ -370,7 +374,7 @@ class Compiler {
     w.block(`await test.step(${title}, async () => {`, () => {
       w.line(`const message = ${title};`);
       for (const read of plan.reads) {
-        if (read !== plan.polled) w.line(`expect.soft(${this.factVars.get(refKey(read.ref))!}, message).not.toBeNull();`);
+        if (read.position !== plan.position) w.line(`expect.soft(${this.factVars.get(refKey(read.ref))!}, message).not.toBeNull();`);
       }
       this.emitAssertion(w, plan, param);
     }, "});");
@@ -378,49 +382,65 @@ class Compiler {
 
   private emitAssertion(w: SourceWriter, plan: CriterionPlan, param: (name: string, value: string | number) => string): void {
     const outcome = plan.criterion.expectedOutcome;
-    const { polled } = plan;
-    const label = `Fact ${refKey(polled.ref)}`;
-    /** A fact's value inside the poll callback: re-read when polled, else its variable. */
-    const valueOf = (read: FactRead): string => (read === polled ? this.freshRead(read) : this.factVars.get(refKey(read.ref))!);
+    const isFresh = (read: FactRead) => read.position === plan.position;
+    const fresh = plan.reads.filter(isFresh);
+    /** A fact's value inside the poll callback: re-read when at the criterion's checkpoint, else its variable. */
+    const valueOf = (read: FactRead): string => (isFresh(read) ? this.freshRead(read) : this.factVars.get(refKey(read.ref))!);
+    const variableOf = (read: FactRead) => this.factVars.get(refKey(read.ref))!;
     const readOf = (path: string) => plan.reads[factRefsOf(outcome).findIndex((r) => r.path[0] === path)]!;
     const poll = (value: string) => `await softExpect.poll(${value.includes("await ") ? "async " : ""}() => ${value}, { message })`;
+    /** Emits one assertion over the fresh reads (brittle-locator comment when any is an XPath). */
+    const assert = (build: (locator: string) => string) => this.withReads(w, fresh, build);
 
     switch (outcome.kind) {
       case "visible":
-        this.withLocator(w, polled, label, (l) => `await expect.soft(${l}, message).${outcome.expected ? "toBeVisible" : "toBeHidden"}();`);
+        assert((l) => `await expect.soft(${l}, message).${outcome.expected ? "toBeVisible" : "toBeHidden"}();`);
         return;
 
       case "text_matches": {
+        const read = fresh[0]!;
         const { mode, value, caseSensitive } = outcome.match;
         if (mode === "regex") {
           const pattern = param("pattern", value);
-          const text = `${this.helper("collapseText")}(${this.freshRead(polled)})`;
-          this.withLocator(w, polled, label, () => `${poll(text)}.toMatch(new RegExp(${pattern}, ${lit(caseSensitive ? "" : "i")}));`);
+          const text = `${this.helper("collapseText")}(${this.freshRead(read)})`;
+          assert(() => `${poll(text)}.toMatch(new RegExp(${pattern}, ${lit(caseSensitive ? "" : "i")}));`);
           return;
         }
         const expected = param("value", value);
-        const matcher = mode === "equals" ? "toHaveText" : "toContainText";
-        if (polled.kind === "url") {
+        if (read.kind === "url") {
           const normalize = this.helper(caseSensitive ? "collapseText" : "foldText");
           const pollMatcher = mode === "equals" ? "toBe" : "toContain";
-          w.line(`${poll(`${normalize}(page.url())`)}.${pollMatcher}(${normalize}(${expected}));`);
+          assert(() => `${poll(`${normalize}(page.url())`)}.${pollMatcher}(${normalize}(${expected}));`);
           return;
         }
-        this.withLocator(w, polled, label, (l) => `await expect.soft(${l}, message).${matcher}(${expected}, { ignoreCase: ${lit(!caseSensitive)}, useInnerText: true });`);
+        const matcher = mode === "equals" ? "toHaveText" : "toContainText";
+        assert((l) => `await expect.soft(${l}, message).${matcher}(${expected}, { ignoreCase: ${lit(!caseSensitive)}, useInnerText: true });`);
         return;
       }
 
       case "numeric_compare": {
-        // The polled value goes on the left: when it is the right-hand fact, the operator flips.
+        // Polled on the left; a fixed side from an earlier checkpoint on the right (the operator flips
+        // when the fresh fact is the right-hand one). Both fresh → their polled difference against 0.
         let operator: Operator = outcome.operator;
+        let polled: string;
         let other: string;
+        const left = readOf("left");
         if (typeof outcome.right === "number") {
+          polled = this.freshRead(left, false);
           other = param("right", outcome.right);
         } else {
-          const left = readOf("left");
-          const fixed = polled === left ? readOf("right") : left;
-          if (polled !== left) operator = FLIPPED[operator];
-          other = `${this.factVars.get(refKey(fixed.ref))!} ?? Number.NaN`;
+          const right = readOf("right");
+          if (isFresh(left) && isFresh(right)) {
+            polled = `${this.helper("difference")}(${this.freshRead(left)}, ${this.freshRead(right)})`;
+            other = lit(0);
+          } else if (isFresh(left)) {
+            polled = this.freshRead(left, false);
+            other = `${variableOf(right)} ?? Number.NaN`;
+          } else {
+            polled = this.freshRead(right, false);
+            other = `${variableOf(left)} ?? Number.NaN`;
+            operator = FLIPPED[operator];
+          }
         }
         const matcher = {
           gt: `toBeGreaterThan(${other})`,
@@ -430,21 +450,21 @@ class Compiler {
           eq: `toBeCloseTo(${other}, 9)`,
           neq: `not.toBeCloseTo(${other}, 9)`,
         }[operator];
-        this.withLocator(w, polled, label, () => `${poll(this.freshRead(polled, false))}.${matcher};`);
+        assert(() => `${poll(polled)}.${matcher};`);
         return;
       }
 
       case "numeric_delta": {
         const change = `${this.helper("difference")}(${valueOf(readOf("after"))}, ${valueOf(readOf("before"))})`;
         const delta = param("delta", outcome.delta);
-        this.withLocator(w, polled, label, () => `${poll(change)}.toBeCloseTo(${delta}, 9);`);
+        assert(() => `${poll(change)}.toBeCloseTo(${delta}, 9);`);
         return;
       }
 
       case "collection_contains": {
         const item = typeof outcome.item === "string" ? param("item", outcome.item) : valueOf(readOf("item"));
         const found = `${this.helper("listContains")}(${valueOf(readOf("collection"))}, ${item}, ${lit(outcome.match)})`;
-        this.withLocator(w, polled, label, () => `${poll(found)}.toBe(true);`);
+        assert(() => `${poll(found)}.toBe(true);`);
         return;
       }
 
@@ -460,23 +480,39 @@ class Compiler {
   /** A fresh read of a fact (`await readX(locator)`, or `page.url()`); `awaited: false` → the bare promise. */
   private freshRead(read: FactRead, awaited = true): string {
     if (!read.candidate) return "page.url()";
-    const call = `${this.helper(READ_HELPER[read.kind]!)}(${this.locator(read.candidate)})`;
+    // No attach wait inside a poll (the poll retries; a read must not outlast its timeout).
+    const call = `${this.helper(READ_HELPER[read.kind]!)}(${this.locator(read.candidate)}, 0)`;
     return awaited ? `await ${call}` : call;
   }
 
   /**
    * Emits a statement that uses an element's locator, preceded by `// brittle-locator` (and noted
-   * once) when that locator is an XPath. `build` gets the locator expression (`page` for the URL
-   * fact, which has no element).
+   * once) when that locator is an XPath. `build` gets the locator expression.
    */
-  private withLocator(w: SourceWriter, target: ElementRef | FactRead, what: string, build: (locator: string) => string): void {
-    const candidate = "candidates" in target ? target.candidates[target.chosenIndex]! : target.candidate;
-    if (candidate?.strategy === "xpath") {
-      w.comment("brittle-locator");
+  private withLocator(w: SourceWriter, element: ElementRef, what: string, build: (locator: string) => string): void {
+    const candidate = element.candidates[element.chosenIndex]!;
+    this.flagBrittle(w, [{ candidate, what }]);
+    w.line(build(this.locator(candidate)));
+  }
+
+  /**
+   * Emits a statement over fact reads (brittle-locator comment when any of them is an XPath). `build`
+   * gets the first read's locator expression (`page` for the URL fact, which has no element).
+   */
+  private withReads(w: SourceWriter, reads: FactRead[], build: (locator: string) => string): void {
+    this.flagBrittle(w, reads.map((r) => ({ candidate: r.candidate, what: `Fact ${refKey(r.ref)}` })));
+    const first = reads[0]?.candidate;
+    w.line(build(first ? this.locator(first) : "page"));
+  }
+
+  private flagBrittle(w: SourceWriter, uses: { candidate: LocatorCandidate | null; what: string }[]): void {
+    const brittle = uses.filter((u) => u.candidate?.strategy === "xpath");
+    if (brittle.length === 0) return;
+    w.comment("brittle-locator");
+    for (const { what } of brittle) {
       const note = `${what} is located by XPath (brittle-locator): it breaks when the page layout changes`;
       if (!this.notes.includes(note)) this.notes.push(note);
     }
-    w.line(build(candidate ? this.locator(candidate) : "page"));
   }
 
   /** The Playwright locator for a recorded candidate (the recorder's `locatorFor`), values from data. */

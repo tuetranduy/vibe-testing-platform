@@ -15,13 +15,15 @@ test("discovered flow", async ({ page }) => {
   await page.getByRole("searchbox", { name: data.locators.loc2.name, exact: true }).fill(data.inputs.input1);
   await page.getByRole("link", { name: data.locators.loc3.name, exact: true }).click();
   // Checkpoint 1
+  await page.waitForLoadState("load", { timeout: 10000 }).catch(() => {});
   const fact1 = await readNumber(page.getByTestId(data.locators.loc4.value));
   await page.getByRole("button", { name: data.locators.loc5.name, exact: true }).click();
   // Checkpoint 2
+  await page.waitForLoadState("load", { timeout: 10000 }).catch(() => {});
   await test.step("[AC-1] " + data.criteria["AC-1"].statement, async () => {
     const message = "[AC-1] " + data.criteria["AC-1"].statement;
     expect.soft(fact1, message).not.toBeNull();
-    await softExpect.poll(() => readNumber(page.getByTestId(data.locators.loc4.value)), { message }).toBeGreaterThan(fact1 ?? Number.NaN);
+    await softExpect.poll(() => readNumber(page.getByTestId(data.locators.loc4.value), 0), { message }).toBeGreaterThan(fact1 ?? Number.NaN);
   });
   await test.step("[AC-2] " + data.criteria["AC-2"].statement, async () => {
     const message = "[AC-2] " + data.criteria["AC-2"].statement;
@@ -33,7 +35,7 @@ test("discovered flow", async ({ page }) => {
   });
   await test.step("[AC-4] " + data.criteria["AC-4"].statement, async () => {
     const message = "[AC-4] " + data.criteria["AC-4"].statement;
-    await softExpect.poll(async () => listContains(await readTextList(page.getByTestId(data.locators.loc8.value)), data.criteria["AC-4"].item, "contains"), { message }).toBe(true);
+    await softExpect.poll(async () => listContains(await readTextList(page.getByTestId(data.locators.loc8.value), 0), data.criteria["AC-4"].item, "contains"), { message }).toBe(true);
   });
 });
 "
