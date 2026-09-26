@@ -33,8 +33,8 @@ afterAll(async () => {
 
 const REAL = { LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5", ANTHROPIC_API_KEY: "sk-test" } as const;
 /** Real-engine deps with a browserless sandbox/explorer (the real one is covered by tests/integration). */
-const realDeps = (transport: FakeTransport, extra: Record<string, unknown> = {}) => {
-  const exploration = fakeExploration();
+const realDeps = (transport: FakeTransport, extra: Record<string, unknown> = {}, page: Parameters<typeof fakeExploration>[0] = {}) => {
+  const exploration = fakeExploration(page);
   return {
     exploration,
     deps: { db: h.tdb.db, logger: silentLogger, transport, storage: createLocalStorage({ rootDir: artifactDir }), exploration: exploration.deps, ...extra },
@@ -200,8 +200,8 @@ describe("createEngine (Ruling R7)", () => {
     expect(exploration.log.filter((l) => l.startsWith("actOn")).every((l) => l === "actOn click")).toBe(true);
   });
 
-  it("real engine never reports PASS/FAIL from stages that are still fake (no PASS without evidence)", async () => {
-    // Even a fallback configured to PASS must not leak a verdict into a real run.
+  it("real engine verifies from recorded facts: nothing observed → INCONCLUSIVE / FACT_NOT_OBSERVED (a fallback set to PASS has no say)", async () => {
+    // The fake page shows nothing (extract answers null): no criterion can be decided.
     const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), { fake: { provisionalStatus: "PASS" } }).deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
@@ -211,7 +211,110 @@ describe("createEngine (Ruling R7)", () => {
     expect(after.lifecycle).toBe("COMPLETED");
     expect(after.verdict).toBe("INCONCLUSIVE");
     const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
-    expect(results.length).toBeGreaterThan(0);
+    expect(results.map((r) => r.criterionId).sort()).toEqual(["AC-1", "AC-2"]);
     for (const r of results) expect(r).toMatchObject({ status: "INCONCLUSIVE", reason: "FACT_NOT_OBSERVED" });
+  });
+
+  it("real engine end to end: a DOM_VERIFIED cart delta is a provisional PASS that stands (EXPLORATION_ONLY); MODEL_EXTRACTED evidence ends UNVERIFIED_EVIDENCE (R26)", async () => {
+    const page = {
+      facts: {
+        "cartCount@before_add": { value: 0, dom: true },
+        "cartCount@after_add": { value: 1, dom: true },
+        // The model says the cart lists the product, but the DOM read did not confirm it.
+        "cartItems@cart_page": { value: ["iPhone 17 Pro"], dom: false },
+      },
+    };
+    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), {}, page).deps);
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
+
+    await executeRunJob(h.deps(engine.stages), run.id);
+
+    const facts = await new ObservedFactRepository(h.tdb.db).listByRun(run.id);
+    expect(facts.filter((f) => f.key !== "url").map((f) => [f.key, f.checkpoint, f.value, f.provenance])).toEqual(
+      expect.arrayContaining([
+        ["cartCount", "before_add", 0, "DOM_VERIFIED"],
+        ["cartCount", "after_add", 1, "DOM_VERIFIED"],
+        ["cartItems", "cart_page", ["iPhone 17 Pro"], "MODEL_EXTRACTED"],
+      ]),
+    );
+
+    // Provisional results are published during VERIFYING, built from the recorded facts.
+    const events = await eventsOf(h, run.id);
+    const provisional = events.filter((e) => e.type === "criterion.evaluated" && e.stage === "VERIFYING").map((e) => e.payload);
+    expect(provisional).toEqual([
+      { criterionId: "AC-1", status: "PASS", reason: null, provisional: true },
+      { criterionId: "AC-2", status: "PASS", reason: null, provisional: true },
+    ]);
+    expect(events.find((e) => e.type === "criterion.evaluated" && e.stage === "VERIFYING")!.message).toBe("AC-1 provisionally PASS");
+
+    // Final results: the interim no-rerun rule (R26) keeps only DOM-backed verdicts.
+    const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
+    const byId = Object.fromEntries(results.map((r) => [r.criterionId, r]));
+    expect(byId["AC-1"]).toMatchObject({
+      status: "PASS",
+      reason: null,
+      verdictSource: "EXPLORATION_ONLY",
+      rerunOutcome: "UNAVAILABLE",
+      factRefs: [
+        { key: "cartCount", checkpoint: "after_add" },
+        { key: "cartCount", checkpoint: "before_add" },
+      ],
+      expected: "Cart count after add > before add",
+      actual: "Cart count after add (1) > before add (0)",
+      provisional: { status: "PASS", reason: null },
+    });
+    expect(byId["AC-2"]).toMatchObject({
+      status: "INCONCLUSIVE",
+      reason: "UNVERIFIED_EVIDENCE",
+      verdictSource: null,
+      provisional: { status: "PASS", reason: null },
+    });
+    const final = events.filter((e) => e.type === "criterion.evaluated" && e.stage === "GENERATING_REPORT").map((e) => e.payload);
+    expect(final).toEqual([
+      { criterionId: "AC-1", status: "PASS", reason: null, provisional: false },
+      { criterionId: "AC-2", status: "INCONCLUSIVE", reason: "UNVERIFIED_EVIDENCE", provisional: false },
+    ]);
+    expect((await new RunRepository(h.tdb.db).getById(run.id)).verdict).toBe("INCONCLUSIVE");
+  });
+
+  it("real engine end to end: every criterion backed by DOM_VERIFIED facts → verdict PASSED", async () => {
+    const page = {
+      facts: {
+        "cartCount@before_add": { value: 0, dom: true },
+        "cartCount@after_add": { value: 1, dom: true },
+        "cartItems@cart_page": { value: ["Apple iPhone 17 Pro"], dom: true },
+      },
+    };
+    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), {}, page).deps);
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
+
+    await executeRunJob(h.deps(engine.stages), run.id);
+
+    const after = await new RunRepository(h.tdb.db).getById(run.id);
+    expect([after.lifecycle, after.verdict]).toEqual(["COMPLETED", "PASSED"]);
+    const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
+    for (const r of results) expect(r).toMatchObject({ status: "PASS", verdictSource: "EXPLORATION_ONLY" });
+  });
+
+  it("real engine: a DOM_VERIFIED count that did not increase is a FAIL", async () => {
+    const page = {
+      facts: {
+        "cartCount@before_add": { value: 1, dom: true },
+        "cartCount@after_add": { value: 1, dom: true },
+        "cartItems@cart_page": { value: [], dom: true },
+      },
+    };
+    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), {}, page).deps);
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
+
+    await executeRunJob(h.deps(engine.stages), run.id);
+
+    expect((await new RunRepository(h.tdb.db).getById(run.id)).verdict).toBe("FAILED");
+    const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
+    expect(results.find((r) => r.criterionId === "AC-1")).toMatchObject({
+      status: "FAIL",
+      verdictSource: "EXPLORATION_ONLY",
+      actual: "Cart count after add (1) is not > before add (1)",
+    });
   });
 });
