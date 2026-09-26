@@ -57,7 +57,7 @@ ${extra}${steps}
 }
 
 /** results.json as the JSON reporter writes it, for a single test. */
-function resultsJson(dir: string, over: { status?: string; steps?: { title: string; error?: string }[]; errors?: string[]; attachments?: string[] } = {}): string {
+function resultsJson(dir: string, over: { status?: string; steps?: { title: string; error?: string; duration?: number }[]; errors?: string[]; attachments?: string[] } = {}): string {
   const out = path.join(dir, "test-results", "run-discovered-flow");
   const kinds: Record<string, [string, string]> = { trace: ["trace.zip", "application/zip"], screenshot: ["test-failed-1.png", "image/png"], video: ["video.webm", "video/webm"] };
   const attachments = (over.attachments ?? []).map((name) => {
@@ -79,7 +79,7 @@ function resultsJson(dir: string, over: { status?: string; steps?: { title: stri
                   {
                     status: over.status ?? "passed",
                     errors: (over.errors ?? []).map((message) => ({ message })),
-                    steps: (over.steps ?? []).map((s) => ({ title: s.title, duration: 5, ...(s.error ? { error: { message: s.error } } : {}) })),
+                    steps: (over.steps ?? []).map((s) => ({ title: s.title, duration: s.duration ?? 5, ...(s.error ? { error: { message: s.error } } : {}) })),
                     attachments,
                   },
                 ],
@@ -314,6 +314,27 @@ describe("runGeneratedTest", () => {
     expect(out.status).toBe("ERRORED");
     expect(out.perCriterion).toEqual({ "AC-1": "PASSED", "AC-2": "NOT_REACHED" });
     expect(out.artifacts.map((a) => a.type)).toEqual(["TRACE"]);
+  });
+
+  it("the Playwright worker died mid-step → ERRORED (R41), never FAILED; the unfinished step is NOT_REACHED, not PASSED", async () => {
+    const crash = "Error: worker process exited unexpectedly (code=null, signal=SIGKILL)";
+    const spawn = fakeSpawn(writesResults({ status: "failed", steps: [{ title: title("AC-1") }, { title: title("AC-2"), duration: -1 }], errors: [crash], attachments: ["trace"] }));
+    const out = await runGeneratedTest(runInput(generated(["AC-1", "AC-2", "AC-3"])), { spawn, workspace: { baseDir: base } });
+    expect(out.status).toBe("ERRORED");
+    expect(out.perCriterion).toEqual({ "AC-1": "PASSED", "AC-2": "NOT_REACHED", "AC-3": "NOT_REACHED" });
+    expect(out.errorText["AC-2"]).toBe(`Not reached: ${crash}`);
+    expect(out.artifacts.map((a) => a.type)).toEqual(["TRACE"]);
+  });
+
+  it("killed at the rerun budget after Playwright wrote its results → ERRORED; completed steps keep their outcome, the rest NOT_REACHED (R41)", async () => {
+    const spawn = fakeSpawn(async (input) => {
+      await writesResults({ status: "failed", steps: [{ title: title("AC-1") }, { title: title("AC-2"), error: "Error: [AC-2] wrong" }], errors: ["Error: [AC-2] wrong"] })(input);
+      return untilAborted(input); // then hangs (e.g. closing the browser) until the budget kill
+    });
+    const out = await runGeneratedTest(runInput(generated(["AC-1", "AC-2", "AC-3"]), { timeoutMs: 300 }), { spawn, workspace: { baseDir: base } });
+    expect(out.status).toBe("ERRORED");
+    expect(out.perCriterion).toEqual({ "AC-1": "PASSED", "AC-2": "ASSERTION_FAILED", "AC-3": "NOT_REACHED" });
+    expect(out.errorText["AC-2"]).toBe("Error: [AC-2] wrong");
   });
 
   it("no results.json (runner crashed) → ERRORED, every criterion NOT_REACHED", async () => {

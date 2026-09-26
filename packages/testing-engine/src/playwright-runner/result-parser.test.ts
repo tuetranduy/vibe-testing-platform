@@ -13,6 +13,8 @@ const ANSI = (s: string) => `\u001b[2m${s}\u001b[22m`;
 
 interface StepDraft {
   title: string;
+  /** Playwright keeps -1 until the step ends; `null` omits the field. Default 12. */
+  duration?: number | null;
   error?: string;
   steps?: StepDraft[];
 }
@@ -21,7 +23,7 @@ const step = (id: string, error?: string, steps?: StepDraft[]): StepDraft => ({ 
 function results(over: { noTest?: boolean; status?: string; steps?: StepDraft[]; errors?: string[]; attachments?: { name: string; contentType: string; path?: string }[]; topErrors?: string[] } = {}) {
   const serializeStep = (s: StepDraft): unknown => ({
     title: s.title,
-    duration: 12,
+    ...(s.duration === null ? {} : { duration: s.duration ?? 12 }),
     ...(s.error ? { error: { message: s.error, stack: `${s.error}\n    at ${WS}/run.spec.ts:20:5` } } : {}),
     ...(s.steps ? { steps: s.steps.map(serializeStep) } : {}),
   });
@@ -105,6 +107,25 @@ describe("parseRunResults: outcomes keyed on the [AC-n] step title", () => {
     expect(parsed.perCriterion).toEqual({ "AC-1": "PASSED", "AC-2": "NOT_REACHED", "AC-3": "NOT_REACHED" });
     expect(parsed.stopped).toBe(true);
     expect(parsed.testStatus).toBe("timedOut");
+  });
+
+  it("a step that never ended (Playwright keeps duration -1, no error) did not complete → NOT_REACHED, never PASSED", () => {
+    const parsed = parse(results({ status: "failed", steps: [step("AC-1"), { ...step("AC-2"), duration: -1 }], errors: ["Error: boom"] }));
+    expect(parsed.perCriterion).toEqual({ "AC-1": "PASSED", "AC-2": "NOT_REACHED", "AC-3": "NOT_REACHED" });
+    expect(parsed.crashed).toBe(true);
+    expect(parse(results({ steps: [{ ...step("AC-1"), duration: null }] }), ["AC-1"]).perCriterion).toEqual({ "AC-1": "NOT_REACHED" });
+    expect(parse(results({ steps: [{ ...step("AC-1", "Error: x"), duration: -1 }] }), ["AC-1"]).perCriterion).toEqual({ "AC-1": "NOT_REACHED" });
+  });
+
+  it("the Playwright worker died mid-test (OOM, native crash) → crashed; completed steps keep their outcome, the in-flight one is NOT_REACHED", () => {
+    const crash = "Error: worker process exited unexpectedly (code=null, signal=SIGKILL)";
+    const parsed = parse(results({ status: "failed", steps: [step("AC-1"), { ...step("AC-2"), duration: -1 }], errors: [crash] }));
+    expect(parsed.crashed).toBe(true);
+    expect(parsed.perCriterion).toEqual({ "AC-1": "PASSED", "AC-2": "NOT_REACHED", "AC-3": "NOT_REACHED" });
+    expect(parsed.errorText["AC-2"]).toBe(`Not reached: ${crash}`);
+    // Even when every started step had ended, a dead worker means the test did not finish on its own.
+    expect(parse(results({ status: "failed", steps: [step("AC-1")], errors: [crash] }), ["AC-1"]).crashed).toBe(true);
+    expect(parse(results({ status: "failed", steps: [step("AC-1", "Error: x")], errors: ["Error: x"] }), ["AC-1"]).crashed).toBe(false);
   });
 
   it("keeps trace, screenshot and video attachments inside the workspace's output dir; drops anything else", () => {

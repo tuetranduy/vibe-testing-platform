@@ -13,7 +13,10 @@ import type { LocalArtifact } from "../evidence/collector";
  * - the step is present without error → PASSED;
  * - the step never started (a hard action failed first, or the test stopped) → NOT_REACHED, with the
  *   error that stopped the test;
- * - a step cut short by the test timeout did not complete → NOT_REACHED, and the run is `stopped`.
+ * - a step cut short by the test timeout did not complete → NOT_REACHED, and the run is `stopped`;
+ * - a step that never ended (Playwright keeps `duration: -1` until step-end; a dying worker never
+ *   sends it, and the step has no error) did not complete → NOT_REACHED, and the run is `crashed`;
+ *   so is a test failed with "worker process exited unexpectedly" (OOM, native crash): R41 ERRORED.
  *
  * Attachments are kept only for the trace, screenshot and video, and only inside the workspace's
  * output directory. Anything unreadable → RunResultsError (the rerun is then ERRORED).
@@ -33,6 +36,8 @@ export interface ParsedRunResults {
   testStatus: TestStatus | null;
   /** The test was cut short (its timeout, an interruption) rather than finishing on its own. */
   stopped: boolean;
+  /** The Playwright worker died, or a step never ended: the rerun did not run to completion. */
+  crashed: boolean;
   /** Every compiled criterion: PASSED, ASSERTION_FAILED or NOT_REACHED. */
   perCriterion: Record<string, RerunOutcome>;
   errorText: Record<string, string>;
@@ -43,12 +48,13 @@ export interface ParsedRunResults {
 
 interface JsonStep {
   title: string;
+  duration?: number | undefined;
   error?: { message?: string | undefined } | undefined;
   steps?: JsonStep[] | undefined;
 }
 const ErrorSchema = z.object({ message: z.string().optional() });
 const StepSchema: z.ZodType<JsonStep> = z.lazy(() =>
-  z.object({ title: z.string(), error: ErrorSchema.optional(), steps: z.array(StepSchema).optional() }),
+  z.object({ title: z.string(), duration: z.number().optional(), error: ErrorSchema.optional(), steps: z.array(StepSchema).optional() }),
 );
 const ResultSchema = z.object({
   status: z.enum(["passed", "failed", "timedOut", "interrupted", "skipped"]),
@@ -68,6 +74,7 @@ const ReportSchema = z.object({ suites: z.array(SuiteSchema), errors: z.array(Er
 
 const STEP_TITLE = /^\[(AC-\d{1,3})\] /;
 const TEST_TIMEOUT = /Test timeout of \d+ms exceeded/;
+const WORKER_EXIT = /worker process exited unexpectedly/;
 const ATTACHMENT_TYPES: Record<string, LocalArtifact["type"]> = { trace: "TRACE", screenshot: "SCREENSHOT", video: "VIDEO" };
 export const OUTPUT_DIR = "test-results";
 const MAX_ERROR_TEXT = 1000;
@@ -127,14 +134,16 @@ export function parseRunResults(raw: string, opts: { compiledCriteria: string[];
   const compiled = new Set(opts.compiledCriteria);
   const cutShort = result?.status === "timedOut" || result?.status === "interrupted";
   let stopped = cutShort;
+  let crashed = result?.errors.some((e) => WORKER_EXIT.test(e.message ?? "")) ?? false;
 
   // The [AC-n] steps that started, in order.
-  const started: { id: string; error: string | null }[] = [];
+  const started: { id: string; error: string | null; ended: boolean }[] = [];
   const visit = (steps: JsonStep[]) => {
     for (const step of steps) {
       const id = STEP_TITLE.exec(step.title)?.[1];
       if (id && compiled.has(id)) {
-        if (!started.some((s) => s.id === id)) started.push({ id, error: firstError(step) });
+        const ended = typeof step.duration === "number" && step.duration >= 0;
+        if (!started.some((s) => s.id === id)) started.push({ id, error: firstError(step), ended });
       } else {
         visit(step.steps ?? []);
       }
@@ -142,7 +151,12 @@ export function parseRunResults(raw: string, opts: { compiledCriteria: string[];
   };
   visit(result?.steps ?? []);
 
-  started.forEach(({ id, error }, index) => {
+  started.forEach(({ id, error, ended }, index) => {
+    // A step without its step-end never finished, whatever it recorded: not reached.
+    if (!ended) {
+      crashed = true;
+      return;
+    }
     if (error === null) {
       perCriterion[id] = "PASSED";
       return;
@@ -166,6 +180,7 @@ export function parseRunResults(raw: string, opts: { compiledCriteria: string[];
   return {
     testStatus: result?.status ?? null,
     stopped,
+    crashed,
     perCriterion,
     errorText,
     artifacts: result ? artifactsOf(result, opts.workspaceDir) : [],

@@ -93,6 +93,7 @@ const REASON = {
   budget: "The rerun was stopped: its time budget was exhausted",
   aborted: "The rerun was stopped: the run was cancelled or reached its deadline",
   noResults: "The Playwright runner did not produce results",
+  crashed: "The Playwright runner stopped unexpectedly before the test finished",
   unreadable: "The Playwright runner's results could not be read",
 } as const;
 
@@ -141,24 +142,26 @@ export async function runGeneratedTest(input: RunGeneratedTestInput, deps: RunGe
     return errored(signal.aborted ? (input.signal.aborted ? REASON.aborted : REASON.budget) : REASON.spawn);
   }
   if (input.signal.aborted) return errored(REASON.aborted);
-  if (budget.aborted) return errored(REASON.budget);
 
   let raw: string;
   try {
     raw = await readFile(path.join(workspace.dir, RESULTS_FILE), "utf8");
   } catch {
-    return errored(REASON.noResults);
+    return errored(budget.aborted ? REASON.budget : REASON.noResults);
   }
   let parsed: ParsedRunResults;
   try {
     parsed = parseRunResults(raw, { compiledCriteria: compiled, workspaceDir: workspace.dir });
   } catch (err) {
-    if (err instanceof RunResultsError) return errored(REASON.unreadable);
+    if (err instanceof RunResultsError) return errored(budget.aborted ? REASON.budget : REASON.unreadable);
     throw err;
   }
+  // Killed at the budget after Playwright wrote its results: R41 — completed steps keep their outcome.
+  if (budget.aborted) return errored(REASON.budget, parsed);
 
   const allPassed = compiled.every((id) => parsed.perCriterion[id] === "PASSED");
   if (parsed.runErrors.length > 0) return errored(`The Playwright runner reported an error: ${parsed.runErrors[0]}`.slice(0, 1000), parsed);
+  if (parsed.crashed) return errored(REASON.crashed, parsed);
   if (parsed.stopped) return errored(REASON.budget, parsed);
   if (parsed.testStatus === "failed") {
     return { status: "FAILED", perCriterion: parsed.perCriterion, errorText: parsed.errorText, artifacts: parsed.artifacts, durationMs: Date.now() - startedAt };
