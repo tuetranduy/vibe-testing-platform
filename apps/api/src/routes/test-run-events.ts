@@ -15,6 +15,14 @@ const PAGE = 500;
  * skips ahead (e.g. two publishers racing) triggers a DB backfill to fill the gap.
  */
 export async function testRunEventRoutes(app: FastifyInstance, deps: ApiDeps): Promise<void> {
+  // Open streams, ended before the server closes: server.close() waits for every connection, and a
+  // live run's stream would otherwise hold a stopping API up until the run ends. Clients reconnect
+  // with Last-Event-ID (to the next instance) and lose nothing.
+  const open = new Set<() => void>();
+  app.addHook("preClose", async () => {
+    for (const close of [...open]) close();
+  });
+
   app.get("/v1/test-runs/:runId/events", async (req, reply) => {
     const { runId } = parseOr400(Params, req.params);
     const { afterSequence } = parseOr400(Query, req.query);
@@ -44,10 +52,12 @@ export async function testRunEventRoutes(app: FastifyInstance, deps: ApiDeps): P
     const close = () => {
       if (closed) return;
       closed = true;
+      open.delete(close);
       clearInterval(heartbeat);
       void unsubscribe?.();
       raw.end();
     };
+    open.add(close);
     req.raw.on("close", close);
     const runs = new RunRepository(deps.db);
     const graceMs = Math.max(2_000, deps.config.sseHeartbeatMs);
