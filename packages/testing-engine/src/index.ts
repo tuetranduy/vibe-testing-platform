@@ -7,3 +7,5 @@ export * from "./compiler";
 export * from "./playwright-runner";
 export * from "./evidence";
 export * from "./shared/locator-policy";
+export * from "./reporting";
+export * from "./reporting/diagnostics";

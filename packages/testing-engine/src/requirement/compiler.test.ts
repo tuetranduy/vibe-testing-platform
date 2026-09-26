@@ -9,7 +9,6 @@ import {
 import { FakeTransport, LlmClient, type FakeReply } from "@platform/llm";
 import { createRunRedactor } from "@platform/security";
 import { describe, expect, it } from "vitest";
-import { createFakeStages } from "../orchestrator/fake-stages";
 import { runAnalysis, type RunPorts } from "../orchestrator/orchestrator";
 import { createRealStages } from "../orchestrator/real-stages";
 import type { EventDraft, RequirementDraft, StageContext } from "../orchestrator/stages";
@@ -301,7 +300,8 @@ describe("analyze stage (real compiler behind runAnalysis)", () => {
     const { llm } = setup({ json: { ...cartOutput(), reasoning } });
     const unusedExploration = { openSandbox: async () => ({}) as never, explorer: { start: async () => ({}) as never }, store: () => ({}) as never };
     const unusedRerun = { openProxy: async () => ({}) as never, spawn: async () => ({}) as never, workspace: { baseDir: "/nonexistent" }, evidence: () => ({}) as never };
-    const stages = createRealStages({ llm, exploration: unusedExploration, generateTest: { store: () => ({ save: async () => {} }) }, runTest: unusedRerun }, createFakeStages());
+    const unusedReport = { store: () => ({}) as never };
+    const stages = createRealStages({ llm, exploration: unusedExploration, generateTest: { store: () => ({ save: async () => {} }) }, runTest: unusedRerun, report: unusedReport });
     const p = fakePorts();
 
     await runAnalysis(stageContext(storedRequest(CART_TEXT)), p.ports, stages);

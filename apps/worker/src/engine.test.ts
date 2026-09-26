@@ -1,8 +1,10 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { CriterionResult } from "@platform/contracts";
 import {
   ArtifactRepository,
+  DiagnosticFindingRepository,
   ExplorationStepRepository,
   GeneratedTestRepository,
   LlmCallRepository,
@@ -36,16 +38,22 @@ afterAll(async () => {
 const REAL = { LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5", ANTHROPIC_API_KEY: "sk-test" } as const;
 /**
  * A browserless rerun child (the real one is covered by sandbox/runner-process.test.ts): every
- * compiled `[AC-n]` step of the workspace's run.spec.ts passes.
+ * compiled `[AC-n]` step of the workspace's run.spec.ts passes, except the `failing` ones, whose
+ * assertion fails.
  */
-function fakeRerunSpawn(): SpawnRunner & { calls: RunnerProcessInput[] } {
+function fakeRerunSpawn(failing: string[] = []): SpawnRunner & { calls: RunnerProcessInput[] } {
   const calls: RunnerProcessInput[] = [];
   const spawn = (async (input: RunnerProcessInput) => {
     calls.push(input);
     const source = readFileSync(path.join(input.cwd, "run.spec.ts"), "utf8");
     const ids = [...source.matchAll(/test\.step\("\[(AC-\d+)\] "/g)].map((m) => m[1]!);
-    const steps = ids.map((id) => ({ title: `[${id}] statement`, duration: 1 }));
-    const results = { suites: [{ specs: [{ tests: [{ results: [{ status: "passed", errors: [], steps, attachments: [] }] }] }] }], errors: [] };
+    const error = { message: "Error: expect(received).toBeGreaterThan(expected)\n\nExpected: > 1\nReceived:   1" };
+    // Playwright stops at the first failed assertion: later steps never start (NOT_REACHED).
+    const firstFailure = ids.findIndex((id) => failing.includes(id));
+    const ran = firstFailure === -1 ? ids : ids.slice(0, firstFailure + 1);
+    const steps = ran.map((id) => ({ title: `[${id}] statement`, duration: 1, ...(failing.includes(id) ? { error } : {}) }));
+    const status = firstFailure === -1 ? "passed" : "failed";
+    const results = { suites: [{ specs: [{ tests: [{ results: [{ status, errors: [], steps, attachments: [] }] }] }] }], errors: [] };
     writeFileSync(path.join(input.cwd, "results.json"), JSON.stringify(results));
     return { exitCode: 0, signal: null };
   }) as SpawnRunner & { calls: RunnerProcessInput[] };
@@ -54,9 +62,14 @@ function fakeRerunSpawn(): SpawnRunner & { calls: RunnerProcessInput[] } {
 }
 
 /** Real-engine deps with a browserless sandbox/explorer (the real one is covered by tests/integration) and rerun child. */
-const realDeps = (transport: FakeTransport, extra: Record<string, unknown> = {}, page: Parameters<typeof fakeExploration>[0] = {}) => {
+const realDeps = (
+  transport: FakeTransport,
+  extra: Record<string, unknown> = {},
+  page: Parameters<typeof fakeExploration>[0] = {},
+  failingInRerun: string[] = [],
+) => {
   const exploration = fakeExploration(page);
-  const rerunSpawn = fakeRerunSpawn();
+  const rerunSpawn = fakeRerunSpawn(failingInRerun);
   const rerunDir = path.join(artifactDir, "runs");
   return {
     exploration,
@@ -119,6 +132,9 @@ const planned = {
   stopConditions: [],
 };
 
+/** The report's diagnostics reply (Task 18): nothing to add. */
+const noDiagnostics = { json: { findings: [], notes: [] } };
+
 describe("createEngine (Ruling R7)", () => {
   it("LLM_PROVIDER=fake keeps the full fake engine", async () => {
     const engine = createEngine({ LLM_PROVIDER: "fake", LLM_MODEL: "claude-sonnet-5" }, { db: h.tdb.db, logger: silentLogger });
@@ -166,7 +182,7 @@ describe("createEngine (Ruling R7)", () => {
   });
 
   it("real engine plans with the LLM: plan persisted, plan.created published, PLANNING llm_calls row, no secret sent", async () => {
-    const transport = new FakeTransport().enqueue({ json: planned, usage: { inputTokens: 2000, outputTokens: 500 } });
+    const transport = new FakeTransport().enqueue({ json: planned, usage: { inputTokens: 2000, outputTokens: 500 } }, noDiagnostics);
     const engine = createEngine(REAL, realDeps(transport).deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, secrets: { password: "pw-Plan-Secret-456" } });
 
@@ -184,7 +200,10 @@ describe("createEngine (Ruling R7)", () => {
     expect(created.message).toBe("Plan created with 7 steps");
 
     const calls = await new LlmCallRepository(h.tdb.db).listByRun(run.id);
-    expect(calls).toMatchObject([{ stage: "PLANNING", inputTokens: 2000, outputTokens: 500, status: "SUCCESS" }]);
+    expect(calls).toMatchObject([
+      { stage: "PLANNING", inputTokens: 2000, outputTokens: 500, status: "SUCCESS" },
+      { stage: "GENERATING_REPORT", status: "SUCCESS" }, // report diagnostics (nothing passed here)
+    ]);
 
     const sent = JSON.stringify(transport.requests.map(({ signal: _s, ...r }) => r));
     expect(sent).toContain("password");
@@ -192,7 +211,7 @@ describe("createEngine (Ruling R7)", () => {
     expect(JSON.stringify(plan)).not.toContain("pw-Plan-Secret-456");
   });
 
-  it("real engine generates the Playwright test (Task 16) and reruns it in the sandbox (Task 17); outcomes are reconciled only by Task 18", async () => {
+  it("real engine generates the Playwright test (Task 16), reruns it in the sandbox (Task 17) and reconciles the outcome (Task 18)", async () => {
     const page = {
       facts: {
         "cartCount@before_add": { value: 0, dom: true },
@@ -200,7 +219,7 @@ describe("createEngine (Ruling R7)", () => {
         "cartItems@cart_page": { value: ["iPhone 17 Pro"], dom: false },
       },
     };
-    const real = realDeps(new FakeTransport().enqueue({ json: planned }), {}, page);
+    const real = realDeps(new FakeTransport().enqueue({ json: planned }, noDiagnostics), {}, page);
     const engine = createEngine(REAL, real.deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
@@ -225,9 +244,10 @@ describe("createEngine (Ruling R7)", () => {
     const completed = events.filter((e) => e.type === "playwright.completed");
     expect(completed).toHaveLength(1); // published by the orchestrator only (R34)
     expect(completed[0]!.payload).toMatchObject({ status: "PASSED" });
-    // Until Task 18 reconciles, no rerun confirmation is claimed: the DOM-backed PASS stands as EXPLORATION_ONLY.
+    // The rerun confirmed the compiled criterion; the one it could not compile rests on unverified evidence.
     const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
-    expect(results.find((r) => r.criterionId === "AC-1")).toMatchObject({ status: "PASS", verdictSource: "EXPLORATION_ONLY", rerunOutcome: "UNAVAILABLE" });
+    expect(results.find((r) => r.criterionId === "AC-1")).toMatchObject({ status: "PASS", verdictSource: "PLAYWRIGHT_RERUN", rerunOutcome: "PASSED" });
+    expect(results.find((r) => r.criterionId === "AC-2")).toMatchObject({ status: "INCONCLUSIVE", reason: "UNVERIFIED_EVIDENCE", rerunOutcome: "UNAVAILABLE" });
     expect((await new RunRepository(h.tdb.db).findById(run.id))!.lifecycle).toBe("COMPLETED");
   });
 
@@ -309,7 +329,7 @@ describe("createEngine (Ruling R7)", () => {
     for (const r of results) expect(r).toMatchObject({ status: "INCONCLUSIVE", reason: "FACT_NOT_OBSERVED" });
   });
 
-  it("real engine end to end: a DOM_VERIFIED cart delta is a provisional PASS that stands (EXPLORATION_ONLY); MODEL_EXTRACTED evidence ends UNVERIFIED_EVIDENCE (R26)", async () => {
+  it("real engine end to end: a DOM_VERIFIED cart delta is a provisional PASS the rerun confirms; MODEL_EXTRACTED evidence ends UNVERIFIED_EVIDENCE", async () => {
     const page = {
       facts: {
         "cartCount@before_add": { value: 0, dom: true },
@@ -318,7 +338,7 @@ describe("createEngine (Ruling R7)", () => {
         "cartItems@cart_page": { value: ["iPhone 17 Pro"], dom: false },
       },
     };
-    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), {}, page).deps);
+    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }, noDiagnostics), {}, page).deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
     await executeRunJob(h.deps(engine.stages), run.id);
@@ -341,14 +361,14 @@ describe("createEngine (Ruling R7)", () => {
     ]);
     expect(events.find((e) => e.type === "criterion.evaluated" && e.stage === "VERIFYING")!.message).toBe("AC-1 provisionally PASS");
 
-    // Final results: the interim no-rerun rule (R26) keeps only DOM-backed verdicts.
+    // Final results (Section 2.3): the rerun confirms AC-1; AC-2 was not compiled and its evidence is not deterministic.
     const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
     const byId = Object.fromEntries(results.map((r) => [r.criterionId, r]));
     expect(byId["AC-1"]).toMatchObject({
       status: "PASS",
       reason: null,
-      verdictSource: "EXPLORATION_ONLY",
-      rerunOutcome: "UNAVAILABLE",
+      verdictSource: "PLAYWRIGHT_RERUN",
+      rerunOutcome: "PASSED",
       factRefs: [
         { key: "cartCount", checkpoint: "after_add" },
         { key: "cartCount", checkpoint: "before_add" },
@@ -361,6 +381,7 @@ describe("createEngine (Ruling R7)", () => {
       status: "INCONCLUSIVE",
       reason: "UNVERIFIED_EVIDENCE",
       verdictSource: null,
+      rerunOutcome: "UNAVAILABLE",
       provisional: { status: "PASS", reason: null },
     });
     const final = events.filter((e) => e.type === "criterion.evaluated" && e.stage === "GENERATING_REPORT").map((e) => e.payload);
@@ -387,10 +408,32 @@ describe("createEngine (Ruling R7)", () => {
     const after = await new RunRepository(h.tdb.db).getById(run.id);
     expect([after.lifecycle, after.verdict]).toEqual(["COMPLETED", "PASSED"]);
     const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
-    for (const r of results) expect(r).toMatchObject({ status: "PASS", verdictSource: "EXPLORATION_ONLY" });
+    for (const r of results) expect(r).toMatchObject({ status: "PASS", verdictSource: "PLAYWRIGHT_RERUN", rerunOutcome: "PASSED" });
+    // Nothing to diagnose: no model call in GENERATING_REPORT.
+    expect((await new LlmCallRepository(h.tdb.db).listByRun(run.id)).map((c) => c.stage)).toEqual(["PLANNING"]);
   });
 
-  it("real engine: a DOM_VERIFIED count that did not increase is a FAIL", async () => {
+  it("real engine with the rerun disabled: a DOM-backed PASS stands as EXPLORATION_ONLY (not confirmed by rerun)", async () => {
+    const page = {
+      facts: {
+        "cartCount@before_add": { value: 0, dom: true },
+        "cartCount@after_add": { value: 1, dom: true },
+        "cartItems@cart_page": { value: ["Apple iPhone 17 Pro"], dom: true },
+      },
+    };
+    const real = realDeps(new FakeTransport().enqueue({ json: planned }), {}, page);
+    const engine = createEngine(REAL, real.deps);
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600, rerunGeneratedTest: false } });
+
+    await executeRunJob(h.deps(engine.stages), run.id);
+
+    expect(real.rerunSpawn.calls).toHaveLength(0);
+    expect((await new RunRepository(h.tdb.db).getById(run.id)).verdict).toBe("PASSED");
+    const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
+    for (const r of results) expect(r).toMatchObject({ status: "PASS", verdictSource: "EXPLORATION_ONLY", rerunOutcome: "UNAVAILABLE" });
+  });
+
+  it("real engine: a DOM_VERIFIED count that did not increase is a FAIL the rerun confirms; the failure keeps its evidence; diagnostics add a finding, never a status", async () => {
     const page = {
       facts: {
         "cartCount@before_add": { value: 1, dom: true },
@@ -398,17 +441,55 @@ describe("createEngine (Ruling R7)", () => {
         "cartItems@cart_page": { value: [], dom: true },
       },
     };
-    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), {}, page).deps);
-    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
+    const finding = { criterionId: "AC-1", summary: "The cart badge stayed at 1: the Add to cart click may not have registered." };
+    const transport = new FakeTransport().enqueue({ json: planned }, { json: { findings: [finding], notes: [] }, usage: { inputTokens: 900, outputTokens: 60 } });
+    const engine = createEngine(REAL, realDeps(transport, {}, page, ["AC-1"]).deps);
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, secrets: { password: "pw-Report-Secret-1" } });
 
     await executeRunJob(h.deps(engine.stages), run.id);
 
     expect((await new RunRepository(h.tdb.db).getById(run.id)).verdict).toBe("FAILED");
+    const results = (await new ResultRepository(h.tdb.db).listByRun(run.id)) as CriterionResult[];
+    const failed = results.find((r) => r.criterionId === "AC-1")!;
+    expect(failed).toMatchObject({ status: "FAIL", verdictSource: "PLAYWRIGHT_RERUN", rerunOutcome: "ASSERTION_FAILED" });
+    expect(failed.actual).toMatch(/^Cart count after add \(1\) is not > before add \(1\) \| Rerun: Error: expect\(received\)\.toBeGreaterThan/);
+    // Playwright stopped at AC-1: AC-2 was not reached, so its DOM-backed FAIL stands on exploration alone.
+    expect(results.find((r) => r.criterionId === "AC-2")).toMatchObject({ status: "FAIL", verdictSource: "EXPLORATION_ONLY", rerunOutcome: "NOT_REACHED" });
+    // Failed criteria keep evidence: their steps' screenshots (the related steps recorded its facts).
+    const screenshots = (await new ArtifactRepository(h.tdb.db).listByRun(run.id)).map((a) => a.id);
+    expect(failed.relatedStepIds.length).toBeGreaterThan(0);
+    expect(failed.evidenceArtifactIds.length).toBeGreaterThan(0);
+    for (const id of failed.evidenceArtifactIds) expect(screenshots).toContain(id);
+
+    expect(await new DiagnosticFindingRepository(h.tdb.db).listByRun(run.id)).toEqual([finding]);
+    const calls = await new LlmCallRepository(h.tdb.db).listByRun(run.id);
+    expect(calls.map((c) => [c.stage, c.status])).toEqual([["PLANNING", "SUCCESS"], ["GENERATING_REPORT", "SUCCESS"]]);
+    const diagnosticsPrompt = JSON.stringify(transport.requests[1]!.messages);
+    expect(diagnosticsPrompt).toContain("Run verdict: FAILED");
+    expect(diagnosticsPrompt).not.toContain("pw-Report-Secret-1");
+  });
+
+  it("real engine: a diagnostics failure never fails the run — same statuses, no findings, a warning", async () => {
+    const page = {
+      facts: {
+        "cartCount@before_add": { value: 1, dom: true },
+        "cartCount@after_add": { value: 1, dom: true },
+        "cartItems@cart_page": { value: [], dom: true },
+      },
+    };
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warn: (_obj: object, msg?: string) => void warnings.push(msg ?? "") };
+    // No diagnostics reply scripted: the provider call fails.
+    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), { logger }, page, ["AC-1"]).deps);
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
+
+    await executeRunJob(h.deps(engine.stages), run.id);
+
+    const after = await new RunRepository(h.tdb.db).getById(run.id);
+    expect([after.lifecycle, after.verdict]).toEqual(["COMPLETED", "FAILED"]);
     const results = await new ResultRepository(h.tdb.db).listByRun(run.id);
-    expect(results.find((r) => r.criterionId === "AC-1")).toMatchObject({
-      status: "FAIL",
-      verdictSource: "EXPLORATION_ONLY",
-      actual: "Cart count after add (1) is not > before add (1)",
-    });
+    expect(results.map((r) => [r.criterionId, r.status]).sort()).toEqual([["AC-1", "FAIL"], ["AC-2", "FAIL"]]);
+    expect(await new DiagnosticFindingRepository(h.tdb.db).listByRun(run.id)).toEqual([]);
+    expect(warnings).toContain("report diagnostics failed; reporting without them");
   });
 });

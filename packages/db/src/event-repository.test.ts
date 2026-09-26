@@ -47,4 +47,17 @@ describe("EventRepository", () => {
     ).rejects.toThrow();
     expect(await events.listAfter(run.id, 0)).toHaveLength(0);
   });
+
+  it("finds the latest event of a type (e.g. playwright.completed for the report, Ruling R36)", async () => {
+    const run = await new RunRepository(tdb.db).create({ tenantId: TEST_TENANT_ID, targetUrl: "https://x.com", request: storedRequest() });
+    const events = new EventRepository(tdb.db);
+    expect(await events.findLastOfType(run.id, "playwright.completed")).toBeNull();
+    const completed = (status: "PASSED" | "FAILED", durationMs: number) =>
+      events.append({ runId: run.id, stage: "RUNNING_PLAYWRIGHT", type: "playwright.completed", message: "done", payload: { status, durationMs } });
+    await completed("FAILED", 10);
+    await events.append({ runId: run.id, stage: "GENERATING_REPORT", type: "stage.started", message: "x", payload: { stage: "GENERATING_REPORT" } });
+    await completed("PASSED", 20);
+    const last = await events.findLastOfType(run.id, "playwright.completed");
+    expect(last).toMatchObject({ type: "playwright.completed", sequence: 3, payload: { status: "PASSED", durationMs: 20 } });
+  });
 });
