@@ -200,6 +200,33 @@ describe("createEngine (Ruling R7)", () => {
     expect(exploration.log.filter((l) => l.startsWith("actOn")).every((l) => l === "actOn click")).toBe(true);
   });
 
+  it("real engine: a sandbox that fails to launch ends the run ERRORED / BROWSER_PROVIDER with a clean message; Chromium's stderr stays in the worker log", async () => {
+    const stderr = "Chromium exited during launch: No usable sandbox! ... you can try using --no-sandbox.";
+    const logged: { level: string; obj: object; msg?: string }[] = [];
+    const at = (level: string) => (obj: object, msg?: string) => void logged.push({ level, obj, msg });
+    const logger = { info: at("info"), warn: at("warn"), error: at("error") };
+    const { deps, exploration } = realDeps(new FakeTransport().enqueue({ json: planned }), { logger });
+    deps.exploration = {
+      ...exploration.deps,
+      openSandbox: async () => {
+        throw new Error(stderr);
+      },
+    };
+    const engine = createEngine(REAL, deps);
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
+
+    await executeRunJob(h.deps(engine.stages), run.id);
+
+    const after = await new RunRepository(h.tdb.db).getById(run.id);
+    expect([after.lifecycle, after.errorCategory, after.errorMessage]).toEqual(["ERRORED", "BROWSER_PROVIDER", "Browser sandbox failed to start"]);
+    const events = await eventsOf(h, run.id);
+    expect(events.find((e) => e.type === "run.errored")?.payload).toEqual({ category: "BROWSER_PROVIDER", message: "Browser sandbox failed to start" });
+    expect(JSON.stringify(events)).not.toContain("no-sandbox");
+    const sandboxLog = logged.find((l) => l.msg === "browser sandbox failed to start");
+    expect(sandboxLog).toMatchObject({ level: "error", obj: { runId: run.id } });
+    expect(((sandboxLog!.obj as { err: Error }).err).message).toContain("--no-sandbox");
+  });
+
   it("real engine verifies from recorded facts: nothing observed → INCONCLUSIVE / FACT_NOT_OBSERVED (a fallback set to PASS has no say)", async () => {
     // The fake page shows nothing (extract answers null): no criterion can be decided.
     const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), { fake: { provisionalStatus: "PASS" } }).deps);

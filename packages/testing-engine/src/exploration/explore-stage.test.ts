@@ -1,7 +1,8 @@
-import type { NormalizedRequirement, TestPlan } from "@platform/contracts";
+import { BrowserProviderError, StorageError, type NormalizedRequirement, type TestPlan } from "@platform/contracts";
 import type { ExplorerSession, ExplorerStartInput } from "@platform/stagehand-adapter/browser-explorer";
 import type { Page } from "playwright-core";
 import { describe, expect, it } from "vitest";
+import { errorCategoryOf } from "../orchestrator/errors";
 import type { StageContext } from "../orchestrator/stages";
 import { createExploreStage, type ExplorationSandbox } from "./explore-stage";
 
@@ -14,11 +15,12 @@ const plan = {
 } as TestPlan;
 const requirement = { facts: [], criteria: [] } as unknown as NormalizedRequirement;
 
-function harness(opts: { startDelayMs?: number } = {}) {
+function harness(opts: { startDelayMs?: number; openError?: unknown; startError?: unknown } = {}) {
   const run = new AbortController();
   const budget = new AbortController();
   const cleanups: (() => unknown)[] = [];
   const log: string[] = [];
+  const logged: { obj: object; msg?: string }[] = [];
   const redact = (v: unknown) => v;
   const ctx = {
     runId: "run_stage",
@@ -48,11 +50,13 @@ function harness(opts: { startDelayMs?: number } = {}) {
     openSandbox: async (c) => {
       expect(c).toBe(ctx);
       log.push("sandbox.open");
+      if (opts.openError) throw opts.openError;
       return sandbox;
     },
     explorer: {
       start: async (input) => {
         started = input;
+        if (opts.startError) throw opts.startError;
         if (opts.startDelayMs) {
           budget.abort(new DOMException("timed out", "TimeoutError"));
           throw budget.signal.reason;
@@ -60,9 +64,10 @@ function harness(opts: { startDelayMs?: number } = {}) {
         return session;
       },
     },
+    logger: { error: (obj, msg) => void logged.push({ obj, msg }) },
     store: () => ({ saveStep: async () => {}, saveFact: async () => {}, saveScreenshot: async () => ({ artifactId: "a" }) }),
   });
-  return { ctx, run, budget, cleanups, log, stage, started: () => started, redact };
+  return { ctx, run, budget, cleanups, log, logged, stage, started: () => started, redact };
 }
 
 describe("createExploreStage", () => {
@@ -88,5 +93,36 @@ describe("createExploreStage", () => {
     h.run.abort(reason);
     await expect(h.stage(h.ctx, plan, requirement)).rejects.toBe(reason);
     expect(h.log).toContain("sandbox.close");
+  });
+
+  const CHROMIUM_STDERR =
+    "Chromium exited during launch: No usable sandbox! ... If you want to live dangerously and need an immediate workaround, you can try using --no-sandbox.";
+
+  it("the sandbox fails to open → BROWSER_PROVIDER with a clean message; the Chromium stderr goes to the log only", async () => {
+    const cause = new Error(CHROMIUM_STDERR);
+    const h = harness({ openError: cause });
+    const err = await h.stage(h.ctx, plan, requirement).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BrowserProviderError);
+    expect(errorCategoryOf(err)).toBe("BROWSER_PROVIDER");
+    expect((err as Error).message).toBe("Browser sandbox failed to start");
+    expect((err as Error).cause).toBe(cause);
+    expect(h.logged).toEqual([{ obj: { err: cause, runId: "run_stage" }, msg: "browser sandbox failed to start" }]);
+  });
+
+  it("the explorer fails to start with a plain error → BROWSER_PROVIDER, sandbox released", async () => {
+    const cause = new Error("Stagehand extension not found (set STAGEHAND_EXTENSION_DIRECTORY_PATH or install @browserbasehq/stagehand)");
+    const h = harness({ startError: cause });
+    const err = await h.stage(h.ctx, plan, requirement).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BrowserProviderError);
+    expect((err as Error).message).toBe("Browser explorer failed to start");
+    expect((err as Error).cause).toBe(cause);
+    expect(h.log).toContain("sandbox.close");
+    expect(h.logged.map((l) => l.msg)).toEqual(["browser explorer failed to start"]);
+  });
+
+  it("typed engine errors while starting pass through unchanged", async () => {
+    const typed = new StorageError("disk full");
+    const h = harness({ openError: typed });
+    await expect(h.stage(h.ctx, plan, requirement)).rejects.toBe(typed);
   });
 });

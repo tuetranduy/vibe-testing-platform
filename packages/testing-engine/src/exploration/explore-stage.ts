@@ -1,4 +1,4 @@
-import type { ExplorationOutcome } from "@platform/contracts";
+import { BrowserProviderError, CancelledError, EngineError, type ExplorationOutcome } from "@platform/contracts";
 import type { BrowserExplorer, ExplorerSession, SandboxedPage } from "@platform/stagehand-adapter/browser-explorer";
 import type { EngineStages, StageContext } from "../orchestrator/stages";
 import { runExploration, type ExplorationStore, type RecorderPort } from "./executor";
@@ -17,7 +17,18 @@ export interface ExploreStageDeps {
   store(ctx: StageContext): ExplorationStore;
   recorder?: RecorderPort;
   pollIntervalMs?: number;
+  /**
+   * Receives the raw error when the sandbox or the explorer fails to start (it may carry Chromium's
+   * stderr). Only the log sees it: the run records a short template message.
+   */
+  logger?: { error(obj: object, msg?: string): void };
 }
+
+/** Which start-up step failed, for the user-facing template message. */
+const START_FAILURES = {
+  sandbox: "Browser sandbox failed to start",
+  explorer: "Browser explorer failed to start",
+} as const;
 
 /**
  * The real `explore` stage (Task 14): sandbox → explorer session (bounded by the exploration
@@ -29,10 +40,12 @@ export function createExploreStage(deps: ExploreStageDeps): EngineStages["explor
     const budget = ctx.budgetSignal(ctx.budgets.explorationMs);
     let sandbox: ExplorationSandbox | undefined;
     let session: ExplorerSession | undefined;
+    let starting: keyof typeof START_FAILURES | null = "sandbox";
     try {
       sandbox = await deps.openSandbox(ctx);
       const opened = sandbox;
       ctx.addCleanup(() => opened.close());
+      starting = "explorer";
       session = await deps.explorer.start({
         page: sandbox,
         runId: ctx.runId,
@@ -43,6 +56,7 @@ export function createExploreStage(deps: ExploreStageDeps): EngineStages["explor
       });
       const started = session;
       ctx.addCleanup(() => started.close());
+      starting = null;
       return await runExploration(ctx, { plan, requirement, session, budget }, {
         store: deps.store(ctx),
         ...(deps.recorder ? { recorder: deps.recorder } : {}),
@@ -52,6 +66,13 @@ export function createExploreStage(deps: ExploreStageDeps): EngineStages["explor
       if (ctx.signal.aborted) throw ctx.signal.reason;
       // The budget ran out while the browser or the explorer was still starting: nothing explored.
       if (budget.aborted) return { steps: [], facts: [], stopReason: "EXPLORATION_BUDGET_EXHAUSTED" };
+      // Launch / proxy / extension failures are the browser provider's, not INTERNAL. The raw message
+      // (e.g. Chromium's stderr tail) stays in the worker log, never in the run's error or events.
+      if (starting && !(err instanceof EngineError) && !(err instanceof CancelledError)) {
+        const message = START_FAILURES[starting];
+        deps.logger?.error({ err, runId: ctx.runId }, message.toLowerCase());
+        throw new BrowserProviderError(message, { cause: err });
+      }
       throw err;
     } finally {
       await session?.close().catch(() => {});
