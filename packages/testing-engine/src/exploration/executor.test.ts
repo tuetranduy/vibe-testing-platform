@@ -626,6 +626,71 @@ describe("runExploration (fake explorer)", () => {
     expect(outcome.steps[2]!.inputRef).toEqual({ source: "literal", key: "iPhone 17 Pro" });
   });
 
+  it("search whose submit fails once then succeeds: exactly one golden fill + one golden act, both from the retry", async () => {
+    const { ctx, events } = fakeCtx();
+    const session = new FakeSession({ actOn: (_el, n) => (n === 0 ? { success: false, message: "submit did nothing" } : {}) });
+    const mem = memoryStore();
+    const plan = planOf(step("navigate", "Open"), step("search", "Search for the product", { inputRef: { source: "literal", key: "iPhone 17 Pro" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder({ describe: () => ({ role: "button", name: "Search", text: "Search" }) }).recorder });
+
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "SUCCESS", false], // attempt 1
+      [2, "fill", "PS-2", "SUCCESS", false],
+      [3, "observe", "PS-2", "SUCCESS", false],
+      [4, "act", "PS-2", "FAILED", false],
+      [5, "observe", "PS-2", "SUCCESS", false], // attempt 2
+      [6, "fill", "PS-2", "SUCCESS", true],
+      [7, "observe", "PS-2", "SUCCESS", false],
+      [8, "act", "PS-2", "SUCCESS", true],
+    ]);
+    // Persisted and published once each, in order, with the final flag.
+    expect(mem.steps).toEqual(outcome.steps);
+    expect(events.filter((e) => e.type === "step.recorded").map((e) => (e.payload as { index: number }).index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it("search failing both attempts: no step of that planned step is on the golden path", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({ actOn: () => ({ success: false, message: "submit did nothing" }) });
+    const mem = memoryStore();
+    const plan = planOf(step("navigate", "Open"), step("search", "Search for the product", { inputRef: { source: "literal", key: "iPhone 17 Pro" } }), step("click", "Click the first result"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder().recorder });
+
+    expect(outcome.stopReason).toBe("COMPLETED");
+    const search = outcome.steps.filter((s) => s.plannedStepId === "PS-2");
+    expect(search.map((s) => [s.kind, s.outcome])).toEqual([
+      ["observe", "SUCCESS"],
+      ["fill", "SUCCESS"],
+      ["observe", "SUCCESS"],
+      ["act", "FAILED"],
+      ["observe", "SUCCESS"],
+      ["fill", "SUCCESS"],
+      ["observe", "SUCCESS"],
+      ["act", "FAILED"],
+    ]);
+    expect(search.some((s) => s.onGoldenPath)).toBe(false);
+    expect(mem.steps).toEqual(outcome.steps);
+    expect(outcome.steps.some((s) => s.plannedStepId === "PS-3")).toBe(false);
+  });
+
+  it("a search stopped by the step limit mid-execution persists its held steps off the golden path", async () => {
+    const { ctx } = fakeCtx({ options: { maxExplorationSteps: 4 } });
+    const session = new FakeSession();
+    const mem = memoryStore();
+    const plan = planOf(step("navigate", "Open"), step("search", "Search for the product", { inputRef: { source: "literal", key: "iPhone 17 Pro" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder().recorder });
+    expect(outcome.stopReason).toBe("STEP_LIMIT_REACHED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "SUCCESS", false],
+      [2, "fill", "PS-2", "SUCCESS", false], // its submit never ran
+      [3, "observe", "PS-2", "SUCCESS", false],
+    ]);
+    expect(mem.steps).toEqual(outcome.steps);
+    expect(session.ops()).not.toContain("actOn");
+  });
+
   it("select with an inputRef selects our value deterministically (never actOn)", async () => {
     const { ctx } = fakeCtx({ testData: { size: "M" } });
     const session = new FakeSession({ observe: () => [{ selector: "xpath=/html[1]/body[1]/select[1]", description: "size", method: "selectOptionFromDropdown", arguments: ["XL"] }] });

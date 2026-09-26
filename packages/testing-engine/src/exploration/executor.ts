@@ -60,7 +60,9 @@ import { describeElement, fillElement, recordElement, selectElementOption } from
  *                types: no value is ever passed to `act()` / `actOn()`.
  * - select       With `inputRef`: like `fill`, but the recorder selects the option (recorded as kind
  *                `fill`; the compiler tells it apart by the planned step's kind). Without: like `click`.
- * - search       `fill` of the query, then the search's submit control is observed and clicked.
+ * - search       `fill` of the query, then the search's submit control is observed and clicked. The
+ *                fill is golden only when the submit succeeds in the same attempt (its steps are
+ *                persisted after the attempt, with their final flags).
  * - capture_checkpoint
  *                One `extract` of every FactRequest at that checkpoint (model values) → for each fact
  *                with a DOM read mode, `observe` its element → recorder `captureFact` (DOM_VERIFIED
@@ -243,6 +245,8 @@ function valueSchema(valueType: FactRequest["valueType"]): z.ZodType<FactValue> 
 class ExplorationRun {
   private readonly steps: ExplorationStep[] = [];
   private readonly facts: ObservedFact[] = [];
+  /** Steps of an execution in progress whose golden flag depends on its outcome (see `asOneExecution`). */
+  private held: ExplorationStep[] | null = null;
   private readonly session: ExplorerSession;
   private readonly recorder: RecorderPort;
   private readonly policy: ActionPolicy;
@@ -324,10 +328,14 @@ class ExplorationRun {
         if (step.kind === "select" && !step.inputRef) return this.withRetry(() => this.act(step));
         const value = await this.resolveInput(step);
         const how = step.kind === "select" ? "select" : "fill";
-        return this.withRetry(async () => {
-          const filled = await this.fill(step, value, how);
-          return filled === "ok" && step.kind === "search" ? this.act(step, `Find the button that submits the search: ${step.description}`) : filled;
-        });
+        if (step.kind !== "search") return this.withRetry(() => this.fill(step, value, how));
+        // A search is one execution: its fill is golden only if the submit succeeds in the same attempt.
+        return this.withRetry(() =>
+          this.asOneExecution(async () => {
+            const filled = await this.fill(step, value, how);
+            return filled === "ok" ? this.act(step, `Find the button that submits the search: ${step.description}`) : filled;
+          }),
+        );
       }
       case "capture_checkpoint":
         return this.withRetry(() => this.checkpoint(step));
@@ -663,7 +671,7 @@ class ExplorationRun {
   private async reserve(): Promise<void> {
     if (this.ctx.signal.aborted) throw this.ctx.signal.reason;
     if (this.input.budget.aborted) throw new Stop("EXPLORATION_BUDGET_EXHAUSTED");
-    if (this.steps.length >= this.max) throw new Stop("STEP_LIMIT_REACHED");
+    if (this.recordedCount() >= this.max) throw new Stop("STEP_LIMIT_REACHED");
   }
 
   /** Lets policy blocks be handled by the caller; everything else that isn't a step failure propagates. */
@@ -679,13 +687,41 @@ class ExplorationRun {
     return String(this.ctx.redact(s));
   }
 
+  /**
+   * Runs a multi-step execution (a search: fill + submit) with its steps held back, then persists
+   * and publishes them in order, each exactly once, with their final golden-path flag: kept only
+   * when the whole execution succeeded, otherwise every one of its steps is off the golden path.
+   */
+  private async asOneExecution(execution: () => Promise<Attempt>): Promise<Attempt> {
+    this.held = [];
+    let result: Attempt = "failed";
+    try {
+      result = await execution();
+      return result;
+    } finally {
+      const held = this.held;
+      this.held = null;
+      for (const step of held) await this.commit(result === "ok" ? step : { ...step, onGoldenPath: false });
+    }
+  }
+
   private async record(draft: StepDraft): Promise<ExplorationStep> {
+    const step = this.build(draft);
+    if (this.held) {
+      this.held.push(step);
+      return step;
+    }
+    await this.commit(step);
+    return step;
+  }
+
+  private build(draft: StepDraft): ExplorationStep {
     const finishedAt = this.ctx.now();
     // Redact first, then truncate: truncating first could cut a secret so the redactor misses it.
     const redacted = this.ctx.redact({
       id: draft.id ?? newStepId(),
       runId: this.ctx.runId,
-      index: this.steps.length,
+      index: this.recordedCount(),
       plannedStepId: draft.plannedStepId,
       kind: draft.kind,
       instruction: draft.instruction,
@@ -702,11 +738,15 @@ class ExplorationRun {
       artifactIds: draft.artifactIds ?? [],
       llm: draft.llm ?? null,
     }) as ExplorationStep;
-    const step = ExplorationStepSchema.parse({
+    return ExplorationStepSchema.parse({
       ...redacted,
       instruction: redacted.instruction.slice(0, 1000),
       error: redacted.error === null ? null : redacted.error.slice(0, 2000),
     });
+  }
+
+  /** Persists and publishes a step (once, never updated afterwards). */
+  private async commit(step: ExplorationStep): Promise<void> {
     await this.deps.store.saveStep(step);
     this.steps.push(step);
     await this.ctx.publish({
@@ -714,7 +754,11 @@ class ExplorationRun {
       message: `Step ${step.index + 1}: ${step.kind} ${OUTCOME_LABEL[step.outcome]}`,
       payload: { stepId: step.id, index: step.index, kind: step.kind, outcome: step.outcome, blockReason: step.blockReason },
     });
-    return step;
+  }
+
+  /** Recorded steps, including those held back by `asOneExecution`. */
+  private recordedCount(): number {
+    return this.steps.length + (this.held?.length ?? 0);
   }
 
   private async saveFact(fact: ObservedFact): Promise<void> {
