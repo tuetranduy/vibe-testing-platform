@@ -173,6 +173,50 @@ function minimalEnv(): NodeJS.ProcessEnv {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const noop = () => {};
+
+/** How long teardown waits for `browser.close()` and then for the killed process group to exit. */
+const CLOSE_TIMEOUT_MS = 5_000;
+
+/** Waits for `work` (never rejects) or `ms`, whichever comes first, without leaving a timer behind. */
+async function boundedWait(work: Promise<unknown>, ms: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([work.then(noop, noop), new Promise<void>((r) => (timer = setTimeout(r, ms)))]);
+  clearTimeout(timer);
+}
+
+export interface BrowserResources {
+  browser?: Pick<Browser, "close">;
+  proc?: ChildProcess;
+  profileDir?: string;
+}
+
+/**
+ * Releases a launched browser: disconnect (bounded: a hung Chromium must not block the kill), then
+ * SIGKILL the whole process group (browser + helpers), then delete the profile. Idempotent. Only
+ * the profile removal can throw. `graceful: false` skips the disconnect (a browser abandoned while
+ * it was still starting is killed straight away).
+ */
+export async function releaseBrowser(
+  res: BrowserResources,
+  opts: { closeTimeoutMs?: number; graceful?: boolean } = {},
+): Promise<void> {
+  const timeoutMs = opts.closeTimeoutMs ?? CLOSE_TIMEOUT_MS;
+  if (res.browser && opts.graceful !== false) await boundedWait(res.browser.close(), timeoutMs);
+  const child = res.proc;
+  if (child?.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise<void>((r) => child.once("exit", () => r()));
+    try {
+      process.kill(-child.pid, "SIGKILL"); // the whole process group: browser + helpers
+    } catch {
+      // already gone
+    }
+    await boundedWait(exited, timeoutMs);
+  }
+  child?.stderr?.destroy();
+  if (res.profileDir) await rm(res.profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+
 async function getJson<T>(url: string): Promise<T | undefined> {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(1_000) });
@@ -202,23 +246,11 @@ export async function launchSandboxedBrowser(opts: LaunchSandboxedBrowserOptions
   let browser: Browser | undefined;
   let stderrTail = "";
   let disposed = false;
+  let launched = false;
 
   /** Idempotent; safe to run again to catch anything created after an earlier run. */
-  const teardown = async () => {
-    await browser?.close().catch(() => {});
-    if (proc?.pid !== undefined && proc.exitCode === null && proc.signalCode === null) {
-      const child = proc;
-      const exited = new Promise<void>((r) => child.once("exit", () => r()));
-      try {
-        process.kill(-child.pid!, "SIGKILL"); // the whole process group: browser + helpers
-      } catch {
-        // already gone
-      }
-      await Promise.race([exited, sleep(5_000)]);
-    }
-    proc?.stderr?.destroy();
-    if (profileDir) await rm(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  };
+  // Until the launch has returned, nothing is worth a graceful disconnect: kill right away.
+  const teardown = () => releaseBrowser({ browser, proc, profileDir }, { graceful: launched });
   let closing: Promise<void> | undefined;
   const close = () => {
     disposed = true;
@@ -285,6 +317,7 @@ export async function launchSandboxedBrowser(opts: LaunchSandboxedBrowserOptions
     stopIfDisposed();
     const page = context.pages().find((p) => p.url() === "about:blank") ?? (await context.newPage());
     stopIfDisposed();
+    launched = true;
 
     return {
       cdpUrl,
@@ -297,8 +330,9 @@ export async function launchSandboxedBrowser(opts: LaunchSandboxedBrowserOptions
     };
   } catch (err) {
     disposed = true;
-    await closing; // a concurrent close() may be mid-flight
-    await teardown(); // and may have run before something above was created
+    // A teardown failure (e.g. removing the profile) must not mask the launch error.
+    await closing?.catch(noop); // a concurrent close() may be mid-flight
+    await teardown().catch(noop); // and may have run before something above was created
     throw signal?.aborted ? (signal.reason ?? err) : err;
   } finally {
     signal?.removeEventListener("abort", onAbort);
