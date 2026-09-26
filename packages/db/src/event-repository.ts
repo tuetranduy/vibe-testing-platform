@@ -1,5 +1,5 @@
-import { TestEventSchema, type TestEvent, type TestEventInput } from "@platform/contracts";
-import { and, asc, eq, gt, sql } from "drizzle-orm";
+import { TestEventSchema, type TestEvent, type TestEventInput, type TestEventOf, type TestEventType } from "@platform/contracts";
+import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 import type { Executor } from "./client";
 import { NotFoundError } from "./errors";
 import { newId } from "./ids";
@@ -65,6 +65,17 @@ export class EventRepository {
       .orderBy(asc(testEvents.sequence))
       .limit(limit);
     return rows.map(toEvent);
+  }
+
+  /** The run's latest event of `type`, or null (e.g. `playwright.completed` for the report, Ruling R36). */
+  async findLastOfType<T extends TestEventType>(runId: string, type: T): Promise<TestEventOf<T> | null> {
+    const [row] = await this.db
+      .select()
+      .from(testEvents)
+      .where(and(eq(testEvents.runId, runId), eq(testEvents.type, type)))
+      .orderBy(desc(testEvents.sequence))
+      .limit(1);
+    return row ? (toEvent(row) as TestEventOf<T>) : null;
   }
 }
 

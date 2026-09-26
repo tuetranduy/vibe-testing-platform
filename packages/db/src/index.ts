@@ -11,4 +11,5 @@ export * from "./result-repository";
 export * from "./llm-call-repository";
 export * from "./exploration-repository";
 export * from "./generated-test-repository";
+export * from "./diagnostic-finding-repository";
 export * as schema from "./schema";

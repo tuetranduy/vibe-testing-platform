@@ -15,6 +15,7 @@ import {
 import type { WorkerLogger } from "./deps";
 import { createExplorationDeps } from "./exploration";
 import { createGenerateTestDeps } from "./generated-test";
+import { createReportDeps } from "./report";
 import { createRunTestDeps } from "./rerun";
 
 export type EngineConfig = Pick<Env, "LLM_PROVIDER" | "LLM_MODEL"> &
@@ -52,13 +53,12 @@ export interface EngineDeps {
 
 /**
  * Ruling R7: LLM_PROVIDER=fake keeps the full fake engine (demo/compose work without a key);
- * otherwise the real stages (analyze, plan, explore, verify, generate test, rerun) over the fake engine
- * for the stages not built yet.
+ * otherwise every stage is real (analyze, plan, explore, verify, generate test, rerun, report — the
+ * report with LLM diagnostics, Ruling R37).
  * Throws at startup for providers not implemented in V1.
  */
 export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSelection {
-  const fake = createFakeStages(deps.fake);
-  if (config.LLM_PROVIDER === "fake") return { kind: "fake", stages: fake, llm: null };
+  if (config.LLM_PROVIDER === "fake") return { kind: "fake", stages: createFakeStages(deps.fake), llm: null };
 
   const transport =
     deps.transport ?? createTransport({ provider: config.LLM_PROVIDER, anthropicApiKey: config.ANTHROPIC_API_KEY });
@@ -98,5 +98,6 @@ export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSele
     },
     ...(deps.rerun ? { overrides: deps.rerun } : {}),
   });
-  return { kind: "real", stages: createRealStages({ llm, exploration, generateTest: createGenerateTestDeps(deps.db), runTest }, fake), llm };
+  const report = createReportDeps({ db: deps.db, logger: deps.logger, llm });
+  return { kind: "real", stages: createRealStages({ llm, exploration, generateTest: createGenerateTestDeps(deps.db), runTest, report }), llm };
 }

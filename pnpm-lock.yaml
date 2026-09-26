@@ -77,6 +77,9 @@ importers:
       '@platform/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      '@platform/testing-engine':
+        specifier: workspace:*
+        version: link:../../packages/testing-engine
       bullmq:
         specifier: ^6.3.8
         version: 6.3.8(ioredis@6.0.0)(pg@8.23.0)

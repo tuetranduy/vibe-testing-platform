@@ -1,6 +1,7 @@
 import {
   ProvisionalResultSchema,
   RerunResultSchema,
+  type RerunResult,
   type AcceptanceCriterion,
   type ExplorationOutcome,
   type FactRef,
@@ -9,7 +10,6 @@ import {
   type TestPlan,
 } from "@platform/contracts";
 import { describe, expect, it } from "vitest";
-import { createFakeStages } from "./fake-stages";
 import { createRealStages } from "./real-stages";
 import type { StageContext } from "./stages";
 
@@ -35,7 +35,11 @@ const requirement = {
     criterion("AC-2", { kind: "text_matches", fact: title, match: { mode: "contains", value: "Added", caseSensitive: false } }),
     criterion("AC-3", { kind: "numeric_compare", left: after, operator: "eq", right: 1 }),
   ],
-  facts: [],
+  facts: [
+    { ...before, description: "Cart badge count", valueType: "number" },
+    { ...after, description: "Cart badge count", valueType: "number" },
+    { ...title, description: "Page title", valueType: "string" },
+  ],
   confirmedAt: "2026-09-26T10:00:00.000Z",
 } as NormalizedRequirement;
 const plan: TestPlan = {
@@ -85,23 +89,19 @@ const ctx = {
   now: () => new Date("2026-09-26T10:00:00.000Z"),
   redact: (v: unknown) => JSON.parse(JSON.stringify(v).replaceAll(SECRET, "[REDACTED]")),
 } as unknown as StageContext;
-const stagesWith = (status?: "PASS" | "FAIL") =>
-  createRealStages(
-    { llm, exploration: explorationDeps, generateTest: generateTestDeps, runTest: runTestDeps },
-    createFakeStages(status ? { provisionalStatus: status } : {}),
-  );
+const reportDeps = { store: () => ({ saveDiagnostics: async () => {}, llmUsage: async () => [] }) };
+const stagesWith = () =>
+  createRealStages({ llm, exploration: explorationDeps, generateTest: generateTestDeps, runTest: runTestDeps, report: reportDeps });
 
 describe("createRealStages: verify (Task 15)", () => {
-  it("verifies every criterion from the recorded facts; a fallback configured to PASS/FAIL has no say", () => {
-    for (const status of ["PASS", "FAIL"] as const) {
-      const results = stagesWith(status).verify(ctx, requirement, plan, exploration([fact(before, 1), fact(after, 1), fact(title, "Added to cart")]));
-      expect(results.map((r) => [r.criterionId, r.status, r.reason])).toEqual([
-        ["AC-1", "FAIL", null],
-        ["AC-2", "PASS", null],
-        ["AC-3", "BLOCKED", "MISSING_SECRET"],
-      ]);
-      for (const r of results) ProvisionalResultSchema.parse(r);
-    }
+  it("verifies every criterion from the recorded facts", () => {
+    const results = stagesWith().verify(ctx, requirement, plan, exploration([fact(before, 1), fact(after, 1), fact(title, "Added to cart")]));
+    expect(results.map((r) => [r.criterionId, r.status, r.reason])).toEqual([
+      ["AC-1", "FAIL", null],
+      ["AC-2", "PASS", null],
+      ["AC-3", "BLOCKED", "MISSING_SECRET"],
+    ]);
+    for (const r of results) ProvisionalResultSchema.parse(r);
   });
 
   it("all-blocked path (exploration null): every criterion is plan-blocked", () => {
@@ -119,66 +119,48 @@ describe("createRealStages: verify (Task 15)", () => {
   });
 });
 
-describe("createRealStages: interim report (Ruling R26, until Task 18)", () => {
-  const input = (facts: ObservedFact[]) => {
+describe("createRealStages: report (Task 18)", () => {
+  const input = (facts: ObservedFact[], rerun: RerunResult | null) => {
     const exp = exploration(facts);
     const provisional = stagesWith().verify(ctx, requirement, plan, exp);
-    return { requirement, plan, exploration: exp, provisional, generatedTest: null, rerun: null, startedAt: null };
+    return { requirement, plan, exploration: exp, provisional, generatedTest: null, rerun, startedAt: null };
   };
+  const dom = [fact(before, 0), fact(after, 1), fact(title, "Added")];
 
-  it("a PASS/FAIL backed only by DOM_VERIFIED facts stands as EXPLORATION_ONLY", async () => {
-    const report = await stagesWith().report(ctx, input([fact(before, 0), fact(after, 1), fact(title, "Added")]));
-    expect(report.criteria.map((c) => [c.criterionId, c.status, c.reason, c.verdictSource])).toEqual([
-      ["AC-1", "PASS", null, "EXPLORATION_ONLY"],
-      ["AC-2", "PASS", null, "EXPLORATION_ONLY"],
-      ["AC-3", "BLOCKED", "MISSING_SECRET", null],
+  it("reconciles the rerun: a confirmed PASS is PLAYWRIGHT_RERUN, a disagreeing rerun makes it INCONCLUSIVE (the interim R26 rule is gone, R35)", async () => {
+    const rerun = { status: "FAILED" as const, perCriterion: { "AC-1": "ASSERTION_FAILED" as const, "AC-2": "PASSED" as const }, durationMs: 42, errorText: {}, artifactIds: ["art_1"] };
+    const report = await stagesWith().report(ctx, input(dom, rerun));
+    expect(report.criteria.map((c) => [c.criterionId, c.status, c.reason, c.verdictSource, c.rerunOutcome])).toEqual([
+      ["AC-1", "INCONCLUSIVE", "DISCOVERY_RERUN_DISAGREE", null, "ASSERTION_FAILED"],
+      ["AC-2", "PASS", null, "PLAYWRIGHT_RERUN", "PASSED"],
+      ["AC-3", "BLOCKED", "MISSING_SECRET", null, "UNAVAILABLE"],
     ]);
+    expect(report.criteria[0]!.provisional).toEqual({ status: "PASS", reason: null });
+    expect(report.summary.confirmedByRerun).toBe(1);
+    expect(report.playwright).toEqual({ status: "FAILED", durationMs: 42 });
     expect(report.verdict).toBe("BLOCKED");
   });
 
-  it("a PASS/FAIL with any MODEL_EXTRACTED fact → INCONCLUSIVE / UNVERIFIED_EVIDENCE; the provisional status is kept for the record", async () => {
-    const report = await stagesWith().report(ctx, input([fact(before, 0), fact(after, 1, "MODEL_EXTRACTED"), fact(title, "Added")]));
-    expect(report.criteria[0]).toMatchObject({
-      criterionId: "AC-1",
-      status: "INCONCLUSIVE",
-      reason: "UNVERIFIED_EVIDENCE",
-      verdictSource: null,
-      rerunOutcome: "UNAVAILABLE",
-      provisional: { status: "PASS", reason: null },
-    });
-    expect(report.criteria[1]).toMatchObject({ status: "PASS", verdictSource: "EXPLORATION_ONLY", provisional: { status: "PASS", reason: null } });
-    expect(report.summary).toMatchObject({ passed: 1, inconclusive: 1, blocked: 1 });
-  });
-});
-
-describe("createRealStages: interim report and the rerun (until Task 18)", () => {
-  it("rerun outcomes are not reconciled yet: no criterion is labelled PLAYWRIGHT_RERUN, even when the rerun disagrees; the rerun status is still reported", async () => {
-    const exp = exploration([fact(before, 0), fact(after, 1), fact(title, "Added")]);
-    const provisional = stagesWith().verify(ctx, requirement, plan, exp);
-    const rerun = { status: "FAILED" as const, perCriterion: { "AC-1": "ASSERTION_FAILED" as const, "AC-2": "PASSED" as const }, durationMs: 42, errorText: {}, artifactIds: ["art_1"] };
-    const report = await stagesWith().report(ctx, { requirement, plan, exploration: exp, provisional, generatedTest: null, rerun, startedAt: null });
-    expect(report.criteria.map((c) => [c.criterionId, c.status, c.verdictSource, c.rerunOutcome])).toEqual([
-      ["AC-1", "PASS", "EXPLORATION_ONLY", "UNAVAILABLE"],
-      ["AC-2", "PASS", "EXPLORATION_ONLY", "UNAVAILABLE"],
-      ["AC-3", "BLOCKED", null, "UNAVAILABLE"],
+  it("no rerun: a PASS stands (EXPLORATION_ONLY) only on DOM_VERIFIED facts; MODEL_EXTRACTED evidence → INCONCLUSIVE / UNVERIFIED_EVIDENCE", async () => {
+    const report = await stagesWith().report(ctx, input([fact(before, 0), fact(after, 1, "MODEL_EXTRACTED"), fact(title, "Added")], null));
+    expect(report.criteria.map((c) => [c.criterionId, c.status, c.reason, c.verdictSource])).toEqual([
+      ["AC-1", "INCONCLUSIVE", "UNVERIFIED_EVIDENCE", null],
+      ["AC-2", "PASS", null, "EXPLORATION_ONLY"],
+      ["AC-3", "BLOCKED", "MISSING_SECRET", null],
     ]);
-    expect(report.summary.confirmedByRerun).toBe(0);
-    expect(report.playwright).toEqual({ status: "FAILED", durationMs: 42 });
   });
 });
 
 describe("createRealStages: runTest (Task 17)", () => {
   it("is the sandboxed rerun, never the fake: a rerun that cannot start is ERRORED, every compiled criterion NOT_REACHED", async () => {
-    for (const status of ["PASS", "FAIL"] as const) {
-      const test = { id: "gt_1", source: "", helpersSource: "", dataJson: "{}", compiledCriteria: ["AC-1", "AC-2"], notCompiled: [], notes: [] };
-      const rerun = await stagesWith(status).runTest(ctx, test);
-      expect(RerunResultSchema.parse(rerun)).toEqual({
-        status: "ERRORED",
-        perCriterion: { "AC-1": "NOT_REACHED", "AC-2": "NOT_REACHED" },
-        durationMs: 0,
-        errorText: { "AC-1": "The rerun's network guard could not be started", "AC-2": "The rerun's network guard could not be started" },
-        artifactIds: [],
-      });
-    }
+    const test = { id: "gt_1", source: "", helpersSource: "", dataJson: "{}", compiledCriteria: ["AC-1", "AC-2"], notCompiled: [], notes: [] };
+    const rerun = await stagesWith().runTest(ctx, test);
+    expect(RerunResultSchema.parse(rerun)).toEqual({
+      status: "ERRORED",
+      perCriterion: { "AC-1": "NOT_REACHED", "AC-2": "NOT_REACHED" },
+      durationMs: 0,
+      errorText: { "AC-1": "The rerun's network guard could not be started", "AC-2": "The rerun's network guard could not be started" },
+      artifactIds: [],
+    });
   });
 });
