@@ -69,6 +69,19 @@ describe("loadEnv", () => {
     expect(env.S3_FORCE_PATH_STYLE).toBe(true);
   });
 
+  it("S3_PUBLIC_ENDPOINT is optional; set, it must be an http(s) URL; empty means unset (Ruling R54)", () => {
+    expect(loadEnv(validEnv).S3_PUBLIC_ENDPOINT).toBeUndefined();
+    expect(loadEnv({ ...validEnv, S3_PUBLIC_ENDPOINT: "" }).S3_PUBLIC_ENDPOINT).toBeUndefined();
+    expect(loadEnv({ ...validEnv, S3_PUBLIC_ENDPOINT: "http://localhost:9000" }).S3_PUBLIC_ENDPOINT).toBe(
+      "http://localhost:9000",
+    );
+    expect(loadEnv({ ...validEnv, S3_PUBLIC_ENDPOINT: "https://files.example.com" }).S3_PUBLIC_ENDPOINT).toBe(
+      "https://files.example.com",
+    );
+    expect(() => loadEnv({ ...validEnv, S3_PUBLIC_ENDPOINT: "localhost:9000" })).toThrow(/S3_PUBLIC_ENDPOINT/);
+    expect(() => loadEnv({ ...validEnv, S3_PUBLIC_ENDPOINT: "ftp://localhost:9000" })).toThrow(/S3_PUBLIC_ENDPOINT/);
+  });
+
   it("requires provider keys for real LLM providers", () => {
     expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "anthropic" })).toThrow(/ANTHROPIC_API_KEY/);
     expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "openai" })).toThrow(/OPENAI_API_KEY/);
