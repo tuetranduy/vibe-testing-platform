@@ -1,6 +1,6 @@
-import type { ExpectedOutcome, FactRequest } from "@platform/contracts";
 import { describe, expect, it } from "vitest";
-import { describeOutcome } from "./outcome-text";
+import { describeExpectedOutcome, STATEMENT_MAX_LENGTH } from "./describe-outcome";
+import type { ExpectedOutcome, FactRequest } from "./requirement";
 
 const facts: FactRequest[] = [
   { key: "cartCount", checkpoint: "before_add", description: "Cart badge count", valueType: "number" },
@@ -11,9 +11,9 @@ const facts: FactRequest[] = [
   { key: "chosenProduct", checkpoint: "results", description: "Name of the chosen product", valueType: "string" },
 ];
 const at = (key: string, checkpoint: string) => ({ key, checkpoint });
-const text = (o: ExpectedOutcome) => describeOutcome(o, facts);
+const text = (o: ExpectedOutcome) => describeExpectedOutcome(o, facts);
 
-describe("describeOutcome", () => {
+describe("describeExpectedOutcome", () => {
   it("visible", () => {
     expect(text({ kind: "visible", fact: at("banner", "home"), expected: true })).toBe("Cookie banner (at “home”) is visible.");
     expect(text({ kind: "visible", fact: at("banner", "home"), expected: false })).toBe("Cookie banner (at “home”) is not visible.");
@@ -84,14 +84,29 @@ describe("describeOutcome", () => {
   });
 
   it("falls back to the fact's key, and names the automatic page URL", () => {
-    expect(describeOutcome({ kind: "visible", fact: at("promoCode", "checkout"), expected: true }, [])).toBe(
+    expect(describeExpectedOutcome({ kind: "visible", fact: at("promoCode", "checkout"), expected: true }, [])).toBe(
       "promoCode (at “checkout”) is visible.",
     );
     expect(
-      describeOutcome(
+      describeExpectedOutcome(
         { kind: "text_matches", fact: at("url", "after_login"), match: { mode: "contains", value: "/account", caseSensitive: false } },
         [],
       ),
     ).toBe("The page address (at “after login”) contains “/account” (ignoring case).");
+  });
+
+  it("clips a generated sentence to the statement limit", () => {
+    const long = "x".repeat(500);
+    const wide: FactRequest[] = [{ key: "heading", checkpoint: "results", description: "d".repeat(500), valueType: "string" }];
+    const out = describeExpectedOutcome(
+      { kind: "text_matches", fact: at("heading", "results"), match: { mode: "equals", value: long, caseSensitive: false } },
+      wide,
+    );
+    expect(out).toHaveLength(STATEMENT_MAX_LENGTH);
+    expect(out.endsWith("…")).toBe(true);
+  });
+
+  it("leaves a short sentence unclipped", () => {
+    expect(text({ kind: "visible", fact: at("banner", "home"), expected: true }).endsWith("…")).toBe(false);
   });
 });

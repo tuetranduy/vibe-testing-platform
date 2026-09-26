@@ -1,9 +1,8 @@
 "use client";
 
-import type { AcceptanceCriterion, FactRequest } from "@platform/contracts";
+import { describeExpectedOutcome, type AcceptanceCriterion, type FactRequest } from "@platform/contracts";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
-import { describeOutcome } from "./outcome-text";
 
 interface Props {
   criterion: AcceptanceCriterion;
@@ -127,7 +126,7 @@ export function CriterionCard({ criterion: c, facts, reworded, busy, canRemove, 
         <p id={`${c.id}-check`} className="criterion-check-title">
           What will be checked
         </p>
-        <p>{describeOutcome(c.expectedOutcome, facts)}</p>
+        <p>{describeExpectedOutcome(c.expectedOutcome, facts)}</p>
         {(editing || reworded) && (
           <p className="hint">
             <Icon name="info" /> Rewording changes the description only; the check above is unchanged.

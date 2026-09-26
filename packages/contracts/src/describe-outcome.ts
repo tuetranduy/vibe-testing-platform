@@ -1,11 +1,21 @@
-import { URL_FACT_KEY, type ExpectedOutcome, type FactRef, type FactRequest } from "@platform/contracts";
+import { URL_FACT_KEY, type FactRef } from "./common";
+import type { ExpectedOutcome, FactRequest } from "./requirement";
+
+/** `AcceptanceCriterionSchema.statement`'s limit: a generated statement always fits it. */
+export const STATEMENT_MAX_LENGTH = 1000;
 
 /**
- * What a criterion's check actually is, in plain language (Ruling R55). The verifier judges
- * `expectedOutcome`, not the statement, so the review shows this next to the (editable) wording.
- * Facts are named by the requirement's own descriptions where it has them.
+ * What a criterion's check actually verifies, in one plain sentence. The API writes it as the
+ * statement of every criterion whose check a user edited during review, and the web shows it as
+ * "What will be checked" and as the edit preview — one wording for both, so a statement can never
+ * describe a different check than the one the verifier runs. Facts are named by the
+ * requirement's own descriptions where it has them.
  */
-export function describeOutcome(outcome: ExpectedOutcome, facts: readonly FactRequest[]): string {
+export function describeExpectedOutcome(outcome: ExpectedOutcome, facts: readonly FactRequest[]): string {
+  return clip(sentence(outcome, facts));
+}
+
+function sentence(outcome: ExpectedOutcome, facts: readonly FactRequest[]): string {
   const fact = (ref: FactRef) => {
     const known = facts.find((f) => f.key === ref.key && f.checkpoint === ref.checkpoint)?.description;
     const name = known ?? (ref.key === URL_FACT_KEY ? "The page address" : ref.key);
@@ -38,6 +48,8 @@ export function describeOutcome(outcome: ExpectedOutcome, facts: readonly FactRe
       return `Judged by AI only, so it ends Inconclusive: ${quoted(outcome.description)}.`;
   }
 }
+
+const clip = (s: string) => (s.length <= STATEMENT_MAX_LENGTH ? s : `${s.slice(0, STATEMENT_MAX_LENGTH - 1)}…`);
 
 const COMPARE: Record<Extract<ExpectedOutcome, { kind: "numeric_compare" }>["operator"], string> = {
   eq: "equals",
