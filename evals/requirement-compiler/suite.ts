@@ -33,6 +33,11 @@ export const EvalCaseSchema = z.object({
     /** Each entry must be matched by at least one criterion; a list entry means "any of these kinds". */
     requiredOutcomeKinds: z.array(z.union([Kind, z.array(Kind).min(1)])).default([]),
     mustFlagAmbiguous: z.boolean(),
+    /**
+     * Every test_data / secret precondition names a provided key or secret. Off by default: a case whose
+     * requirement needs an input that was not provided expects the precondition with the name it needs.
+     */
+    onlyProvidedInputRefs: z.boolean().default(false),
   }),
 });
 export type EvalCase = z.infer<typeof EvalCaseSchema>;
@@ -55,7 +60,10 @@ export function loadCases(dir = CASES_DIR): EvalCase[] {
 }
 
 /** Score one compiled requirement against a case's expectations. */
-export function scoreCase(c: EvalCase, criteria: { expectedOutcome: { kind: string }; ambiguity: unknown }[]): string[] {
+export function scoreCase(
+  c: EvalCase,
+  criteria: { expectedOutcome: { kind: string }; ambiguity: unknown; preconditions: { kind: string; ref?: string | null }[] }[],
+): string[] {
   const failures: string[] = [];
   const { min, max } = c.expect.criteriaCount;
   if (criteria.length < min || criteria.length > max) failures.push(`criteria count ${criteria.length} not in [${min}, ${max}]`);
@@ -65,6 +73,14 @@ export function scoreCase(c: EvalCase, criteria: { expectedOutcome: { kind: stri
     if (!anyOf.some((k) => kinds.has(k))) failures.push(`no criterion with outcome kind ${anyOf.join(" | ")} (got ${[...kinds].join(", ")})`);
   }
   if (c.expect.mustFlagAmbiguous && !criteria.some((x) => x.ambiguity !== null)) failures.push("expected an ambiguous criterion, none flagged");
+  if (c.expect.onlyProvidedInputRefs) {
+    const provided = { test_data: new Set(Object.keys(caseTestData(c))), secret: new Set(c.secretNames) };
+    for (const p of criteria.flatMap((x) => x.preconditions)) {
+      if ((p.kind === "test_data" || p.kind === "secret") && !provided[p.kind].has(p.ref ?? "")) {
+        failures.push(`${p.kind} precondition names "${p.ref ?? ""}", which was not provided`);
+      }
+    }
+  }
   return failures;
 }
 
