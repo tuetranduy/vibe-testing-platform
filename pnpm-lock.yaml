@@ -11,15 +11,24 @@ importers:
       '@platform/contracts':
         specifier: workspace:*
         version: link:packages/contracts
+      '@platform/db':
+        specifier: workspace:*
+        version: link:packages/db
       '@platform/demo-shop':
         specifier: workspace:*
         version: link:tests/fixtures/demo-shop
       '@platform/llm':
         specifier: workspace:*
         version: link:packages/llm
+      '@platform/security':
+        specifier: workspace:*
+        version: link:packages/security
       '@platform/stagehand-adapter':
         specifier: workspace:*
         version: link:packages/stagehand-adapter
+      '@platform/storage':
+        specifier: workspace:*
+        version: link:packages/storage
       '@platform/testing-engine':
         specifier: workspace:*
         version: link:packages/testing-engine
@@ -127,6 +136,9 @@ importers:
       '@platform/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@platform/stagehand-adapter':
+        specifier: workspace:*
+        version: link:../../packages/stagehand-adapter
       '@platform/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -264,6 +276,9 @@ importers:
       '@platform/security':
         specifier: workspace:*
         version: link:../security
+      '@platform/stagehand-adapter':
+        specifier: workspace:*
+        version: link:../stagehand-adapter
       playwright-core:
         specifier: 1.56.1
         version: 1.56.1

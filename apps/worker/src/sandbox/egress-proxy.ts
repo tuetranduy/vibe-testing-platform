@@ -1,6 +1,7 @@
 import http from "node:http";
 import net from "node:net";
 import { normalizeHost, validateTargetUrl, type Resolver } from "@platform/security";
+import { STAGEHAND_TELEMETRY_HOST } from "@platform/stagehand-adapter/telemetry";
 
 /**
  * D8 egress guard: an HTTP forward proxy (plain `http:` requests + `CONNECT` tunnels) that every
@@ -47,11 +48,11 @@ export interface EgressProxy {
 
 /**
  * Reserved sink for Stagehand's in-browser OTel trace export, which cannot be disabled (Ruling R22).
- * `@platform/stagehand-adapter` points `telemetry.traces.endpoint` here by default
- * (`DEFAULT_TELEMETRY_ENDPOINT`); denying it as a background service keeps it silent (no
+ * The constant comes from `@platform/stagehand-adapter` (whose default `telemetry.traces.endpoint`
+ * points there), so the two can't drift; denying it as a background service keeps it silent (no
  * `egress.blocked` event) and it never resolves (`.invalid`, RFC 6761).
  */
-export const STAGEHAND_TELEMETRY_SINK_HOST = "stagehand-telemetry.invalid";
+export const STAGEHAND_TELEMETRY_SINK_HOST = STAGEHAND_TELEMETRY_HOST;
 
 /**
  * Chromium background endpoints seen by the Stagehand spike (caveat 4) and their siblings. Denied

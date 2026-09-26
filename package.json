@@ -22,9 +22,12 @@
   },
   "devDependencies": {
     "@platform/contracts": "workspace:*",
+    "@platform/db": "workspace:*",
     "@platform/demo-shop": "workspace:*",
     "@platform/llm": "workspace:*",
+    "@platform/security": "workspace:*",
     "@platform/stagehand-adapter": "workspace:*",
+    "@platform/storage": "workspace:*",
     "@platform/testing-engine": "workspace:*",
     "@types/node": "^22.19.0",
     "playwright-core": "1.56.1",

@@ -1,17 +1,45 @@
-import { LlmCallRepository, PlanRepository, RequirementRepository, ResultRepository, RunRepository } from "@platform/db";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  ArtifactRepository,
+  ExplorationStepRepository,
+  LlmCallRepository,
+  ObservedFactRepository,
+  PlanRepository,
+  RequirementRepository,
+  ResultRepository,
+  RunRepository,
+} from "@platform/db";
 import { FakeTransport } from "@platform/llm";
+import { createLocalStorage } from "@platform/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { silentLogger } from "./deps";
 import { createEngine } from "./engine";
 import { analyzeRunJob } from "./jobs/analyze-run";
 import { executeRunJob } from "./jobs/execute-run";
-import { createHarness, eventsOf, seedRun, type WorkerHarness } from "./test-support";
+import { createHarness, eventsOf, fakeExploration, seedRun, type WorkerHarness } from "./test-support";
 
 let h: WorkerHarness;
+let artifactDir: string;
 beforeAll(async () => {
   h = await createHarness();
+  artifactDir = mkdtempSync(path.join(os.tmpdir(), "worker-engine-artifacts-"));
 });
-afterAll(async () => h?.close());
+afterAll(async () => {
+  await h?.close();
+  if (artifactDir) rmSync(artifactDir, { recursive: true, force: true });
+});
+
+const REAL = { LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5", ANTHROPIC_API_KEY: "sk-test" } as const;
+/** Real-engine deps with a browserless sandbox/explorer (the real one is covered by tests/integration). */
+const realDeps = (transport: FakeTransport, extra: Record<string, unknown> = {}) => {
+  const exploration = fakeExploration();
+  return {
+    exploration,
+    deps: { db: h.tdb.db, logger: silentLogger, transport, storage: createLocalStorage({ rootDir: artifactDir }), exploration: exploration.deps, ...extra },
+  };
+};
 
 const compiled = {
   criteria: [
@@ -73,10 +101,7 @@ describe("createEngine (Ruling R7)", () => {
 
   it("a real provider compiles criteria with the LLM, persists revision 1, and records llm_calls rows", async () => {
     const transport = new FakeTransport().enqueue({ json: compiled, usage: { inputTokens: 1200, outputTokens: 300 } });
-    const engine = createEngine(
-      { LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5", ANTHROPIC_API_KEY: "sk-test" },
-      { db: h.tdb.db, logger: silentLogger, transport },
-    );
+    const engine = createEngine(REAL, realDeps(transport).deps);
     expect(engine.kind).toBe("real");
     const run = await seedRun(h, { secrets: { password: "pw-Top-Secret-123" } });
 
@@ -109,11 +134,8 @@ describe("createEngine (Ruling R7)", () => {
 
   it("real engine plans with the LLM: plan persisted, plan.created published, PLANNING llm_calls row, no secret sent", async () => {
     const transport = new FakeTransport().enqueue({ json: planned, usage: { inputTokens: 2000, outputTokens: 500 } });
-    const engine = createEngine(
-      { LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5", ANTHROPIC_API_KEY: "sk-test" },
-      { db: h.tdb.db, logger: silentLogger, transport },
-    );
-    const run = await seedRun(h, { lifecycle: "PLANNING", secrets: { password: "pw-Plan-Secret-456" } });
+    const engine = createEngine(REAL, realDeps(transport).deps);
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, secrets: { password: "pw-Plan-Secret-456" } });
 
     await executeRunJob(h.deps(engine.stages), run.id);
 
@@ -137,26 +159,51 @@ describe("createEngine (Ruling R7)", () => {
     expect(JSON.stringify(plan)).not.toContain("pw-Plan-Secret-456");
   });
 
-  it("real engine: explore/verify stay fake for now, generateTest is the R7 null stub", async () => {
-    const engine = createEngine(
-      { LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5", ANTHROPIC_API_KEY: "sk-test" },
-      { db: h.tdb.db, logger: silentLogger, transport: new FakeTransport() },
-    );
+  it("real engine: generateTest is the R7 null stub", async () => {
+    const engine = createEngine(REAL, realDeps(new FakeTransport()).deps);
     expect(await engine.stages.generateTest({} as never, {} as never)).toBeNull();
   });
 
-  it("real engine never reports PASS/FAIL from stages that are still fake (no PASS without evidence)", async () => {
-    const engine = createEngine(
-      { LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5", ANTHROPIC_API_KEY: "sk-test" },
-      // Even a fallback configured to PASS must not leak a verdict into a real run.
-      {
-        db: h.tdb.db,
-        logger: silentLogger,
-        transport: new FakeTransport().enqueue({ json: planned }),
-        fake: { provisionalStatus: "PASS" },
-      },
+  it("the real engine needs artifact storage (fails fast at startup)", () => {
+    expect(() => createEngine(REAL, { db: h.tdb.db, logger: silentLogger, transport: new FakeTransport() })).toThrow(/artifact storage/);
+  });
+
+  it("real engine explores (Task 14): steps, facts and screenshots persisted; sandbox and session released", async () => {
+    const { deps, exploration } = realDeps(new FakeTransport().enqueue({ json: planned }));
+    const engine = createEngine(REAL, deps);
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, secrets: { password: "pw-Explore-789" } });
+
+    await executeRunJob(h.deps(engine.stages), run.id);
+
+    expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("COMPLETED");
+    const steps = await new ExplorationStepRepository(h.tdb.db).listByRun(run.id);
+    expect(steps.map((s) => s.index)).toEqual(steps.map((_, i) => i));
+    // The planned flow ran end to end: 3 checkpoints recorded on the golden path.
+    expect(steps.filter((s) => s.kind === "checkpoint" && s.onGoldenPath).length).toBe(3);
+    expect(steps.find((s) => s.kind === "fill")).toMatchObject({ plannedStepId: "PS-2", inputRef: { source: "literal", key: "iPhone 17 Pro" }, onGoldenPath: true });
+    const facts = await new ObservedFactRepository(h.tdb.db).listByRun(run.id);
+    expect(facts.filter((f) => f.key === "url").map((f) => f.checkpoint).sort()).toEqual(["after_add", "before_add", "cart_page"]);
+    expect(facts.find((f) => f.key === "cartCount")).toMatchObject({ provenance: "MODEL_EXTRACTED", value: null });
+    const artifacts = await new ArtifactRepository(h.tdb.db).listByRun(run.id);
+    expect(artifacts).toHaveLength(3);
+    expect(artifacts.every((a) => a.type === "SCREENSHOT" && a.sensitivity === "SECRET_BEARING")).toBe(true);
+
+    const events = await eventsOf(h, run.id);
+    expect(events.filter((e) => e.type === "step.recorded")).toHaveLength(steps.length);
+    expect(events.filter((e) => e.type === "fact.observed")).toHaveLength(facts.length);
+    expect(events.filter((e) => e.type === "artifact.created").map((e) => e.payload)).toEqual(
+      artifacts.map((a) => ({ artifactId: a.id, type: "SCREENSHOT", sensitivity: "SECRET_BEARING" })),
     );
-    const run = await seedRun(h, { lifecycle: "PLANNING" });
+    expect(events.every((e) => e.stage !== "EXPLORING" || ["stage.started", "step.recorded", "fact.observed", "artifact.created", "stage.completed"].includes(e.type))).toBe(true);
+    expect(exploration.log).toContain("sandbox.close");
+    expect(exploration.log).toContain("session.close");
+    expect(exploration.log.filter((l) => l.startsWith("actOn")).every((l) => l === "actOn click")).toBe(true);
+  });
+
+  it("real engine never reports PASS/FAIL from stages that are still fake (no PASS without evidence)", async () => {
+    // Even a fallback configured to PASS must not leak a verdict into a real run.
+    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), { fake: { provisionalStatus: "PASS" } }).deps);
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
     await executeRunJob(h.deps(engine.stages), run.id);
 

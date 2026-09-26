@@ -1,6 +1,7 @@
 import { loadEnvOrExit } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
 import { createRunQueue } from "@platform/event-bus";
+import { createArtifactStorage } from "@platform/storage";
 import { writeFileSync } from "node:fs";
 import { Redis } from "ioredis";
 import { CancelWatcher } from "./cancel-watcher";
@@ -31,15 +32,31 @@ const publisher = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 3 });
 const cancelWatcher = new CancelWatcher(new Redis(env.REDIS_URL, { maxRetriesPerRequest: null }));
 const queue = createRunQueue(connection);
 
+// Exploration screenshots (the real engine); the API signs read URLs for the same store.
+const storage = createArtifactStorage(env);
+
 // Ruling R7: LLM_PROVIDER=fake → the deterministic fake engine; otherwise real stages as they land
-// (Task 10: analyze), with the fake engine standing in for the rest.
+// (analyze, plan, explore), with the fake engine standing in for the rest.
 const engine = createEngine(env, {
   db: handle.db,
   logger,
+  storage,
   fake: { stepDelayMs: Number(process.env.FAKE_ENGINE_STEP_DELAY_MS ?? 500), explorationSteps: 4 },
 });
 if (engine.kind === "fake") logger.warn({ engine: "fake" }, "using the fake test engine (LLM_PROVIDER=fake)");
-else logger.info({ engine: "real", provider: engine.llm?.provider, model: engine.llm?.model }, "using the real test engine");
+else {
+  logger.info({ engine: "real", provider: engine.llm?.provider, model: engine.llm?.model }, "using the real test engine");
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await storage.ensureReady();
+      break;
+    } catch (err) {
+      if (attempt >= 10) throw err;
+      logger.warn({ err, attempt }, "artifact storage not ready; retrying");
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
+  }
+}
 const stages = engine.stages;
 
 const workers = await startWorkers(

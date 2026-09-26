@@ -299,7 +299,8 @@ describe("analyze stage (real compiler behind runAnalysis)", () => {
   it("publishes stage.started, criteria.proposed (\"2 acceptance criteria identified\"), stage.completed — no model reasoning", async () => {
     const reasoning = "INTERNAL-CHAIN-OF-THOUGHT: the user probably means the badge";
     const { llm } = setup({ json: { ...cartOutput(), reasoning } });
-    const stages = createRealStages({ llm }, createFakeStages());
+    const unusedExploration = { openSandbox: async () => ({}) as never, explorer: { start: async () => ({}) as never }, store: () => ({}) as never };
+    const stages = createRealStages({ llm, exploration: unusedExploration }, createFakeStages());
     const p = fakePorts();
 
     await runAnalysis(stageContext(storedRequest(CART_TEXT)), p.ports, stages);

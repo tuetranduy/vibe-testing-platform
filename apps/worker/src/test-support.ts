@@ -3,8 +3,17 @@ import { EventRepository, RequirementRepository, RunRepository, SecretRepository
 import { TEST_TENANT_ID, createTestDatabase, type TestDatabase } from "@platform/db/testing";
 import { runCancelChannel, type RunQueue } from "@platform/event-bus";
 import { encryptSecret } from "@platform/security";
-import { createFakeStages, type EngineStages, type FakeEngineOptions } from "@platform/testing-engine";
+import type { ExplorerSession } from "@platform/stagehand-adapter";
+import {
+  createFakeStages,
+  factFromReadings,
+  type EngineStages,
+  type ExploreStageDeps,
+  type FakeEngineOptions,
+  type RecorderPort,
+} from "@platform/testing-engine";
 import { Redis } from "ioredis";
+import type { Page } from "playwright-core";
 import { CancelWatcher } from "./cancel-watcher";
 import { silentLogger, type WorkerDeps } from "./deps";
 
@@ -138,3 +147,65 @@ export async function requestCancel(h: WorkerHarness, runId: string, viaRedis = 
 }
 
 export { createFakeStages, type FakeEngineOptions };
+
+/**
+ * A scripted stand-in for the sandbox + Stagehand explorer + recorder, so the real explore stage
+ * runs without a browser: every observe finds one element, every click succeeds, extract answers
+ * null for every requested fact.
+ */
+export function fakeExploration(): { deps: Partial<ExploreStageDeps>; log: string[] } {
+  const log: string[] = [];
+  let url = "about:blank";
+  const page = { url: () => url, isClosed: () => false, waitForLoadState: async () => {} } as unknown as Page;
+  const session: ExplorerSession = {
+    page,
+    async navigate(u) {
+      log.push(`navigate ${u}`);
+      url = u;
+      return { url };
+    },
+    async observe(instruction) {
+      log.push("observe");
+      return { elements: [{ selector: "xpath=/html[1]/body[1]/button[1]", description: instruction.slice(0, 40), method: "click", arguments: [] }], llm: null };
+    },
+    async act() {
+      throw new Error("the executor never lets the model act");
+    },
+    async actOn(element) {
+      log.push(`actOn ${element.method}`);
+      return { success: true, message: "ok", element, navigationBlocks: [], llm: null };
+    },
+    async extract(_instruction, schema) {
+      log.push("extract");
+      const shape = (schema as unknown as { shape: Record<string, unknown> }).shape;
+      return { data: schema.parse(Object.fromEntries(Object.keys(shape).map((k) => [k, null]))), llm: null };
+    },
+    async screenshot() {
+      return Buffer.from("\x89PNG fake");
+    },
+    async close() {
+      log.push("session.close");
+    },
+  };
+  const ref = { candidates: [{ strategy: "xpath" as const, selector: "/html[1]/body[1]/button[1]" }], chosenIndex: 0, framePath: [] };
+  const recorder: RecorderPort = {
+    describe: async () => ({ role: "button", name: "Continue", text: "Continue" }),
+    record: async () => ref,
+    fill: async () => void log.push("fill"),
+    select: async () => void log.push("select"),
+    captureFact: async (_page, input) => factFromReadings({ ...input, dom: null }),
+  };
+  return {
+    log,
+    deps: {
+      openSandbox: async () => ({
+        cdpUrl: "http://127.0.0.1:9",
+        extensionIds: ["stagehand"],
+        page,
+        close: async () => void log.push("sandbox.close"),
+      }),
+      explorer: { start: async () => session },
+      recorder,
+    },
+  };
+}

@@ -1,0 +1,677 @@
+import {
+  BrowserProviderError,
+  CancelledError,
+  ExplorationStepSchema,
+  ModelProviderError,
+  ObservedFactSchema,
+  type ElementRef,
+  type ExplorationStep,
+  type NormalizedRequirement,
+  type ObservedFact,
+  type PlannedStep,
+  type StoredTestRunRequest,
+  type TestPlan,
+} from "@platform/contracts";
+import {
+  ExplorerSessionClosedError,
+  NavigationBlockedError,
+  type ActResult,
+  type ExplorerSession,
+  type NavigationBlock,
+  type ObservedElement,
+} from "@platform/stagehand-adapter/browser-explorer";
+import type { Page } from "playwright-core";
+import { describe, expect, it } from "vitest";
+import type { ZodType } from "zod";
+import type { EventDraft, StageContext } from "../orchestrator/stages";
+import { runExploration, type ExplorationStore, type RecorderPort } from "./executor";
+import { factFromReadings, type FactCaptureInput } from "./fact-reader";
+
+// ---------------------------------------------------------------------------------------------
+// Fakes
+// ---------------------------------------------------------------------------------------------
+
+const SECRET = "Sup3r-Secret-Value!";
+const TARGET = "https://shop.test/products/1";
+const USAGE = { model: "fake-model", inputTokens: 100, outputTokens: 10, cacheHit: null };
+
+type Call = { op: "navigate" | "observe" | "act" | "actOn" | "extract" | "screenshot" | "close"; arg: unknown };
+
+interface FakeSessionScript {
+  navigate?: (url: string) => Promise<void> | void;
+  observe?: (instruction: string, n: number) => Promise<ObservedElement[]> | ObservedElement[];
+  actOn?: (el: ObservedElement, n: number) => Promise<Partial<ActResult>> | Partial<ActResult>;
+  extract?: (instruction: string) => Promise<unknown> | unknown;
+}
+
+class FakeSession implements ExplorerSession {
+  readonly calls: Call[] = [];
+  closed = false;
+  url = "about:blank";
+  observeCount = 0;
+  actOnCount = 0;
+  readonly page: Page;
+
+  constructor(private readonly script: FakeSessionScript = {}) {
+    const self = this;
+    this.page = {
+      url: () => self.url,
+      isClosed: () => false,
+      waitForLoadState: async () => {},
+    } as unknown as Page;
+  }
+
+  async navigate(url: string) {
+    this.calls.push({ op: "navigate", arg: url });
+    await this.script.navigate?.(url);
+    this.url = url;
+    return { url };
+  }
+
+  async observe(instruction: string) {
+    this.calls.push({ op: "observe", arg: instruction });
+    const n = this.observeCount++;
+    const elements = this.script.observe
+      ? await this.script.observe(instruction, n)
+      : [{ selector: `xpath=/html[1]/body[1]/el[${n + 1}]`, description: "an element", method: "click", arguments: [] }];
+    return { elements, llm: USAGE };
+  }
+
+  async act(instruction: string): Promise<ActResult> {
+    this.calls.push({ op: "act", arg: instruction });
+    return { success: true, message: "done", element: null, navigationBlocks: [], llm: USAGE };
+  }
+
+  async actOn(element: ObservedElement): Promise<ActResult> {
+    this.calls.push({ op: "actOn", arg: element });
+    const n = this.actOnCount++;
+    const res = (await this.script.actOn?.(element, n)) ?? {};
+    return { success: true, message: "clicked", element, navigationBlocks: [], llm: null, ...res };
+  }
+
+  async extract<T>(instruction: string, schema: ZodType<T>) {
+    this.calls.push({ op: "extract", arg: instruction });
+    const data = schema.parse(await this.script.extract?.(instruction));
+    return { data, llm: USAGE };
+  }
+
+  async screenshot() {
+    this.calls.push({ op: "screenshot", arg: null });
+    return Buffer.from("\x89PNG fake");
+  }
+
+  async close() {
+    this.calls.push({ op: "close", arg: null });
+    this.closed = true;
+  }
+
+  ops() {
+    return this.calls.map((c) => c.op);
+  }
+}
+
+interface FakeRecorderOptions {
+  /** Accessibility facts per selector (default: a button named "Add to cart"). */
+  describe?: (selector: string) => { role: string | null; name: string | null; text: string | null };
+  /** DOM readings per fact key (default: equal to the model value). */
+  dom?: Record<string, unknown>;
+}
+
+function fakeRecorder(opts: FakeRecorderOptions = {}) {
+  const fills: { selector: string; value: string }[] = [];
+  const selects: { selector: string; value: string }[] = [];
+  const captures: FactCaptureInput[] = [];
+  const ref = (selector: string): ElementRef => ({ candidates: [{ strategy: "xpath", selector }], chosenIndex: 0, framePath: [] });
+  const recorder: RecorderPort = {
+    async describe(_page, selector) {
+      return opts.describe?.(selector) ?? { role: "button", name: "Add to cart", text: "Add to cart" };
+    },
+    async record(_page, selector) {
+      return ref(selector);
+    },
+    async fill(_page, selector, value) {
+      fills.push({ selector, value });
+    },
+    async select(_page, selector, value) {
+      selects.push({ selector, value });
+    },
+    async captureFact(_page, input) {
+      captures.push(input);
+      const dom = input.element && input.mode ? { value: (opts.dom?.[input.key] ?? input.modelValue) as never, read: { element: input.element, mode: input.mode } } : null;
+      return factFromReadings({ key: input.key, checkpoint: input.checkpoint, stepId: input.stepId, modelValue: input.modelValue, dom });
+    },
+  };
+  return { recorder, fills, selects, captures };
+}
+
+function memoryStore() {
+  const steps: ExplorationStep[] = [];
+  const facts: ObservedFact[] = [];
+  const screenshots: { png: Buffer; sensitivity: string; fileName: string }[] = [];
+  const store: ExplorationStore = {
+    async saveStep(step) {
+      steps.push(ExplorationStepSchema.parse(step));
+    },
+    async saveFact(fact) {
+      facts.push(ObservedFactSchema.parse(fact));
+    },
+    async saveScreenshot(input) {
+      screenshots.push(input);
+      return { artifactId: `art_${screenshots.length}` };
+    },
+  };
+  return { store, steps, facts, screenshots };
+}
+
+interface CtxOptions {
+  options?: Partial<StoredTestRunRequest["options"]>;
+  environment?: "staging" | "production";
+  secrets?: Record<string, string>;
+  testData?: Record<string, string | number | boolean | null>;
+  targetUrl?: string;
+}
+
+function fakeCtx(o: CtxOptions = {}) {
+  const run = new AbortController();
+  const budget = new AbortController();
+  const events: EventDraft[] = [];
+  const cleanups: (() => unknown)[] = [];
+  const secrets = o.secrets ?? {};
+  const redact = (v: unknown): unknown => {
+    let json = JSON.stringify(v);
+    for (const s of Object.values(secrets)) json = json.split(s).join("[REDACTED]");
+    return json === undefined ? v : JSON.parse(json);
+  };
+  const ctx: StageContext = {
+    runId: "run_exec",
+    tenantId: "t_default",
+    request: {
+      targetUrl: o.targetUrl ?? TARGET,
+      requirement: "Add iPhone 17 Pro to the cart; the cart count increases.",
+      environment: o.environment ?? "staging",
+      browser: "chromium",
+      testData: o.testData ?? {},
+      secretNames: Object.keys(secrets),
+      options: {
+        maxExplorationSteps: 40,
+        maxRunSeconds: 300,
+        generatePlaywright: true,
+        rerunGeneratedTest: true,
+        autoConfirmCriteria: true,
+        allowDestructiveActions: false,
+        additionalAllowedHosts: [],
+        ...o.options,
+      },
+    },
+    signal: run.signal,
+    deadlineAt: null,
+    budgets: { explorationMs: 60_000, rerunMs: 30_000 },
+    secrets: { names: Object.keys(secrets), get: (n) => secrets[n] },
+    redact,
+    publish: async (e) => void events.push(e),
+    addCleanup: (fn) => void cleanups.push(fn),
+    boundary: async () => {
+      if (run.signal.aborted) throw run.signal.reason;
+    },
+    budgetSignal: () => budget.signal,
+    now: () => new Date("2026-09-26T10:00:00.000Z"),
+  };
+  return { ctx, run, budget, events, cleanups };
+}
+
+let seq = 0;
+const step = (kind: PlannedStep["kind"], description: string, extra: Partial<PlannedStep> = {}): PlannedStep => ({
+  id: `PS-${++seq}`,
+  kind,
+  description,
+  criterionIds: [],
+  destructive: false,
+  ...extra,
+});
+
+function planOf(...steps: PlannedStep[]): TestPlan {
+  seq = 0;
+  return {
+    runId: "run_exec",
+    requirementRevision: 1,
+    scenarios: [{ id: "SC-1", title: "scenario", criterionIds: ["AC-1"], steps: steps.map((s, i) => ({ ...s, id: `PS-${i + 1}` })) }],
+    blockedCriteria: [],
+    stopConditions: [],
+  };
+}
+
+function requirementWith(facts: NormalizedRequirement["facts"], outcome?: NormalizedRequirement["criteria"][number]["expectedOutcome"]): NormalizedRequirement {
+  return {
+    runId: "run_exec",
+    revision: 1,
+    originalText: "Add iPhone 17 Pro to the cart; the cart count increases.",
+    criteria: [
+      {
+        id: "AC-1",
+        sourceText: "the cart count increases",
+        statement: "The cart count increases",
+        expectedOutcome: outcome ?? { kind: "semantic", description: "the cart count increases" },
+        preconditions: [],
+        ambiguity: null,
+      },
+    ],
+    facts,
+    confirmedAt: "2026-09-26T09:59:00.000Z",
+  };
+}
+
+const cartFact = { key: "cartCount", checkpoint: "after_add", description: "Cart badge count", valueType: "number" as const };
+
+const summary = (steps: ExplorationStep[]) =>
+  steps.map((s) => [s.index, s.kind, s.plannedStepId, s.outcome, s.onGoldenPath]);
+
+// ---------------------------------------------------------------------------------------------
+
+describe("runExploration (fake explorer)", () => {
+  it("navigate → observe → act (one retry) → extract { cartCount: 1 }: steps persisted in order, golden path only on successful planned executions", async () => {
+    const { ctx, events } = fakeCtx();
+    const session = new FakeSession({
+      actOn: (_el, n) => (n === 0 ? { success: false, message: "element detached" } : {}),
+      extract: () => ({ cartCount: 1 }),
+    });
+    const { recorder, captures } = fakeRecorder();
+    const mem = memoryStore();
+    const plan = planOf(
+      step("navigate", "Open the product page"),
+      step("click", "Click Add to cart"),
+      step("capture_checkpoint", "Capture the cart badge after adding", { checkpoint: "after_add" }),
+    );
+
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder });
+
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "SUCCESS", false],
+      [2, "act", "PS-2", "FAILED", false], // failed attempt
+      [3, "observe", "PS-2", "SUCCESS", false], // retry
+      [4, "act", "PS-2", "SUCCESS", true],
+      [5, "extract", "PS-3", "SUCCESS", false],
+      [6, "observe", "PS-3", "SUCCESS", false], // locating the badge
+      [7, "checkpoint", "PS-3", "SUCCESS", true],
+    ]);
+    // Persisted in the same order, before the outcome returned.
+    expect(mem.steps.map((s) => s.id)).toEqual(outcome.steps.map((s) => s.id));
+    expect(session.calls[0]).toEqual({ op: "navigate", arg: TARGET }); // first action: the target URL
+    expect(session.ops()).not.toContain("act"); // clicks replay the observed element (no model-chosen action)
+
+    const [nav, , failed, , acted, extracted, , checkpoint] = outcome.steps as ExplorationStep[];
+    expect(nav).toMatchObject({ urlBefore: "about:blank", urlAfter: TARGET, element: null, llm: null });
+    expect(failed).toMatchObject({ error: expect.stringContaining("element detached"), element: { chosenIndex: 0 } });
+    expect(acted!.element).not.toBeNull();
+    expect(acted!.llm).toBeNull(); // actOn makes no model call
+    expect(outcome.steps[1]!.llm).toEqual(USAGE); // observe usage (R21: cacheHit null)
+    expect(extracted!.llm).toEqual(USAGE);
+    expect(checkpoint!.artifactIds).toEqual(["art_1"]);
+
+    // Facts: the reserved url fact first, then cartCount read from the DOM at the located element.
+    expect(outcome.facts.map((f) => [f.key, f.checkpoint, f.value, f.provenance, f.stepId])).toEqual([
+      ["url", "after_add", TARGET, "DOM_VERIFIED", checkpoint!.id],
+      ["cartCount", "after_add", 1, "DOM_VERIFIED", checkpoint!.id],
+    ]);
+    expect(captures[0]).toMatchObject({ key: "cartCount", modelValue: 1, mode: "number" });
+    expect(mem.facts).toEqual(outcome.facts);
+    expect(mem.screenshots).toMatchObject([{ sensitivity: "STANDARD" }]);
+
+    // Events: one step.recorded per step, fact.observed per fact (no value), artifact.created (no URL).
+    expect(events.filter((e) => e.type === "step.recorded")).toHaveLength(8);
+    expect(events.filter((e) => e.type === "fact.observed").map((e) => e.payload)).toEqual([
+      { key: "url", checkpoint: "after_add", provenance: "DOM_VERIFIED" },
+      { key: "cartCount", checkpoint: "after_add", provenance: "DOM_VERIFIED" },
+    ]);
+    expect(events.filter((e) => e.type === "artifact.created").map((e) => e.payload)).toEqual([
+      { artifactId: "art_1", type: "SCREENSHOT", sensitivity: "STANDARD" },
+    ]);
+    expect(events.find((e) => e.type === "step.recorded")).toMatchObject({
+      message: "Step 1: navigate succeeded",
+      payload: { stepId: nav!.id, index: 0, kind: "navigate", outcome: "SUCCESS", blockReason: null },
+    });
+    expect(session.closed).toBe(true);
+  });
+
+  it("maxExplorationSteps = 3, objective never met → stops after 3 steps with STEP_LIMIT_REACHED", async () => {
+    const { ctx } = fakeCtx({ options: { maxExplorationSteps: 3 } });
+    const session = new FakeSession();
+    const mem = memoryStore();
+    const plan = planOf(
+      step("navigate", "Open the product page"),
+      step("click", "Click Add to cart"),
+      step("click", "Click Add to cart again"),
+      step("capture_checkpoint", "Capture", { checkpoint: "after_add" }),
+    );
+
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder().recorder });
+
+    expect(outcome.stopReason).toBe("STEP_LIMIT_REACHED");
+    expect(outcome.steps).toHaveLength(3);
+    expect(mem.steps).toHaveLength(3);
+    expect(session.ops()).toEqual(["navigate", "observe", "actOn", "close"]); // nothing ran that couldn't be recorded
+    expect(outcome.facts).toEqual([]);
+  });
+
+  it("exploration budget exhausted mid-operation → returns EXPLORATION_BUDGET_EXHAUSTED (does not throw), session closed", async () => {
+    const { ctx, budget } = fakeCtx();
+    const session = new FakeSession({
+      observe: (_i, n) => {
+        if (n === 1) {
+          // The real session races every operation against its (budget) signal.
+          budget.abort(new DOMException("The operation timed out.", "TimeoutError"));
+          throw budget.signal.reason;
+        }
+        return [{ selector: "xpath=/html[1]/body[1]/button[1]", description: "button", method: "click", arguments: [] }];
+      },
+    });
+    const mem = memoryStore();
+    const plan = planOf(step("navigate", "Open the product page"), step("click", "Click Add to cart"), step("click", "Click Add to cart again"));
+
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder().recorder });
+
+    expect(outcome.stopReason).toBe("EXPLORATION_BUDGET_EXHAUSTED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "SUCCESS", false],
+      [2, "act", "PS-2", "SUCCESS", true],
+    ]);
+    expect(session.closed).toBe(true);
+  });
+
+  it("an already exhausted budget stops before the first action", async () => {
+    const { ctx, budget } = fakeCtx();
+    budget.abort(new DOMException("The operation timed out.", "TimeoutError"));
+    const session = new FakeSession();
+    const outcome = await runExploration(ctx, { plan: planOf(step("navigate", "Open")), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(outcome).toEqual({ steps: [], facts: [], stopReason: "EXPLORATION_BUDGET_EXHAUSTED" });
+    expect(session.ops()).toEqual(["close"]);
+  });
+
+  it("secrets: a fill step with a secret inputRef is filled by the recorder, never by act(); the value appears in no row, event or explorer input", async () => {
+    const { ctx, events } = fakeCtx({ secrets: { password: SECRET }, testData: { email: "qa@demo.test" }, targetUrl: "https://shop.test/" });
+    const session = new FakeSession({
+      observe: (instruction, n) => [{ selector: `xpath=/html[1]/body[1]/f[${n + 1}]`, description: `field for ${instruction}`, method: "fill", arguments: ["model-chosen"] }],
+      // The page echoes the secret after login; the model reads it back.
+      extract: () => ({ greeting: `Welcome back, ${SECRET}` }),
+      actOn: () => ({ message: `logged in with ${SECRET}` }),
+    });
+    const { recorder, fills } = fakeRecorder({
+      describe: () => ({ role: "button", name: "Log in", text: `Log in ${SECRET}` }),
+      dom: { greeting: `Welcome back, ${SECRET}` },
+    });
+    const mem = memoryStore();
+    const plan = planOf(
+      step("navigate", "Open https://shop.test/login"),
+      step("fill", "Fill the email field", { inputRef: { source: "testData", key: "email" } }),
+      step("fill", "Fill the password field", { inputRef: { source: "secret", key: "password" } }),
+      // Defense in depth: even a description that (wrongly) contains the value is redacted.
+      step("login", `Click the Log in button, not the one labelled ${SECRET}`),
+      step("capture_checkpoint", "Capture the greeting", { checkpoint: "after_login" }),
+    );
+    const requirement = requirementWith([{ key: "greeting", checkpoint: "after_login", description: "Greeting text", valueType: "string" }]);
+
+    const outcome = await runExploration(ctx, { plan, requirement, session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder });
+
+    expect(outcome.stopReason).toBe("COMPLETED");
+    // Our code filled both fields with the resolved values.
+    expect(fills.map((f) => f.value)).toEqual(["qa@demo.test", SECRET]);
+    // The model never acted with a value: no act(), and actOn only for the login click, with no arguments.
+    expect(session.ops()).not.toContain("act");
+    const actOns = session.calls.filter((c) => c.op === "actOn").map((c) => c.arg as ObservedElement);
+    expect(actOns).toHaveLength(1);
+    expect(actOns[0]).toMatchObject({ method: "click", arguments: [] });
+
+    const fillSteps = outcome.steps.filter((s) => s.kind === "fill");
+    expect(fillSteps.map((s) => [s.plannedStepId, s.inputRef, s.onGoldenPath, s.outcome])).toEqual([
+      ["PS-2", { source: "testData", key: "email" }, true, "SUCCESS"],
+      ["PS-3", { source: "secret", key: "password" }, true, "SUCCESS"],
+    ]);
+    expect(outcome.steps.find((s) => s.plannedStepId === "PS-4" && s.onGoldenPath)).toMatchObject({ kind: "act", instruction: expect.stringContaining("[REDACTED]") });
+    expect(mem.screenshots.map((s) => s.sensitivity)).toEqual(["SECRET_BEARING"]);
+    expect(events.find((e) => e.type === "artifact.created")?.payload).toMatchObject({ sensitivity: "SECRET_BEARING" });
+
+    const everything = JSON.stringify({ steps: mem.steps, facts: mem.facts, outcome, events, explorer: session.calls });
+    expect(everything).not.toContain(SECRET);
+    expect(everything).toContain("[REDACTED]");
+  });
+
+  it.each([
+    ["secret", "MISSING_SECRET"],
+    ["testData", "MISSING_TEST_DATA"],
+  ] as const)("a %s inputRef that was not provided is never invented: BLOCKED_BY_POLICY / %s and exploration stops", async (source, reason) => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const { recorder, fills } = fakeRecorder();
+    const plan = planOf(
+      step("navigate", "Open the login page"),
+      step("fill", "Fill the password field", { inputRef: { source, key: "password" } }),
+      step("login", "Click Log in"),
+    );
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+
+    expect(outcome.stopReason).toBe("BLOCKED_BY_POLICY");
+    expect(outcome.steps.at(-1)).toMatchObject({ kind: "fill", plannedStepId: "PS-2", outcome: "BLOCKED_BY_POLICY", blockReason: reason, onGoldenPath: false });
+    expect(fills).toEqual([]);
+    expect(session.ops()).toEqual(["navigate", "close"]);
+  });
+
+  it("an action denied by assertActionAllowed (observed element's role/name/text) → BLOCKED_BY_POLICY, not executed, exploration stops", async () => {
+    const { ctx, events } = fakeCtx();
+    const session = new FakeSession({ extract: () => ({ cartCount: 0 }) });
+    const { recorder } = fakeRecorder({ describe: () => ({ role: "button", name: "Delete account", text: "Delete account" }) });
+    const plan = planOf(
+      step("navigate", "Open the account page"),
+      step("click", "Click the red button in the danger zone"), // harmless wording; the element is not
+      step("capture_checkpoint", "Capture", { checkpoint: "after_add" }),
+    );
+
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+
+    expect(outcome.stopReason).toBe("BLOCKED_BY_POLICY");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "SUCCESS", false],
+      [2, "act", "PS-2", "BLOCKED_BY_POLICY", false],
+    ]);
+    expect(outcome.steps[2]).toMatchObject({ blockReason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED", element: { chosenIndex: 0 } });
+    expect(session.ops()).toEqual(["navigate", "observe", "close"]); // never acted, never extracted
+    expect(events.filter((e) => e.type === "step.recorded").at(-1)?.payload).toMatchObject({ outcome: "BLOCKED_BY_POLICY", blockReason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED" });
+  });
+
+  it.each([
+    [{ allowDestructiveActions: true }, "production", true],
+    [{ allowDestructiveActions: false }, "staging", true],
+    [{ allowDestructiveActions: true }, "staging", false],
+  ] as const)("destructive policy (R17): options %j in %s → blocked=%s", async (options, environment, blocked) => {
+    const { ctx } = fakeCtx({ options, environment });
+    const session = new FakeSession();
+    const { recorder } = fakeRecorder({ describe: () => ({ role: "button", name: "Delete account", text: null }) });
+    const outcome = await runExploration(ctx, { plan: planOf(step("navigate", "Open"), step("click", "Click the danger button")), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe(blocked ? "BLOCKED_BY_POLICY" : "COMPLETED");
+    expect(session.ops().includes("actOn")).toBe(!blocked);
+  });
+
+  it("a planned step the planner marked destructive is blocked under the default policy even if no term matches", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the big red button", { destructive: true }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(outcome.steps.at(-1)).toMatchObject({ outcome: "BLOCKED_BY_POLICY", blockReason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED" });
+    expect(session.ops()).not.toContain("actOn");
+  });
+
+  it("a navigation blocked by the sandbox guard → BLOCKED_BY_POLICY with the guard's reason", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({
+      navigate: (url) => {
+        if (url.includes("evil.test")) throw new NavigationBlockedError(url, "OFF_DOMAIN_NAVIGATION");
+      },
+    });
+    const plan = planOf(step("navigate", "Open the product page"), step("navigate", "Go to https://evil.test/x"), step("click", "Click Add to cart"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(outcome.stopReason).toBe("BLOCKED_BY_POLICY");
+    expect(outcome.steps.at(-1)).toMatchObject({ kind: "navigate", plannedStepId: "PS-2", outcome: "BLOCKED_BY_POLICY", blockReason: "OFF_DOMAIN_NAVIGATION" });
+    expect(session.ops()).toEqual(["navigate", "navigate", "close"]);
+  });
+
+  it("an action whose navigation the guard blocked → BLOCKED_BY_POLICY", async () => {
+    const { ctx } = fakeCtx();
+    const block: NavigationBlock = { url: "http://10.0.0.1/", reason: "TARGET_BLOCKED_BY_POLICY" };
+    const session = new FakeSession({ actOn: () => ({ navigationBlocks: [block] }) });
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the partner link"), step("click", "Click Add to cart"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(outcome.stopReason).toBe("BLOCKED_BY_POLICY");
+    expect(outcome.steps.at(-1)).toMatchObject({ kind: "act", outcome: "BLOCKED_BY_POLICY", blockReason: "TARGET_BLOCKED_BY_POLICY" });
+    expect(session.actOnCount).toBe(1);
+  });
+
+  it("abort signal between steps → executor throws the abort reason, stops, session closed", async () => {
+    const { ctx, run } = fakeCtx();
+    const session = new FakeSession({
+      actOn: () => {
+        run.abort(new CancelledError());
+        return {};
+      },
+    });
+    const plan = planOf(step("navigate", "Open"), step("click", "Click Add to cart"), step("click", "Click again"));
+    await expect(
+      runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder }),
+    ).rejects.toBeInstanceOf(CancelledError);
+    expect(session.actOnCount).toBe(1);
+    expect(session.ops().at(-1)).toBe("close");
+    expect(session.closed).toBe(true);
+  });
+
+  it("a planned step that fails after one retry stops exploration (no later checkpoint: no fabricated evidence)", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({ observe: () => [] });
+    const plan = planOf(step("navigate", "Open"), step("click", "Click Add to cart"), step("capture_checkpoint", "Capture", { checkpoint: "after_add" }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "FAILED", false],
+      [2, "observe", "PS-2", "FAILED", false],
+    ]);
+    expect(outcome.facts).toEqual([]);
+    expect(session.ops()).not.toContain("extract");
+  });
+
+  it("model provider errors are infrastructure errors: rethrown (ERRORED), session closed", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({
+      observe: () => {
+        throw new ModelProviderError("provider down");
+      },
+    });
+    await expect(
+      runExploration(ctx, { plan: planOf(step("navigate", "Open"), step("click", "Click")), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder }),
+    ).rejects.toBeInstanceOf(ModelProviderError);
+    expect(session.closed).toBe(true);
+  });
+
+  it("a session closed under the executor is a BROWSER_PROVIDER error, not a step failure", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({
+      observe: () => {
+        throw new ExplorerSessionClosedError("explorer session is closed");
+      },
+    });
+    const err = await runExploration(ctx, { plan: planOf(step("navigate", "Open"), step("click", "Click")), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BrowserProviderError);
+    expect((err as BrowserProviderError).category).toBe("BROWSER_PROVIDER");
+  });
+
+  it("navigate with a URL uses session.navigate; without one it clicks the described link", async () => {
+    const { ctx } = fakeCtx({ targetUrl: "https://shop.test/" });
+    const session = new FakeSession();
+    const plan = planOf(step("navigate", "Open https://shop.test/"), step("navigate", "Open the cart page"), step("navigate", "Go to /products/2"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder({ describe: () => ({ role: "link", name: "Cart", text: "Cart" }) }).recorder });
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true], // the initial navigation is PS-1
+      [1, "observe", "PS-2", "SUCCESS", false],
+      [2, "act", "PS-2", "SUCCESS", true],
+      [3, "navigate", "PS-3", "SUCCESS", true],
+    ]);
+    expect(session.calls.filter((c) => c.op === "navigate").map((c) => c.arg)).toEqual(["https://shop.test/", "https://shop.test/products/2"]);
+  });
+
+  it("the initial navigation to the target is its own step when the first planned step is not a plain navigation", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const outcome = await runExploration(ctx, { plan: planOf(step("click", "Click Add to cart")), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", null, "SUCCESS", true],
+      [1, "observe", "PS-1", "SUCCESS", false],
+      [2, "act", "PS-1", "SUCCESS", true],
+    ]);
+  });
+
+  it("search: our code fills the query (literal inputRef), then the submit control is clicked", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const { recorder, fills } = fakeRecorder({ describe: () => ({ role: "button", name: "Search", text: "Search" }) });
+    const plan = planOf(step("navigate", "Open"), step("search", "Search for the product", { inputRef: { source: "literal", key: "iPhone 17 Pro" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "SUCCESS", false],
+      [2, "fill", "PS-2", "SUCCESS", true],
+      [3, "observe", "PS-2", "SUCCESS", false],
+      [4, "act", "PS-2", "SUCCESS", true],
+    ]);
+    expect(fills).toEqual([{ selector: expect.any(String), value: "iPhone 17 Pro" }]);
+    expect(outcome.steps[2]!.inputRef).toEqual({ source: "literal", key: "iPhone 17 Pro" });
+  });
+
+  it("select with an inputRef selects our value deterministically (never actOn)", async () => {
+    const { ctx } = fakeCtx({ testData: { size: "M" } });
+    const session = new FakeSession({ observe: () => [{ selector: "xpath=/html[1]/body[1]/select[1]", description: "size", method: "selectOptionFromDropdown", arguments: ["XL"] }] });
+    const { recorder, selects } = fakeRecorder({ describe: () => ({ role: "combobox", name: "Size", text: null }) });
+    const plan = planOf(step("navigate", "Open"), step("select", "Choose the size", { inputRef: { source: "testData", key: "size" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(selects).toEqual([{ selector: "xpath=/html[1]/body[1]/select[1]", value: "M" }]);
+    expect(session.ops()).not.toContain("actOn");
+    expect(outcome.steps.at(-1)).toMatchObject({ kind: "fill", onGoldenPath: true, inputRef: { source: "testData", key: "size" } });
+  });
+
+  it("boolean facts (R24): read as `visible` only when a visible outcome references them; otherwise MODEL_EXTRACTED without a DOM read", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({ extract: () => ({ bannerShown: true, inStock: true }) });
+    const { recorder, captures } = fakeRecorder();
+    const facts = [
+      { key: "bannerShown", checkpoint: "after_add", description: "Added banner is shown", valueType: "boolean" as const },
+      { key: "inStock", checkpoint: "after_add", description: "Product is in stock", valueType: "boolean" as const },
+    ];
+    const requirement = requirementWith(facts, { kind: "visible", fact: { key: "bannerShown", checkpoint: "after_add" }, expected: true });
+    const plan = planOf(step("navigate", "Open"), step("capture_checkpoint", "Capture", { checkpoint: "after_add" }));
+    const outcome = await runExploration(ctx, { plan, requirement, session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+
+    expect(captures.map((c) => [c.key, c.mode, c.element !== null])).toEqual([
+      ["bannerShown", "visible", true],
+      ["inStock", null, false],
+    ]);
+    expect(outcome.facts.map((f) => [f.key, f.provenance])).toEqual([
+      ["url", "DOM_VERIFIED"],
+      ["bannerShown", "DOM_VERIFIED"],
+      ["inStock", "MODEL_EXTRACTED"],
+    ]);
+    // Only the fact that gets a DOM read is located.
+    expect(session.calls.filter((c) => c.op === "observe")).toHaveLength(1);
+  });
+
+  it("wait_for polls observe (bounded) until the element appears", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({ observe: (_i, n) => (n < 1 ? [] : [{ selector: "xpath=/html[1]/body[1]/p[1]", description: "banner", method: null, arguments: [] }]) });
+    const plan = planOf(step("navigate", "Open"), step("wait_for", "Wait for the Added to cart message"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, pollIntervalMs: 1 });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "FAILED", false],
+      [2, "observe", "PS-2", "SUCCESS", false],
+    ]);
+  });
+});
