@@ -1,3 +1,4 @@
+import { createGenerateTestStage, type GenerateTestStageDeps } from "../compiler/generate-stage";
 import { createExploreStage, type ExploreStageDeps } from "../exploration/explore-stage";
 import { createPlanStage } from "../planner/planner";
 import { createAnalyzeStage, type RequirementLlm } from "../requirement/compiler";
@@ -10,6 +11,8 @@ export interface RealStageDeps {
   llm: RequirementLlm;
   /** Browser sandbox, explorer and persistence for the explore stage (Task 14). */
   exploration: ExploreStageDeps;
+  /** Persistence for the generated test (Task 16, Ruling R28). */
+  generateTest: GenerateTestStageDeps;
 }
 
 /**
@@ -22,9 +25,16 @@ export function createRealStages(deps: RealStageDeps, fallback: EngineStages): E
     plan: createPlanStage(deps.llm), // Task 12
     explore: createExploreStage(deps.exploration), // Task 14
     verify: verifyStage, // Task 15
-    // R7: no generated test until Milestone C, so the rerun is UNAVAILABLE.
-    generateTest: async () => null,
-    runTest: (ctx, test) => fallback.runTest(ctx, test),
+    generateTest: createGenerateTestStage(deps.generateTest), // Task 16
+    // Ruling R39 — replaced by Task 17's sandboxed rerun. Until then nothing is rerun: the fake rerun
+    // would report PASSED and fabricate PLAYWRIGHT_RERUN confirmations for a real generated test, so
+    // every compiled criterion is UNAVAILABLE (the report keeps Section 2.3's no-rerun rows).
+    runTest: async (_ctx, test) => ({
+      status: "ERRORED",
+      perCriterion: Object.fromEntries(test.compiledCriteria.map((id) => [id, "UNAVAILABLE" as const])),
+      durationMs: 0,
+      errorText: {},
+    }),
     // Fake until Milestone C. INTERIM (Ruling R26, until Task 18): before it runs, Section 2.3's no-rerun
     // rows apply — a PASS/FAIL not backed only by DOM_VERIFIED facts becomes INCONCLUSIVE /
     // UNVERIFIED_EVIDENCE. Each criterion keeps the verifier's status as its `provisional` record.

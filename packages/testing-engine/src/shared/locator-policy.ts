@@ -32,8 +32,11 @@ export interface ElementDescription {
   xpath: string;
 }
 
-/** ARIA roles `page.getByRole` accepts and that identify an element by name (not generic containers). */
-const NAMEABLE_ROLES = new Set([
+/**
+ * ARIA roles `page.getByRole` accepts and that identify an element by name (not generic containers).
+ * The compiler (Task 16) writes only these roles into generated source.
+ */
+export const NAMEABLE_ROLES: ReadonlySet<string> = new Set([
   "alert", "alertdialog", "application", "article", "banner", "blockquote", "button", "caption", "cell", "checkbox",
   "code", "columnheader", "combobox", "complementary", "contentinfo", "definition", "deletion", "dialog", "directory",
   "document", "emphasis", "feed", "figure", "form", "grid", "gridcell", "group", "heading", "img", "insertion", "link",

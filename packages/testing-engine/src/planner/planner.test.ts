@@ -637,7 +637,7 @@ function executionPorts(requirement: NormalizedRequirement) {
 function realPlanStages(llm: Parameters<typeof createRealStages>[0]["llm"]) {
   const fake = createFakeStages();
   const unused = { openSandbox: async () => ({}) as never, explorer: { start: async () => ({}) as never }, store: () => ({}) as never };
-  return { ...createRealStages({ llm, exploration: unused }, fake), explore: fake.explore };
+  return { ...createRealStages({ llm, exploration: unused, generateTest: { store: () => ({ save: async () => {} }) } }, fake), explore: fake.explore };
 }
 
 describe("plan stage behind runExecution (real planner, fake later stages)", () => {

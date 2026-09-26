@@ -11,6 +11,7 @@ import {
 } from "@platform/testing-engine";
 import type { WorkerLogger } from "./deps";
 import { createExplorationDeps } from "./exploration";
+import { createGenerateTestDeps } from "./generated-test";
 
 export type EngineConfig = Pick<Env, "LLM_PROVIDER" | "LLM_MODEL"> &
   Partial<
@@ -36,7 +37,8 @@ export interface EngineDeps {
 
 /**
  * Ruling R7: LLM_PROVIDER=fake keeps the full fake engine (demo/compose work without a key);
- * otherwise the real stages (analyze, plan, explore) over the fake engine for the stages not built yet.
+ * otherwise the real stages (analyze, plan, explore, verify, generate test) over the fake engine for the
+ * stages not built yet.
  * Throws at startup for providers not implemented in V1.
  */
 export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSelection {
@@ -68,5 +70,5 @@ export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSele
     },
     ...(deps.exploration ? { overrides: deps.exploration } : {}),
   });
-  return { kind: "real", stages: createRealStages({ llm, exploration }, fake), llm };
+  return { kind: "real", stages: createRealStages({ llm, exploration, generateTest: createGenerateTestDeps(deps.db) }, fake), llm };
 }

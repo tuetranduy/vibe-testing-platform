@@ -1,0 +1,537 @@
+import {
+  CriterionIdSchema,
+  SecretNameSchema,
+  URL_FACT_KEY,
+  factRefsOf,
+  type AcceptanceCriterion,
+  type ElementRef,
+  type ExplorationStep,
+  type FactRef,
+  type GeneratedTest,
+  type LocatorCandidate,
+  type NormalizedRequirement,
+  type ObservedFact,
+  type PlannedStep,
+  type ProvisionalResult,
+  type TestDataValue,
+  type TestPlan,
+} from "@platform/contracts";
+import { NAMEABLE_ROLES } from "../shared/locator-policy";
+import { assertSafeSource } from "./ast-guard";
+import { HELPERS_SOURCE } from "./helpers-template";
+import { SourceWriter, ident, lit, member } from "./source-builder";
+
+/**
+ * Playwright test compiler (Task 16): turns the discovered flow into a replayable Playwright test.
+ * Pure — no I/O; the GENERATING_TEST stage persists the result (generate-stage.ts).
+ *
+ * Workspace: `run.spec.ts` (the source), `helpers.ts` (a fixed template, helpers-template.ts) and
+ * `run-data.json` (every run value).
+ *
+ * Replay: the golden path (`onGoldenPath && outcome === "SUCCESS"`) in index order, up to the last
+ * checkpoint a compiled criterion needs. The test opens `data.targetUrl` first (the executor's first
+ * navigate is that same open); a later navigate → `page.goto` of its URL; act → click; fill → fill,
+ * or selectOption when the planned step is a `select`. Elements are located with the recorded
+ * (chosen) candidate exactly as the recorder's `resolveElement` does; an XPath one gets a
+ * `// brittle-locator` comment and a note. Navigation and actions are hard: a failure stops the test
+ * and later criteria are simply not reached.
+ *
+ * Assertions: each compiled criterion sits in `await test.step("[AC-n] " + statement, …)` (the
+ * `[AC-n]` prefix comes first: the rerun's result parser keys on it) at the latest checkpoint it
+ * references, with soft assertions only, messages `"[AC-n] " + statement`, so every reached
+ * criterion is evaluated. Facts of earlier checkpoints (and a criterion's other facts) are read
+ * into variables at their own checkpoint; the fact at the criterion's checkpoint is re-read until it
+ * matches (web-first matcher or `expect.poll`), since the page may still be updating after a click.
+ * Reads and comparisons mean what the fact reader and the verifier mean (see helpers-template.ts):
+ *
+ * - visible            → `expect.soft(locator).toBeVisible()` / `toBeHidden()`
+ * - text_matches       → `toHaveText` / `toContainText` ({ ignoreCase, useInnerText }); regex and
+ *                        the `url` fact are polled over the verifier's normalized text
+ * - numeric_compare    → polled number vs the other side (`toBeGreaterThan`, …; eq/neq within 1e-9)
+ * - numeric_delta      → polled difference `toBeCloseTo(delta)`
+ * - collection_contains → polled `listContains(readTextList(…), item)` (verifier matching)
+ *
+ * Not compiled (with a template-built reason): semantic outcomes (D3), provisional BLOCKED /
+ * INCONCLUSIVE, a fact that is missing, MODEL_EXTRACTED, read in a mode the assertion cannot replay,
+ * or captured off the replayed flow, and anything behind a golden step the test cannot replay.
+ *
+ * D11: the source holds only compiler-chosen identifiers, schema-validated criterion ids, allow-listed
+ * ARIA roles and fixed template text; every string literal goes through `lit` (JSON.stringify).
+ * Page text, test data, literal inputs, URLs and criterion text are referenced as `data.<path>`;
+ * secrets are read from `process.env.SECRET_<NAME>` and never seen here. The source must pass the
+ * AST guard before it is returned.
+ */
+
+export interface CompileTestInput {
+  requirement: NormalizedRequirement;
+  plan: TestPlan;
+  steps: ExplorationStep[];
+  facts: ObservedFact[];
+  provisional: ProvisionalResult[];
+  targetUrl: string;
+  /** Names of the run's secrets (values never reach the compiler). */
+  secretNames: string[];
+  /** The run's test data (Ruling R29): values go only into run-data.json. */
+  testData: Record<string, TestDataValue>;
+}
+
+/** The generated test without its id (the stage assigns it, Ruling R29). */
+export type CompiledTest = Omit<GeneratedTest, "id">;
+
+interface RunData {
+  targetUrl: string;
+  urls: Record<string, string>;
+  locators: Record<string, Record<string, string>>;
+  inputs: Record<string, string>;
+  criteria: Record<string, Record<string, string | number>>;
+}
+
+/** How a fact is read back: a DOM read mode, or the page URL for the reserved `url` fact. */
+type ReadKind = NonNullable<ObservedFact["read"]>["mode"] | "url";
+
+interface FactRead {
+  ref: FactRef;
+  kind: ReadKind;
+  /** The recorded candidate (null for `url`). */
+  candidate: LocatorCandidate | null;
+  /** Golden-path position of the checkpoint the fact was captured at. */
+  position: number;
+}
+
+interface CriterionPlan {
+  criterion: AcceptanceCriterion;
+  position: number;
+  reads: FactRead[];
+  /** The fact re-read until it matches (at `position`). */
+  polled: FactRead;
+}
+
+/** Read modes an outcome can replay, per role of the fact in it. */
+const TEXT_KINDS: readonly ReadKind[] = ["text", "url"];
+const NUMBER_KINDS: readonly ReadKind[] = ["number", "count"];
+
+const refKey = (ref: FactRef) => `${ref.key}@${ref.checkpoint}`;
+
+const READ_HELPER: Partial<Record<ReadKind, string>> = {
+  text: "readText",
+  number: "readNumber",
+  count: "readCount",
+  text_list: "readTextList",
+};
+
+const FLIPPED = { gt: "lt", gte: "lte", lt: "gt", lte: "gte", eq: "eq", neq: "neq" } as const;
+type Operator = keyof typeof FLIPPED;
+
+/** Why a recorded element cannot be located by the generated test, or null when it can. */
+function unreplayable(element: ElementRef | null): string | null {
+  if (!element) return "has no recorded element";
+  if (element.framePath.length > 0) return "acts on an element inside a frame (main frame only in V1)";
+  const candidate = element.candidates[element.chosenIndex];
+  if (!candidate) return "has no recorded locator";
+  if (candidate.strategy === "role" && !NAMEABLE_ROLES.has(candidate.role)) return "is located by a role Playwright cannot query";
+  return null;
+}
+
+/** The URL a later navigate step opened: its `Navigate to <url>` instruction, else where it landed. */
+function navigateUrl(step: ExplorationStep): string | null {
+  const named = /^Navigate to (\S+)$/.exec(step.instruction)?.[1];
+  for (const candidate of [named, step.urlAfter]) {
+    if (!candidate) continue;
+    try {
+      const url = new URL(candidate);
+      if (url.protocol === "http:" || url.protocol === "https:") return url.href;
+    } catch {
+      // not a URL
+    }
+  }
+  return null;
+}
+
+export function compilePlaywrightTest(input: CompileTestInput): CompiledTest {
+  return new Compiler(input).compile();
+}
+
+class Compiler {
+  private readonly golden: ExplorationStep[];
+  private readonly plannedKind: Map<string, PlannedStep["kind"]>;
+  /** Golden position of each checkpoint step, by step id. */
+  private readonly checkpointAt = new Map<string, number>();
+  /** Why a golden step cannot be replayed, by golden position. */
+  private readonly problems = new Map<number, string>();
+
+  private readonly data: RunData;
+  private readonly locatorKeys = new Map<string, string>();
+  private readonly helpers = new Set<string>();
+  private readonly notes: string[] = [];
+  private readonly factVars = new Map<string, string>();
+
+  constructor(private readonly input: CompileTestInput) {
+    this.golden = [...input.steps].filter((s) => s.onGoldenPath && s.outcome === "SUCCESS").sort((a, b) => a.index - b.index);
+    this.plannedKind = new Map(input.plan.scenarios.flatMap((s) => s.steps).map((s) => [s.id, s.kind]));
+    this.data = { targetUrl: input.targetUrl, urls: {}, locators: {}, inputs: {}, criteria: {} };
+    this.golden.forEach((step, position) => {
+      if (step.kind === "checkpoint") this.checkpointAt.set(step.id, position);
+      const problem = this.stepProblem(step, position);
+      if (problem) this.problems.set(position, `step ${step.index} ${problem}`);
+    });
+  }
+
+  compile(): CompiledTest {
+    const plans: CriterionPlan[] = [];
+    const notCompiled: CompiledTest["notCompiled"] = [];
+    for (const criterion of this.input.requirement.criteria) {
+      const planned = this.planCriterion(criterion);
+      if (typeof planned === "string") notCompiled.push({ criterionId: criterion.id, reason: planned });
+      else plans.push(planned);
+    }
+
+    const body = new SourceWriter();
+    if (plans.length > 0) this.emitFlow(body, plans);
+    const source = this.assemble(body);
+    assertSafeSource(source);
+    return {
+      source,
+      helpersSource: HELPERS_SOURCE,
+      dataJson: `${JSON.stringify(this.data, null, 2)}\n`,
+      compiledCriteria: plans.map((p) => p.criterion.id),
+      notCompiled,
+      notes: this.notes,
+    };
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Analysis
+  // -------------------------------------------------------------------------------------------
+
+  private stepProblem(step: ExplorationStep, position: number): string | null {
+    switch (step.kind) {
+      case "navigate":
+        return position === 0 || navigateUrl(step) ? null : "has no URL to open";
+      case "act":
+        return unreplayable(step.element);
+      case "fill": {
+        const problem = unreplayable(step.element);
+        if (problem) return problem;
+        const ref = step.inputRef;
+        if (!ref) return "has no input reference";
+        if (ref.source === "secret" && !(SecretNameSchema.safeParse(ref.key).success && this.input.secretNames.includes(ref.key))) {
+          return "fills a secret the run does not provide";
+        }
+        if (ref.source === "testData" && !Object.hasOwn(this.input.testData, ref.key)) return "fills test data the run does not provide";
+        return null;
+      }
+      default:
+        return null; // checkpoints mark positions; nothing else is replayed
+    }
+  }
+
+  /** The criterion's plan, or why it is not compiled. */
+  private planCriterion(criterion: AcceptanceCriterion): CriterionPlan | string {
+    const outcome = criterion.expectedOutcome;
+    if (outcome.kind === "semantic") return "AI-judged (semantic) criteria are never compiled";
+    const provisional = this.input.provisional.find((p) => p.criterionId === criterion.id);
+    if (!provisional) return "No provisional result";
+    if (provisional.status !== "PASS" && provisional.status !== "FAIL") {
+      return `Provisional result is ${provisional.status}${provisional.reason ? ` (${provisional.reason})` : ""}`;
+    }
+    CriterionIdSchema.parse(criterion.id);
+
+    const allowed = (path: string): readonly ReadKind[] => {
+      switch (outcome.kind) {
+        case "visible":
+          return ["visible"];
+        case "text_matches":
+          return TEXT_KINDS;
+        case "numeric_compare":
+        case "numeric_delta":
+          return NUMBER_KINDS;
+        case "collection_contains":
+          return path === "collection" ? ["text_list"] : TEXT_KINDS;
+      }
+    };
+
+    const reads: FactRead[] = [];
+    for (const { ref, path } of factRefsOf(outcome)) {
+      const label = `Fact ${refKey(ref)}`;
+      const fact = this.input.facts.find((f) => f.key === ref.key && f.checkpoint === ref.checkpoint);
+      if (!fact) return `${label} was not recorded`;
+      if (fact.provenance !== "DOM_VERIFIED") return `${label} was extracted by the model, not read from the page`;
+      const position = this.checkpointAt.get(fact.stepId);
+      if (position === undefined) return `${label} was not captured on the replayed flow`;
+      let kind: ReadKind;
+      let candidate: LocatorCandidate | null = null;
+      if (fact.key === URL_FACT_KEY) {
+        kind = "url";
+      } else {
+        if (!fact.read) return `${label} was not read from the page`;
+        kind = fact.read.mode;
+        const problem = unreplayable(fact.read.element);
+        if (problem) return `${label} is read through an element the test cannot locate`;
+        candidate = fact.read.element.candidates[fact.read.element.chosenIndex]!;
+      }
+      if (!allowed(path[0]!).includes(kind)) return `${label} was read as ${kind}, which this assertion cannot replay`;
+      reads.push({ ref, kind, candidate, position });
+    }
+
+    const position = Math.max(...reads.map((r) => r.position));
+    for (let p = 0; p < position; p++) {
+      const problem = this.problems.get(p);
+      if (problem) return `The discovered flow cannot be replayed: ${problem}`;
+    }
+    // The fact re-read at the criterion's checkpoint: the "after" side where there is a choice.
+    const preference = outcome.kind === "numeric_delta" ? [...reads].reverse() : reads;
+    const polled = preference.find((r) => r.position === position)!;
+    return { criterion, position, reads, polled };
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Emission
+  // -------------------------------------------------------------------------------------------
+
+  private emitFlow(w: SourceWriter, plans: CriterionPlan[]): void {
+    const cutoff = Math.max(...plans.map((p) => p.position));
+    // Facts read into variables: every fact that is not the one a criterion re-reads.
+    const saved = new Map<number, FactRead[]>();
+    for (const plan of plans) {
+      for (const read of plan.reads) {
+        if (read === plan.polled) continue;
+        const list = saved.get(read.position) ?? [];
+        if (!list.some((r) => refKey(r.ref) === refKey(read.ref))) list.push(read);
+        saved.set(read.position, list);
+      }
+    }
+
+    w.line("await page.goto(data.targetUrl);");
+    let checkpoints = 0;
+    this.golden.forEach((step, position) => {
+      if (position > cutoff) return;
+      switch (step.kind) {
+        case "navigate":
+          if (position > 0) w.line(`await page.goto(${this.url(navigateUrl(step)!)});`);
+          return;
+        case "act":
+          this.withLocator(w, step.element!, `Step ${step.index} (act)`, (l) => `await ${l}.click();`);
+          return;
+        case "fill": {
+          const value = this.inputValue(step);
+          const method = step.plannedStepId && this.plannedKind.get(step.plannedStepId) === "select" ? "selectOption" : "fill";
+          this.withLocator(w, step.element!, `Step ${step.index} (fill)`, (l) => `await ${l}.${method}(${value});`);
+          return;
+        }
+        case "checkpoint":
+          w.comment(`Checkpoint ${++checkpoints}`);
+          for (const read of saved.get(position) ?? []) this.emitSavedRead(w, read);
+          for (const plan of plans) if (plan.position === position) this.emitCriterion(w, plan);
+          return;
+        default:
+          return;
+      }
+    });
+  }
+
+  private assemble(body: SourceWriter): string {
+    const w = new SourceWriter();
+    w.comment("Generated by the AI testing platform from a discovered flow. Do not edit.");
+    w.comment("Values live in run-data.json; secrets are read from SECRET_* environment variables.");
+    w.line('import { expect, test } from "@playwright/test";');
+    if (this.helpers.size > 0) w.line(`import { ${[...this.helpers].sort().map(ident).join(", ")} } from "./helpers";`);
+    w.line('import data from "./run-data.json";');
+    w.line();
+    w.line("const softExpect = expect.configure({ soft: true });");
+    w.line();
+    const inner = body.toString().trimEnd();
+    w.block(`test(${lit("discovered flow")}, async ({ page }) => {`, () => {
+      for (const line of inner.split("\n")) w.line(line);
+    }, "});");
+    return w.toString();
+  }
+
+  private emitSavedRead(w: SourceWriter, read: FactRead): void {
+    const name = ident(`fact${this.factVars.size + 1}`);
+    this.factVars.set(refKey(read.ref), name);
+    if (read.candidate) {
+      this.withLocator(w, read, `Fact ${refKey(read.ref)}`, (l) => `const ${name} = await ${this.helper(READ_HELPER[read.kind]!)}(${l});`);
+    } else {
+      w.line(`const ${name} = page.url();`);
+    }
+  }
+
+  private emitCriterion(w: SourceWriter, plan: CriterionPlan): void {
+    const id = plan.criterion.id;
+    const entry: Record<string, string | number> = { statement: plan.criterion.statement };
+    this.data.criteria[id] = entry;
+    const criterionData = member("data.criteria", id);
+    const title = `${lit(`[${id}] `)} + ${criterionData}.statement`;
+    const param = (name: string, value: string | number) => {
+      entry[name] = value;
+      return `${criterionData}.${ident(name)}`;
+    };
+
+    w.block(`await test.step(${title}, async () => {`, () => {
+      w.line(`const message = ${title};`);
+      for (const read of plan.reads) {
+        if (read !== plan.polled) w.line(`expect.soft(${this.factVars.get(refKey(read.ref))!}, message).not.toBeNull();`);
+      }
+      this.emitAssertion(w, plan, param);
+    }, "});");
+  }
+
+  private emitAssertion(w: SourceWriter, plan: CriterionPlan, param: (name: string, value: string | number) => string): void {
+    const outcome = plan.criterion.expectedOutcome;
+    const { polled } = plan;
+    const label = `Fact ${refKey(polled.ref)}`;
+    /** A fact's value inside the poll callback: re-read when polled, else its variable. */
+    const valueOf = (read: FactRead): string => (read === polled ? this.freshRead(read) : this.factVars.get(refKey(read.ref))!);
+    const readOf = (path: string) => plan.reads[factRefsOf(outcome).findIndex((r) => r.path[0] === path)]!;
+    const poll = (value: string) => `await softExpect.poll(${value.includes("await ") ? "async " : ""}() => ${value}, { message })`;
+
+    switch (outcome.kind) {
+      case "visible":
+        this.withLocator(w, polled, label, (l) => `await expect.soft(${l}, message).${outcome.expected ? "toBeVisible" : "toBeHidden"}();`);
+        return;
+
+      case "text_matches": {
+        const { mode, value, caseSensitive } = outcome.match;
+        if (mode === "regex") {
+          const pattern = param("pattern", value);
+          const text = `${this.helper("collapseText")}(${this.freshRead(polled)})`;
+          this.withLocator(w, polled, label, () => `${poll(text)}.toMatch(new RegExp(${pattern}, ${lit(caseSensitive ? "" : "i")}));`);
+          return;
+        }
+        const expected = param("value", value);
+        const matcher = mode === "equals" ? "toHaveText" : "toContainText";
+        if (polled.kind === "url") {
+          const normalize = this.helper(caseSensitive ? "collapseText" : "foldText");
+          const pollMatcher = mode === "equals" ? "toBe" : "toContain";
+          w.line(`${poll(`${normalize}(page.url())`)}.${pollMatcher}(${normalize}(${expected}));`);
+          return;
+        }
+        this.withLocator(w, polled, label, (l) => `await expect.soft(${l}, message).${matcher}(${expected}, { ignoreCase: ${lit(!caseSensitive)}, useInnerText: true });`);
+        return;
+      }
+
+      case "numeric_compare": {
+        // The polled value goes on the left: when it is the right-hand fact, the operator flips.
+        let operator: Operator = outcome.operator;
+        let other: string;
+        if (typeof outcome.right === "number") {
+          other = param("right", outcome.right);
+        } else {
+          const left = readOf("left");
+          const fixed = polled === left ? readOf("right") : left;
+          if (polled !== left) operator = FLIPPED[operator];
+          other = `${this.factVars.get(refKey(fixed.ref))!} ?? Number.NaN`;
+        }
+        const matcher = {
+          gt: `toBeGreaterThan(${other})`,
+          gte: `toBeGreaterThanOrEqual(${other})`,
+          lt: `toBeLessThan(${other})`,
+          lte: `toBeLessThanOrEqual(${other})`,
+          eq: `toBeCloseTo(${other}, 9)`,
+          neq: `not.toBeCloseTo(${other}, 9)`,
+        }[operator];
+        this.withLocator(w, polled, label, () => `${poll(this.freshRead(polled, false))}.${matcher};`);
+        return;
+      }
+
+      case "numeric_delta": {
+        const change = `${this.helper("difference")}(${valueOf(readOf("after"))}, ${valueOf(readOf("before"))})`;
+        const delta = param("delta", outcome.delta);
+        this.withLocator(w, polled, label, () => `${poll(change)}.toBeCloseTo(${delta}, 9);`);
+        return;
+      }
+
+      case "collection_contains": {
+        const item = typeof outcome.item === "string" ? param("item", outcome.item) : valueOf(readOf("item"));
+        const found = `${this.helper("listContains")}(${valueOf(readOf("collection"))}, ${item}, ${lit(outcome.match)})`;
+        this.withLocator(w, polled, label, () => `${poll(found)}.toBe(true);`);
+        return;
+      }
+
+      case "semantic":
+        throw new Error("compiler: semantic criteria are never compiled");
+    }
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Building blocks
+  // -------------------------------------------------------------------------------------------
+
+  /** A fresh read of a fact (`await readX(locator)`, or `page.url()`); `awaited: false` → the bare promise. */
+  private freshRead(read: FactRead, awaited = true): string {
+    if (!read.candidate) return "page.url()";
+    const call = `${this.helper(READ_HELPER[read.kind]!)}(${this.locator(read.candidate)})`;
+    return awaited ? `await ${call}` : call;
+  }
+
+  /**
+   * Emits a statement that uses an element's locator, preceded by `// brittle-locator` (and noted
+   * once) when that locator is an XPath. `build` gets the locator expression (`page` for the URL
+   * fact, which has no element).
+   */
+  private withLocator(w: SourceWriter, target: ElementRef | FactRead, what: string, build: (locator: string) => string): void {
+    const candidate = "candidates" in target ? target.candidates[target.chosenIndex]! : target.candidate;
+    if (candidate?.strategy === "xpath") {
+      w.comment("brittle-locator");
+      const note = `${what} is located by XPath (brittle-locator): it breaks when the page layout changes`;
+      if (!this.notes.includes(note)) this.notes.push(note);
+    }
+    w.line(build(candidate ? this.locator(candidate) : "page"));
+  }
+
+  /** The Playwright locator for a recorded candidate (the recorder's `locatorFor`), values from data. */
+  private locator(c: LocatorCandidate): string {
+    const identity = JSON.stringify(c);
+    let key = this.locatorKeys.get(identity);
+    if (!key) {
+      key = ident(`loc${this.locatorKeys.size + 1}`);
+      this.locatorKeys.set(identity, key);
+      this.data.locators[key] =
+        c.strategy === "role"
+          ? { name: c.name }
+          : c.strategy === "label" || c.strategy === "placeholder" || c.strategy === "text"
+            ? { text: c.text }
+            : c.strategy === "testId"
+              ? { value: c.value }
+              : { selector: `${c.strategy}=${c.selector}` };
+    }
+    const d = `data.locators.${key}`;
+    switch (c.strategy) {
+      case "role":
+        if (!NAMEABLE_ROLES.has(c.role)) throw new Error("compiler: unsupported role");
+        return `page.getByRole(${lit(c.role)}, { name: ${d}.name, exact: ${lit(c.exact)} })`;
+      case "label":
+        return `page.getByLabel(${d}.text, { exact: true })`;
+      case "placeholder":
+        return `page.getByPlaceholder(${d}.text, { exact: true })`;
+      case "text":
+        return `page.getByText(${d}.text, { exact: ${lit(c.exact)} })`;
+      case "testId":
+        return `page.getByTestId(${d}.value)`;
+      case "css":
+      case "xpath":
+        return `page.locator(${d}.selector)`;
+    }
+  }
+
+  /** The value a fill step types: a secret from the environment, else a run-data input. */
+  private inputValue(step: ExplorationStep): string {
+    const ref = step.inputRef!;
+    if (ref.source === "secret") return `${this.helper("secret")}(process.env.${ident(`SECRET_${SecretNameSchema.parse(ref.key).toUpperCase()}`)})`;
+    const value = ref.source === "testData" ? String(this.input.testData[ref.key] ?? "") : ref.key;
+    const key = ident(`input${Object.keys(this.data.inputs).length + 1}`);
+    this.data.inputs[key] = value;
+    return `data.inputs.${key}`;
+  }
+
+  private url(href: string): string {
+    const key = ident(`url${Object.keys(this.data.urls).length + 1}`);
+    this.data.urls[key] = href;
+    return `data.urls.${key}`;
+  }
+
+  private helper(name: string): string {
+    this.helpers.add(name);
+    return ident(name);
+  }
+}

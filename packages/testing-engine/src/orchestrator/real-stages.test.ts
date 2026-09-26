@@ -1,5 +1,6 @@
 import {
   ProvisionalResultSchema,
+  RerunResultSchema,
   type AcceptanceCriterion,
   type ExplorationOutcome,
   type FactRef,
@@ -67,6 +68,7 @@ const exploration = (facts: ObservedFact[]): ExplorationOutcome => ({ steps: [],
 
 const llm = { generateStructured: async () => ({}) as never };
 const explorationDeps = { openSandbox: async () => ({}) as never, explorer: { start: async () => ({}) as never }, store: () => ({}) as never };
+const generateTestDeps = { store: () => ({ save: async () => {} }) };
 const ctx = {
   runId: "run_1",
   request: { targetUrl: "https://shop.example.com" },
@@ -74,7 +76,7 @@ const ctx = {
   redact: (v: unknown) => JSON.parse(JSON.stringify(v).replaceAll(SECRET, "[REDACTED]")),
 } as unknown as StageContext;
 const stagesWith = (status?: "PASS" | "FAIL") =>
-  createRealStages({ llm, exploration: explorationDeps }, createFakeStages(status ? { provisionalStatus: status } : {}));
+  createRealStages({ llm, exploration: explorationDeps, generateTest: generateTestDeps }, createFakeStages(status ? { provisionalStatus: status } : {}));
 
 describe("createRealStages: verify (Task 15)", () => {
   it("verifies every criterion from the recorded facts; a fallback configured to PASS/FAIL has no say", () => {
@@ -133,5 +135,20 @@ describe("createRealStages: interim report (Ruling R26, until Task 18)", () => {
     });
     expect(report.criteria[1]).toMatchObject({ status: "PASS", verdictSource: "EXPLORATION_ONLY", provisional: { status: "PASS", reason: null } });
     expect(report.summary).toMatchObject({ passed: 1, inconclusive: 1, blocked: 1 });
+  });
+});
+
+describe("createRealStages: runTest until Task 17 (Ruling R39)", () => {
+  it("never delegates to the fake rerun: ERRORED, every compiled criterion UNAVAILABLE, no confirmation fabricated", async () => {
+    for (const status of ["PASS", "FAIL"] as const) {
+      const test = { id: "gt_1", source: "", helpersSource: "", dataJson: "{}", compiledCriteria: ["AC-1", "AC-2"], notCompiled: [], notes: [] };
+      const rerun = await stagesWith(status).runTest(ctx, test);
+      expect(RerunResultSchema.parse(rerun)).toEqual({
+        status: "ERRORED",
+        perCriterion: { "AC-1": "UNAVAILABLE", "AC-2": "UNAVAILABLE" },
+        durationMs: 0,
+        errorText: {},
+      });
+    }
   });
 });
