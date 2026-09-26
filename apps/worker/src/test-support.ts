@@ -156,7 +156,8 @@ export interface FakeFactValue {
 
 /**
  * A scripted stand-in for the sandbox + Stagehand explorer + recorder, so the real explore stage
- * runs without a browser: every observe finds one element, every click succeeds, extract answers
+ * runs without a browser: every observe finds one element (a search's submit button is a second one,
+ * as on a real page), every click succeeds, extract answers
  * null for every requested fact. `facts` (keyed `key@checkpoint`) scripts what the page shows: a
  * `dom: true` value is confirmed by the DOM read (DOM_VERIFIED), otherwise it stays MODEL_EXTRACTED.
  */
@@ -173,7 +174,8 @@ export function fakeExploration(opts: { facts?: Record<string, FakeFactValue> } 
     },
     async observe(instruction) {
       log.push("observe");
-      return { elements: [{ selector: "xpath=/html[1]/body[1]/button[1]", description: instruction.slice(0, 40), method: "click", arguments: [] }], llm: null };
+      const selector = /submits this search/.test(instruction) ? "xpath=/html[1]/body[1]/button[2]" : "xpath=/html[1]/body[1]/button[1]";
+      return { elements: [{ selector, description: instruction.slice(0, 40), method: "click", arguments: [] }], llm: null };
     },
     async act() {
       throw new Error("the executor never lets the model act");

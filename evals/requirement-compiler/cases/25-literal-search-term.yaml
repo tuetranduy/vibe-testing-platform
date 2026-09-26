@@ -1,0 +1,13 @@
+id: literal-search-term
+tags: [search, cart, inputs]
+# The Milestone B demo's run 1 requirement. The search term is written in the requirement, so it is
+# not test data: a test_data precondition for it would block the run as MISSING_TEST_DATA.
+input: Search for iPhone 17 Pro, add it to the cart, and the cart count should increase by 1.
+testDataKeys: []
+secretNames: []
+expect:
+  criteriaCount: { min: 1, max: 3 }
+  requiredOutcomeKinds:
+    - [numeric_delta, numeric_compare]
+  mustFlagAmbiguous: false
+  onlyProvidedInputRefs: true

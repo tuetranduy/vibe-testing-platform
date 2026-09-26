@@ -60,8 +60,9 @@ import { describeElement, fillElement, recordElement, selectElementOption } from
  *                types: no value is ever passed to `act()` / `actOn()`.
  * - select       With `inputRef`: like `fill`, but the recorder selects the option (recorded as kind
  *                `fill`; the compiler tells it apart by the planned step's kind). Without: like `click`.
- * - search       `fill` of the query, then the search's submit control is observed and clicked. The
- *                fill is golden only when the submit succeeds in the same attempt (its steps are
+ * - search       `fill` of the query, then the search's submit control is observed and clicked (an
+ *                observe that returns the filled field fails the attempt: clicking it submits
+ *                nothing). The fill is golden only when the submit succeeds in the same attempt (its steps are
  *                persisted after the attempt, with their final flags).
  * - capture_checkpoint
  *                One `extract` of every FactRequest at that checkpoint (model values) → for each fact
@@ -332,8 +333,12 @@ class ExplorationRun {
         // A search is one execution: its fill is golden only if the submit succeeds in the same attempt.
         return this.withRetry(() =>
           this.asOneExecution(async () => {
-            const filled = await this.fill(step, value, how);
-            return filled === "ok" ? this.act(step, `Find the button that submits the search: ${step.description}`) : filled;
+            const field: { selector?: string } = {};
+            const filled = await this.fill(step, value, how, field);
+            if (filled !== "ok") return filled;
+            // The planner's description is about the search box, which the model tends to return again.
+            const submit = `Find the button that submits this search, not the text field the query was typed into: ${step.description}`;
+            return this.act(step, submit, field.selector);
           }),
         );
       }
@@ -429,11 +434,29 @@ class ExplorationRun {
     return "ok";
   }
 
-  /** observe → policy → deterministic click (or a safe `other` method) on the observed element. */
-  private async act(step: PlannedStep, observeInstruction = step.description): Promise<Attempt> {
+  /**
+   * observe → policy → deterministic click (or a safe `other` method) on the observed element.
+   * `searchField`: the selector a search's query was just filled into; clicking it again submits
+   * nothing, so the attempt fails instead of recording a search that never ran.
+   */
+  private async act(step: PlannedStep, observeInstruction = step.description, searchField?: string): Promise<Attempt> {
     const located = await this.locate(step, observeInstruction);
     if (!located) return "failed";
     const instruction = observeInstruction;
+    if (searchField !== undefined && located.element.selector === searchField) {
+      await this.reserve();
+      await this.record({
+        plannedStepId: step.id,
+        kind: "act",
+        instruction,
+        element: located.ref,
+        urlBefore: this.url(),
+        startedAt: this.ctx.now(),
+        outcome: "FAILED",
+        error: "The search's submit control resolved to the search field itself",
+      });
+      return "failed";
+    }
     await this.enforcePolicy(step, instruction, located, "act");
 
     await this.reserve();
@@ -462,9 +485,11 @@ class ExplorationRun {
     return "ok";
   }
 
-  private async fill(step: PlannedStep, value: string, how: "fill" | "select"): Promise<Attempt> {
+  /** `field`, when given, receives the selector of the element filled. */
+  private async fill(step: PlannedStep, value: string, how: "fill" | "select", field?: { selector?: string }): Promise<Attempt> {
     const located = await this.locate(step, step.description);
     if (!located) return "failed";
+    if (field) field.selector = located.element.selector;
     await this.enforcePolicy(step, step.description, located, "fill");
 
     await this.reserve();

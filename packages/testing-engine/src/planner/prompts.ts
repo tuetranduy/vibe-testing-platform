@@ -31,7 +31,7 @@ Each step:
 - "inputRef": for steps that enter a value (fill, search, select): {"source":"testData","key":<test data key>} or {"source":"secret","key":<secret name>}; {"source":"literal","key":<the value>} only for a value written in the requirement itself (e.g. a search term), never for credentials or personal data. Every "fill" step must have one. Otherwise null. If a needed value was not provided, still reference the name it would need — never invent a value and never drop the step.
 - "checkpoint": for "capture_checkpoint" steps, exactly one of the listed checkpoint names; null for every other step.
 - "criterionIds": the ids of the criteria this step serves (only ids from the list; may be empty).
-- "destructive": true when the step deletes, cancels, pays, purchases, places an order, sends, transfers or unsubscribes; otherwise false.
+- "destructive": true when the step commits a lasting change beyond the browsing session: deletes an account or stored data, cancels an order or subscription, pays, purchases, places an order, sends a message or money, transfers or unsubscribes. Otherwise false — in particular, adding items to or removing items from a cart, changing a quantity, opening the cart or the checkout page, searching, sorting, filtering and logging in are not destructive. Examples: "Click the Add to cart button" → false; "Remove the item from the cart" → false; "Click Place order" → true; "Delete the account" → true.
 
 Rules:
 - Capture every listed checkpoint exactly once, at the moment its facts are visible on the page. A "before_*" checkpoint is captured before the action it precedes, and an "after_*" checkpoint after it; respect the listed capture order.

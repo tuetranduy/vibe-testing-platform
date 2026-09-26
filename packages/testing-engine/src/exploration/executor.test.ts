@@ -642,6 +642,32 @@ describe("runExploration (fake explorer)", () => {
     expect(outcome.steps[2]!.inputRef).toEqual({ source: "literal", key: "iPhone 17 Pro" });
   });
 
+  it("search whose submit control resolves to the filled field: never clicked, the attempt fails (a model-found observe)", async () => {
+    const { ctx } = fakeCtx();
+    const field = { selector: "xpath=/html[1]/body[1]/main[1]/form[1]/input[1]", description: "search box", method: "click", arguments: [] };
+    const session = new FakeSession({ observe: () => [field] });
+    const mem = memoryStore();
+    const plan = planOf(step("navigate", "Open"), step("search", "Search for the product using the site search box", { inputRef: { source: "literal", key: "iPhone 17 Pro" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder().recorder });
+
+    const search = outcome.steps.filter((s) => s.plannedStepId === "PS-2");
+    expect(search.map((s) => [s.kind, s.outcome, s.onGoldenPath])).toEqual([
+      ["observe", "SUCCESS", false],
+      ["fill", "SUCCESS", false],
+      ["observe", "SUCCESS", false],
+      ["act", "FAILED", false],
+      ["observe", "SUCCESS", false],
+      ["fill", "SUCCESS", false],
+      ["observe", "SUCCESS", false],
+      ["act", "FAILED", false],
+    ]);
+    expect(search[3]!.error).toMatch(/search field itself/);
+    expect(session.calls.filter((c) => c.op === "actOn")).toEqual([]);
+    // The submit observe asks for a control other than the field the query was typed into.
+    const submitObserve = session.calls.filter((c) => c.op === "observe")[1]!.arg as string;
+    expect(submitObserve).toMatch(/not the (text )?field/i);
+  });
+
   it("search whose submit fails once then succeeds: exactly one golden fill + one golden act, both from the retry", async () => {
     const { ctx, events } = fakeCtx();
     const session = new FakeSession({ actOn: (_el, n) => (n === 0 ? { success: false, message: "submit did nothing" } : {}) });

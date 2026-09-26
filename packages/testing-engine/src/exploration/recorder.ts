@@ -47,8 +47,11 @@ async function resolveHandle(page: Page, target: ElementTarget, opts: RecorderOp
   return handle;
 }
 
+/**
+ * Runs in the browser (`handle.evaluate`), so it must not declare a named inner function: tsx's
+ * `keepNames` would wrap it in a `__name(...)` call the page doesn't define.
+ */
 function readDom(el: Element): DomFacts {
-  const collapse = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
   const parts: string[] = [];
   for (let n: Element | null = el; n; n = n.parentElement) {
     let i = 1;
@@ -58,7 +61,7 @@ function readDom(el: Element): DomFacts {
   const xpath = `/${parts.join("/")}`;
   const resolved = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
   const field = el as HTMLInputElement;
-  const labels = "labels" in field && field.labels ? Array.from(field.labels).map((l) => collapse(l.textContent)).filter(Boolean) : [];
+  const labels = "labels" in field && field.labels ? Array.from(field.labels).map((l) => (l.textContent ?? "").replace(/\s+/g, " ").trim()).filter(Boolean) : [];
   const text = el instanceof HTMLElement ? el.innerText : el.textContent;
   return {
     tag: el.localName,

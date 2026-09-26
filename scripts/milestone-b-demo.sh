@@ -91,7 +91,10 @@ SUMMARY1=$(lifecycle "$RUN1")
 echo "summary: $SUMMARY1"
 echo "final criteria: $(printf '%s' "$EV1" | final_statuses)"
 [[ $SUMMARY1 =~ ^COMPLETED ]] || die "run $RUN1: expected COMPLETED after confirmation, got '$SUMMARY1'"
-echo "OK: run 1 reached AWAITING_CONFIRMATION and, once confirmed, COMPLETED"
+# COMPLETED alone would also hold for a run whose every step after navigate failed, or that was blocked.
+ACTED=$(printf '%s' "$EV1" | json 'o.some(e=>e.type==="step.recorded"&&e.payload.kind==="act"&&e.payload.outcome==="SUCCESS")')
+[[ $ACTED == true ]] || die "run $RUN1: the explorer never acted on the page successfully (see its step.recorded events above)"
+echo "OK: run 1 reached AWAITING_CONFIRMATION and, once confirmed, COMPLETED after acting on the page"
 
 say "2. Login without the password secret -> expect a criterion BLOCKED / MISSING_SECRET"
 # The demo shop's login (qa@demo.test / demo-pass-123) needs a password; none is supplied, so the

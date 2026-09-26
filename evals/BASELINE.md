@@ -5,9 +5,7 @@ change and record the new score here next to the old one, so regressions are vis
 
 ## requirement-compiler
 
-**Status: pending — no baseline recorded yet.** The environment this harness was built in has no
-`ANTHROPIC_API_KEY`, so the suite has not been run against a real model. No score below is real
-until someone records it.
+**Status: baseline recorded 2026-09-26** (first run against the real provider).
 
 How to record it:
 
@@ -21,12 +19,20 @@ Copy the `Total:` line into the table, with the date, model, the commit of
 
 | Date | Model | Prompt commit | Passed | Tokens in / out | Est. cost | Failing cases |
 |------|-------|---------------|--------|-----------------|-----------|---------------|
-| _pending_ | | | | | | |
+| 2026-09-26 | claude-sonnet-5 | a2538bc | 24/24 (100%) | 128,283 / 18,353 | $0.44 | — |
+| 2026-09-26 | claude-sonnet-5 | a2538bc + "a value written in the requirement is not test data" | not re-run in full (credit ran out; 3/3 before) | | | — |
+
+The second row's prompt change fixes a `test_data` precondition invented for a value written in the
+requirement (seen in the Milestone B demo: "Search for iPhone 17 Pro…" got a `test_data` precondition
+`iphone17Pro`, so the run was `BLOCKED / MISSING_TEST_DATA`). Case `literal-search-term` (added for
+it, `onlyProvidedInputRefs: true`) failed 1 of 20 samples before the change and 0 of 60 after.
+**Re-run the full suite and replace that row.**
 
 What a case checks (`evals/requirement-compiler/cases/*.yaml`): the compiled criterion count is in
 `expect.criteriaCount`, every `expect.requiredOutcomeKinds` entry is matched by at least one criterion
 (a list entry means "any of these kinds"), and when `mustFlagAmbiguous` is true at least one criterion
-carries an ambiguity. A compile that throws (e.g. `ContractError` after the correction round) fails
+carries an ambiguity; with `onlyProvidedInputRefs`, every `test_data` / `secret` precondition names
+a provided key or secret. A compile that throws (e.g. `ContractError` after the correction round) fails
 the case. The runner exits 0 regardless of the score. A case may give `testData` values (else each
 `testDataKeys` entry gets the placeholder `"value"`); they only feed the invented-threshold check, the
 model sees keys only. Token and cost totals count every provider request, including the attempts of a
@@ -34,8 +40,7 @@ case that ended in an error.
 
 ## planner
 
-**Status: pending — no baseline recorded yet.** Same reason as above (no `ANTHROPIC_API_KEY` where
-the suite was built, Ruling R8). No score below is real until someone records it.
+**Status: baseline recorded 2026-09-26** (first run against the real provider).
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-... pnpm eval planner          # model: claude-sonnet-5 (default)
@@ -45,7 +50,13 @@ Record the `Total:` line with the commit of `packages/testing-engine/src/planner
 
 | Date | Model | Prompt commit | Passed | Tokens in / out | Est. cost | Failing cases |
 |------|-------|---------------|--------|-----------------|-----------|---------------|
-| _pending_ | | | | | | |
+| 2026-09-26 | claude-sonnet-5 | a2538bc | 11/14 (78.6%) | 33,177 / 9,938 | $0.17 | add-to-cart, german-cart, empty-cart |
+| 2026-09-26 | claude-sonnet-5 | a2538bc + tighter "destructive" definition | 14/14 (100%) | 35,151 / 8,362 | $0.15 | — |
+
+The failures at a2538bc were all the model marking "Add to cart" / "Remove the item from the cart"
+`destructive: true`, which blocks the criterion (`DESTRUCTIVE_ACTION_NOT_AUTHORIZED`) even though the
+action policy allows both. The fix defines destructive as a lasting change beyond the browsing
+session, with examples; german-cart went from about 1 in 6 blocked to 0 of 8.
 
 What a case checks (`evals/planner/cases/*.yaml`, each with a hand-written confirmed requirement, most
 reusing a requirement-compiler input): planning succeeds without `ContractError` (every checkpoint
