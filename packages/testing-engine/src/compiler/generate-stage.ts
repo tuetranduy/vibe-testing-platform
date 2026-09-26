@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { GeneratedTestSchema, type GeneratedTest } from "@platform/contracts";
 import type { EngineStages, StageContext } from "../orchestrator/stages";
+import { assertSafeSource } from "./ast-guard";
 import { compilePlaywrightTest } from "./test-compiler";
 
 /** Persistence port (Ruling R28), implemented by the worker over `GeneratedTestRepository`. */
@@ -41,6 +42,7 @@ export function createGenerateTestStage(deps: GenerateTestStageDeps): EngineStag
     });
     if (compiled.compiledCriteria.length === 0) return null;
     const test = GeneratedTestSchema.parse(ctx.redact({ id: newGeneratedTestId(), ...compiled }));
+    assertSafeSource(test.source); // what is persisted (after redaction) must pass the guard too
     await deps.store(ctx).save(test);
     return test;
   };

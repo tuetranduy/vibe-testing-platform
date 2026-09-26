@@ -26,10 +26,10 @@ interface Helpers {
   listContains(list: string[] | null, item: string | null, match: "equals" | "contains"): boolean;
   difference(a: number | null, b: number | null): number | null;
   secret(value: string | undefined): string;
-  readText(locator: Locator): Promise<string | null>;
-  readNumber(locator: Locator): Promise<number | null>;
-  readCount(locator: Locator): Promise<number | null>;
-  readTextList(locator: Locator): Promise<string[] | null>;
+  readText(locator: Locator, waitMs?: number): Promise<string | null>;
+  readNumber(locator: Locator, waitMs?: number): Promise<number | null>;
+  readCount(locator: Locator, waitMs?: number): Promise<number | null>;
+  readTextList(locator: Locator, waitMs?: number): Promise<string[] | null>;
 }
 
 let helpers: Helpers;
@@ -158,6 +158,13 @@ describe("helpers.ts DOM reads match the fact reader", () => {
     ["dup", "text", "readText"],
     ["dup", "number", "readNumber"],
   ];
+
+  it("waitMs 0 (reads inside expect.poll) does not wait for a missing element", async () => {
+    const started = Date.now();
+    expect(await helpers.readNumber(locatorFor(page, { strategy: "testId", value: "missing" }), 0)).toBeNull();
+    expect(await helpers.readText(locatorFor(page, { strategy: "testId", value: "notice" }), 0)).toBe("Free shipping");
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
 
   it.each(cases)("%s read as %s", async (testId, mode, helper) => {
     const ref = refOf(testId);
