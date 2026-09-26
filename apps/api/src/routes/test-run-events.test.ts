@@ -263,3 +263,45 @@ describe("GET /v1/test-runs/:runId/events", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("SSE streams on shutdown", () => {
+  it("app.close() ends open streams instead of waiting for them (clients reconnect with Last-Event-ID)", async () => {
+    const own = await createTestApi({ sseHeartbeatMs: 60_000 });
+    let stream: ReturnType<typeof openStream> | undefined;
+    try {
+      await own.app.listen({ port: 0, host: "127.0.0.1" });
+      const addr = own.app.server.address();
+      const ownBase = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+      const run = await new RunRepository(own.tdb.db).create({ tenantId: TEST_TENANT_ID, targetUrl: "https://x.com", request });
+      await createRunEventPublisher({ events: new EventRepository(own.tdb.db), redis: own.redis, redact: (v) => v }).publish(
+        stageEvent(run.id, 1),
+      );
+
+      const ac = new AbortController();
+      const res = await fetch(`${ownBase}/v1/test-runs/${run.id}/events`, { headers: auth, signal: ac.signal });
+      const reader = res.body!.getReader();
+      let text = "";
+      while (!text.includes("id: 1\n")) text += new TextDecoder().decode((await reader.read()).value);
+      stream = { close: () => ac.abort() } as never;
+
+      // The run is not terminal, so without the shutdown hook the stream (and close()) never ends.
+      const closed = await Promise.race([
+        own.app.close().then(() => "closed" as const),
+        new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 3_000)),
+      ]);
+      expect(closed).toBe("closed");
+      let ended = false;
+      for (;;) {
+        const { done } = await reader.read();
+        if (done) {
+          ended = true;
+          break;
+        }
+      }
+      expect(ended).toBe(true);
+    } finally {
+      stream?.close();
+      await own.close();
+    }
+  });
+});
