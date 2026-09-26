@@ -142,4 +142,22 @@ describe("progressReducer", () => {
     const s = reduce([ev(1, "stage.started", { stage: "ANALYZING_REQUIREMENT" }), ev(2, "stage.started", { stage: "EXPLORING" })]);
     expect(s.latestStage).toBe("EXPLORING");
   });
+  it("collects every artifact and recorded step, for the report's evidence and related steps", () => {
+    const s = reduce([
+      ...upToExploring,
+      ev(5, "step.recorded", { stepId: "st_1", index: 0, kind: "navigate", outcome: "SUCCESS", blockReason: null }, { stage: "EXPLORING", message: "Step 1: navigate succeeded" }),
+      ev(6, "artifact.created", { artifactId: "art_1", type: "SCREENSHOT", sensitivity: "STANDARD" }, { stage: "EXPLORING", message: "Screenshot saved at checkpoint a" }),
+      ev(7, "step.recorded", { stepId: "st_2", index: 1, kind: "fill", outcome: "FAILED", blockReason: null }, { stage: "EXPLORING", message: "Step 2: fill failed" }),
+      ev(8, "artifact.created", { artifactId: "art_2", type: "TRACE", sensitivity: "SECRET_BEARING" }, { stage: "RUNNING_PLAYWRIGHT", message: "Rerun trace stored" }),
+    ]);
+    expect(s.artifacts).toEqual([
+      { artifactId: "art_1", type: "SCREENSHOT", sensitivity: "STANDARD", message: "Screenshot saved at checkpoint a", timestamp: expect.any(String) },
+      { artifactId: "art_2", type: "TRACE", sensitivity: "SECRET_BEARING", message: "Rerun trace stored", timestamp: expect.any(String) },
+    ]);
+    expect(s.steps).toEqual([
+      { stepId: "st_1", index: 0, kind: "navigate", outcome: "SUCCESS", message: "Step 1: navigate succeeded" },
+      { stepId: "st_2", index: 1, kind: "fill", outcome: "FAILED", message: "Step 2: fill failed" },
+    ]);
+    expect(s.latestScreenshot?.artifactId).toBe("art_1"); // a trace is not a screenshot
+  });
 });

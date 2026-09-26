@@ -1,7 +1,9 @@
 import {
   RunLifecycleSchema,
   type ArtifactSensitivity,
+  type ArtifactType,
   type CancelReason,
+  type ExplorationStep,
   type ErrorCategory,
   type RunLifecycle,
   type RunVerdict,
@@ -78,6 +80,26 @@ export interface ScreenshotRef {
   timestamp: string;
 }
 
+/** An artifact of the run, as announced by its `artifact.created` event (the report only has ids). */
+export interface ArtifactInfo {
+  artifactId: string;
+  type: ArtifactType;
+  sensitivity: ArtifactSensitivity;
+  /** Template-built server text, e.g. "Screenshot saved at checkpoint after_add". */
+  message: string;
+  timestamp: string;
+}
+
+/** An exploration step, as announced by its `step.recorded` event. */
+export interface StepInfo {
+  stepId: string;
+  index: number;
+  kind: ExplorationStep["kind"];
+  outcome: ExplorationStep["outcome"];
+  /** Template-built server text, e.g. "Step 3: fill succeeded". */
+  message: string;
+}
+
 export interface ProgressState {
   latestSequence: number;
   stages: Record<ProgressStage, StageState>;
@@ -89,6 +111,9 @@ export interface ProgressState {
   plannedSteps: number | null;
   stepsRecorded: number;
   latestScreenshot: ScreenshotRef | null;
+  /** Every artifact and step announced so far, in event order. */
+  artifacts: ArtifactInfo[];
+  steps: StepInfo[];
   timeline: TimelineItem[];
   outcome: RunOutcome | null;
 }
@@ -107,6 +132,8 @@ export function initialProgress(): ProgressState {
     plannedSteps: null,
     stepsRecorded: 0,
     latestScreenshot: null,
+    artifacts: [],
+    steps: [],
     timeline: [],
     outcome: null,
   };
@@ -224,10 +251,17 @@ export function progressReducer(state: ProgressState, e: TestEvent): ProgressSta
     case "plan.created":
       next.plannedSteps = e.payload.stepCount;
       break;
-    case "step.recorded":
+    case "step.recorded": {
+      const { stepId, index, kind, outcome } = e.payload;
       next.stepsRecorded = state.stepsRecorded + 1;
+      next.steps = [...state.steps, { stepId, index, kind, outcome, message: e.message }];
       break;
+    }
     case "artifact.created":
+      next.artifacts = [
+        ...state.artifacts,
+        { artifactId: e.payload.artifactId, type: e.payload.type, sensitivity: e.payload.sensitivity, message: e.message, timestamp: e.timestamp },
+      ];
       if (e.payload.type === "SCREENSHOT") {
         next.latestScreenshot = {
           artifactId: e.payload.artifactId,

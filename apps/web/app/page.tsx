@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-// The run history becomes the home page with Task 20 (Ruling R52).
+// The run history is the home page (Ruling R52); "New test" is in the header and on the history page.
 export default function HomePage() {
-  redirect("/runs/new");
+  redirect("/runs");
 }

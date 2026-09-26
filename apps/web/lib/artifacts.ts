@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiRequestError, getArtifactUrl } from "./api";
 
 /**
- * The one place that fetches artifact URLs (LiveEvidence now, the report's artifact list later).
+ * The one place that fetches artifact URLs (LiveEvidence and the report's ArtifactList).
  * Rule: a STANDARD artifact's signed URL is fetched automatically; a SECRET_BEARING one (it may
  * show entered credentials) only after the user explicitly asks to reveal it, which the API audits.
  * Signed URLs are short-lived, so a failed load refetches (a bounded number of times).
@@ -34,7 +34,7 @@ export type ArtifactUrlState =
   | { status: "idle" }
   | { status: "reveal-required" }
   | { status: "loading" }
-  | { status: "ready"; url: string }
+  | { status: "ready"; url: string; expiresAt: string }
   | { status: "error"; message: string };
 
 const MAX_REFRESHES = 2;
@@ -43,7 +43,7 @@ export interface UseArtifactUrl {
   state: ArtifactUrlState;
   /** The user asked to see a SECRET_BEARING artifact. */
   reveal(): void;
-  /** The URL failed to load (probably expired): fetch a fresh one, up to a limit. */
+  /** The URL failed to load or has expired: fetch a fresh one, up to a limit. */
   onLoadError(): void;
 }
 
@@ -65,15 +65,16 @@ export function useArtifactUrl(ref: ArtifactRef | null): UseArtifactUrl {
       return;
     }
     if (n > MAX_REFRESHES) {
-      setState({ status: "error", message: "The image couldn't be loaded." });
+      setState({ status: "error", message: "The file couldn't be loaded." });
       return;
     }
     let live = true;
     setState({ status: "loading" });
     fetchArtifactUrl(ref, { revealed }).then(
-      (r) => live && setState(r.kind === "url" ? { status: "ready", url: r.url } : { status: "reveal-required" }),
+      (r) =>
+        live && setState(r.kind === "url" ? { status: "ready", url: r.url, expiresAt: r.expiresAt } : { status: "reveal-required" }),
       (err: unknown) =>
-        live && setState({ status: "error", message: err instanceof Error ? err.message : "The image couldn't be loaded." }),
+        live && setState({ status: "error", message: err instanceof Error ? err.message : "The file couldn't be loaded." }),
     );
     return () => {
       live = false;

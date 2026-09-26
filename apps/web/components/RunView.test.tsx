@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ev } from "../test/events";
-import { json, requirementFixture, summaryFixture } from "../test/fixtures";
+import { json, reportFixture, requirementFixture, summaryFixture } from "../test/fixtures";
 import type { RunEventsOptions } from "../lib/run-events";
 import { RunView } from "./RunView";
 
@@ -38,6 +38,19 @@ const RUN = "/api/v1/test-runs/run_1";
 const summaries = (...list: TestRunSummary[]) => () => json(200, list.length > 1 ? list.shift()! : list[0]!);
 
 beforeEach(() => void (streams.length = 0));
+
+const partialReport = (lifecycle: "ERRORED" | "CANCELLED") =>
+  reportFixture({
+    lifecycle,
+    verdict: null,
+    partial: true,
+    error: null,
+    summary: { totalCriteria: 0, passed: 0, failed: 0, blocked: 0, inconclusive: 0, confirmedByRerun: 0 },
+    criteria: [],
+    generatedTest: null,
+    playwright: null,
+    diagnostics: [],
+  });
 
 const toExploring = [
   ev(1, "run.created", { targetHost: "shop.example.com" }, { stage: "QUEUED", message: "Test run created for shop.example.com" }),
@@ -119,6 +132,7 @@ describe("RunView", () => {
     const fetch = routeFetch({
       [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING" })),
       [`POST ${RUN}/cancel`]: () => json(202, summaryFixture({ lifecycle: "EXPLORING" })),
+      [`GET ${RUN}/report`]: () => json(200, partialReport("CANCELLED")),
     });
     render(<RunView runId="run_1" />);
     await user.click(await screen.findByRole("button", { name: /^cancel run$/i }));
@@ -144,33 +158,77 @@ describe("RunView", () => {
   });
 
   it("shows a cancelled run with its reason", async () => {
-    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "CANCELLED", cancelReason: "CONFIRMATION_EXPIRED" })) });
+    routeFetch({
+      [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "CANCELLED", cancelReason: "CONFIRMATION_EXPIRED" })),
+      [`GET ${RUN}/report`]: () => json(200, partialReport("CANCELLED")),
+    });
     render(<RunView runId="run_1" />);
     expect(await screen.findByRole("heading", { name: /run cancelled/i })).toBeInTheDocument();
+    expect(screen.getByText(/partial report/i)).toBeInTheDocument();
     expect(screen.getByText(/weren.t confirmed in time/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /cancel run/i })).not.toBeInTheDocument();
   });
 
-  it("shows an errored run with its category and the template message only", async () => {
-    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING" })) });
+  it("shows an errored run as a partial report: category first, the raw error only as collapsed technical details", async () => {
+    const user = userEvent.setup();
+    routeFetch({
+      [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING" }), summaryFixture({ lifecycle: "ERRORED", errorCategory: "BROWSER_PROVIDER" })),
+      [`GET ${RUN}/report`]: () =>
+        json(200, { ...partialReport("ERRORED"), error: { category: "BROWSER_PROVIDER", message: "chromium: No usable sandbox! at /tmp/x" } }),
+    });
     render(<RunView runId="run_1" />);
     await screen.findByRole("list", { name: /stages/i });
     await emit(
       ...toExploring,
       ev(8, "run.errored", { category: "BROWSER_PROVIDER", message: "chromium: No usable sandbox! at /tmp/x" }, { stage: "ERRORED", message: "Run stopped: browser failed" }),
     );
-    expect(await screen.findByRole("heading", { name: /run stopped because of an error/i })).toBeInTheDocument();
-    expect(screen.getByText(/browser error/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /run errored/i })).toBeInTheDocument();
+    const headline = screen.getByRole("region", { name: /run errored/i });
+    expect(within(headline).getByText("Browser error")).toBeInTheDocument();
+    const details = within(headline).getByText(/technical details/i).closest("details")!;
+    expect(details).not.toHaveAttribute("open");
+    // The raw error text is nowhere but in that collapsed disclosure.
+    const outside = headline.cloneNode(true) as HTMLElement;
+    outside.querySelector("details")!.remove();
+    expect(outside.textContent).not.toContain("No usable sandbox");
+
+    // The run's activity (stages + template-only timeline) stays available.
+    await user.click(screen.getByRole("button", { name: /run activity/i }));
     expect(screen.getAllByText("Run stopped: browser failed").length).toBeGreaterThan(0);
-    expect(document.body.textContent).not.toContain("No usable sandbox");
     expect(within(screen.getByRole("list", { name: /stages/i })).getByText(/exploring website/i).closest("li")).toHaveTextContent(/stopped/i);
   });
 
-  it("shows the verdict of a completed run", async () => {
-    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "COMPLETED", verdict: "FAILED" })) });
+  it("shows the report of a completed run", async () => {
+    routeFetch({
+      [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "COMPLETED", verdict: "FAILED" })),
+      [`GET ${RUN}/report`]: () => json(200, reportFixture()),
+    });
     render(<RunView runId="run_1" />);
-    expect(await screen.findByRole("heading", { name: /run completed/i })).toBeInTheDocument();
-    expect(screen.getByText(/verdict: failed/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /verdict: failed/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^AC-1\b/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /run activity/i })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("list", { name: /stages/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /cancel run/i })).not.toBeInTheDocument();
+  });
+
+  it("hands the report the run's artifacts and steps from the event stream", async () => {
+    const user = userEvent.setup();
+    routeFetch({
+      [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "COMPLETED", verdict: "FAILED" })),
+      [`GET ${RUN}/report`]: () => json(200, reportFixture()),
+      [`GET ${RUN}/artifacts/art_1/url`]: () => json(200, { url: "https://s3.test/after_add.png", expiresAt: "2099-01-01T00:00:00.000Z" }),
+    });
+    render(<RunView runId="run_1" />);
+    await screen.findByRole("heading", { name: /verdict: failed/i });
+    await emit(
+      ev(1, "step.recorded", { stepId: "st_1", index: 0, kind: "navigate", outcome: "SUCCESS", blockReason: null }, { stage: "EXPLORING", message: "Step 1: navigate succeeded" }),
+      ev(2, "artifact.created", { artifactId: "art_1", type: "SCREENSHOT", sensitivity: "STANDARD" }, { stage: "EXPLORING", message: "Screenshot saved at checkpoint after_add" }),
+      ev(3, "run.completed", { verdict: "FAILED" }, { stage: "COMPLETED", message: "Run completed: FAILED" }),
+    );
+    await user.click(screen.getByRole("button", { name: /^AC-1\b/ }));
+    const detail = screen.getByRole("region", { name: /AC-1/ });
+    expect(within(detail).getByText("Step 1: navigate succeeded")).toBeInTheDocument();
+    expect(await within(detail).findByRole("img", { name: /after_add/ })).toHaveAttribute("src", "https://s3.test/after_add.png");
   });
 
   it("reports a missing run", async () => {
