@@ -11,7 +11,7 @@ Plan: [`docs/ai-testing-platform-implementation-plan.md`](docs/ai-testing-platfo
 
 **Milestone C (Tasks 16–18) is implemented**: after verification the real engine compiles the discovered golden path into a Playwright test (Task 16, `packages/testing-engine/src/compiler`: `run.spec.ts` + `helpers.ts` + `run-data.json`, semantic locators, every run value in the JSON file, secrets read from `SECRET_*` environment variables; the source passes an allowlist AST guard and typechecks against `@playwright/test`), then reruns it in a sandbox (Task 17): a Playwright child process in a per-run workspace under `RUNNER_WORKSPACE_DIR`, with an environment allow-list (only this run's `SECRET_*`, `PATH`, `PLAYWRIGHT_BROWSERS_PATH`, and `TMPDIR` pointed into the workspace) and its own egress proxy (same private allowlist as exploration). Trace, screenshot and video are kept only when the rerun fails; traces are scrubbed of every secret value (plain, URL-encoded, base64, JSON/HTML-escaped) before upload, and every artifact of a run with secrets is `SECRET_BEARING`. Reconciliation (Task 18, `src/reconciliation`) combines each criterion's provisional result with its rerun outcome: a discovery PASS/FAIL the rerun confirms has `verdictSource: PLAYWRIGHT_RERUN`; a disagreement is `INCONCLUSIVE / DISCOVERY_RERUN_DISAGREE`; without a rerun outcome, PASS/FAIL stands (`EXPLORATION_ONLY`) only when every referenced fact was read from the DOM, else `INCONCLUSIVE / UNVERIFIED_EVIDENCE` — so no PASS exists without deterministic evidence. `GET /v1/test-runs/:runId/report` returns the reconciled `TestReport` (`packages/contracts/src/report.ts`): per criterion the status, `verdictSource`, `rerunOutcome`, the provisional status, `expected` / `actual`, `evidenceArtifactIds`, `relatedStepIds` (and an AI note for semantic criteria); the summary (incl. `confirmedByRerun`), the verdict, the generated test's source, the rerun's status and duration, diagnostics and LLM usage. It answers `409 REPORT_NOT_READY` until the run is terminal, and a `partial: true` report for `ERRORED` / `CANCELLED` runs. Artifacts are fetched through `GET /v1/test-runs/:runId/artifacts/:artifactId/url` (`?reveal=true` for `SECRET_BEARING` ones).
 
-**Milestone D, Task 19 (web UI) is implemented** (`apps/web`, Next.js): the new-test form (`/runs/new`: URL, requirement, environment, optional test data and masked secrets, collapsed advanced options; `422 TARGET_NOT_ALLOWED` shown on the URL field, `429 TOO_MANY_ACTIVE_RUNS` as a banner; secret values are cleared from the page as soon as a submit is sent), and the run page (`/runs/<runId>`), which follows the lifecycle: analyzing → criteria review (edit / remove / "Confirm and start", with ambiguous and AI-judged criteria highlighted) → live progress (stages, timeline of the server's template messages, latest screenshot; `SECRET_BEARING` screenshots only after "Reveal") → completed / cancelled / errored. Live progress comes from the SSE stream; after a disconnect the client reconnects with `Last-Event-ID`, so no event is lost or shown twice. **Task 20** adds the final report and the run history: `/` opens the history (`/runs`: created time, target host, requirement preview, result, duration; "Load more" pages through `GET /v1/test-runs` with its cursor), and a finished run's page shows its report — for COMPLETED the verdict, summary cards (criteria counts, how many PASS/FAIL results the Playwright rerun confirmed, duration, estimated model cost), one expandable row per criterion (status as icon + label + color, the reason in plain language, "Confirmed by rerun" / "Not confirmed by rerun", the AI note kept apart from the status; details: requirement text → expected → actual → related steps → evidence → diagnostics), the generated Playwright test (read-only, syntax-highlighted, with the criteria it could not compile and why) and every stored artifact; for ERRORED / CANCELLED a partial report (lifecycle, error category, the technical message behind a disclosure, and whatever was recorded). Artifact types and sensitivity come from the run's `artifact.created` events; `SECRET_BEARING` artifacts stay hidden until "Reveal (may contain entered credentials)".
+**Milestone D (Tasks 19–20, the web UI) is implemented and its gate was demonstrated on 2026-09-26** (see [Milestone D demo](#milestone-d-demo)). **Task 19** (`apps/web`, Next.js): the new-test form (`/runs/new`: URL, requirement, environment, optional test data and masked secrets, collapsed advanced options; `422 TARGET_NOT_ALLOWED` shown on the URL field, `429 TOO_MANY_ACTIVE_RUNS` as a banner; secret values are cleared from the page as soon as a submit is sent), and the run page (`/runs/<runId>`), which follows the lifecycle: analyzing → criteria review (edit / remove / "Confirm and start", with ambiguous and AI-judged criteria highlighted) → live progress (stages, timeline of the server's template messages, latest screenshot; `SECRET_BEARING` screenshots only after "Reveal") → completed / cancelled / errored. Live progress comes from the SSE stream; after a disconnect the client reconnects with `Last-Event-ID`, so no event is lost or shown twice. **Task 20** adds the final report and the run history: `/` opens the history (`/runs`: created time, target host, requirement preview, result, duration; "Load more" pages through `GET /v1/test-runs` with its cursor), and a finished run's page shows its report — for COMPLETED the verdict, summary cards (criteria counts, how many PASS/FAIL results the Playwright rerun confirmed, duration, estimated model cost), one expandable row per criterion (status as icon + label + color, the reason in plain language, "Confirmed by rerun" / "Not confirmed by rerun", the AI note kept apart from the status; details: requirement text → expected → actual → related steps → evidence → diagnostics), the generated Playwright test (read-only, syntax-highlighted, with the criteria it could not compile and why) and every stored artifact; for ERRORED / CANCELLED a partial report (lifecycle, error category, the technical message behind a disclosure, and whatever was recorded). Artifact types and sensitivity come from the run's `artifact.created` events; `SECRET_BEARING` artifacts stay hidden until "Reveal (may contain entered credentials)".
 
 **The browser only talks to the web app.** `apps/web/app/api/[...path]/route.ts` proxies an allow-list of the V1 endpoints to `API_URL` and adds `Authorization: Bearer $API_TOKEN` on the server (both read from the web server's environment at request time; the token never reaches the browser). It drops the browser's own `Authorization` / `Cookie` headers, forwards only `content-type`, `accept`, `idempotency-key` and `last-event-id`, streams SSE unbuffered, and rejects `POST` / `PUT` requests whose `Origin` isn't the web app's own host. **V1 has no end-user authentication** (single tenant, D6): anyone who can reach the web app can create, confirm, cancel and view runs, and reveal secret-bearing screenshots. Only expose it to trusted users (a private network, VPN, or an authenticating reverse proxy in front of it). The Origin check compares against the `Host` header, so a reverse proxy must pass the original `Host` through.
 
@@ -41,6 +41,14 @@ Chromium can't start its sandbox in the container yet (see Status), so use a loc
 | S3 artifact store | http://localhost:9000 (s3admin / s3admin-secret) |
 
 Override secrets in `infra/compose/.env` (`API_TOKEN`, `SECRETS_ENCRYPTION_KEY`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, …).
+
+Signed artifact URLs (screenshots, traces, videos) are opened by your browser, which can't resolve the compose-internal
+`http://s3:9000`. The compose `api` therefore sets `S3_PUBLIC_ENDPOINT=http://localhost:9000` (override it in
+`infra/compose/.env` if the stack is reached under another host name). Optional everywhere: when set, S3 read URLs
+are presigned against it instead of `S3_ENDPOINT`; it must reach the same server and bucket (Ruling R54).
+
+**Images built before Milestone D run the old UI** (and an api without `S3_PUBLIC_ENDPOINT`): rebuild with
+`pnpm stack:up` (it passes `--build`) to get the new `web` and `api`.
 The defaults are for local use only.
 
 Try it by hand:
@@ -81,6 +89,17 @@ pnpm --filter @platform/api dev
 pnpm --filter @platform/worker dev
 pnpm --filter @platform/web dev   # needs API_URL and API_TOKEN (from .env); open http://localhost:3000
 ```
+
+**The UI against a local API.** The web app reads only `API_URL` and `API_TOKEN`, at request time, on the server
+(`apps/web/app/api/[...path]/route.ts`); `API_TOKEN` must equal the API's. Any port works:
+
+```bash
+cd apps/web
+API_URL=http://localhost:3011 API_TOKEN=<the API's token> pnpm exec next dev -p 3002   # http://localhost:3002
+```
+
+With `S3_ENDPOINT=http://localhost:9000` (as in `.env.example`) signed URLs already work from the browser;
+set `S3_PUBLIC_ENDPOINT` only if the API reaches S3 under a name the browser can't.
 
 ### Real engine (Milestone B)
 
@@ -143,6 +162,51 @@ script's non-LLM checks were exercised separately: its report and evidence check
 through the API, and its trace checks against a real scrubbed rerun trace (the password fill recorded as
 `"value":"[REDACTED]"`, no form of the password present). Re-run the script once the provider account has credit.
 
+### Milestone D demo
+
+The gate: new test → criteria review → live progress → final report → artifacts → history, with no progress lost on
+reconnect, a criterion-centric report that shows how each result was confirmed, and the API token never in the browser.
+With the full stack (after `pnpm stack:up`) open http://localhost:3000 and use `http://demo-shop:4000/` as the URL;
+with a local API and worker (fake engine) and `next dev`, use `http://localhost:4000/`. Then:
+
+1. **New test**: URL, a requirement, optionally a test-data row and a secret row (the value is masked) → "Start test".
+2. **Criteria review**: edit a criterion ("Edit" → "Save" makes a new revision), remove one if you like, "Confirm and
+   start". Warnings from the confirm (ambiguous or AI-judged criteria) show in the "Criteria confirmed" note; the fake
+   engine's criteria are never ambiguous, so it shows none.
+3. **Live progress**: the stage list, the timeline and the latest screenshot update from the event stream. Stop the
+   API mid-run and start it again: "Connection lost — reconnecting…" shows, and the timeline resumes without gaps or
+   duplicates. "Cancel run" → "Yes, cancel run" ends it with a partial report.
+4. **Final report**: the verdict and summary cards, one row per criterion with its status and how it was confirmed
+   ("Confirmed by rerun", or why not); expand a row for requirement → expected → actual → related steps → evidence →
+   diagnostics. Below: the generated Playwright test, "All evidence" (`STANDARD` files load; `SECRET_BEARING` ones
+   need "Reveal"), and the run activity.
+5. **History**: `/runs` lists every run, newest first ("Load more" after 50).
+
+The fake engine stores no screenshots or traces (only the real engine and the Playwright rerun do).
+
+**Verified run, 2026-09-26** (Ruling R53: an isolated local stack from this branch on the compose Postgres, S3 and demo
+shop: API on :3011 and a `LLM_PROVIDER=fake` worker, both on Redis DB 1 so no other worker could take the jobs, and
+`next dev` on :3002; `FAKE_ENGINE_STEP_DELAY_MS=4000`–`6000` to give the live view time). Checked in the browser, at
+1280 px and 375 px (no horizontal page scroll):
+- every step above, on runs against `http://localhost:4000/` (secret row masked; AC-2 edited to revision 2; stages
+  and timeline live; report with both criteria "Pass · Confirmed by rerun", details expanded; generated test; history
+  of 22 runs, one page, so "Load more" did not appear); a cancelled run's partial report ("Exploring website" marked
+  Stopped); and an earlier real-engine run's errored partial report ("Model provider error", technical details
+  collapsed);
+- artifacts against real stored objects: a throwaway script (not in the repo) stored a real screenshot (`STANDARD`)
+  and a real Playwright trace (`SECRET_BEARING`) for one run through `@platform/storage` and `ArtifactRepository` and
+  published their `artifact.created` events. The screenshot showed live and in the report from a signed URL on the
+  `S3_PUBLIC_ENDPOINT` host; the trace's URL was not requested until "Reveal", then with `?reveal=true` (without it
+  the API answers `403 REVEAL_REQUIRED`), and its link downloaded the stored bytes;
+- reconnect: the API was killed (`SIGKILL`) during exploration. The stream broke after event 10, the client retried
+  with `Last-Event-ID: 10` (502 from the proxy while the API was down), and after the restart received 11–29. The
+  rendered timeline had 29 entries, equal one for one to the API's `/events` backfill (1–29). The same after a
+  graceful restart (`SIGTERM`), which surfaced a fix: open SSE streams now end when the API shuts down;
+- the token: none of the served pages (including the inline RSC data), the 16 JS chunks the pages load, the DOM,
+  storage, cookies, request URLs, proxy response headers or `apps/web/.next` contained the API token.
+
+The fake engine's generated test is now stored like the real one's, so its report shows the generated-test viewer.
+
 ## Tests
 
 ```bash
@@ -155,7 +219,9 @@ pnpm eval planner                # same, for the planner prompt
 ```
 
 - DB tests clone a migrated template database per test file. They use `TEST_DATABASE_URL`, which defaults to the compose Postgres (`postgresql://platform:platform@localhost:5432/platform`). The role needs `CREATEDB`.
-- Redis tests use `TEST_REDIS_URL` (default `redis://localhost:6379`).
+- Redis tests use `TEST_REDIS_URL` (default `redis://localhost:6379`). Some worker tests create real BullMQ queues, so
+  while a dev or compose worker is running on the same Redis, point the tests at another database index
+  (e.g. `TEST_REDIS_URL=redis://localhost:6379/2`) so that worker can't take their jobs.
 - S3 storage tests run only when `S3_TEST_ENDPOINT` is set (see `packages/storage/README.md`).
 - Demo shop tests: `cd tests/fixtures/demo-shop && npx playwright install chromium && npx playwright test -c playwright.config.ts`.
 - `pnpm test:integration` and `pnpm test:live` run through the top-level `vitest.config.ts` projects (`integration`, `live`); `test:live` includes the Stagehand-through-sandbox smoke test (`tests/integration/stagehand-smoke.live.test.ts`) and any `*.live.test.ts` under `packages/**/src`.
