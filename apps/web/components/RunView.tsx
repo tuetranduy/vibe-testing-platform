@@ -1,7 +1,7 @@
 "use client";
 
 import { isTerminalLifecycle, type RunLifecycle, type TestRunSummary } from "@platform/contracts";
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ApiRequestError, cancelRun, getRun, type ConfirmResult } from "../lib/api";
 import { initialProgress, lifecycleRank, progressReducer, type ProgressState } from "../lib/progress-reducer";
 import { connectRunEvents, type ConnectionStatus } from "../lib/run-events";
@@ -131,6 +131,30 @@ export function RunView({ runId }: { runId: string }) {
     setSummary((s) => (s && s.lifecycle === "AWAITING_CONFIRMATION" ? { ...s, lifecycle: "PLANNING" } : s));
   }, []);
 
+  // 5. Announce the end of a run this page was watching (not one that had already ended when it
+  //    opened): the view swaps to the report, which a screen reader wouldn't otherwise hear.
+  const [announcement, setAnnouncement] = useState("");
+  const shownLifecycle = summary ? viewLifecycle(summary, progress) : null;
+  const shownTerminal = shownLifecycle !== null && isTerminalLifecycle(shownLifecycle);
+  const wasTerminal = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (shownLifecycle === null) return;
+    if (wasTerminal.current === false && shownTerminal) {
+      const o = progress.outcome;
+      const verdict = o?.kind === "completed" ? o.verdict : summary?.verdict;
+      setAnnouncement(
+        shownLifecycle === "COMPLETED"
+          ? verdict
+            ? `Run completed: ${VERDICT_LABEL[verdict]}`
+            : "Run completed"
+          : shownLifecycle === "CANCELLED"
+            ? "Run cancelled"
+            : "Run stopped because of an error",
+      );
+    }
+    wasTerminal.current = shownTerminal;
+  }, [shownLifecycle, shownTerminal, progress.outcome, summary?.verdict]);
+
   async function requestCancel() {
     setCancel("pending");
     setCancelError(null);
@@ -176,6 +200,9 @@ export function RunView({ runId }: { runId: string }) {
 
   return (
     <div className="stack">
+      <p className="visually-hidden" role="status" aria-live="polite" aria-atomic="true" data-announcer>
+        {announcement}
+      </p>
       <header className="run-header">
         <div className="run-header-main">
           <p className="eyebrow">Test run · {summary.runId}</p>
@@ -274,8 +301,8 @@ export function RunView({ runId }: { runId: string }) {
                 <p>Revision {confirmation.revision} is frozen and the run is starting.</p>
                 {confirmation.warnings.length > 0 && (
                   <ul>
-                    {confirmation.warnings.map((w) => (
-                      <li key={w}>{w}</li>
+                    {confirmation.warnings.map((w, i) => (
+                      <li key={`${i}-${w}`}>{w}</li>
                     ))}
                   </ul>
                 )}

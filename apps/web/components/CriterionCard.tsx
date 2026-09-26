@@ -30,6 +30,7 @@ export function CriterionCard({ criterion: c, facts, reworded, busy, canRemove, 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(c.statement);
   const [error, setError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
   // Cards are keyed by id, so saving another criterion keeps this card's draft; only a change to
   // its own statement (its own save) resets it.
   const [statement, setStatement] = useState(c.statement);
@@ -157,8 +158,8 @@ export function CriterionCard({ criterion: c, facts, reworded, busy, canRemove, 
             <>
               <p className="note-title">Suggested wording</p>
               <ul>
-                {c.ambiguity.suggestions.map((s) => (
-                  <li key={s}>{s}</li>
+                {c.ambiguity.suggestions.map((s, i) => (
+                  <li key={`${i}-${s}`}>{s}</li>
                 ))}
               </ul>
             </>
@@ -174,7 +175,32 @@ export function CriterionCard({ criterion: c, facts, reworded, busy, canRemove, 
         </div>
       )}
 
-      {!editing && (
+      {!editing && removing && (
+        <div role="group" aria-labelledby={`${c.id}-remove-title`} className="note note-warning">
+          <p id={`${c.id}-remove-title`} className="note-title">
+            Remove {c.id}?
+          </p>
+          <p>It won&apos;t be checked in this run.</p>
+          <div className="actions">
+            <button
+              type="button"
+              className="button button-danger"
+              onClick={() => {
+                setRemoving(false);
+                onRemove();
+              }}
+              disabled={busy}
+            >
+              Yes, remove
+            </button>
+            <button type="button" className="button button-secondary" onClick={() => setRemoving(false)} autoFocus>
+              Keep it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!editing && !removing && (
         <div className="actions">
           <button
             type="button"
@@ -191,7 +217,7 @@ export function CriterionCard({ criterion: c, facts, reworded, busy, canRemove, 
           <button
             type="button"
             className="button button-quiet"
-            onClick={onRemove}
+            onClick={() => setRemoving(true)}
             disabled={busy || !canRemove}
             title={canRemove ? undefined : "At least one criterion is required"}
             aria-label={`Remove ${c.id}`}

@@ -69,7 +69,7 @@ describe("CriteriaResults", () => {
 
   it("gives every BLOCKED / INCONCLUSIVE result its reason in plain language", () => {
     renderResults();
-    expect(within(row("AC-3")).getByText("No password was provided for login")).toBeInTheDocument();
+    expect(within(row("AC-3")).getByText("A secret this check needs (for example a password) was not provided")).toBeInTheDocument();
     expect(within(row("AC-4")).getByText(/can only be judged by the AI model/i)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/MISSING_SECRET|AI_JUDGED_ONLY|DISCOVERY_RERUN_DISAGREE/);
   });

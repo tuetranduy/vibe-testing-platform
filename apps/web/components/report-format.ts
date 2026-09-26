@@ -36,7 +36,7 @@ export const VERDICT_UI: Record<RunVerdict, StatusUi> = {
 /** One plain-language sentence for every BLOCKED and INCONCLUSIVE reason in the contracts (Section 2.2). */
 export const STATUS_REASON_TEXT: Record<StatusReason, string> = {
   // BLOCKED
-  MISSING_SECRET: "No password was provided for login",
+  MISSING_SECRET: "A secret this check needs (for example a password) was not provided",
   MISSING_TEST_DATA: "Test data this check needs was not provided",
   DESTRUCTIVE_ACTION_NOT_AUTHORIZED: "Checking it needs an action that could change or delete data, which this run was not allowed to take",
   TARGET_BLOCKED_BY_POLICY: "The page it needs is not allowed by the network policy",

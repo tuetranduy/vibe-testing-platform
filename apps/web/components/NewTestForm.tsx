@@ -167,6 +167,17 @@ export function NewTestForm() {
   const [pending, setPending] = useState(false);
   /** Secret values were wiped after a failed submit and must be typed again. */
   const [secretsCleared, setSecretsCleared] = useState(false);
+  /**
+   * One Idempotency-Key per request: a retry after a lost response must replay the run it may have
+   * created, not start a second one. A new key only once the request changes. The fingerprint
+   * holds secret names, never their values (those are re-entered for every attempt).
+   */
+  const idempotency = useRef<{ key: string; fingerprint: string } | null>(null);
+  const keyFor = (body: CreateTestRunRequestInput) => {
+    const fingerprint = JSON.stringify({ ...body, secrets: Object.keys(body.secrets ?? {}).sort() });
+    if (idempotency.current?.fingerprint !== fingerprint) idempotency.current = { key: newIdempotencyKey(), fingerprint };
+    return idempotency.current.key;
+  };
 
   /** Focuses the first invalid field in document order (opening Advanced options if it's in there). */
   const focusFirstError = (errs: Errors) => {
@@ -195,8 +206,9 @@ export function NewTestForm() {
     // names stay so they can be re-entered after an error.
     setSecrets((rows) => rows.map((r) => ({ ...r, value: "" })));
     try {
-      const created = await createRun(body, newIdempotencyKey());
+      const created = await createRun(body, keyFor(body));
       router.push(`/runs/${encodeURIComponent(created.runId)}`);
+      idempotency.current = null;
     } catch (err) {
       setPending(false);
       setSecretsCleared(secrets.some((r) => r.value));
@@ -214,6 +226,13 @@ export function NewTestForm() {
         const next = { [fid.url]: err.message };
         setErrors(next);
         focusFirstError(next);
+      } else if (err.code === "IDEMPOTENCY_CONFLICT") {
+        // An earlier attempt with these details reached the server with different secret values.
+        idempotency.current = null;
+        setBanner({
+          title: "This test may already have started",
+          message: "An earlier attempt reached the server. Check Test runs before starting it again; submitting again starts a new run.",
+        });
       } else if (err.code === "TOO_MANY_ACTIVE_RUNS") {
         setBanner({ title: "Can't start another run yet", message: `${err.message}. You can cancel a run or try again later.` });
       } else if (err.code === "VALIDATION_FAILED" && Object.keys(issuesToErrors(err)).length > 0) {
@@ -396,7 +415,7 @@ export function NewTestForm() {
                 id={fid.secretValue(row.id)}
                 type="password"
                 placeholder="Value"
-                autoComplete="off"
+                autoComplete="new-password"
                 spellCheck={false}
                 value={row.value}
                 onChange={(e) => {

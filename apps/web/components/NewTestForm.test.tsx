@@ -95,7 +95,7 @@ describe("NewTestForm", () => {
     await user.click(screen.getByRole("button", { name: /add secret/i }));
     const value = screen.getByLabelText(/secret 1 value/i);
     expect(value).toHaveAttribute("type", "password");
-    expect(value).toHaveAttribute("autocomplete", "off");
+    expect(value).toHaveAttribute("autocomplete", "new-password"); // never offer or save a stored password
     await user.type(screen.getByLabelText(/secret 1 name/i), "password");
     await user.type(value, "hunter2!");
     await user.click(screen.getByRole("button", { name: /start test/i }));
@@ -178,6 +178,76 @@ describe("NewTestForm", () => {
     await user.click(screen.getByRole("button", { name: /start test/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/in the browser/i);
     expect(error).toHaveBeenCalledWith(expect.stringMatching(/new test/i), expect.objectContaining({ message: "router exploded" }));
+  });
+
+  describe("Idempotency-Key across retries", () => {
+    const keyOf = (fetch: ReturnType<typeof mockFetch>, call: number) => new Headers(fetch.mock.calls[call]![1]!.headers).get("idempotency-key");
+    const created = () => json(202, { runId: "run_5", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_5/events" });
+
+    it("reuses the key when the same request is retried after a lost response", async () => {
+      const user = userEvent.setup();
+      let calls = 0;
+      const fetch = vi.fn(async () => {
+        if (calls++ === 0) throw new TypeError("Failed to fetch"); // the run may have been created
+        return created();
+      });
+      vi.stubGlobal("fetch", fetch);
+      render(<NewTestForm />);
+      await fillValid(user);
+      await user.click(screen.getByRole("button", { name: /start test/i }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(/could not reach the server/i);
+      await user.click(screen.getByRole("button", { name: /start test/i }));
+      await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_5"));
+      expect(keyOf(fetch as never, 1)).toBe(keyOf(fetch as never, 0));
+    });
+
+    it("reuses the key when only the (re-entered) secret values are sent again", async () => {
+      const user = userEvent.setup();
+      const fetch = mockFetch(json(503, { code: "QUEUE_UNAVAILABLE", message: "The run could not be queued; please retry" }), created());
+      render(<NewTestForm />);
+      await fillValid(user);
+      await user.click(screen.getByRole("button", { name: /add secret/i }));
+      await user.type(screen.getByLabelText(/secret 1 name/i), "password");
+      await user.type(screen.getByLabelText(/secret 1 value/i), "hunter2!");
+      await user.click(screen.getByRole("button", { name: /start test/i }));
+      await screen.findByRole("alert");
+      await user.type(screen.getByLabelText(/secret 1 value/i), "hunter2!");
+      await user.click(screen.getByRole("button", { name: /start test/i }));
+      await waitFor(() => expect(push).toHaveBeenCalled());
+      expect(keyOf(fetch, 1)).toBe(keyOf(fetch, 0));
+    });
+
+    it("uses a new key once the request changes", async () => {
+      const user = userEvent.setup();
+      const fetch = mockFetch(json(503, { code: "QUEUE_UNAVAILABLE", message: "The run could not be queued; please retry" }), created());
+      render(<NewTestForm />);
+      await fillValid(user);
+      await user.click(screen.getByRole("button", { name: /start test/i }));
+      await screen.findByRole("alert");
+      await user.type(screen.getByLabelText(/requirement/i), " And see it listed.");
+      await user.click(screen.getByRole("button", { name: /start test/i }));
+      await waitFor(() => expect(push).toHaveBeenCalled());
+      expect(keyOf(fetch, 1)).not.toBe(keyOf(fetch, 0));
+    });
+
+    it("on IDEMPOTENCY_CONFLICT says a run may already exist, and the next attempt uses a new key", async () => {
+      const user = userEvent.setup();
+      const fetch = mockFetch(
+        json(503, { code: "QUEUE_UNAVAILABLE", message: "The run could not be queued; please retry" }),
+        json(409, { code: "IDEMPOTENCY_CONFLICT", message: "Idempotency-Key was already used with a different request body" }),
+        created(),
+      );
+      render(<NewTestForm />);
+      await fillValid(user);
+      await user.click(screen.getByRole("button", { name: /start test/i }));
+      await screen.findByRole("alert");
+      await user.click(screen.getByRole("button", { name: /start test/i }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(/may already have started/i);
+      await user.click(screen.getByRole("button", { name: /start test/i }));
+      await waitFor(() => expect(push).toHaveBeenCalled());
+      expect(keyOf(fetch, 1)).toBe(keyOf(fetch, 0));
+      expect(keyOf(fetch, 2)).not.toBe(keyOf(fetch, 1));
+    });
   });
 
   it("disables the submit button while the request is pending", async () => {
