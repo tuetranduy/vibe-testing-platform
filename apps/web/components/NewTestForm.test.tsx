@@ -154,6 +154,32 @@ describe("NewTestForm", () => {
     expect(bodyOf(fetch).options.autoConfirmCriteria).toBe(true);
   });
 
+  it("creates a run on an insecure origin, where crypto.randomUUID is unavailable", async () => {
+    const real = globalThis.crypto;
+    vi.stubGlobal("crypto", { getRandomValues: real.getRandomValues.bind(real) });
+    const user = userEvent.setup();
+    const fetch = mockFetch(json(202, { runId: "run_7", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_7/events" }));
+    render(<NewTestForm />);
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_7"));
+    expect(new Headers(fetch.mock.calls[0]![1]!.headers).get("idempotency-key")).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("logs an unexpected client-side error and says it happened in the browser", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    push.mockImplementationOnce(() => {
+      throw new Error("router exploded");
+    });
+    const user = userEvent.setup();
+    mockFetch(json(202, { runId: "run_8", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_8/events" }));
+    render(<NewTestForm />);
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/in the browser/i);
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/new test/i), expect.objectContaining({ message: "router exploded" }));
+  });
+
   it("disables the submit button while the request is pending", async () => {
     const user = userEvent.setup();
     let resolve!: (r: Response) => void;
