@@ -300,7 +300,8 @@ describe("analyze stage (real compiler behind runAnalysis)", () => {
     const reasoning = "INTERNAL-CHAIN-OF-THOUGHT: the user probably means the badge";
     const { llm } = setup({ json: { ...cartOutput(), reasoning } });
     const unusedExploration = { openSandbox: async () => ({}) as never, explorer: { start: async () => ({}) as never }, store: () => ({}) as never };
-    const stages = createRealStages({ llm, exploration: unusedExploration, generateTest: { store: () => ({ save: async () => {} }) } }, createFakeStages());
+    const unusedRerun = { openProxy: async () => ({}) as never, spawn: async () => ({}) as never, workspace: { baseDir: "/nonexistent" }, evidence: () => ({}) as never };
+    const stages = createRealStages({ llm, exploration: unusedExploration, generateTest: { store: () => ({ save: async () => {} }) }, runTest: unusedRerun }, createFakeStages());
     const p = fakePorts();
 
     await runAnalysis(stageContext(storedRequest(CART_TEXT)), p.ports, stages);

@@ -1,13 +1,12 @@
-import { ArtifactRepository, ExplorationStepRepository, ObservedFactRepository, type Database } from "@platform/db";
+import { ExplorationStepRepository, ObservedFactRepository, type Database } from "@platform/db";
 import type { StructuredLlm } from "@platform/stagehand-adapter";
 import { StagehandExplorer, resolveStagehandExtensionDir } from "@platform/stagehand-adapter";
 import type { ArtifactStorage } from "@platform/storage";
 import type { ExplorationStore, ExploreStageDeps, StageContext } from "@platform/testing-engine";
+import { storeArtifact } from "./artifacts";
 import type { WorkerLogger } from "./deps";
 import { computeExtensionId, type BrowserExtension } from "./sandbox/browser-launcher";
 import { openRunSandbox } from "./sandbox/run-sandbox";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface ExplorationConfig {
   /** TARGET_PRIVATE_ALLOWLIST (non-production only; see @platform/config). */
@@ -29,10 +28,8 @@ export interface ExplorationStoreDeps {
  * sensitivity (SECRET_BEARING artifacts are kept for a shorter time).
  */
 export function createExplorationStore(deps: ExplorationStoreDeps, ctx: Pick<StageContext, "runId" | "tenantId">): ExplorationStore {
-  const now = deps.now ?? (() => new Date());
   const steps = new ExplorationStepRepository(deps.db);
   const facts = new ObservedFactRepository(deps.db);
-  const artifacts = new ArtifactRepository(deps.db);
   return {
     async saveStep(step) {
       await steps.insert(step);
@@ -40,29 +37,8 @@ export function createExplorationStore(deps: ExplorationStoreDeps, ctx: Pick<Sta
     async saveFact(fact) {
       await facts.upsert(ctx.runId, fact);
     },
-    async saveScreenshot({ png, fileName, sensitivity }) {
-      const contentType = "image/png";
-      const stored = await deps.storage.put({ tenantId: ctx.tenantId, runId: ctx.runId, type: "SCREENSHOT", fileName, body: png, contentType, sensitivity });
-      const days = sensitivity === "SECRET_BEARING" ? deps.config.secretArtifactRetentionDays : deps.config.artifactRetentionDays;
-      try {
-        const row = await artifacts.create({
-          tenantId: ctx.tenantId,
-          runId: ctx.runId,
-          type: "SCREENSHOT",
-          objectKey: stored.objectKey,
-          sha256: stored.sha256,
-          bytes: stored.bytes,
-          contentType,
-          sensitivity,
-          expiresAt: new Date(now().getTime() + days * DAY_MS),
-        });
-        return { artifactId: row.id };
-      } catch (err) {
-        // No row → nothing would ever expire the object: remove it now.
-        await deps.storage.delete(stored.objectKey).catch(() => {});
-        throw err;
-      }
-    },
+    saveScreenshot: ({ png, fileName, sensitivity }) =>
+      storeArtifact(deps, { tenantId: ctx.tenantId, runId: ctx.runId, type: "SCREENSHOT", fileName, body: png, contentType: "image/png", sensitivity }),
   };
 }
 

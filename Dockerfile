@@ -32,6 +32,12 @@ FROM source AS worker
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN pnpm --filter @platform/worker exec playwright-core install --with-deps chromium \
     && chown -R node:node /ms-playwright
+# Playwright rerun (Task 17, Ruling R32): per-run workspaces live here; each links node_modules to the
+# @playwright/test that testing-engine depends on (infra/runner/Dockerfile: a pre-installed runner base).
+# procps: `ps` finds a browser left behind by a killed runner.
+ENV RUNNER_WORKSPACE_DIR=/work/runs
+RUN apt-get update && apt-get install -y --no-install-recommends procps && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /work/runs && chown node:node /work/runs
 USER node
 HEALTHCHECK --interval=10s --timeout=3s --retries=6 \
   CMD node -e "process.exit(Date.now()-require('fs').statSync('/tmp/worker-alive').mtimeMs<30000?0:1)"

@@ -69,14 +69,27 @@ const exploration = (facts: ObservedFact[]): ExplorationOutcome => ({ steps: [],
 const llm = { generateStructured: async () => ({}) as never };
 const explorationDeps = { openSandbox: async () => ({}) as never, explorer: { start: async () => ({}) as never }, store: () => ({}) as never };
 const generateTestDeps = { store: () => ({ save: async () => {} }) };
+/** A rerun whose egress proxy cannot start: the stage must answer ERRORED without running anything. */
+const runTestDeps = {
+  openProxy: async () => Promise.reject(new Error("proxy unavailable")),
+  spawn: async () => Promise.reject(new Error("never spawned")),
+  workspace: { baseDir: "/nonexistent-rerun-workspaces" },
+  evidence: () => ({ save: async () => ({ artifactId: "art_never" }) }),
+};
 const ctx = {
   runId: "run_1",
   request: { targetUrl: "https://shop.example.com" },
+  signal: new AbortController().signal,
+  secrets: { names: [], get: () => undefined },
+  addCleanup: () => {},
   now: () => new Date("2026-09-26T10:00:00.000Z"),
   redact: (v: unknown) => JSON.parse(JSON.stringify(v).replaceAll(SECRET, "[REDACTED]")),
 } as unknown as StageContext;
 const stagesWith = (status?: "PASS" | "FAIL") =>
-  createRealStages({ llm, exploration: explorationDeps, generateTest: generateTestDeps }, createFakeStages(status ? { provisionalStatus: status } : {}));
+  createRealStages(
+    { llm, exploration: explorationDeps, generateTest: generateTestDeps, runTest: runTestDeps },
+    createFakeStages(status ? { provisionalStatus: status } : {}),
+  );
 
 describe("createRealStages: verify (Task 15)", () => {
   it("verifies every criterion from the recorded facts; a fallback configured to PASS/FAIL has no say", () => {
@@ -138,16 +151,33 @@ describe("createRealStages: interim report (Ruling R26, until Task 18)", () => {
   });
 });
 
-describe("createRealStages: runTest until Task 17 (Ruling R39)", () => {
-  it("never delegates to the fake rerun: ERRORED, every compiled criterion UNAVAILABLE, no confirmation fabricated", async () => {
+describe("createRealStages: interim report and the rerun (until Task 18)", () => {
+  it("rerun outcomes are not reconciled yet: no criterion is labelled PLAYWRIGHT_RERUN, even when the rerun disagrees; the rerun status is still reported", async () => {
+    const exp = exploration([fact(before, 0), fact(after, 1), fact(title, "Added")]);
+    const provisional = stagesWith().verify(ctx, requirement, plan, exp);
+    const rerun = { status: "FAILED" as const, perCriterion: { "AC-1": "ASSERTION_FAILED" as const, "AC-2": "PASSED" as const }, durationMs: 42, errorText: {}, artifactIds: ["art_1"] };
+    const report = await stagesWith().report(ctx, { requirement, plan, exploration: exp, provisional, generatedTest: null, rerun, startedAt: null });
+    expect(report.criteria.map((c) => [c.criterionId, c.status, c.verdictSource, c.rerunOutcome])).toEqual([
+      ["AC-1", "PASS", "EXPLORATION_ONLY", "UNAVAILABLE"],
+      ["AC-2", "PASS", "EXPLORATION_ONLY", "UNAVAILABLE"],
+      ["AC-3", "BLOCKED", null, "UNAVAILABLE"],
+    ]);
+    expect(report.summary.confirmedByRerun).toBe(0);
+    expect(report.playwright).toEqual({ status: "FAILED", durationMs: 42 });
+  });
+});
+
+describe("createRealStages: runTest (Task 17)", () => {
+  it("is the sandboxed rerun, never the fake: a rerun that cannot start is ERRORED, every compiled criterion NOT_REACHED", async () => {
     for (const status of ["PASS", "FAIL"] as const) {
       const test = { id: "gt_1", source: "", helpersSource: "", dataJson: "{}", compiledCriteria: ["AC-1", "AC-2"], notCompiled: [], notes: [] };
       const rerun = await stagesWith(status).runTest(ctx, test);
       expect(RerunResultSchema.parse(rerun)).toEqual({
         status: "ERRORED",
-        perCriterion: { "AC-1": "UNAVAILABLE", "AC-2": "UNAVAILABLE" },
+        perCriterion: { "AC-1": "NOT_REACHED", "AC-2": "NOT_REACHED" },
         durationMs: 0,
-        errorText: {},
+        errorText: { "AC-1": "The rerun's network guard could not be started", "AC-2": "The rerun's network guard could not be started" },
+        artifactIds: [],
       });
     }
   });

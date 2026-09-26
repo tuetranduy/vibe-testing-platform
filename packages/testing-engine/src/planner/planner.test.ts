@@ -637,7 +637,9 @@ function executionPorts(requirement: NormalizedRequirement) {
 function realPlanStages(llm: Parameters<typeof createRealStages>[0]["llm"]) {
   const fake = createFakeStages();
   const unused = { openSandbox: async () => ({}) as never, explorer: { start: async () => ({}) as never }, store: () => ({}) as never };
-  return { ...createRealStages({ llm, exploration: unused, generateTest: { store: () => ({ save: async () => {} }) } }, fake), explore: fake.explore };
+  // No rerun here: a proxy that cannot start makes the rerun ERRORED without running anything.
+  const noRerun = { openProxy: async () => Promise.reject(new Error("no rerun")), spawn: async () => ({}) as never, workspace: { baseDir: "/nonexistent" }, evidence: () => ({}) as never };
+  return { ...createRealStages({ llm, exploration: unused, generateTest: { store: () => ({ save: async () => {} }) }, runTest: noRerun }, fake), explore: fake.explore };
 }
 
 describe("plan stage behind runExecution (real planner, fake later stages)", () => {

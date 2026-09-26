@@ -160,6 +160,13 @@ importers:
       zod:
         specifier: 4.4.3
         version: 4.4.3
+    devDependencies:
+      '@platform/demo-shop':
+        specifier: workspace:*
+        version: link:../../tests/fixtures/demo-shop
+      fflate:
+        specifier: 0.8.2
+        version: 0.8.2
 
   packages/config:
     dependencies:
@@ -282,6 +289,12 @@ importers:
       '@platform/stagehand-adapter':
         specifier: workspace:*
         version: link:../stagehand-adapter
+      '@playwright/test':
+        specifier: 1.56.1
+        version: 1.56.1
+      fflate:
+        specifier: 0.8.2
+        version: 0.8.2
       playwright-core:
         specifier: 1.56.1
         version: 1.56.1
@@ -291,10 +304,6 @@ importers:
       zod:
         specifier: 4.4.3
         version: 4.4.3
-    devDependencies:
-      '@playwright/test':
-        specifier: 1.56.1
-        version: 1.56.1
 
   tests/fixtures/demo-shop:
     devDependencies:
@@ -1643,6 +1652,9 @@ packages:
     peerDependenciesMeta:
       picomatch:
         optional: true
+
+  fflate@0.8.2:
+    resolution: {integrity: sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A==}
 
   find-my-way@9.9.0:
     resolution: {integrity: sha512-sJsgZ1sQH2UDuowPuMKg8az7Qc8F0jnj+SKkFWU/+T0xcFlgV5skgXOGUqmQzOdmW6ALA7AhJINWx3qFBkbLHA==}
@@ -3362,6 +3374,8 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
       picomatch: 4.0.7
+
+  fflate@0.8.2: {}
 
   find-my-way@9.9.0:
     dependencies:

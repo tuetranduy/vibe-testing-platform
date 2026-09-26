@@ -1,3 +1,5 @@
+import os from "node:os";
+import path from "node:path";
 import type { Env } from "@platform/config";
 import { LlmCallRepository, type Database } from "@platform/db";
 import { LlmClient, createTransport, type LlmTransport } from "@platform/llm";
@@ -8,14 +10,25 @@ import {
   type EngineStages,
   type ExploreStageDeps,
   type FakeEngineOptions,
+  type RunTestStageDeps,
 } from "@platform/testing-engine";
 import type { WorkerLogger } from "./deps";
 import { createExplorationDeps } from "./exploration";
 import { createGenerateTestDeps } from "./generated-test";
+import { createRunTestDeps } from "./rerun";
 
 export type EngineConfig = Pick<Env, "LLM_PROVIDER" | "LLM_MODEL"> &
   Partial<
-    Pick<Env, "ANTHROPIC_API_KEY" | "OPENAI_API_KEY" | "TARGET_PRIVATE_ALLOWLIST" | "ARTIFACT_RETENTION_DAYS" | "SECRET_ARTIFACT_RETENTION_DAYS">
+    Pick<
+      Env,
+      | "ANTHROPIC_API_KEY"
+      | "OPENAI_API_KEY"
+      | "TARGET_PRIVATE_ALLOWLIST"
+      | "ARTIFACT_RETENTION_DAYS"
+      | "SECRET_ARTIFACT_RETENTION_DAYS"
+      | "RUNNER_WORKSPACE_DIR"
+      | "RUNNER_NODE_MODULES_DIR"
+    >
   >;
 
 export interface EngineSelection {
@@ -29,16 +42,18 @@ export interface EngineDeps {
   logger: WorkerLogger;
   fake?: FakeEngineOptions;
   transport?: LlmTransport;
-  /** Artifact storage for exploration screenshots. Required by the real engine. */
+  /** Artifact storage for exploration screenshots and rerun evidence. Required by the real engine. */
   storage?: ArtifactStorage;
   /** Test seams for the real explore stage (sandbox, explorer, recorder). */
   exploration?: Partial<ExploreStageDeps>;
+  /** Test seams for the real rerun stage (proxy, runner child process, workspace, evidence store). */
+  rerun?: Partial<RunTestStageDeps>;
 }
 
 /**
  * Ruling R7: LLM_PROVIDER=fake keeps the full fake engine (demo/compose work without a key);
- * otherwise the real stages (analyze, plan, explore, verify, generate test) over the fake engine for the
- * stages not built yet.
+ * otherwise the real stages (analyze, plan, explore, verify, generate test, rerun) over the fake engine
+ * for the stages not built yet.
  * Throws at startup for providers not implemented in V1.
  */
 export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSelection {
@@ -58,17 +73,30 @@ export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSele
     },
     onRecordError: (err, call) => deps.logger.warn({ err, runId: call.runId }, "failed to record LLM call"),
   });
+  const retention = {
+    artifactRetentionDays: config.ARTIFACT_RETENTION_DAYS ?? 30,
+    secretArtifactRetentionDays: config.SECRET_ARTIFACT_RETENTION_DAYS ?? 7,
+  };
+  const privateAllowlist = config.TARGET_PRIVATE_ALLOWLIST ?? [];
   const exploration = createExplorationDeps({
     db: deps.db,
     storage: deps.storage,
     logger: deps.logger,
     llm,
-    config: {
-      privateAllowlist: config.TARGET_PRIVATE_ALLOWLIST ?? [],
-      artifactRetentionDays: config.ARTIFACT_RETENTION_DAYS ?? 30,
-      secretArtifactRetentionDays: config.SECRET_ARTIFACT_RETENTION_DAYS ?? 7,
-    },
+    config: { privateAllowlist, ...retention },
     ...(deps.exploration ? { overrides: deps.exploration } : {}),
   });
-  return { kind: "real", stages: createRealStages({ llm, exploration, generateTest: createGenerateTestDeps(deps.db) }, fake), llm };
+  const runTest = createRunTestDeps({
+    db: deps.db,
+    storage: deps.storage,
+    logger: deps.logger,
+    config: {
+      privateAllowlist,
+      ...retention,
+      workspaceDir: config.RUNNER_WORKSPACE_DIR ?? path.join(os.tmpdir(), "platform-runs"),
+      nodeModulesDir: config.RUNNER_NODE_MODULES_DIR,
+    },
+    ...(deps.rerun ? { overrides: deps.rerun } : {}),
+  });
+  return { kind: "real", stages: createRealStages({ llm, exploration, generateTest: createGenerateTestDeps(deps.db), runTest }, fake), llm };
 }
