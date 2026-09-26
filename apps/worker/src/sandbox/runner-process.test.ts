@@ -227,7 +227,7 @@ describe("runGeneratedTest against the demo shop (real child process, egress pro
     }
   });
 
-  it("abort signal → the child (and its Chromium) is killed within 5 s; ERRORED; no orphan process survives", async () => {
+  it("Chromium runs with its sandbox on; abort signal → the child (and its Chromium) is killed within 5 s; ERRORED; no orphan process survives", async () => {
     const test = cartTest(`${shop.url}/products/1`, { beforeAc3: ['await page.getByRole("button", { name: data.locators.loc5.name, exact: true }).click();'] });
     const controller = new AbortController();
     const running = runGeneratedTest(input(test, { signal: controller.signal }), { ...deps(), actionTimeoutMs: 60_000 });
@@ -238,9 +238,14 @@ describe("runGeneratedTest against the demo shop (real child process, egress pro
       if (Date.now() > deadline) throw new Error("Chromium did not start");
       await new Promise((r) => setTimeout(r, 100));
     }
+    // Chromium's own sandbox is on (Playwright adds --no-sandbox unless chromiumSandbox is true);
+    // exploration's browser-launcher keeps it on too.
+    const chromium = processesMentioning(tmp).filter((l) => /chrom|headless_shell/i.test(l));
     const abortedAt = Date.now();
     controller.abort(new Error("cancelled"));
     const out = await running;
+    expect(chromium.length).toBeGreaterThan(0);
+    for (const line of chromium) expect(line).not.toContain("--no-sandbox");
     expect(Date.now() - abortedAt).toBeLessThan(5_000);
     expect(out.status).toBe("ERRORED");
     expect(out.perCriterion).toEqual({ "AC-1": "NOT_REACHED", "AC-2": "NOT_REACHED", "AC-3": "NOT_REACHED" });
