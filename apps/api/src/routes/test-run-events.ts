@@ -18,8 +18,12 @@ export async function testRunEventRoutes(app: FastifyInstance, deps: ApiDeps): P
   // Open streams, ended before the server closes: server.close() waits for every connection, and a
   // live run's stream would otherwise hold a stopping API up until the run ends. Clients reconnect
   // with Last-Event-ID (to the next instance) and lose nothing.
+  // A handler still awaiting its run lookup when shutdown starts registers after the hook has run,
+  // so it checks `closing` and ends its stream at once.
   const open = new Set<() => void>();
+  let closing = false;
   app.addHook("preClose", async () => {
+    closing = true;
     for (const close of [...open]) close();
   });
 
@@ -35,13 +39,20 @@ export async function testRunEventRoutes(app: FastifyInstance, deps: ApiDeps): P
 
     reply.hijack();
     const raw = reply.raw;
+    // Shutdown began while the run was looked up: end at once, and without keep-alive, so this
+    // connection can't hold close() open either. The client reconnects like any ended stream.
+    const stopping = closing;
     raw.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-cache, no-transform",
-      connection: "keep-alive",
+      connection: stopping ? "close" : "keep-alive",
       "x-accel-buffering": "no",
     });
     raw.write(": connected\n\n");
+    if (stopping) {
+      raw.end();
+      return;
+    }
 
     let closed = false;
     let live = false;
