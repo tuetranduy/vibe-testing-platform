@@ -457,6 +457,22 @@ describe("runExploration (fake explorer)", () => {
     expect(session.ops()).toEqual(["navigate", "close"]);
   });
 
+  it("a failed fill with an empty value keeps the error text readable (no [REDACTED] between characters)", async () => {
+    const { ctx } = fakeCtx({ testData: { note: "" } });
+    const session = new FakeSession({
+      observe: () => [{ selector: "xpath=/html[1]/body[1]/textarea[1]", description: "note field", method: "fill", arguments: [] }],
+    });
+    const { recorder } = fakeRecorder();
+    recorder.fill = async () => {
+      throw new Error("element is detached");
+    };
+    const plan = planOf(step("navigate", "Open"), step("fill", "Fill the note field", { inputRef: { source: "testData", key: "note" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+
+    const failed = outcome.steps.find((s) => s.kind === "fill" && s.outcome === "FAILED");
+    expect(failed?.error).toBe("element is detached");
+  });
+
   it("an action denied by assertActionAllowed (observed element's role/name/text) → BLOCKED_BY_POLICY, not executed, exploration stops", async () => {
     const { ctx, events } = fakeCtx();
     const session = new FakeSession({ extract: () => ({ cartCount: 0 }) });
