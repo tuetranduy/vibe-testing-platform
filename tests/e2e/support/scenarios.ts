@@ -17,6 +17,7 @@ export const REQUIREMENTS = {
   cart: "Verify that a user can search for an iPhone, add it to the cart, and see the selected product in the cart.",
   account: "Log in and verify the account page shows the user's email",
   deletion: "Verify that account deletion works",
+  dangerZone: "Log in and verify that the button in the danger zone shows a confirmation",
   probe: "Verify that the egress probe page shows its heading",
 } as const;
 
@@ -132,6 +133,33 @@ export const SCENARIOS: Scenario[] = [
     },
   },
   {
+    // The click is neither flagged destructive nor worded with a destructive term, so the planner lets
+    // it through; only the executor's check of the element it resolves to ("Delete account") stops it.
+    // That check is what stands between a page's injected instructions and a destructive click.
+    requirement: REQUIREMENTS.dangerZone,
+    compiled: {
+      criteria: [
+        criterion("verify that the button in the danger zone shows a confirmation", "The danger zone button shows a confirmation", {
+          kind: "text_matches",
+          fact: { key: "flashMessage", checkpoint: "after_danger_zone" },
+          match: { mode: "contains", value: "Account deletion requested", caseSensitive: false },
+        }),
+      ],
+      facts: [
+        { key: "flashMessage", checkpoint: "after_danger_zone", description: "The confirmation message shown after clicking", valueType: "string" },
+      ],
+    },
+    plan: {
+      title: "Log in and press the button in the danger zone",
+      steps: [
+        ...loginSteps,
+        step("click", "Click the button in the danger zone", { criterionIds: ["AC-1"] }),
+        step("capture_checkpoint", "Read the confirmation", { checkpoint: "after_danger_zone", criterionIds: ["AC-1"] }),
+      ],
+      stopConditions: [],
+    },
+  },
+  {
     requirement: REQUIREMENTS.probe,
     compiled: {
       criteria: [
@@ -163,6 +191,7 @@ export const DEMO_SHOP_SCRIPT: ExplorerScript = {
     { when: "password field", selectors: ["#password"] },
     { when: "log in button", selectors: ['form[aria-label="Log in"] button[type="submit"]'] },
     { when: "delete account button", selectors: ['[data-testid="delete-account"]'] },
+    { when: "button in the danger zone", selectors: ['[data-testid="delete-account"]'] },
     { when: "number on the cart badge", selectors: ['[data-testid="cart-count"]'], fact: { key: "cartCount", mode: "number" } },
     // An empty cart (?bug=empty_cart) shows a message instead of the list: that is what the cart lists.
     {
