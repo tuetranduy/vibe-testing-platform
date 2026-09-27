@@ -1,6 +1,6 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { createWriteStream, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -8,9 +8,9 @@ import { fileURLToPath } from "node:url";
 import { startDemoShop, type RunningDemoShop } from "@platform/demo-shop";
 import { createTestDatabase, type TestDatabase } from "@platform/db/testing";
 import { Redis } from "ioredis";
+import { launchProcess } from "./process";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const TSX = path.join(ROOT, "node_modules", ".bin", "tsx");
 
 export interface E2EStack {
   mode: "ci" | "live";
@@ -103,20 +103,9 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
     };
 
     const launch = (name: string, entry: string, extra: Record<string, string>): ChildProcess => {
-      const log = createWriteStream(path.join(logDir, `${name}.log`));
-      const child = spawn(TSX, [entry], { cwd: ROOT, env: { ...env, ...extra }, stdio: ["ignore", "pipe", "pipe"] });
-      child.stdout!.pipe(log);
-      child.stderr!.pipe(log);
-      stops.push(
-        () =>
-          new Promise<void>((resolve) => {
-            if (child.exitCode !== null || child.signalCode !== null) return resolve();
-            child.once("exit", () => resolve());
-            child.kill("SIGTERM");
-            setTimeout(() => child.kill("SIGKILL"), 10_000).unref();
-          }),
-      );
-      return child;
+      const launched = launchProcess({ name, entry, cwd: ROOT, env: { ...env, ...extra }, logDir });
+      stops.push(launched.stop);
+      return launched.child;
     };
 
     const api = launch("api", "apps/api/src/main.ts", { LLM_PROVIDER: "fake" });
