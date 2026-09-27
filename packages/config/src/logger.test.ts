@@ -47,7 +47,7 @@ describe("createLogger", () => {
       tenantId: "t_1",
       stage: "EXPLORING",
       detail: "typed [REDACTED]",
-      err: { name: "Error", message: "launch failed: [REDACTED]" },
+      err: { name: "Error", message: "launch failed: [REDACTED]", stack: expect.stringContaining("Error: launch failed: [REDACTED]\n    at ") },
       msg: "saw [REDACTED]",
     });
     expect(second).toMatchObject({ runId: "run_1", tenantId: "t_1", stage: "VERIFYING" });
@@ -75,6 +75,64 @@ describe("createLogger", () => {
     cyclic.self = cyclic;
     expect(() => logger.info({ cyclic, big: 10n }, "odd")).not.toThrow();
     expect(parsed()[0]).toMatchObject({ cyclic: { name: "loop", self: "[Circular]" }, big: "10", msg: "odd" });
+  });
+
+  it("writes a value referenced twice both times: only a value inside itself is [Circular]", () => {
+    const { logger, parsed } = capture();
+    const shared = { id: 7 };
+    const list = [shared, shared];
+    logger.info({ a: shared, b: shared, list, again: list });
+    expect(parsed()[0]).toMatchObject({ a: { id: 7 }, b: { id: 7 }, list: [{ id: 7 }, { id: 7 }], again: [{ id: 7 }, { id: 7 }] });
+  });
+
+  it("err keeps its code, stack and cause chain, redacted like the rest of the line", () => {
+    const runs = createRunLogRegistry();
+    runs.register("run_1", { tenantId: "t_1", stage: "EXPLORING", redact: createRunRedactor([SECRET]) });
+    const { logger, lines, parsed } = capture({ runs });
+    const refused = Object.assign(new Error(`connect ECONNREFUSED for ${SECRET}`), { code: "ECONNREFUSED" });
+    const err = new TypeError("fetch failed", { cause: refused });
+
+    logger.error({ runId: "run_1", err }, "upload failed");
+
+    expect(lines.join("\n")).not.toContain(SECRET);
+    expect(parsed()[0]!.err).toEqual({
+      name: "TypeError",
+      message: "fetch failed",
+      stack: expect.stringContaining("TypeError: fetch failed\n    at "),
+      cause: {
+        name: "Error",
+        message: "connect ECONNREFUSED for [REDACTED]",
+        code: "ECONNREFUSED",
+        stack: expect.stringContaining("Error: connect ECONNREFUSED for [REDACTED]\n    at "),
+      },
+    });
+  });
+
+  it("a cause chain that loops ends in [Circular]; a cause that is not an Error is kept as a value", () => {
+    const { logger, parsed } = capture();
+    const a = new Error("a");
+    (a as { cause?: unknown }).cause = new Error("b", { cause: a });
+    logger.error({ err: a });
+    logger.error({ err: new Error("c", { cause: { status: 503, password: "p" } }) });
+    const [loop, plain] = parsed();
+    expect(loop!.err).toMatchObject({ message: "a", cause: { message: "b", cause: "[Circular]" } });
+    expect(plain!.err).toMatchObject({ message: "c", cause: { status: 503, password: "[REDACTED]" } });
+  });
+
+  it("keeps at most five causes below err", () => {
+    const { logger, parsed } = capture();
+    let err = new Error("e9");
+    for (let i = 8; i >= 0; i--) err = new Error(`e${i}`, { cause: err });
+    logger.error({ err });
+    const messages: unknown[] = [];
+    for (let e = parsed()[0]!.err as { message?: string; cause?: unknown } | string; ; e = (e as { cause: typeof e }).cause) {
+      if (typeof e === "string") {
+        messages.push(e);
+        break;
+      }
+      messages.push(e.message);
+    }
+    expect(messages).toEqual(["e0", "e1", "e2", "e3", "e4", "e5", "[Truncated]"]);
   });
 
   it("a registration released twice, or replaced, does not remove the newer scope", () => {

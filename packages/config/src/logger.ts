@@ -67,24 +67,41 @@ export interface LoggerOptions {
   now?: () => Date;
 }
 
-/** Errors keep only what is safe and useful in a log line. */
-function serializeError(err: unknown): unknown {
+/** How many `cause` links a logged error keeps. */
+const MAX_CAUSE_DEPTH = 5;
+
+/**
+ * An error as a plain object: name, message, code, stack and its `cause` chain (a cause that is
+ * not an Error is kept as a value). The line's redaction then applies to all of it, stack included.
+ */
+function serializeError(err: unknown, chain: unknown[] = []): unknown {
   if (!(err instanceof Error)) return err;
   const out: Record<string, unknown> = { name: err.name, message: err.message };
   const code = (err as { code?: unknown }).code;
   if (typeof code === "string" || typeof code === "number") out.code = code;
+  if (typeof err.stack === "string") out.stack = err.stack;
+  if (err.cause !== undefined) {
+    const next = [...chain, err];
+    if (next.includes(err.cause)) out.cause = "[Circular]";
+    else if (next.length > MAX_CAUSE_DEPTH) out.cause = "[Truncated]";
+    else out.cause = serializeError(err.cause, next);
+  }
   return out;
 }
 
-/** JSON that never throws: repeated/cyclic objects become "[Circular]", BigInts strings. */
+/**
+ * JSON that never throws: a value inside itself (a cycle) becomes "[Circular]", BigInts strings.
+ * A value referenced twice is written twice: only the path from the root to a value is checked.
+ */
 function stringify(value: unknown): string {
-  const seen = new WeakSet<object>();
-  return JSON.stringify(value, (_key, v: unknown) => {
+  const ancestors: object[] = [];
+  return JSON.stringify(value, function (this: unknown, _key, v: unknown) {
     if (typeof v === "bigint") return v.toString();
-    if (v !== null && typeof v === "object") {
-      if (seen.has(v)) return "[Circular]";
-      seen.add(v);
-    }
+    if (v === null || typeof v !== "object") return v;
+    // `this` is the object holding `v`: leave the branches JSON.stringify has finished.
+    while (ancestors.length > 0 && ancestors.at(-1) !== this) ancestors.pop();
+    if (ancestors.includes(v)) return "[Circular]";
+    ancestors.push(v);
     return v;
   });
 }

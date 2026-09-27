@@ -120,7 +120,9 @@ worker writes about a run it is processing carries `runId`, `tenantId`, `stage` 
 it (including a run it skips or cannot start). Lines about a run written from outside its job (reaper, retention,
 the queue's job-failure handler) carry `runId` and whatever else is at hand. Two layers of redaction run on every line:
 key-based (`password`, `token`, `authorization`, `cookie`, …) and the run's own redactor, which masks the run's
-secret values in any encoded form, including inside error messages. Useful filters: all lines of one run
+secret values in any encoded form, including inside error messages. An `err` field carries the error's name, message,
+`code`, stack and `cause` chain (up to five causes), redacted like the rest of the line; the `run errored` line
+carries the error that ended the run. Useful filters: all lines of one run
 (`runId`), and errors by `component`. The API's HTTP access log is Fastify's (pino), with the `authorization` and
 `cookie` headers redacted and request bodies never logged.
 

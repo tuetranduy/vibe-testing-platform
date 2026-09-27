@@ -33,7 +33,8 @@ export async function failRun(deps: WorkerDeps, handle: RunContextHandle, err: u
     const message = String(ctx.redact(errorMessageOf(reason)));
     await ports.transition("ERRORED", { errorCategory: category, errorMessage: message });
     await ports.publish({ type: "run.errored", message: `Run failed: ${category}`, payload: { category, message } });
-    deps.logger.error({ runId: ctx.runId, category, err: message }, "run errored");
+    // The error itself (stack, cause chain): the run's log scope redacts its secret values.
+    deps.logger.error({ runId: ctx.runId, category, err: reason }, "run errored");
   } catch (e) {
     if (e instanceof StaleTransitionError) return;
     throw e;
@@ -52,7 +53,7 @@ export async function purgeSecretsIfTerminal(deps: WorkerDeps, runId: string): P
 export async function failBeforeContext(deps: WorkerDeps, run: TestRun, err: unknown): Promise<void> {
   const category = errorCategoryOf(err);
   const message = "Run could not be started by the worker";
-  deps.logger.error({ runId: run.id, tenantId: run.tenantId, stage: run.lifecycle, category, err: errorMessageOf(err) }, message);
+  deps.logger.error({ runId: run.id, tenantId: run.tenantId, stage: run.lifecycle, category, err }, message);
   try {
     await new RunRepository(deps.db).transition(run.id, run.lifecycle, "ERRORED", { errorCategory: category, errorMessage: message });
     observeStage(deps.metrics, run.lifecycle, run.lifecycleChangedAt, (deps.now ?? (() => new Date()))());

@@ -76,6 +76,31 @@ describe("run log lines (Task 22 step 2)", () => {
     expect(runLogs.size).toBe(0);
   });
 
+  it("an ERRORED run's line carries the error's stack and cause, with the run's secret redacted", async () => {
+    const { lines, runLogs, logger, parsed } = setup();
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, secrets: { password: SECRET } });
+    const stages = leakyStages(logger, {
+      explore: async () => {
+        throw new Error("browser crashed", { cause: new Error(`launch failed for ${SECRET}`) });
+      },
+    });
+
+    await executeRunJob(h.deps(stages, { logger, runLogs }), run.id);
+
+    expect(lines.join("\n")).not.toContain(SECRET);
+    expect(parsed().find((l) => l.msg === "run errored")).toMatchObject({
+      runId: run.id,
+      tenantId: TEST_TENANT_ID,
+      stage: "ERRORED",
+      category: "INTERNAL",
+      err: {
+        message: "browser crashed",
+        stack: expect.stringContaining("Error: browser crashed\n    at "),
+        cause: { message: "launch failed for [REDACTED]", stack: expect.stringContaining("launch failed for [REDACTED]") },
+      },
+    });
+  });
+
   it("dispose() still releases the registration, and drops the run's secrets, when a release before them throws", async () => {
     const { runLogs, logger } = setup();
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, secrets: { password: SECRET } });
@@ -111,6 +136,7 @@ describe("run log lines (Task 22 step 2)", () => {
       runId: run.id,
       tenantId: TEST_TENANT_ID,
       stage: "PLANNING",
+      err: { name: "Error", stack: expect.stringContaining("\n    at ") },
     });
   });
 
