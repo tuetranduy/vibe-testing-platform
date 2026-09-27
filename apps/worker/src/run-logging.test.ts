@@ -4,7 +4,9 @@ import { TEST_TENANT_ID } from "@platform/db/testing";
 import { encryptSecret } from "@platform/security";
 import type { EngineStages } from "@platform/testing-engine";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { WorkerDeps } from "./deps";
 import { executeRunJob } from "./jobs/execute-run";
+import { createRunContext } from "./run-context";
 import { createFakeStages, createHarness, requestCancel, seedRun, type WorkerHarness } from "./test-support";
 
 let h: WorkerHarness;
@@ -72,6 +74,27 @@ describe("run log lines (Task 22 step 2)", () => {
 
     expect(parsed().find((l) => l.msg === "run cancelled")).toMatchObject({ runId: run.id, tenantId: TEST_TENANT_ID, stage: "CANCELLED" });
     expect(runLogs.size).toBe(0);
+  });
+
+  it("dispose() still releases the registration, and drops the run's secrets, when a release before them throws", async () => {
+    const { runLogs, logger } = setup();
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, secrets: { password: SECRET } });
+    const cancelWatcher = {
+      watch: async () => () => {
+        throw new Error("unwatch failed");
+      },
+    } as unknown as WorkerDeps["cancelWatcher"];
+    const handle = await createRunContext(h.deps(createFakeStages(), { logger, runLogs, cancelWatcher }), run, {
+      deadlineAt: new Date(Date.now() + 60_000),
+      totalBudgetMs: 60_000,
+    });
+    expect(runLogs.get(run.id)).toBeDefined();
+    expect(handle.ctx.secrets.get("password")).toBe(SECRET);
+
+    await expect(handle.dispose()).rejects.toThrow("unwatch failed");
+
+    expect(runLogs.size).toBe(0);
+    expect(handle.ctx.secrets.get("password")).toBeUndefined();
   });
 
   it("a run the worker cannot start (secrets fail to decrypt) logs with tenantId and stage too", async () => {
