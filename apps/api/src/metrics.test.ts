@@ -42,4 +42,18 @@ describe("GET /metrics", () => {
       queue.depthFails = false;
     }
   });
+
+  it("answers promptly when the queue never replies (ioredis holds commands while Redis reconnects): no queue_depth, everything else", async () => {
+    queue.depthHangs = true;
+    try {
+      const started = Date.now();
+      const { status, text } = await scrape();
+      expect(status).toBe(200);
+      expect(Date.now() - started).toBeLessThan(2_500);
+      expect(text).not.toMatch(/^queue_depth\{/m);
+      expect(text).toContain("# TYPE test_runs_total counter");
+    } finally {
+      queue.depthHangs = false;
+    }
+  });
 });
