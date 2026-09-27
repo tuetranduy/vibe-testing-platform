@@ -2,7 +2,7 @@ import { EventRepository, RunRepository, SecretRepository, StaleTransitionError,
 import { createRunEventPublisher } from "@platform/event-bus";
 import { redactByKey } from "@platform/security";
 import type { WorkerDeps } from "../deps";
-import { NO_VERDICT } from "../metrics";
+import { NO_VERDICT, observeStage } from "../metrics";
 
 export interface ReapResult {
   workerLost: string[];
@@ -37,6 +37,7 @@ export async function reapJob(deps: WorkerDeps): Promise<ReapResult> {
   // Each run is counted as soon as it is ended, so a pass that fails later still counts it.
   const errorRun = async (run: TestRun, category: keyof typeof REAPED_REASON, message: string) => {
     await runs.transition(run.id, run.lifecycle, "ERRORED", { errorCategory: category, errorMessage: message });
+    observeStage(deps.metrics, run.lifecycle, run.lifecycleChangedAt, now);
     deps.metrics?.testRuns.inc({ lifecycle: "ERRORED", verdict: NO_VERDICT });
     deps.metrics?.runsReaped.inc({ reason: REAPED_REASON[category] });
     await secrets.purge(run.id);
@@ -87,6 +88,7 @@ export async function reapJob(deps: WorkerDeps): Promise<ReapResult> {
   for (const run of await runs.findAwaitingConfirmationSince(new Date(now.getTime() - ttlMs))) {
     await safely(run, async () => {
       await runs.transition(run.id, "AWAITING_CONFIRMATION", "CANCELLED", { cancelReason: "CONFIRMATION_EXPIRED" });
+      observeStage(deps.metrics, "AWAITING_CONFIRMATION", run.lifecycleChangedAt, now);
       deps.metrics?.testRuns.inc({ lifecycle: "CANCELLED", verdict: NO_VERDICT });
       deps.metrics?.runsReaped.inc({ reason: "CONFIRMATION_EXPIRED" });
       await secrets.purge(run.id);

@@ -7,6 +7,9 @@ import type { EgressBlockEvent } from "./sandbox/egress-proxy";
 /** `verdict` label of runs that ended without one (ERRORED, CANCELLED). */
 export const NO_VERDICT = "none";
 
+/** `test_run_duration_seconds` buckets; the API's histogram uses the same, since Prometheus sums the two. */
+export const RUN_DURATION_BUCKETS = [1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600];
+
 /**
  * The worker's Prometheus metrics (Task 22). One registry per process; the API exports
  * `queue_depth` and its own `test_runs_total` series (runs it ends itself), which Prometheus sums.
@@ -21,7 +24,7 @@ export function createWorkerMetrics(registry = new Registry()) {
       name: "test_run_duration_seconds",
       help: "Time a run spent in each lifecycle stage",
       labelNames: ["stage"],
-      buckets: [1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600],
+      buckets: RUN_DURATION_BUCKETS,
       registers,
     }),
     activeRuns: new Gauge({ name: "active_worker_runs", help: "Run jobs (analyze / execute) this worker is processing", registers }),
@@ -42,6 +45,15 @@ export function createWorkerMetrics(registry = new Registry()) {
 }
 
 export type WorkerMetrics = ReturnType<typeof createWorkerMetrics>;
+
+/**
+ * Observes the time a run spent in `stage`, which it entered at `enteredAt` (its
+ * `lifecycleChangedAt`) and leaves at `leftAt`. Every transition times the stage it ends,
+ * whichever process makes it.
+ */
+export function observeStage(metrics: WorkerMetrics | undefined, stage: string, enteredAt: Date, leftAt: Date): void {
+  metrics?.runDuration.observe({ stage }, Math.max(0, leftAt.getTime() - enteredAt.getTime()) / 1000);
+}
 
 /** The LlmClient's call sink, next to the llm_calls row. */
 export function recordLlmCall(metrics: WorkerMetrics, call: LlmCallRecord): void {

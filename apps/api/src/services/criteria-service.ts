@@ -5,7 +5,7 @@ import { redactByKey } from "@platform/security";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 import { applyCriteriaEdit } from "./criteria-edit";
-import { NO_VERDICT } from "../metrics";
+import { NO_VERDICT, observeStage } from "../metrics";
 
 const ENQUEUE_FAILED = "Queue unavailable after confirmation";
 
@@ -124,24 +124,26 @@ export class CriteriaService {
       payload: { revision: confirmed.revision },
     });
 
-    await this.runs.transition(runId, "AWAITING_CONFIRMATION", "PLANNING", { heartbeatAt: new Date() });
+    const planned = await this.runs.transition(runId, "AWAITING_CONFIRMATION", "PLANNING", { heartbeatAt: new Date() });
+    observeStage(this.deps.metrics, "AWAITING_CONFIRMATION", run.lifecycleChangedAt, planned.lifecycleChangedAt);
 
     try {
       await this.deps.queue.enqueueExecute(runId);
     } catch {
-      await this.failEnqueue(runId);
+      await this.failEnqueue(runId, planned.lifecycleChangedAt);
       throw new HttpError(503, "QUEUE_UNAVAILABLE", "The run could not be queued; please retry");
     }
 
     return { revision: confirmed.revision, warnings };
   }
 
-  private async failEnqueue(runId: string): Promise<void> {
+  private async failEnqueue(runId: string, plannedAt: Date): Promise<void> {
     try {
-      await this.runs.transition(runId, "PLANNING", "ERRORED", {
+      const errored = await this.runs.transition(runId, "PLANNING", "ERRORED", {
         errorCategory: "INTERNAL",
         errorMessage: ENQUEUE_FAILED,
       });
+      observeStage(this.deps.metrics, "PLANNING", plannedAt, errored.lifecycleChangedAt);
       this.deps.metrics?.testRuns.inc({ lifecycle: "ERRORED", verdict: NO_VERDICT });
       await new SecretRepository(this.deps.db).purge(runId);
       await this.publisher().publish({
