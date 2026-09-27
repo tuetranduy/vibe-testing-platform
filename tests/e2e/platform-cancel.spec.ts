@@ -30,7 +30,8 @@ describe("Task 21 step 4 — cancel", () => {
 
     await expect.poll(() => processesMentioning(runId), { timeout: 5_000 }).toEqual([]);
     expect(existsSync(path.join(stack.runnerDir, runId))).toBe(false);
-    expect(await store.secretsActive(runId)).toEqual([]);
+    // The worker purges secrets after it releases the run's resources, which follows the CANCELLED transition.
+    await expect.poll(() => store.secretsActive(runId), { timeout: 5_000 }).toEqual([]);
     expect((await store.events(runId)).map((e) => e.type)).toContain("run.cancelled");
   });
 });
