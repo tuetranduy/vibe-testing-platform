@@ -87,8 +87,8 @@ export function logs(stack: E2EStack): string {
     .join("\n");
 }
 
-/** Command lines of live processes that mention `text` (e.g. a run id in a sandbox profile dir). */
-export function processesMentioning(text: string): string[] {
+/** Command lines of the worker's live processes that mention `text` (e.g. a run id in a sandbox profile dir). */
+export function processesMentioning(_stack: E2EStack, text: string): string[] {
   const out = execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return out.split("\n").filter((l) => l.includes(text) && !l.includes("ps -axo"));
 }
