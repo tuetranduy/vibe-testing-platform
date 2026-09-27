@@ -86,6 +86,7 @@ const workers = await startWorkers(
     logger,
     runLogs,
     metrics,
+    storage,
   },
   { connection, concurrency: env.WORKER_CONCURRENCY },
 );

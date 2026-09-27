@@ -2,6 +2,7 @@ import {
   JOB_ANALYZE_RUN,
   JOB_EXECUTE_RUN,
   JOB_REAP,
+  JOB_RETENTION,
   MAINTENANCE_QUEUE,
   RUNS_QUEUE,
   type RunJobData,
@@ -11,6 +12,7 @@ import type { WorkerDeps } from "./deps";
 import { analyzeRunJob } from "./jobs/analyze-run";
 import { executeRunJob } from "./jobs/execute-run";
 import { reapJob } from "./jobs/reap";
+import { retentionJob } from "./jobs/retention";
 
 export interface RunningWorkers {
   close(): Promise<void>;
@@ -23,7 +25,7 @@ export interface RunningWorkers {
  */
 export async function startWorkers(
   deps: WorkerDeps,
-  opts: { connection: ConnectionOptions; concurrency: number; reapEveryMs?: number },
+  opts: { connection: ConnectionOptions; concurrency: number; reapEveryMs?: number; retentionEveryMs?: number },
 ): Promise<RunningWorkers> {
   const runs = new Worker<RunJobData>(
     RUNS_QUEUE,
@@ -42,6 +44,13 @@ export async function startWorkers(
     { every: opts.reapEveryMs ?? 60_000 },
     { name: JOB_REAP, opts: { attempts: 1, removeOnComplete: 100, removeOnFail: 100 } },
   );
+  if (deps.storage) {
+    await maintenanceQueue.upsertJobScheduler(
+      JOB_RETENTION,
+      { every: opts.retentionEveryMs ?? 24 * 3_600_000 },
+      { name: JOB_RETENTION, opts: { attempts: 1, removeOnComplete: 30, removeOnFail: 30 } },
+    );
+  }
   const maintenance = new Worker(
     MAINTENANCE_QUEUE,
     async (job) => {
@@ -50,6 +59,10 @@ export async function startWorkers(
         if (Object.values(r).some((ids) => ids.length > 0)) {
           deps.logger.info(r, "reaper acted");
         }
+      }
+      if (job.name === JOB_RETENTION && deps.storage) {
+        const r = await retentionJob({ db: deps.db, storage: deps.storage, logger: deps.logger, ...(deps.now ? { now: deps.now } : {}) });
+        if (r.deleted > 0 || r.failed > 0) deps.logger.info(r, "retention acted");
       }
     },
     { connection: opts.connection, concurrency: 1, maxStalledCount: 0 },

@@ -1,5 +1,5 @@
 import type { ArtifactSensitivity, ArtifactType } from "@platform/contracts";
-import { and, asc, eq, lt } from "drizzle-orm";
+import { and, asc, eq, gt, lt } from "drizzle-orm";
 import type { Executor } from "./client";
 import { NotFoundError } from "./errors";
 import { newId } from "./ids";
@@ -43,8 +43,15 @@ export class ArtifactRepository {
     return this.db.select().from(artifacts).where(eq(artifacts.runId, runId)).orderBy(asc(artifacts.createdAt));
   }
 
-  async listExpired(now: Date, limit = 500): Promise<ArtifactRecord[]> {
-    return this.db.select().from(artifacts).where(lt(artifacts.expiresAt, now)).limit(limit);
+  /** Expired artifacts in id order; pass the last id seen as `afterId` to continue past rows kept for retry. */
+  async listExpired(now: Date, limit = 500, afterId?: string): Promise<ArtifactRecord[]> {
+    const expired = lt(artifacts.expiresAt, now);
+    return this.db
+      .select()
+      .from(artifacts)
+      .where(afterId ? and(expired, gt(artifacts.id, afterId)) : expired)
+      .orderBy(asc(artifacts.id))
+      .limit(limit);
   }
 
   async delete(id: string): Promise<void> {

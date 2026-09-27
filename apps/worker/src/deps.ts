@@ -1,6 +1,7 @@
 import type { RunLogRegistry } from "@platform/config";
 import type { Database } from "@platform/db";
 import type { RunQueue } from "@platform/event-bus";
+import type { ArtifactStorage } from "@platform/storage";
 import type { EngineStages } from "@platform/testing-engine";
 import type { Redis } from "ioredis";
 import type { CancelWatcher } from "./cancel-watcher";
@@ -39,6 +40,8 @@ export interface WorkerDeps {
   runLogs?: RunLogRegistry;
   /** Prometheus metrics; absent in most tests. */
   metrics?: WorkerMetrics;
+  /** Artifact storage; when set, the daily retention job runs. */
+  storage?: ArtifactStorage;
   now?: () => Date;
 }
 
