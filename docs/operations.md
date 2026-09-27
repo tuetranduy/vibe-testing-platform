@@ -130,8 +130,11 @@ carries the error that ended the run. Useful filters: all lines of one run
 
 A daily `retention` job (its own queue) deletes expired artifacts, the object first and then its row.
 `expires_at` is set when an artifact is stored: `SECRET_BEARING` after `SECRET_ARTIFACT_RETENTION_DAYS` (7),
-`STANDARD` after `ARTIFACT_RETENTION_DAYS` (30). A failed delete is logged and retried on the next pass. As a
-backstop, configure an S3 lifecycle rule that expires objects some time after the longest retention (e.g. 45 days).
+`STANDARD` after `ARTIFACT_RETENTION_DAYS` (30). A failed delete is logged and retried on the next pass. A pass
+stops after an hour, even in the middle of a store call that does not return ("retention pass reached its time
+limit" in the log), and leaves the rest to the next pass; S3 calls also fail after 5 s without a connection or 30 s
+of silence. As a backstop, configure an S3 lifecycle rule that expires objects some time after the longest retention
+(e.g. 45 days).
 
 ## Release checks
 

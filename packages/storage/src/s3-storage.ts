@@ -27,11 +27,20 @@ export interface S3StorageOptions {
   secretAccessKey: string;
   /** true for MinIO and most S3-compatible servers. */
   forcePathStyle: boolean;
+  /** How long connecting to the store may take. Default 5 s. */
+  connectionTimeoutMs?: number;
+  /**
+   * How long a request's socket may sit idle (nothing sent or received) before the request fails.
+   * An idle limit, not a total one, so a large upload that keeps moving is never cut off. Default 30 s.
+   */
+  socketTimeoutMs?: number;
 }
 
 /** Multipart part size for streamed uploads (S3 minimum is 5 MiB). */
 const PART_SIZE = 5 * 1024 * 1024;
 const QUEUE_SIZE = 4;
+const CONNECTION_TIMEOUT_MS = 5_000;
+const SOCKET_TIMEOUT_MS = 30_000;
 
 export function createS3Storage(opts: S3StorageOptions): ArtifactStorage {
   for (const k of ["bucket", "region", "accessKeyId", "secretAccessKey"] as const) {
@@ -49,6 +58,12 @@ export function createS3Storage(opts: S3StorageOptions): ArtifactStorage {
       // mishandle; integrity is covered by our own sha256.
       requestChecksumCalculation: "WHEN_REQUIRED",
       responseChecksumValidation: "WHEN_REQUIRED",
+      // Without these a store that stops answering holds a request (an upload, a retention delete)
+      // forever. A timed-out attempt is retried like any network error, then fails.
+      requestHandler: {
+        connectionTimeout: opts.connectionTimeoutMs ?? CONNECTION_TIMEOUT_MS,
+        socketTimeout: opts.socketTimeoutMs ?? SOCKET_TIMEOUT_MS,
+      },
     });
   const client = makeClient(opts.endpoint);
   // SigV4 signs the Host header, so a URL for another host must be signed by a client configured

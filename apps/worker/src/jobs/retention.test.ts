@@ -42,14 +42,14 @@ describe("retentionJob (fake clock)", () => {
     const { run, secret, standard } = await seedArtifacts(storage);
     const repo = new ArtifactRepository(h.tdb.db);
 
-    expect(await retentionJob({ db: h.tdb.db, storage, logger: silentLogger, now: () => at(6) })).toEqual({ deleted: 0, failed: 0 });
+    expect(await retentionJob({ db: h.tdb.db, storage, logger: silentLogger, now: () => at(6) })).toEqual({ deleted: 0, failed: 0, stoppedEarly: false });
 
-    expect(await retentionJob({ db: h.tdb.db, storage, logger: silentLogger, now: () => at(8) })).toEqual({ deleted: 1, failed: 0 });
+    expect(await retentionJob({ db: h.tdb.db, storage, logger: silentLogger, now: () => at(8) })).toEqual({ deleted: 1, failed: 0, stoppedEarly: false });
     expect((await repo.listByRun(run.id)).map((a) => a.id)).toEqual([standard.id]);
     expect(existsSync(resolveLocalObjectPath(root, secret.objectKey))).toBe(false);
     expect(existsSync(resolveLocalObjectPath(root, standard.objectKey))).toBe(true);
 
-    expect(await retentionJob({ db: h.tdb.db, storage, logger: silentLogger, now: () => at(31) })).toEqual({ deleted: 1, failed: 0 });
+    expect(await retentionJob({ db: h.tdb.db, storage, logger: silentLogger, now: () => at(31) })).toEqual({ deleted: 1, failed: 0, stoppedEarly: false });
     expect(await repo.listByRun(run.id)).toEqual([]);
     expect(existsSync(resolveLocalObjectPath(root, standard.objectKey))).toBe(false);
   });
@@ -86,6 +86,48 @@ describe("retentionJob (fake clock)", () => {
 
     // The next pass, with storage back, finishes the job.
     expect((await retentionJob({ db: h.tdb.db, storage: good, logger: silentLogger, now: () => at(31) })).failed).toBe(0);
+    expect(await new ArtifactRepository(h.tdb.db).listByRun(run.id)).toEqual([]);
+  });
+
+  it("a delete that never returns ends the pass at its time limit; nothing else is started and the rows stay for the next pass", async () => {
+    const good = createLocalStorage({ rootDir: root });
+    const { run } = await seedArtifacts(good);
+    const warnings: { obj: object; msg?: string }[] = [];
+    let deletes = 0;
+    const hung: ArtifactStorage = {
+      ...good,
+      put: good.put.bind(good),
+      getSignedReadUrl: good.getSignedReadUrl.bind(good),
+      ensureReady: good.ensureReady.bind(good),
+      delete: () => {
+        deletes += 1;
+        return new Promise<void>(() => {});
+      },
+    };
+    const pass = (day: number) =>
+      retentionJob({
+        db: h.tdb.db,
+        storage: hung,
+        logger: { ...silentLogger, warn: (obj, msg) => void warnings.push({ obj, msg }) },
+        now: () => at(day),
+        passTimeoutMs: 300,
+      });
+
+    // Day 8: only the SECRET_BEARING artifact is expired, and its delete hangs.
+    let started = Date.now();
+    expect(await pass(8)).toEqual({ deleted: 0, failed: 1, stoppedEarly: true });
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(deletes).toBe(1);
+    // Day 31: both are expired; the first delete hangs, the second is never started.
+    started = Date.now();
+    expect(await pass(31)).toEqual({ deleted: 0, failed: 1, stoppedEarly: true });
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(deletes).toBe(2);
+    expect(await new ArtifactRepository(h.tdb.db).listByRun(run.id)).toHaveLength(2);
+    expect(warnings.map((w) => w.msg)).toContainEqual(expect.stringMatching(/time limit/));
+
+    // The next pass, with a store that answers, deletes them.
+    expect(await retentionJob({ db: h.tdb.db, storage: good, logger: silentLogger, now: () => at(31) })).toMatchObject({ failed: 0, stoppedEarly: false });
     expect(await new ArtifactRepository(h.tdb.db).listByRun(run.id)).toEqual([]);
   });
 });
