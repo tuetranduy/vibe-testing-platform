@@ -26,6 +26,10 @@ export async function buildApp(deps: ApiDeps, opts: FastifyServerOptions = {}): 
   });
 
   app.get("/healthz", async () => ({ ok: true }));
+  if (deps.metrics) {
+    const { registry } = deps.metrics;
+    app.get("/metrics", async (_req, reply) => reply.type(registry.contentType).send(await registry.metrics()));
+  }
 
   await app.register(async (v1) => {
     v1.addHook("onRequest", createBearerAuth(deps.config.apiToken));

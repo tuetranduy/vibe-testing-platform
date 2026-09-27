@@ -20,6 +20,7 @@ import { createRunRedactor, encryptSecret, redactByKey, validateTargetUrl } from
 import { createHmac } from "node:crypto";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
+import { NO_VERDICT } from "../metrics";
 
 const ENQUEUE_FAILED = "Queue unavailable at creation";
 
@@ -175,6 +176,7 @@ export class TestRunService {
         errorCategory: "INTERNAL",
         errorMessage: ENQUEUE_FAILED,
       });
+      this.deps.metrics?.testRuns.inc({ lifecycle: "ERRORED", verdict: NO_VERDICT });
       await new SecretRepository(this.deps.db).purge(runId);
       await this.publisher().publish({
         runId,
@@ -214,6 +216,7 @@ export class TestRunService {
           cancelReason: "USER_REQUESTED",
           cancelRequestedAt: new Date(),
         });
+        this.deps.metrics?.testRuns.inc({ lifecycle: "CANCELLED", verdict: NO_VERDICT });
         await new SecretRepository(this.deps.db).purge(run.id);
         await this.publisher().publish({
           runId: run.id,

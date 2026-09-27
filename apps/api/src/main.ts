@@ -5,6 +5,7 @@ import { defaultResolver } from "@platform/security";
 import { createArtifactStorage } from "@platform/storage";
 import { Redis } from "ioredis";
 import { buildApp } from "./app";
+import { createApiMetrics } from "./metrics";
 import { createCancelSignal } from "./services/cancel-signal";
 
 const env = loadEnvOrExit();
@@ -34,6 +35,8 @@ const queue = createRunQueue(queueConnection);
 const storage = createArtifactStorage(env);
 await retry(() => storage.ensureReady(), "artifact storage");
 
+const metrics = createApiMetrics({ queue });
+
 const app = await buildApp(
   {
     config: {
@@ -52,6 +55,7 @@ const app = await buildApp(
     storage,
     cancelSignal: createCancelSignal(redis),
     resolve: defaultResolver,
+    metrics,
   },
   { logger: { level: env.LOG_LEVEL, redact: ["req.headers.authorization", "req.headers.cookie"] } },
 );
