@@ -42,7 +42,7 @@ describe("RunReport", () => {
     expect(cost).toHaveTextContent("$0.042");
     expect(cost).toHaveTextContent(/12 model calls/);
 
-    expect(screen.getByRole("heading", { name: /^criteria$/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^results by criterion$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^AC-1\b/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /generated playwright test/i })).toBeInTheDocument();
     // Report-level diagnostics (not tied to a criterion).

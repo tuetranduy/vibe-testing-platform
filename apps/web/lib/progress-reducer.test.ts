@@ -2,7 +2,7 @@
 import type { TestEvent } from "@platform/contracts";
 import { describe, expect, it } from "vitest";
 import { ev } from "../test/events";
-import { STAGE_WEIGHTS, initialProgress, progressReducer, type ProgressState } from "./progress-reducer";
+import { STAGE_WEIGHTS, initialProgress, progressReducer, stagesFor, type ProgressState } from "./progress-reducer";
 
 const reduce = (events: TestEvent[], from: ProgressState = initialProgress()) => events.reduce(progressReducer, from);
 
@@ -159,5 +159,48 @@ describe("progressReducer", () => {
       { stepId: "st_2", index: 1, kind: "fill", outcome: "FAILED", message: "Step 2: fill failed" },
     ]);
     expect(s.latestScreenshot?.artifactId).toBe("art_1"); // a trace is not a screenshot
+  });
+});
+
+describe("executionStartedAt", () => {
+  it("is when the first stage after confirmation started", () => {
+    const s = reduce([
+      ev(1, "stage.started", { stage: "ANALYZING_REQUIREMENT" }),
+      ev(2, "stage.completed", { stage: "ANALYZING_REQUIREMENT" }),
+      ev(3, "criteria.confirmed", { revision: 1 }, { stage: "AWAITING_CONFIRMATION" }),
+      ev(4, "stage.started", { stage: "PLANNING" }),
+      ev(5, "stage.completed", { stage: "PLANNING" }),
+      ev(6, "stage.started", { stage: "EXPLORING" }),
+    ]);
+    expect(s.executionStartedAt).toBe(new Date(Date.UTC(2026, 8, 26, 10, 0, 4)).toISOString());
+  });
+
+  it("is unknown while the run is only being analyzed", () => {
+    expect(reduce([ev(1, "stage.started", { stage: "ANALYZING_REQUIREMENT" })]).executionStartedAt).toBeNull();
+  });
+});
+
+describe("stagesFor", () => {
+  it("shows the lifecycle's stage as current when no event marked one (awaiting confirmation)", () => {
+    const s = reduce([ev(1, "stage.started", { stage: "ANALYZING_REQUIREMENT" }), ev(2, "stage.completed", { stage: "ANALYZING_REQUIREMENT" })]);
+    const shown = stagesFor(s, "AWAITING_CONFIRMATION");
+    expect(shown.currentStage).toBe("AWAITING_CONFIRMATION");
+    expect(shown.stages.AWAITING_CONFIRMATION).toBe("current");
+    expect(shown.stages.ANALYZING_REQUIREMENT).toBe("done");
+    expect(s.stages.AWAITING_CONFIRMATION).toBe("pending"); // the state itself is untouched
+  });
+
+  it("settles the stages before it when the page has not seen their events yet", () => {
+    const shown = stagesFor(initialProgress(), "AWAITING_CONFIRMATION");
+    expect(shown.stages.ANALYZING_REQUIREMENT).toBe("done");
+    expect(shown.stages.PLANNING).toBe("pending");
+  });
+
+  it("keeps the events' view when a stage is current, the run ended, or the lifecycle is not a stage", () => {
+    const exploring = reduce(upToExploring);
+    expect(stagesFor(exploring, "PLANNING")).toEqual({ stages: exploring.stages, currentStage: "EXPLORING" });
+    const ended = reduce([...upToExploring, ev(5, "run.cancelled", { reason: "USER_REQUESTED" }, { stage: "CANCELLED" })]);
+    expect(stagesFor(ended, "CANCELLED").currentStage).toBeNull();
+    expect(stagesFor(initialProgress(), "QUEUED").currentStage).toBeNull();
   });
 });

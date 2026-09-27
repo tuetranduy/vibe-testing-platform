@@ -32,13 +32,15 @@ export function CriteriaResults({ runId, criteria, requirement, diagnostics, art
     });
 
   return (
-    <section className="card" aria-labelledby="criteria-title">
-      <div className="card-head">
-        <h2 id="criteria-title">Criteria</h2>
+    <section className="results-section" aria-labelledby="criteria-title">
+      <div className="section-head">
+        <h2 id="criteria-title" className="section-title">
+          Results by criterion
+        </h2>
         {criteria.length > 0 && <p className="muted">Open a criterion for its expected and actual values, steps and evidence.</p>}
       </div>
       {criteria.length === 0 ? (
-        <p className="muted">No criterion results were recorded{partial ? " before the run stopped" : ""}.</p>
+        <p className="card muted">No criterion results were recorded{partial ? " before the run stopped" : ""}.</p>
       ) : (
         <ul className="results">
           {criteria.map((r) => (
@@ -77,35 +79,42 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
   const decided = r.status === "PASS" || r.status === "FAIL";
 
   return (
-    <li className={`result result-${CRITERION_STATUS_UI[r.status].tone}`}>
-      <h3 className="result-heading">
-        <button
-          type="button"
-          id={toggleId}
-          className="result-toggle"
-          aria-expanded={expanded}
-          aria-controls={expanded ? detailId : undefined}
-          onClick={onToggle}
-        >
-          <span className="result-id">{r.criterionId}</span>{" "}
-          <span className="result-statement">{criterion?.statement ?? `Criterion ${r.criterionId}`}</span>
-          <Icon name="chevron" className="result-chevron" />
-        </button>
-      </h3>
+    <li className={`result result-${CRITERION_STATUS_UI[r.status].tone}${expanded ? " result-open" : ""}`}>
+      <div className="result-row">
+        <span className="result-status">
+          <CriterionStatusBadge status={r.status} />
+        </span>
+        <div className="result-main">
+          <h3 className="result-heading">
+            <button
+              type="button"
+              id={toggleId}
+              className="result-toggle"
+              aria-expanded={expanded}
+              aria-controls={expanded ? detailId : undefined}
+              onClick={onToggle}
+            >
+              <span className="result-id">{r.criterionId}</span>{" "}
+              <span className="result-statement">{criterion?.statement ?? `Criterion ${r.criterionId}`}</span>
+              <Icon name="chevron" className="result-chevron" />
+            </button>
+          </h3>
 
-      <div className="result-meta">
-        <CriterionStatusBadge status={r.status} />
-        {decided && r.verdictSource ? (
-          <>
-            <span className={`confirmation confirmation-${r.verdictSource === "PLAYWRIGHT_RERUN" ? "yes" : "no"}`}>
-              {VERDICT_SOURCE_TEXT[r.verdictSource]}
-            </span>
-            {r.verdictSource === "EXPLORATION_ONLY" && <span className="result-sub">{unconfirmedWhy(r.rerunOutcome)}</span>}
-          </>
-        ) : (
-          <span className="result-reason">{reasonText(r.reason)}</span>
-        )}
-        {r.reason === "DISCOVERY_RERUN_DISAGREE" && <span className="result-sub">{disagreementText(r.provisional.status, r.rerunOutcome)}</span>}
+          <p className="result-meta">
+            {decided && r.verdictSource ? (
+              <>
+                <span className={`confirmation confirmation-${r.verdictSource === "PLAYWRIGHT_RERUN" ? "yes" : "no"}`}>
+                  {r.verdictSource === "PLAYWRIGHT_RERUN" && <Icon name="shield" />}
+                  {VERDICT_SOURCE_TEXT[r.verdictSource]}
+                </span>
+                {r.verdictSource === "EXPLORATION_ONLY" && <span className="result-sub">{unconfirmedWhy(r.rerunOutcome)}</span>}
+              </>
+            ) : (
+              <span className="result-reason">{reasonText(r.reason)}</span>
+            )}
+            {r.reason === "DISCOVERY_RERUN_DISAGREE" && <span className="result-sub">{disagreementText(r.provisional.status, r.rerunOutcome)}</span>}
+          </p>
+        </div>
       </div>
 
       {r.aiNote && (

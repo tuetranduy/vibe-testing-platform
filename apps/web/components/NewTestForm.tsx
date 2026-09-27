@@ -8,10 +8,11 @@ import {
   type CreateTestRunRequestInput,
 } from "@platform/contracts";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ApiRequestError, createRun, getCriteria, getRun } from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
+import { plural } from "./report-format";
 
 interface DataRow {
   id: number;
@@ -140,6 +141,13 @@ const OPTION_MSG: Record<string, string> = {
   additionalAllowedHosts: "Enter up to 10 host names, such as login.example.com.",
 };
 
+/** Starting points for an empty requirement; each fills in a full sentence to edit. */
+const EXAMPLES = [
+  { label: "Adding to cart updates the total", text: "A user can add a product to the cart, and the cart total updates to include its price." },
+  { label: "Sign-in opens the account page", text: "A user can sign in with valid credentials and lands on their account page." },
+  { label: "Search lists matching products", text: "Searching for a product name lists only products whose names contain it." },
+] as const;
+
 /** Maps server validation issues (400) onto the fields they name. */
 function issuesToErrors(err: ApiRequestError): Errors {
   const errors: Errors = {};
@@ -157,6 +165,7 @@ let nextRowId = 1;
 export function NewTestForm({ from = null }: { from?: string | null } = {}) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
+  const requirementRef = useRef<HTMLTextAreaElement>(null);
   const [targetUrl, setTargetUrl] = useState("");
   const [requirement, setRequirement] = useState("");
   /** Pre-fill when starting over from an earlier run (its URL and full requirement text only). */
@@ -273,216 +282,265 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
       </p>
     ) : null;
 
+  const dataCount = data.filter((r) => r.key.trim() || r.value).length;
+  const secretCount = secrets.filter((r) => r.name.trim()).length;
+
+  /** Fills the requirement from an example; focus moves to it, since the example buttons go away. */
+  const applyExample = (text: string) => {
+    setRequirement(text);
+    requirementRef.current?.focus();
+  };
+
   return (
-    <form ref={formRef} className="form" noValidate onSubmit={onSubmit} aria-busy={pending}>
-      {prefill === "loaded" && (
-        <div role="status" className="banner banner-info">
-          <Icon name="info" />
-          <div>
-            <p>Copied the website and requirement from your earlier run. Test data and secrets must be entered again — they are never copied.</p>
+    <form ref={formRef} className="composer" noValidate onSubmit={onSubmit} aria-busy={pending}>
+      <div className="composer-body">
+        {prefill === "loaded" && (
+          <div role="status" className="banner banner-info">
+            <Icon name="info" />
+            <div>
+              <p>Copied the website and requirement from your earlier run. Test data and secrets must be entered again — they are never copied.</p>
+            </div>
           </div>
-        </div>
-      )}
-      {prefill === "failed" && (
-        <div role="status" className="banner banner-warning">
-          <Icon name="warning" />
-          <div>
-            <p>Couldn&apos;t load the earlier run; fill in the form below.</p>
+        )}
+        {prefill === "failed" && (
+          <div role="status" className="banner banner-warning">
+            <Icon name="warning" />
+            <div>
+              <p>Couldn&apos;t load the earlier run; fill in the form below.</p>
+            </div>
           </div>
-        </div>
-      )}
-      {banner && (
-        <div role="alert" className="banner banner-error">
-          <Icon name="warning" />
-          <div>
-            <p className="banner-title">{banner.title}</p>
-            <p>{banner.message}</p>
+        )}
+        {banner && (
+          <div role="alert" className="banner banner-error">
+            <Icon name="warning" />
+            <div>
+              <p className="banner-title">{banner.title}</p>
+              <p>{banner.message}</p>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <div className="field">
-        <label htmlFor={fid.url}>Website URL</label>
-        <p id="targetUrl-hint" className="hint">
-          The page the test starts from.
-        </p>
-        <input
-          id={fid.url}
-          name="targetUrl"
-          type="url"
-          inputMode="url"
-          autoComplete="url"
-          placeholder="https://shop.example.com"
-          value={targetUrl}
-          onChange={(e) => setTargetUrl(e.target.value)}
-          aria-invalid={errors[fid.url] ? true : undefined}
-          aria-describedby={describedBy(fid.url, "targetUrl-hint")}
-        />
-        {fieldError(fid.url)}
+        <div className="field">
+          <label htmlFor={fid.url}>Website URL</label>
+          <div className="input-with-icon">
+            <Icon name="globe" />
+            <input
+              id={fid.url}
+              name="targetUrl"
+              type="url"
+              inputMode="url"
+              autoComplete="url"
+              spellCheck={false}
+              placeholder="https://shop.example.com"
+              value={targetUrl}
+              onChange={(e) => setTargetUrl(e.target.value)}
+              aria-invalid={errors[fid.url] ? true : undefined}
+              aria-describedby={describedBy(fid.url, "targetUrl-hint")}
+            />
+          </div>
+          <p id="targetUrl-hint" className="hint">
+            The page the test starts from.
+          </p>
+          {fieldError(fid.url)}
+        </div>
+
+        <div className="field">
+          <label htmlFor={fid.requirement}>Requirement</label>
+          <div className="prompt-box">
+            <textarea
+              ref={requirementRef}
+              id={fid.requirement}
+              name="requirement"
+              rows={4}
+              placeholder="Verify that a user can search for an iPhone, add it to the cart, and see it in the cart."
+              value={requirement}
+              onChange={(e) => setRequirement(e.target.value)}
+              aria-invalid={errors[fid.requirement] ? true : undefined}
+              aria-describedby={describedBy(fid.requirement, "requirement-hint")}
+            />
+            {requirement === "" && (
+              <div className="prompt-examples" role="group" aria-label="Examples to start from">
+                <span className="examples-label" aria-hidden="true">
+                  Try
+                </span>
+                {EXAMPLES.map((ex) => (
+                  <button key={ex.label} type="button" className="example-chip" onClick={() => applyExample(ex.text)}>
+                    {ex.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <p id="requirement-hint" className="hint">
+            One behaviour per test works best: name the page, the action, and what you expect to see.
+          </p>
+          {fieldError(fid.requirement)}
+        </div>
+
+        <fieldset className="field">
+          <legend>Environment</legend>
+          <div className="env-row">
+            <div className="segmented">
+              {(["staging", "production"] as const).map((env) => (
+                <label key={env} className="segment">
+                  <input
+                    type="radio"
+                    className="segment-input"
+                    name="environment"
+                    value={env}
+                    checked={environment === env}
+                    onChange={() => setEnvironment(env)}
+                  />
+                  {env === "staging" ? "Staging" : "Production"}
+                </label>
+              ))}
+            </div>
+            <p className="hint">
+              {environment === "production" ? (
+                <>
+                  <Icon name="info" /> Destructive actions are always blocked in production.
+                </>
+              ) : (
+                "You can allow destructive actions on staging."
+              )}
+            </p>
+          </div>
+        </fieldset>
       </div>
 
-      <div className="field">
-        <label htmlFor={fid.requirement}>Requirement</label>
-        <p id="requirement-hint" className="hint">
-          Describe in plain language what should work. You&apos;ll review the acceptance criteria before the test starts.
-        </p>
-        <textarea
-          id={fid.requirement}
-          name="requirement"
-          rows={5}
-          placeholder="Verify that a user can search for an iPhone, add it to the cart, and see it in the cart."
-          value={requirement}
-          onChange={(e) => setRequirement(e.target.value)}
-          aria-invalid={errors[fid.requirement] ? true : undefined}
-          aria-describedby={describedBy(fid.requirement, "requirement-hint")}
-        />
-        {fieldError(fid.requirement)}
-      </div>
-
-      <fieldset className="field">
-        <legend>Environment</legend>
-        <div className="choice-row">
-          {(["staging", "production"] as const).map((env) => (
-            <label key={env} className="choice">
-              <input
-                type="radio"
-                name="environment"
-                value={env}
-                checked={environment === env}
-                onChange={() => setEnvironment(env)}
-              />
-              {env === "staging" ? "Staging" : "Production"}
-            </label>
+      <div className="form-sections">
+        <FormSection
+          icon="data"
+          title="Test data"
+          description="Values the test may type, such as a search term. Empty rows are ignored."
+          summary={dataCount === 0 ? "None" : plural(dataCount, "value")}
+        >
+          {data.map((row, i) => (
+            <div key={row.id} className="row">
+              <div className="row-cell">
+                <label className="visually-hidden" htmlFor={fid.dataKey(row.id)}>
+                  Test data {i + 1} key
+                </label>
+                <input
+                  id={fid.dataKey(row.id)}
+                  placeholder="Key, e.g. searchTerm"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={row.key}
+                  onChange={(e) => setData((rows) => rows.map((r) => (r.id === row.id ? { ...r, key: e.target.value } : r)))}
+                  aria-invalid={errors[fid.dataKey(row.id)] ? true : undefined}
+                  aria-describedby={describedBy(fid.dataKey(row.id))}
+                />
+                {fieldError(fid.dataKey(row.id))}
+              </div>
+              <div className="row-cell">
+                <label className="visually-hidden" htmlFor={`testData-${row.id}-value`}>
+                  Test data {i + 1} value
+                </label>
+                <input
+                  id={`testData-${row.id}-value`}
+                  placeholder="Value"
+                  autoComplete="off"
+                  value={row.value}
+                  onChange={(e) => setData((rows) => rows.map((r) => (r.id === row.id ? { ...r, value: e.target.value } : r)))}
+                />
+              </div>
+              <button
+                type="button"
+                className="button button-quiet"
+                onClick={() => setData((rows) => rows.filter((r) => r.id !== row.id))}
+              >
+                Remove<span className="visually-hidden"> test data {i + 1}</span>
+              </button>
+            </div>
           ))}
-        </div>
-        {environment === "production" && (
-          <p className="hint">
-            <Icon name="info" /> Destructive actions are always blocked in production.
-          </p>
-        )}
-      </fieldset>
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => setData((rows) => [...rows, { id: nextRowId++, key: "", value: "" }])}
+          >
+            <Icon name="plus" />
+            Add test data
+          </button>
+        </FormSection>
 
-      <fieldset className="field rows">
-        <legend>Test data (optional)</legend>
-        <p className="hint">Values the test may type, such as a search term. Empty rows are ignored.</p>
-        {data.map((row, i) => (
-          <div key={row.id} className="row">
-            <div className="row-cell">
-              <label className="visually-hidden" htmlFor={fid.dataKey(row.id)}>
-                Test data {i + 1} key
-              </label>
-              <input
-                id={fid.dataKey(row.id)}
-                placeholder="Key, e.g. searchTerm"
-                autoComplete="off"
-                spellCheck={false}
-                value={row.key}
-                onChange={(e) => setData((rows) => rows.map((r) => (r.id === row.id ? { ...r, key: e.target.value } : r)))}
-                aria-invalid={errors[fid.dataKey(row.id)] ? true : undefined}
-                aria-describedby={describedBy(fid.dataKey(row.id))}
-              />
-              {fieldError(fid.dataKey(row.id))}
-            </div>
-            <div className="row-cell">
-              <label className="visually-hidden" htmlFor={`testData-${row.id}-value`}>
-                Test data {i + 1} value
-              </label>
-              <input
-                id={`testData-${row.id}-value`}
-                placeholder="Value"
-                autoComplete="off"
-                value={row.value}
-                onChange={(e) => setData((rows) => rows.map((r) => (r.id === row.id ? { ...r, value: e.target.value } : r)))}
-              />
-            </div>
-            <button
-              type="button"
-              className="button button-quiet"
-              onClick={() => setData((rows) => rows.filter((r) => r.id !== row.id))}
-            >
-              Remove<span className="visually-hidden"> test data {i + 1}</span>
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          className="button button-secondary"
-          onClick={() => setData((rows) => [...rows, { id: nextRowId++, key: "", value: "" }])}
+        <FormSection
+          icon="lock"
+          title="Secrets"
+          description="Credentials such as a password: encrypted, redacted from all output, deleted when the run ends."
+          summary={secretCount === 0 ? "None" : plural(secretCount, "secret")}
         >
-          Add test data
-        </button>
-      </fieldset>
-
-      <fieldset className="field rows">
-        <legend>Secrets (optional)</legend>
-        <p className="hint">
-          <Icon name="lock" /> Credentials such as a password. Encrypted, filled in by the platform (never by the AI), redacted from
-          all output, and deleted when the run ends.
-        </p>
-        {secretsCleared && secrets.length > 0 && (
           <p className="hint">
-            <Icon name="info" /> Secret values are cleared after every submit, so enter them again before retrying.
+            <Icon name="lock" /> Secrets are filled in by the platform, never by the AI.
           </p>
-        )}
-        {secrets.map((row, i) => (
-          <div key={row.id} className="row">
-            <div className="row-cell">
-              <label className="visually-hidden" htmlFor={fid.secretName(row.id)}>
-                Secret {i + 1} name
-              </label>
-              <input
-                id={fid.secretName(row.id)}
-                placeholder="Name, e.g. password"
-                autoComplete="off"
-                spellCheck={false}
-                value={row.name}
-                onChange={(e) => setSecrets((rows) => rows.map((r) => (r.id === row.id ? { ...r, name: e.target.value } : r)))}
-                aria-invalid={errors[fid.secretName(row.id)] ? true : undefined}
-                aria-describedby={describedBy(fid.secretName(row.id))}
-              />
-              {fieldError(fid.secretName(row.id))}
+          {secretsCleared && secrets.length > 0 && (
+            <p className="hint">
+              <Icon name="info" /> Secret values are cleared after every submit, so enter them again before retrying.
+            </p>
+          )}
+          {secrets.map((row, i) => (
+            <div key={row.id} className="row">
+              <div className="row-cell">
+                <label className="visually-hidden" htmlFor={fid.secretName(row.id)}>
+                  Secret {i + 1} name
+                </label>
+                <input
+                  id={fid.secretName(row.id)}
+                  placeholder="Name, e.g. password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={row.name}
+                  onChange={(e) => setSecrets((rows) => rows.map((r) => (r.id === row.id ? { ...r, name: e.target.value } : r)))}
+                  aria-invalid={errors[fid.secretName(row.id)] ? true : undefined}
+                  aria-describedby={describedBy(fid.secretName(row.id))}
+                />
+                {fieldError(fid.secretName(row.id))}
+              </div>
+              <div className="row-cell">
+                <label className="visually-hidden" htmlFor={fid.secretValue(row.id)}>
+                  Secret {i + 1} value
+                </label>
+                <input
+                  id={fid.secretValue(row.id)}
+                  type="password"
+                  placeholder="Value"
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  value={row.value}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSecrets((rows) => rows.map((r) => (r.id === row.id ? { ...r, value } : r)));
+                  }}
+                  aria-invalid={errors[fid.secretValue(row.id)] ? true : undefined}
+                  aria-describedby={describedBy(fid.secretValue(row.id))}
+                />
+                {fieldError(fid.secretValue(row.id))}
+              </div>
+              <button
+                type="button"
+                className="button button-quiet"
+                onClick={() => setSecrets((rows) => rows.filter((r) => r.id !== row.id))}
+              >
+                Remove<span className="visually-hidden"> secret {i + 1}</span>
+              </button>
             </div>
-            <div className="row-cell">
-              <label className="visually-hidden" htmlFor={fid.secretValue(row.id)}>
-                Secret {i + 1} value
-              </label>
-              <input
-                id={fid.secretValue(row.id)}
-                type="password"
-                placeholder="Value"
-                autoComplete="new-password"
-                spellCheck={false}
-                value={row.value}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setSecrets((rows) => rows.map((r) => (r.id === row.id ? { ...r, value } : r)));
-                }}
-                aria-invalid={errors[fid.secretValue(row.id)] ? true : undefined}
-                aria-describedby={describedBy(fid.secretValue(row.id))}
-              />
-              {fieldError(fid.secretValue(row.id))}
-            </div>
-            <button
-              type="button"
-              className="button button-quiet"
-              onClick={() => setSecrets((rows) => rows.filter((r) => r.id !== row.id))}
-            >
-              Remove<span className="visually-hidden"> secret {i + 1}</span>
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          className="button button-secondary"
-          onClick={() => setSecrets((rows) => [...rows, { id: nextRowId++, name: "", value: "" }])}
-        >
-          Add secret
-        </button>
-      </fieldset>
+          ))}
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => setSecrets((rows) => [...rows, { id: nextRowId++, name: "", value: "" }])}
+          >
+            <Icon name="plus" />
+            Add secret
+          </button>
+        </FormSection>
 
-      <details className="advanced">
-        <summary>Advanced options</summary>
-        <div className="advanced-body">
+        <FormSection
+          icon="sliders"
+          title="Advanced options"
+          description="Step and time limits, the Playwright test, confirmation and extra hosts."
+          summary={optionsSummary(options, environment)}
+        >
           <div className="field-pair">
             <div className="field">
               <label htmlFor={fid.option("maxExplorationSteps")}>Max exploration steps</label>
@@ -561,14 +619,74 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
             />
             {fieldError(fid.option("additionalAllowedHosts"))}
           </div>
-        </div>
-      </details>
+        </FormSection>
+      </div>
 
-      <div className="form-actions">
-        <button type="submit" className="button button-primary" disabled={pending}>
+      <div className="composer-footer">
+        <p className="composer-note">
+          <Icon name="shield" /> Runs in a sandboxed browser.{" "}
+          {options.autoConfirmCriteria ? "Its criteria are confirmed automatically." : "You confirm the criteria before it starts."}
+        </p>
+        <button type="submit" className="button button-primary button-lg" disabled={pending}>
           {pending ? "Starting…" : "Start test"}
+          <Icon name="arrow" />
         </button>
       </div>
     </form>
   );
+}
+
+/**
+ * An optional part of the form, collapsed to one line that says what is set. Kept in the DOM while
+ * collapsed, so values survive and `focusFirstError` can open it to show an invalid field.
+ */
+function FormSection({
+  icon,
+  title,
+  description,
+  summary,
+  children,
+}: {
+  icon: IconName;
+  title: string;
+  description: string;
+  summary: string;
+  children: ReactNode;
+}) {
+  const titleId = useId();
+  return (
+    <details className="form-section">
+      <summary>
+        <span className="form-section-icon" aria-hidden="true">
+          <Icon name={icon} />
+        </span>
+        <span className="form-section-text">
+          <span id={titleId} className="form-section-title">
+            {title}
+          </span>
+          <span className="form-section-desc">{description}</span>
+        </span>
+        <span className="form-section-summary">{summary}</span>
+        <Icon name="chevron" className="form-section-chevron" />
+      </summary>
+      <div className="form-section-body" role="group" aria-labelledby={titleId}>
+        {children}
+      </div>
+    </details>
+  );
+}
+
+/** "40 steps · 5 min · rerun on": the advanced options at a glance (only the values that parse). */
+function optionsSummary(o: Options, environment: "staging" | "production"): string {
+  const whole = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : null);
+  const steps = whole(o.maxExplorationSteps);
+  const seconds = whole(o.maxRunSeconds);
+  const parts = [
+    steps !== null ? plural(steps, "step") : null,
+    seconds !== null ? (seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds}s`) : null,
+    !o.generatePlaywright ? "no Playwright test" : o.rerunGeneratedTest ? "rerun on" : "no rerun",
+    o.autoConfirmCriteria ? "auto-confirm" : null,
+    environment === "staging" && o.allowDestructiveActions ? "destructive allowed" : null,
+  ];
+  return parts.filter(Boolean).join(" · ");
 }

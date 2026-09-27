@@ -1,20 +1,28 @@
 import type { Metadata } from "next";
 import { NewTestForm } from "../../../components/NewTestForm";
+import { HowItWorks, RecentRuns } from "../../../components/NewTestAside";
 
 export const metadata: Metadata = { title: "New test" };
 
 export default async function NewTestPage({ searchParams }: { searchParams: Promise<{ from?: string | string[] }> }) {
   const { from } = await searchParams;
   return (
-    <div className="narrow stack">
-      <div className="section-head">
-        <h1>New test</h1>
-        <p className="muted">
-          Point the platform at a website and describe what should work. It proposes acceptance criteria for you to confirm, explores
-          the site, and reports each criterion with its evidence.
-        </p>
+    <div className="new-test">
+      <div className="new-test-main">
+        <div className="title-block">
+          <p className="eyebrow">New test</p>
+          <h1 className="page-title">What should work?</h1>
+          <p className="page-lede">
+            Give a website and describe the behaviour in plain language. You&apos;ll confirm the acceptance criteria before anything
+            runs, then get a report with the evidence for each one.
+          </p>
+        </div>
+        <NewTestForm from={typeof from === "string" ? from : null} />
       </div>
-      <NewTestForm from={typeof from === "string" ? from : null} />
+      <aside className="new-test-aside" aria-label="About test runs">
+        <HowItWorks />
+        <RecentRuns />
+      </aside>
     </div>
   );
 }

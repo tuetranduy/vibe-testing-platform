@@ -10,17 +10,20 @@ interface Props {
   screenshot: ScreenshotRef | null;
 }
 
-/** The latest screenshot of the run, fetched through the proxy under the shared reveal rule. */
+/** The latest screenshot of a running run, fetched through the proxy under the shared reveal rule. */
 export function LiveEvidence({ runId, screenshot }: Props) {
   const { state, reveal, onLoadError } = useArtifactUrl(
     screenshot ? { runId, artifactId: screenshot.artifactId, sensitivity: screenshot.sensitivity } : null,
   );
 
   return (
-    <section className="card evidence" aria-labelledby="evidence-title">
-      <h2 id="evidence-title" className="card-title">
-        Latest screenshot
-      </h2>
+    <section className="ink evidence" aria-labelledby="evidence-title">
+      <div className="evidence-head">
+        <h2 id="evidence-title">
+          <span className="live-dot" aria-hidden="true" />
+          Latest screenshot
+        </h2>
+      </div>
       {!screenshot ? (
         <div className="evidence-empty">
           <Icon name="image" />
@@ -30,7 +33,7 @@ export function LiveEvidence({ runId, screenshot }: Props) {
         <div className="evidence-empty">
           <Icon name="lock" />
           <p>This screenshot may show entered credentials, so it is hidden until you ask for it.</p>
-          <button type="button" className="button button-secondary" onClick={reveal}>
+          <button type="button" className="button button-on-ink" onClick={reveal}>
             Reveal screenshot
           </button>
         </div>
@@ -39,7 +42,8 @@ export function LiveEvidence({ runId, screenshot }: Props) {
           {/* Short-lived signed URL: an error means it expired, so fetch a fresh one. */}
           <img src={state.url} alt={screenshot.message} onError={onLoadError} />
           <figcaption>
-            {screenshot.message} · <time dateTime={screenshot.timestamp}>{formatTime(screenshot.timestamp)}</time>
+            <span>{screenshot.message}</span>
+            <time dateTime={screenshot.timestamp}>{formatTime(screenshot.timestamp)}</time>
           </figcaption>
         </figure>
       ) : state.status === "error" ? (

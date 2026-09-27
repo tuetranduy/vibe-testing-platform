@@ -1,11 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-
-const LINKS = [
-  { href: "/runs", label: "Test runs" },
-  { href: "/runs/new", label: "New test" },
-] as const;
+import { Icon } from "./Icon";
 
 /** "New test" owns /runs/new; every other /runs page (history, a run) belongs to "Test runs". */
 function isCurrent(href: string, pathname: string): boolean {
@@ -13,15 +9,18 @@ function isCurrent(href: string, pathname: string): boolean {
   return pathname === "/runs" || (pathname.startsWith("/runs/") && pathname !== "/runs/new");
 }
 
+/** The header's navigation: the run history, and "New test" as the one call to action at its far end. */
 export function AppNav() {
   const pathname = usePathname() ?? "";
+  const current = (href: string) => (isCurrent(href, pathname) ? "page" : undefined);
   return (
     <nav aria-label="Main" className="app-nav">
-      {LINKS.map(({ href, label }) => (
-        <a key={href} href={href} aria-current={isCurrent(href, pathname) ? "page" : undefined}>
-          {label}
-        </a>
-      ))}
+      <a className="nav-link" href="/runs" aria-current={current("/runs")}>
+        Test runs
+      </a>
+      <a className="button button-primary nav-cta" href="/runs/new" aria-current={current("/runs/new")}>
+        <Icon name="plus" />New test
+      </a>
     </nav>
   );
 }

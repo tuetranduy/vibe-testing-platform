@@ -123,100 +123,131 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
   const openEdits = criteria.map((c) => c.id).filter((id) => editing.has(id));
 
   return (
-    <section className="stack" aria-labelledby="review-title">
-      <div className="section-head">
-        <h2 id="review-title">Review the acceptance criteria</h2>
-        <p className="muted">
-          These are what the run will check. Adjust a check&apos;s values or remove a criterion — they&apos;re frozen once you confirm. Revision{" "}
-          {requirement.revision}.
-        </p>
-        <p className="summary-line">
-          {criteria.length} {criteria.length === 1 ? "criterion" : "criteria"}
-          {unclear > 0 && ` · ${unclear} unclear`}
-          {aiJudged > 0 && ` · ${aiJudged} judged by a model only`}
-        </p>
-      </div>
-
-      {error && (
-        <div role="alert" className="banner banner-error">
-          <Icon name="warning" />
-          <div>
-            <p className="banner-title">That didn&apos;t work</p>
-            <p>{error}</p>
-          </div>
+    <section className="review" aria-labelledby="review-title">
+      <div className="review-main">
+        <div className="review-head">
+          <h2 id="review-title" className="section-title">
+            Review the acceptance criteria
+          </h2>
+          <p className="muted">
+            These are what the run will check. Adjust a check&apos;s values or remove a criterion — they&apos;re frozen once you confirm. Revision{" "}
+            {requirement.revision}.
+          </p>
         </div>
-      )}
 
-      <div className="criteria-list">
-        {criteria.map((c) => (
-          <CriterionCard
-            key={c.id}
-            criterion={c}
-            facts={requirement.facts}
-            busy={saving || confirming}
-            canRemove={criteria.length > 1}
-            onSave={(outcome) =>
-              save(
-                criteria.map((x) =>
-                  x.id === c.id
-                    ? { ...x, expectedOutcome: outcome, statement: describeExpectedOutcome(outcome, requirement.facts), ambiguity: null }
-                    : x,
-                ),
-              )
-            }
-            onRemove={() => void save(criteria.filter((x) => x.id !== c.id)).then((err) => err && setError(err))}
-            onEditingChange={(open) => editingChange(c.id, open)}
-          />
-        ))}
-      </div>
-
-      <div className="form-actions">
-        <button
-          type="button"
-          className="button button-primary"
-          onClick={confirm}
-          disabled={confirming || saving || openEdits.length > 0}
-          aria-describedby={openEdits.length > 0 ? "confirm-blocked" : undefined}
-        >
-          {confirming ? "Starting…" : "Confirm and start"}
-        </button>
-        {openEdits.length > 0 && (
-          <p id="confirm-blocked" className="hint">
-            <Icon name="info" /> Save or discard your {openEdits.length === 1 ? "edit" : "edits"} to {listIds(openEdits)} first.
-          </p>
-        )}
-        {(unclear > 0 || aiJudged > 0) && (
-          <p className="hint">
-            <Icon name="info" /> Unclear and model-judged criteria will be reported as Inconclusive.
-          </p>
-        )}
-        {startingOver === null ? (
-          <button type="button" className="button button-quiet" onClick={() => setStartingOver("ask")} disabled={confirming || saving}>
-            Start over with a revised requirement
-          </button>
-        ) : (
-          <div role="group" aria-labelledby="start-over-title" className="note note-warning">
-            <p id="start-over-title" className="note-title">
-              Start over?
-            </p>
-            <p>This cancels the current run. You can edit the requirement and start a new one. Test data and secrets must be entered again.</p>
-            <div className="actions">
-              <button type="button" className="button button-danger" onClick={startOver} disabled={startingOver === "working"}>
-                {startingOver === "working" ? "Cancelling…" : "Yes, start over"}
-              </button>
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => setStartingOver(null)}
-                disabled={startingOver === "working"}
-                autoFocus
-              >
-                Keep reviewing
-              </button>
+        {error && (
+          <div role="alert" className="banner banner-error">
+            <Icon name="warning" />
+            <div>
+              <p className="banner-title">That didn&apos;t work</p>
+              <p>{error}</p>
             </div>
           </div>
         )}
+
+        <div className="criteria-list">
+          {criteria.map((c) => (
+            <CriterionCard
+              key={c.id}
+              criterion={c}
+              facts={requirement.facts}
+              busy={saving || confirming}
+              canRemove={criteria.length > 1}
+              onSave={(outcome) =>
+                save(
+                  criteria.map((x) =>
+                    x.id === c.id
+                      ? { ...x, expectedOutcome: outcome, statement: describeExpectedOutcome(outcome, requirement.facts), ambiguity: null }
+                      : x,
+                  ),
+                )
+              }
+              onRemove={() => void save(criteria.filter((x) => x.id !== c.id)).then((err) => err && setError(err))}
+              onEditingChange={(open) => editingChange(c.id, open)}
+            />
+          ))}
+        </div>
       </div>
+
+      <aside className="review-side" aria-labelledby="confirm-title">
+        <div className="card confirm-panel">
+          <p className="confirm-status">Waiting for you</p>
+          <h3 id="confirm-title" className="confirm-title">
+            Do these checks match what you meant?
+          </h3>
+          <p className="muted">Nothing runs until you confirm.</p>
+          <dl className="confirm-counts">
+            <div>
+              <dt>Criteria</dt>
+              <dd>{criteria.length}</dd>
+            </div>
+            {unclear > 0 && (
+              <div className="count-warning">
+                <dt>Unclear</dt>
+                <dd>{unclear}</dd>
+              </div>
+            )}
+            {aiJudged > 0 && (
+              <div className="count-info">
+                <dt>Judged by a model only</dt>
+                <dd>{aiJudged}</dd>
+              </div>
+            )}
+          </dl>
+          <button
+            type="button"
+            className="button button-primary button-lg button-block"
+            onClick={confirm}
+            disabled={confirming || saving || openEdits.length > 0}
+            aria-describedby={openEdits.length > 0 ? "confirm-blocked" : undefined}
+          >
+            {confirming ? "Starting…" : "Confirm and start"}
+            <Icon name="arrow" />
+          </button>
+          {openEdits.length > 0 && (
+            <p id="confirm-blocked" className="hint">
+              <Icon name="info" /> Save or discard your {openEdits.length === 1 ? "edit" : "edits"} to {listIds(openEdits)} first.
+            </p>
+          )}
+          {(unclear > 0 || aiJudged > 0) && (
+            <p className="hint">
+              <Icon name="info" /> Unclear and model-judged criteria will be reported as Inconclusive.
+            </p>
+          )}
+          {startingOver === null ? (
+            <button
+              type="button"
+              className="button button-secondary button-block"
+              onClick={() => setStartingOver("ask")}
+              disabled={confirming || saving}
+            >
+              <Icon name="restart" />
+              Start over with a revised requirement
+            </button>
+          ) : (
+            <div role="group" aria-labelledby="start-over-title" className="note note-warning">
+              <p id="start-over-title" className="note-title">
+                Start over?
+              </p>
+              <p>This cancels the current run. You can edit the requirement and start a new one. Test data and secrets must be entered again.</p>
+              <div className="actions">
+                <button type="button" className="button button-danger" onClick={startOver} disabled={startingOver === "working"}>
+                  {startingOver === "working" ? "Cancelling…" : "Yes, start over"}
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => setStartingOver(null)}
+                  disabled={startingOver === "working"}
+                  autoFocus
+                >
+                  Keep reviewing
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </aside>
     </section>
   );
 }

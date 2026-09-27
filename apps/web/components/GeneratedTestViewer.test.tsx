@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import { reportFixture } from "../test/fixtures";
 import { GeneratedTestViewer } from "./GeneratedTestViewer";
 
@@ -36,6 +37,23 @@ describe("GeneratedTestViewer", () => {
     expect(screen.getByText(/uses a CSS locator/)).toBeInTheDocument();
     expect(screen.getByText(/AC-1, AC-2, AC-5/)).toBeInTheDocument();
     expect(screen.getByText(/rerun failed/i)).toBeInTheDocument();
+  });
+
+  it("copies the source to the clipboard", async () => {
+    const user = userEvent.setup(); // stubs the clipboard
+    render(<GeneratedTestViewer test={test} playwright={report.playwright} requirement={report.requirement} />);
+    expect(screen.getByText("run.spec.ts")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+    expect(await navigator.clipboard.readText()).toBe(test.source);
+    expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+  });
+
+  it("says so when the clipboard is unavailable", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("not allowed"));
+    render(<GeneratedTestViewer test={test} playwright={report.playwright} requirement={report.requirement} />);
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+    expect(await screen.findByRole("button", { name: /couldn.t copy/i })).toBeInTheDocument();
   });
 
   it("handles a test with nothing left out and no notes", () => {
