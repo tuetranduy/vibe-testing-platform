@@ -5,6 +5,7 @@ import type { ArtifactStorage } from "@platform/storage";
 import type { ExplorationStore, ExploreStageDeps, StageContext } from "@platform/testing-engine";
 import { storeArtifact } from "./artifacts";
 import type { WorkerLogger } from "./deps";
+import { countEgressBlock, type WorkerMetrics } from "./metrics";
 import { computeExtensionId, type BrowserExtension } from "./sandbox/browser-launcher";
 import { openRunSandbox } from "./sandbox/run-sandbox";
 
@@ -20,6 +21,7 @@ export interface ExplorationStoreDeps {
   storage: ArtifactStorage;
   config: Pick<ExplorationConfig, "artifactRetentionDays" | "secretArtifactRetentionDays">;
   now?: () => Date;
+  metrics?: WorkerMetrics;
 }
 
 /**
@@ -33,6 +35,7 @@ export function createExplorationStore(deps: ExplorationStoreDeps, ctx: Pick<Sta
   return {
     async saveStep(step) {
       await steps.insert(step);
+      if (step.llm?.cacheHit === true) deps.metrics?.stagehandCacheHits.inc();
     },
     async saveFact(fact) {
       await facts.upsert(ctx.runId, fact);
@@ -49,6 +52,7 @@ export interface ExplorationDepsInput {
   /** The LlmClient (the explorer's ClientLLM bridge records its calls as EXPLORING). */
   llm: StructuredLlm;
   config: ExplorationConfig;
+  metrics?: WorkerMetrics;
   /** Test seams: replace the sandbox, the explorer or the recorder. */
   overrides?: Partial<ExploreStageDeps>;
 }
@@ -74,19 +78,34 @@ export function createExplorationDeps(input: ExplorationDepsInput): ExploreStage
   return {
     openSandbox:
       overrides.openSandbox ??
-      ((ctx) =>
-        openRunSandbox(ctx, {
+      (async (ctx) => {
+        const sandbox = await openRunSandbox(ctx, {
           privateAllowlist: config.privateAllowlist,
           logger,
           extensions: [stagehandExtension()],
-        })),
+          onEgressBlock: countEgressBlock(input.metrics),
+        });
+        // The sandbox is closed by the stage and by its registered cleanup: count it down once.
+        input.metrics?.browserSessions.inc();
+        let open = true;
+        const close = sandbox.close.bind(sandbox);
+        return Object.assign(sandbox, {
+          close: async () => {
+            if (open) {
+              open = false;
+              input.metrics?.browserSessions.dec();
+            }
+            await close();
+          },
+        });
+      }),
     explorer:
       overrides.explorer ??
       {
         // Built on first use so the extension id is resolved once, from the loaded extension.
         start: (startInput) => new StagehandExplorer({ llm: input.llm, extensionId: stagehandExtension().id, logger }).start(startInput),
       },
-    store: overrides.store ?? ((ctx) => createExplorationStore({ db, storage, config }, ctx)),
+    store: overrides.store ?? ((ctx) => createExplorationStore({ db, storage, config, metrics: input.metrics }, ctx)),
     // Start-up failures (e.g. Chromium's stderr tail) are logged here; the run records a template message.
     logger: overrides.logger ?? logger,
     ...(overrides.recorder ? { recorder: overrides.recorder } : {}),

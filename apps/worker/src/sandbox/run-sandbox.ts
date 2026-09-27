@@ -3,7 +3,7 @@ import type { StageContext } from "@platform/testing-engine";
 import type { WorkerLogger } from "../deps";
 import { findFreePort, launchSandboxedBrowser, type BrowserExtension, type SandboxedBrowser } from "./browser-launcher";
 import { createEgressEventReporter } from "./egress-events";
-import { startEgressProxy } from "./egress-proxy";
+import { startEgressProxy, type EgressBlockEvent } from "./egress-proxy";
 import { computeAllowedHosts, installNavigationGuard, type NavigationBlockEvent } from "./navigation-guard";
 
 /**
@@ -21,6 +21,8 @@ export interface RunSandboxDeps {
   extensions?: BrowserExtension[];
   executablePath?: string;
   onNavigationBlocked?: (e: NavigationBlockEvent) => void;
+  /** Every egress-proxy block (metrics); events are reported separately, deduplicated. */
+  onEgressBlock?: (e: EgressBlockEvent) => void;
 }
 
 export interface RunSandbox extends SandboxedBrowser {
@@ -91,10 +93,14 @@ export async function openRunSandbox(ctx: StageContext, deps: RunSandboxDeps): P
     stopIfClosed();
     const cdpPort = await findFreePort();
 
+    const report = createEgressEventReporter({ publish: (e) => ctx.publish(e), logger: deps.logger });
     const proxy = await startEgressProxy({
       resolve: deps.resolve ?? defaultResolver,
       privateAllowlist: [...deps.privateAllowlist, `127.0.0.1:${cdpPort}`],
-      onBlock: createEgressEventReporter({ publish: (e) => ctx.publish(e), logger: deps.logger }),
+      onBlock: (e) => {
+        deps.onEgressBlock?.(e);
+        report(e);
+      },
     });
     await scope.own(() => proxy.close());
     stopIfClosed();

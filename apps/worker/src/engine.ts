@@ -16,6 +16,7 @@ import {
 import type { WorkerLogger } from "./deps";
 import { createExplorationDeps } from "./exploration";
 import { createGenerateTestDeps } from "./generated-test";
+import { recordLlmCall, type WorkerMetrics } from "./metrics";
 import { createReportDeps } from "./report";
 import { createRunTestDeps } from "./rerun";
 
@@ -58,6 +59,8 @@ export interface EngineDeps {
   exploration?: Partial<ExploreStageDeps>;
   /** Test seams for the real rerun stage (proxy, runner child process, workspace, evidence store). */
   rerun?: Partial<RunTestStageDeps>;
+  /** Prometheus metrics (LLM calls, sandbox sessions, egress blocks, artifact uploads). */
+  metrics?: WorkerMetrics;
 }
 
 /**
@@ -82,6 +85,7 @@ export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSele
     model: config.LLM_MODEL,
     logger: deps.logger,
     recordCall: async (call) => {
+      if (deps.metrics) recordLlmCall(deps.metrics, call);
       await calls.create(call);
     },
     onRecordError: (err, call) => deps.logger.warn({ err, runId: call.runId }, "failed to record LLM call"),
@@ -96,6 +100,7 @@ export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSele
     storage: deps.storage,
     logger: deps.logger,
     llm,
+    metrics: deps.metrics,
     config: { privateAllowlist, ...retention },
     ...(deps.exploration ? { overrides: deps.exploration } : {}),
   });
@@ -104,6 +109,7 @@ export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSele
     db: deps.db,
     storage: deps.storage,
     logger: deps.logger,
+    metrics: deps.metrics,
     config: {
       privateAllowlist,
       ...retention,

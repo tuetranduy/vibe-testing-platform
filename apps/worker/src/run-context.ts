@@ -1,3 +1,4 @@
+import { isTerminalLifecycle } from "@platform/contracts";
 import {
   EventRepository,
   PlanRepository,
@@ -18,6 +19,7 @@ import {
   type StageContext,
 } from "@platform/testing-engine";
 import type { WorkerDeps } from "./deps";
+import { NO_VERDICT } from "./metrics";
 
 export interface RunContextHandle {
   ctx: StageContext;
@@ -56,6 +58,7 @@ export async function createRunContext(
   });
 
   let lifecycle = run.lifecycle;
+  let stageStartedAt = now();
 
   const abort = (reason: Error) => {
     if (!controller.signal.aborted) controller.abort(reason);
@@ -102,8 +105,12 @@ export async function createRunContext(
     lifecycle: () => lifecycle,
     async transition(to, patch = {}) {
       await runs.transition(run.id, lifecycle, to, patch);
+      const at = now();
+      deps.metrics?.runDuration.observe({ stage: lifecycle }, Math.max(0, at.getTime() - stageStartedAt.getTime()) / 1000);
+      stageStartedAt = at;
       lifecycle = to;
       deps.runLogs?.setStage(run.id, to);
+      if (isTerminalLifecycle(to)) deps.metrics?.testRuns.inc({ lifecycle: to, verdict: patch.verdict ?? NO_VERDICT });
     },
     publish: ctx.publish,
     saveRequirement: (draft) => new RequirementRepository(deps.db).createRevision(run.id, draft),
@@ -119,6 +126,8 @@ export async function createRunContext(
     async saveResults(results) {
       const repo = new ResultRepository(deps.db);
       for (const r of results) await repo.upsert(run.id, r);
+      const disagreements = results.filter((r) => r.reason === "DISCOVERY_RERUN_DISAGREE").length;
+      if (disagreements > 0) deps.metrics?.reconciliationDisagreements.inc(disagreements);
     },
     enqueueExecute: () => deps.queue.enqueueExecute(run.id),
   };

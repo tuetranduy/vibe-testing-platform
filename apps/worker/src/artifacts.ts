@@ -1,6 +1,7 @@
 import type { ArtifactSensitivity, ArtifactType } from "@platform/contracts";
 import { ArtifactRepository, type Database } from "@platform/db";
 import { StorageError, type ArtifactStorage } from "@platform/storage";
+import type { WorkerMetrics } from "./metrics";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -14,6 +15,7 @@ export interface StoreArtifactDeps {
   storage: ArtifactStorage;
   config: ArtifactRetention;
   now?: () => Date;
+  metrics?: Pick<WorkerMetrics, "artifactUploadFailures">;
 }
 
 export interface StoreArtifactInput {
@@ -36,7 +38,10 @@ export interface StoreArtifactInput {
 export async function storeArtifact(deps: StoreArtifactDeps, input: StoreArtifactInput): Promise<{ artifactId: string }> {
   const now = deps.now ?? (() => new Date());
   const { tenantId, runId, type, fileName, body, contentType, sensitivity } = input;
-  const stored = await deps.storage.put({ tenantId, runId, type, fileName, body, contentType, sensitivity });
+  const stored = await deps.storage.put({ tenantId, runId, type, fileName, body, contentType, sensitivity }).catch((err: unknown) => {
+    deps.metrics?.artifactUploadFailures.inc();
+    throw err;
+  });
   const days = sensitivity === "SECRET_BEARING" ? deps.config.secretArtifactRetentionDays : deps.config.artifactRetentionDays;
   try {
     if (input.sha256 !== undefined && stored.sha256 !== input.sha256) {

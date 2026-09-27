@@ -2,6 +2,7 @@ import { EventRepository, RunRepository, SecretRepository, StaleTransitionError,
 import { createRunEventPublisher } from "@platform/event-bus";
 import { redactByKey } from "@platform/security";
 import type { WorkerDeps } from "../deps";
+import { NO_VERDICT } from "../metrics";
 
 export interface ReapResult {
   workerLost: string[];
@@ -32,6 +33,7 @@ export async function reapJob(deps: WorkerDeps): Promise<ReapResult> {
 
   const errorRun = async (run: TestRun, category: "WORKER_LOST" | "TIMEOUT" | "INTERNAL", message: string) => {
     await runs.transition(run.id, run.lifecycle, "ERRORED", { errorCategory: category, errorMessage: message });
+    deps.metrics?.testRuns.inc({ lifecycle: "ERRORED", verdict: NO_VERDICT });
     await secrets.purge(run.id);
     await publisher.publish({
       runId: run.id,
@@ -80,6 +82,7 @@ export async function reapJob(deps: WorkerDeps): Promise<ReapResult> {
   for (const run of await runs.findAwaitingConfirmationSince(new Date(now.getTime() - ttlMs))) {
     await safely(run, async () => {
       await runs.transition(run.id, "AWAITING_CONFIRMATION", "CANCELLED", { cancelReason: "CONFIRMATION_EXPIRED" });
+      deps.metrics?.testRuns.inc({ lifecycle: "CANCELLED", verdict: NO_VERDICT });
       await secrets.purge(run.id);
       await publisher.publish({
         runId: run.id,
@@ -95,5 +98,12 @@ export async function reapJob(deps: WorkerDeps): Promise<ReapResult> {
   for (const runId of await secrets.findTerminalRunIdsWithActiveSecrets()) {
     if ((await secrets.purge(runId)) > 0) result.secretsPurged.push(runId);
   }
+  const reaped: Record<string, number> = {
+    WORKER_LOST: result.workerLost.length,
+    TIMEOUT: result.timedOut.length,
+    NEVER_STARTED: result.neverStarted.length,
+    CONFIRMATION_EXPIRED: result.confirmationExpired.length,
+  };
+  for (const [reason, n] of Object.entries(reaped)) if (n > 0) deps.metrics?.runsReaped.inc({ reason }, n);
   return result;
 }

@@ -12,23 +12,28 @@ export async function analyzeRunJob(deps: WorkerDeps, runId: string): Promise<vo
     deps.logger.info({ runId, lifecycle: run?.lifecycle }, "analyze-run skipped: run is not QUEUED");
     return;
   }
-  const budgetMs = deps.config.analysisTimeoutSeconds * 1000 * deps.config.timeScale;
-  let handle;
+  deps.metrics?.activeRuns.inc();
   try {
-    handle = await createRunContext(deps, run, {
-      deadlineAt: new Date(now().getTime() + budgetMs),
-      totalBudgetMs: budgetMs,
-    });
-  } catch (err) {
-    await failBeforeContext(deps, run, err);
-    return;
-  }
-  try {
-    await runAnalysis(handle.ctx, handle.ports, deps.stages);
-  } catch (err) {
-    await failRun(deps, handle, err);
+    const budgetMs = deps.config.analysisTimeoutSeconds * 1000 * deps.config.timeScale;
+    let handle;
+    try {
+      handle = await createRunContext(deps, run, {
+        deadlineAt: new Date(now().getTime() + budgetMs),
+        totalBudgetMs: budgetMs,
+      });
+    } catch (err) {
+      await failBeforeContext(deps, run, err);
+      return;
+    }
+    try {
+      await runAnalysis(handle.ctx, handle.ports, deps.stages);
+    } catch (err) {
+      await failRun(deps, handle, err);
+    } finally {
+      await handle.dispose();
+      await purgeSecretsIfTerminal(deps, runId);
+    }
   } finally {
-    await handle.dispose();
-    await purgeSecretsIfTerminal(deps, runId);
+    deps.metrics?.activeRuns.dec();
   }
 }
