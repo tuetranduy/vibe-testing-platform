@@ -23,6 +23,8 @@ export interface RunQueue {
   /** True while the analyze-run job for this run is waiting or being processed. */
   isAnalyzePending(runId: string): Promise<boolean>;
   close(): Promise<void>;
+  /** Jobs waiting to be picked up (waiting, delayed, prioritized, waiting-children). Optional for fakes. */
+  depth?(): Promise<number>;
 }
 
 const JOB_OPTS = { attempts: 1, removeOnComplete: 1000, removeOnFail: 5000 } as const;
@@ -43,6 +45,10 @@ export function createRunQueue(connection: ConnectionOptions): RunQueue {
     async isAnalyzePending(runId) {
       const state = await queue.getJobState(analyzeJobId(runId));
       return ["waiting", "delayed", "prioritized", "waiting-children", "active"].includes(state);
+    },
+    async depth() {
+      const counts = await queue.getJobCounts("waiting", "delayed", "prioritized", "waiting-children");
+      return Object.values(counts).reduce((a, b) => a + b, 0);
     },
     close: () => queue.close(),
   };

@@ -32,6 +32,12 @@ export class FakeQueue implements RunQueue {
   async isAnalyzePending() {
     return false;
   }
+  depthValue = 0;
+  depthFails = false;
+  async depth() {
+    if (this.depthFails) throw new Error("redis down");
+    return this.depthValue;
+  }
   async close() {}
 }
 
@@ -63,7 +69,10 @@ export interface TestApi {
   close(): Promise<void>;
 }
 
-export async function createTestApi(overrides: Partial<ApiDeps["config"]> = {}): Promise<TestApi> {
+export async function createTestApi(
+  overrides: Partial<ApiDeps["config"]> = {},
+  extra: Partial<Omit<ApiDeps, "config">> = {},
+): Promise<TestApi> {
   const tdb = await createTestDatabase();
   const redis = new Redis(REDIS_URL);
   const sub = new Redis(REDIS_URL);
@@ -90,12 +99,13 @@ export async function createTestApi(overrides: Partial<ApiDeps["config"]> = {}):
     resolve: fakeResolver,
     audit: (e) => audit.push(e),
   };
+  Object.assign(deps, extra);
   const app = await buildApp(deps, { logger: false });
   return {
     app,
     deps,
     tdb,
-    queue,
+    queue: (extra.queue as FakeQueue | undefined) ?? queue,
     redis,
     audit,
     async close() {

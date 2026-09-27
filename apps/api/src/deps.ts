@@ -3,6 +3,7 @@ import type { RunEventHub, RunQueue } from "@platform/event-bus";
 import type { Resolver } from "@platform/security";
 import type { ArtifactStorage } from "@platform/storage";
 import type { Redis } from "ioredis";
+import type { ApiMetrics } from "./metrics";
 import type { CancelSignal } from "./services/cancel-signal";
 
 export interface ApiConfig {
@@ -27,4 +28,5 @@ export interface ApiDeps {
   cancelSignal: CancelSignal;
   resolve: Resolver;
   audit?: (entry: Record<string, unknown>) => void;
+  metrics?: ApiMetrics;
 }

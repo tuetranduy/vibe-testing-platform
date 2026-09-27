@@ -5,6 +5,7 @@ import { redactByKey } from "@platform/security";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 import { applyCriteriaEdit } from "./criteria-edit";
+import { NO_VERDICT } from "../metrics";
 
 const ENQUEUE_FAILED = "Queue unavailable after confirmation";
 
@@ -141,6 +142,7 @@ export class CriteriaService {
         errorCategory: "INTERNAL",
         errorMessage: ENQUEUE_FAILED,
       });
+      this.deps.metrics?.testRuns.inc({ lifecycle: "ERRORED", verdict: NO_VERDICT });
       await new SecretRepository(this.deps.db).purge(runId);
       await this.publisher().publish({
         runId,
