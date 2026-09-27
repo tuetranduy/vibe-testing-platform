@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web-dev",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd apps/web && API_URL=http://localhost:3001 API_TOKEN=${API_TOKEN:-dev-api-token-change-me-please} WEB_ALLOWED_HOSTS=localhost:3002,127.0.0.1:3002 PATH=$HOME/.config/nvm/versions/node/v24.15.0/bin:$PATH ./node_modules/.bin/next dev -p 3002"],
+      "port": 3002
+    }
+  ]
+}
