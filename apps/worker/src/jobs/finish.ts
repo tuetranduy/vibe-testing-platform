@@ -52,7 +52,7 @@ export async function purgeSecretsIfTerminal(deps: WorkerDeps, runId: string): P
 export async function failBeforeContext(deps: WorkerDeps, run: TestRun, err: unknown): Promise<void> {
   const category = errorCategoryOf(err);
   const message = "Run could not be started by the worker";
-  deps.logger.error({ runId: run.id, category, err: errorMessageOf(err) }, message);
+  deps.logger.error({ runId: run.id, tenantId: run.tenantId, stage: run.lifecycle, category, err: errorMessageOf(err) }, message);
   try {
     await new RunRepository(deps.db).transition(run.id, run.lifecycle, "ERRORED", { errorCategory: category, errorMessage: message });
     deps.metrics?.testRuns.inc({ lifecycle: "ERRORED", verdict: NO_VERDICT });

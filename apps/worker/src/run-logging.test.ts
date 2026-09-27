@@ -1,5 +1,7 @@
 import { createLogger, createRunLogRegistry } from "@platform/config";
+import { SecretRepository } from "@platform/db";
 import { TEST_TENANT_ID } from "@platform/db/testing";
+import { encryptSecret } from "@platform/security";
 import type { EngineStages } from "@platform/testing-engine";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { executeRunJob } from "./jobs/execute-run";
@@ -70,5 +72,35 @@ describe("run log lines (Task 22 step 2)", () => {
 
     expect(parsed().find((l) => l.msg === "run cancelled")).toMatchObject({ runId: run.id, tenantId: TEST_TENANT_ID, stage: "CANCELLED" });
     expect(runLogs.size).toBe(0);
+  });
+
+  it("a run the worker cannot start (secrets fail to decrypt) logs with tenantId and stage too", async () => {
+    const { logger, parsed, runLogs } = setup();
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
+    // Encrypted with another key: the run context cannot be built.
+    await new SecretRepository(h.tdb.db).insertMany(run.id, [
+      { name: "password", ...encryptSecret(SECRET, { runId: run.id, name: "password" }, Buffer.alloc(32, 7)) },
+    ]);
+
+    await executeRunJob(h.deps(createFakeStages(), { logger, runLogs }), run.id);
+
+    expect(parsed().find((l) => l.msg === "Run could not be started by the worker")).toMatchObject({
+      runId: run.id,
+      tenantId: TEST_TENANT_ID,
+      stage: "PLANNING",
+    });
+  });
+
+  it("a skipped job's line carries tenantId and the run's current stage", async () => {
+    const { logger, parsed, runLogs } = setup();
+    const run = await seedRun(h, { lifecycle: "AWAITING_CONFIRMATION" });
+
+    await executeRunJob(h.deps(createFakeStages(), { logger, runLogs }), run.id);
+
+    expect(parsed().find((l) => l.msg === "execute-run skipped: run is not PLANNING")).toMatchObject({
+      runId: run.id,
+      tenantId: TEST_TENANT_ID,
+      stage: "AWAITING_CONFIRMATION",
+    });
   });
 });

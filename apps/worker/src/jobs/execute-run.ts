@@ -10,7 +10,7 @@ export async function executeRunJob(deps: WorkerDeps, runId: string): Promise<vo
   const runs = new RunRepository(deps.db);
   const run = await runs.findById(runId);
   if (!run || run.lifecycle !== "PLANNING") {
-    deps.logger.info({ runId, lifecycle: run?.lifecycle }, "execute-run skipped: run is not PLANNING");
+    deps.logger.info({ runId, tenantId: run?.tenantId, stage: run?.lifecycle }, "execute-run skipped: run is not PLANNING");
     return;
   }
   deps.metrics?.activeRuns.inc();
