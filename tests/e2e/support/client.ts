@@ -93,6 +93,27 @@ export function processesMentioning(_stack: E2EStack, text: string): string[] {
   return out.split("\n").filter((l) => l.includes(text) && !l.includes("ps -axo"));
 }
 
+/**
+ * A secret value in every form the platform's redactors and trace scrubber mask: raw, URL- and
+ * form-encoded, base64 (padded, unpadded, URL-safe), JSON- and HTML-escaped.
+ */
+export function secretForms(value: string): string[] {
+  const b64 = Buffer.from(value, "utf8").toString("base64");
+  const html = value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+  return [
+    ...new Set([
+      value,
+      encodeURIComponent(value),
+      new URLSearchParams([["", value]]).toString().slice(1),
+      b64,
+      b64.replace(/=+$/, ""),
+      Buffer.from(value, "utf8").toString("base64url"),
+      JSON.stringify(value).slice(1, -1),
+      html,
+    ]),
+  ];
+}
+
 export async function shopStats(stack: E2EStack): Promise<{ deleteClicks: number }> {
   return (await fetch(`${stack.shopUrl}/__test/stats`)).json() as Promise<{ deleteClicks: number }>;
 }
