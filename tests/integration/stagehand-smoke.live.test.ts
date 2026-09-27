@@ -1,13 +1,16 @@
 /**
- * @live — real model (Anthropic) + real Stagehand + real sandbox, against the in-process demo shop
- * only (reached as `shop.test`; nothing else is reachable through the egress proxy).
+ * @live — real model (LLM_PROVIDER=gemini, or anthropic when unset or fake) + real Stagehand + real
+ * sandbox, against the in-process demo shop only (reached as `shop.test`; nothing else is reachable
+ * through the egress proxy).
  *
- *   ANTHROPIC_API_KEY=… pnpm test:live -- stagehand-smoke        (optional: LLM_MODEL=…)
+ *   ANTHROPIC_API_KEY=… pnpm test:live -- stagehand-smoke                       (optional: LLM_MODEL=…)
+ *   LLM_PROVIDER=gemini GEMINI_API_KEY=… pnpm test:live -- stagehand-smoke      (optional: LLM_MODEL=…, GEMINI_THINKING_LEVEL=…)
  *
  * Plan: open the product page → read the cart badge → find and click "Add to cart" → read the
  * badge again; the count after adding must be 1, read from the DOM (DOM_VERIFIED).
- * Skipped (with that reason in its title) when ANTHROPIC_API_KEY is not set.
+ * Skipped (with the reason on stderr) when the provider's API key is not set.
  */
+import { loadLiveLlmEnv } from "@platform/config";
 import type { ExplorationStep, NormalizedRequirement, ObservedFact, StoredTestRunRequest, TestPlan } from "@platform/contracts";
 import { startDemoShop, type RunningDemoShop } from "@platform/demo-shop";
 import { LlmClient, createTransport, type LlmCallRecord } from "@platform/llm";
@@ -18,13 +21,17 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { computeExtensionId } from "../../apps/worker/src/sandbox/browser-launcher";
 import { openRunSandbox } from "../../apps/worker/src/sandbox/run-sandbox";
 
-const API_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL = process.env.LLM_MODEL || "claude-sonnet-5";
+// Only an unset API key skips the smoke; any other bad LLM setting fails the file.
+const LIVE = loadLiveLlmEnv();
+const LLM = "missingKey" in LIVE ? null : LIVE;
+const SKIP = "missingKey" in LIVE ? `${LIVE.missingKey} is not set` : null;
 const RUN_ID = "run_stagehand_live_smoke";
 const silent = { info() {}, warn() {}, error() {} };
 
-if (!API_KEY) {
-  process.stderr.write("[stagehand-smoke] SKIPPED: ANTHROPIC_API_KEY is not set (run: ANTHROPIC_API_KEY=… pnpm test:live -- stagehand-smoke)\n");
+if (SKIP) {
+  process.stderr.write(
+    `[stagehand-smoke] SKIPPED: ${SKIP} (run: ANTHROPIC_API_KEY=… or LLM_PROVIDER=gemini GEMINI_API_KEY=… pnpm test:live -- stagehand-smoke)\n`,
+  );
 }
 
 
@@ -33,7 +40,7 @@ describe("@live Stagehand smoke against the demo shop", () => {
   const cleanups: (() => Promise<void> | void)[] = [];
 
   beforeAll(async () => {
-    if (!API_KEY) return;
+    if (SKIP) return;
     shop = await startDemoShop({ port: 0, host: "127.0.0.1" });
   });
 
@@ -42,7 +49,7 @@ describe("@live Stagehand smoke against the demo shop", () => {
     await shop?.close();
   });
 
-  it.skipIf(!API_KEY)("navigate → find 'Add to cart' → click → cart badge reads 1 (DOM_VERIFIED)", async () => {
+  it.skipIf(SKIP !== null)("navigate → find 'Add to cart' → click → cart badge reads 1 (DOM_VERIFIED)", async () => {
     const target = `http://shop.test:${shop.port}/products/1`;
     const request: StoredTestRunRequest = {
       targetUrl: target,
@@ -83,9 +90,15 @@ describe("@live Stagehand smoke against the demo shop", () => {
     };
 
     const records: LlmCallRecord[] = [];
+    const env = LLM!;
     const llm = new LlmClient({
-      transport: createTransport({ provider: "anthropic", anthropicApiKey: API_KEY }),
-      model: MODEL,
+      transport: createTransport({
+        provider: env.LLM_PROVIDER,
+        anthropicApiKey: env.ANTHROPIC_API_KEY,
+        geminiApiKey: env.GEMINI_API_KEY,
+        geminiThinkingLevel: env.GEMINI_THINKING_LEVEL,
+      }),
+      model: env.LLM_MODEL,
       logger: silent,
       recordCall: (c) => void records.push(c),
     });

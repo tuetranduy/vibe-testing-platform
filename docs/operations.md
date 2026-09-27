@@ -33,8 +33,11 @@ guard also keeps top-level navigation on the target's hosts.
 
 Enforce the same boundary in the network (defense in depth — it catches anything that bypasses the proxy):
 
-- **Allow** the worker to reach: its PostgreSQL, Redis and S3 endpoints; the LLM provider (`api.anthropic.com:443`);
-  DNS; and public internet on TCP 80/443 for targets.
+- **Allow** the worker to reach: its PostgreSQL, Redis and S3 endpoints; the LLM provider (`api.anthropic.com:443`,
+  or `generativelanguage.googleapis.com:443` with `LLM_PROVIDER=gemini`); DNS; and public internet on TCP 80/443 for
+  targets.
+- With `LLM_PROVIDER=gemini`, use a `GEMINI_API_KEY` from a billing-enabled Google project: on the Gemini API's free
+  tier, Google may use prompts and responses (here: redacted page content and screenshots) to improve its products.
 - **Deny**: cloud metadata (`169.254.169.254/32`, `fd00:ec2::254/128`), RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`,
   `192.168.0.0/16`), CGNAT (`100.64.0.0/10`), link-local and ULA ranges (`169.254.0.0/16`, `fe80::/10`, `fc00::/7`),
   and every other internal service, including databases other than the worker's own.
@@ -148,4 +151,4 @@ of silence. As a backstop, configure an S3 lifecycle rule that expires objects s
 - `pnpm test`, `pnpm test:integration` and `pnpm test:e2e` (CI mode: scripted model and explorer, deterministic)
   on every change, with `pnpm infra:up` running.
 - `./scripts/e2e-live-gate.sh` before a release: the E2E suite against the real model and Stagehand, green three
-  times in a row (needs `ANTHROPIC_API_KEY`; the calls are billed).
+  times in a row (needs `ANTHROPIC_API_KEY`, or `LLM_PROVIDER=gemini` with `GEMINI_API_KEY`; the calls are billed).

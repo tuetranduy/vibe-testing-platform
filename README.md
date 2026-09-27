@@ -21,6 +21,8 @@ Plan: [`docs/ai-testing-platform-implementation-plan.md`](docs/ai-testing-platfo
 
 **First run against the real provider: 2026-09-26** (`claude-sonnet-5`). The eval baselines are recorded in `evals/BASELINE.md`; `pnpm test:live` and `scripts/milestone-b-demo.sh` (local API + real-engine worker) pass. The integration and live test projects transpile TypeScript the way `tsx` does (esbuild `keepNames`), because functions sent into the browser with `evaluate` fail there with "`__name` is not defined" when they declare a named inner function.
 
+**Gemini provider (2026-09-27).** `LLM_PROVIDER=gemini` with `GEMINI_API_KEY` runs the real engine on the Gemini Developer API (`generateContent` with a JSON response schema; default model `gemini-3.8-flash`, optional `GEMINI_THINKING_LEVEL`), through the same client as Anthropic: redaction, retries, deadline, `llm_calls` records with Gemini prices (thinking tokens billed as output). The evals, `pnpm test:live` and the live E2E gate take `LLM_PROVIDER` too. **It has not been run against the live API yet** (no Gemini key in the implementation environment; [KI-018](docs/known-issues.md#ki-018--the-gemini-provider-has-not-been-run-against-the-live-api)).
+
 **Real exploration and the Playwright rerun run in the Docker worker, with Chromium's sandbox on** (2026-09-27, [KI-002](docs/known-issues.md#ki-002--chromiums-sandbox-cannot-start-in-the-compose-worker)). Chromium's sandbox needs Linux user namespaces, which Docker's default seccomp profile denies ("No usable sandbox!", runs `ERRORED / BROWSER_PROVIDER`). Of the options — a seccomp profile that permits user namespaces, `cap_add: SYS_ADMIN` (broad), or Chromium's `--no-sandbox` (the browser runs untrusted pages) — the compose `worker` uses the first: [`infra/seccomp/worker.json`](infra/seccomp/README.md) is Docker's default profile plus user, PID and network namespaces for `clone` / `unshare`, with no extra capability. Both exploration's Chromium and the rerun's (launched by `@playwright/test`, `chromiumSandbox: true`) start sandboxed in the container, and `pnpm test:e2e:compose` runs the E2E suite against the compose API and worker. A deployment elsewhere needs the same profile (a Kubernetes `Localhost` profile) and a host that allows unprivileged user namespaces; see the profile's README.
 
 ## Run everything with Docker
@@ -37,7 +39,7 @@ The compose stack runs the **fake** engine (`LLM_PROVIDER=fake`). The `worker` i
 Chromium (matching the workspace's `playwright-core` pin) and its OS dependencies under `/ms-playwright`, and the
 `worker` service runs with the seccomp profile that lets Chromium's sandbox start (`infra/seccomp/worker.json`)
 and an init process that reaps the browsers' helpers. For the real engine, set `LLM_PROVIDER=anthropic` and
-`ANTHROPIC_API_KEY` in `infra/compose/.env`.
+`ANTHROPIC_API_KEY`, or `LLM_PROVIDER=gemini` and `GEMINI_API_KEY`, in `infra/compose/.env`.
 
 | Service | URL |
 |---|---|
@@ -114,7 +116,7 @@ set `S3_PUBLIC_ENDPOINT` only if the API reaches S3 under a name the browser can
 ### Real engine (Milestone B)
 
 The route for development: compose for the infrastructure, and the API and the worker on your machine (the compose
-`worker` runs the real engine too, with `LLM_PROVIDER=anthropic` in `infra/compose/.env`). The API runs locally as
+`worker` runs the real engine too, with `LLM_PROVIDER=anthropic` or `gemini` in `infra/compose/.env`). The API runs locally as
 well because the compose API only allowlists `demo-shop:4000`, a name a local worker can't resolve.
 
 ```bash
@@ -136,6 +138,8 @@ pnpm --filter @platform/api dev
 # terminal 2
 set -a; . ./.env; set +a
 LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... pnpm --filter @platform/worker dev
+# or, on Gemini (LLM_MODEL= drops .env's Claude model for gemini-3.8-flash):
+# LLM_PROVIDER=gemini GEMINI_API_KEY=... LLM_MODEL= pnpm --filter @platform/worker dev
 # expect "using the real test engine", "browser sandbox preflight passed" and "rerun runner preflight passed" in its log
 
 # terminal 3
@@ -223,15 +227,20 @@ The fake engine's generated test is now stored like the real one's, so its repor
 ```bash
 pnpm test              # all unit + DB/Redis tests (needs `pnpm infra:up`)
 pnpm test:integration   # tests/integration/**: real-Chromium sandbox + Stagehand adapter tests, no LLM
-pnpm test:live          # @live only: needs a real Chromium + ANTHROPIC_API_KEY; excluded from `pnpm test`
+pnpm test:live          # @live only: needs a real Chromium + the provider's key (below); excluded from `pnpm test`
 pnpm test:e2e           # end-to-end acceptance suite, CI mode (scripted model + explorer; real API, worker, sandbox, runner)
-pnpm test:e2e:live      # the same against the real model and Stagehand (ANTHROPIC_API_KEY; billed)
+pnpm test:e2e:live      # the same against the real model and Stagehand (the provider's key; billed)
 pnpm test:e2e:compose   # CI mode with the API and worker in the compose containers (builds the api and worker images; Docker Desktop)
 ./scripts/e2e-live-gate.sh   # release gate: the live suite green 3 times in a row
 pnpm typecheck
-pnpm eval requirement-compiler   # needs ANTHROPIC_API_KEY; scores a suite against the real model
+pnpm eval requirement-compiler   # needs the provider's key; scores a suite against the real model
 pnpm eval planner                # same, for the planner prompt
 ```
+
+The live commands, the gate and the evals run on Gemini with `LLM_PROVIDER=gemini` and `GEMINI_API_KEY`; with
+`LLM_PROVIDER` unset or `fake` (as in `.env`) they run on Anthropic with `ANTHROPIC_API_KEY`, as before. `LLM_MODEL`
+and `GEMINI_THINKING_LEVEL` work as for the worker; the other provider's model (e.g. `.env`'s
+`LLM_MODEL=claude-sonnet-5` with Gemini) is rejected, so set `LLM_MODEL=` (empty) for the provider's default.
 
 - DB tests clone a migrated template database per test file. They use `TEST_DATABASE_URL`, which defaults to the compose Postgres (`postgresql://platform:platform@localhost:5432/platform`). The role needs `CREATEDB`.
 - Redis tests use `TEST_REDIS_URL` (default `redis://localhost:6379/15`: a dedicated logical database, so tests never
@@ -255,7 +264,7 @@ packages/db                  Drizzle schema, SQL migrations, repositories, state
 packages/security            URL/IP policy, redaction, secret vault, destructive-action policy
 packages/storage             artifact storage (local, S3)
 packages/event-bus           event publisher, Redis fan-out, queue names
-packages/llm                 provider-neutral LLM client (redaction, retries, LlmCall records), Anthropic adapter
+packages/llm                 provider-neutral LLM client (redaction, retries, LlmCall records), Anthropic and Gemini adapters
 packages/stagehand-adapter    Stagehand v4 explorer, ClientLLM bridge, the runtime extension (Task 14)
 packages/testing-engine       orchestrator + engine stages: requirement compiler, planner, exploration, verifier (Tasks 10-15), test compiler, Playwright rerun + evidence, reconciliation + report (Tasks 16-18)
 evals                         `pnpm eval <suite>` harness and cases; BASELINE.md records scores
@@ -279,7 +288,7 @@ Each proposed criterion shows its wording and *what will be checked*. You can ad
 - **Drizzle ORM instead of Prisma.** Prisma's CLI downloads a native engine from `binaries.prisma.sh`, which was unreachable in the build environments. Drizzle is pure TypeScript and gives the same Postgres tables, enums, and constraints. Migrations are plain SQL in `packages/db/migrations` (`pnpm --filter @platform/db db:generate` after editing `schema.ts`).
 - **rclone's S3 server instead of MinIO** in Docker Compose: MinIO images are no longer available on Docker Hub. Production can use any S3-compatible store.
 - **Zod pinned to 4.4.3** because Stagehand v4 pins it (Task 0 finding).
-- **Only the Anthropic provider exists in V1.** `LLM_PROVIDER=openai` makes the worker fail at start-up. The model is set with `LLM_MODEL`.
+- **Anthropic and Gemini are the V1 providers.** Gemini is reached through the Gemini Developer API with an API key (not Vertex AI), by plain `fetch` rather than Google's SDK, which would add 32 packages (google-auth-library among them) to the worker for one endpoint. `LLM_PROVIDER=openai` makes the worker fail at start-up. The model is set with `LLM_MODEL` (default `claude-sonnet-5`, or `gemini-3.8-flash` for Gemini).
 - **Engine error classes live in `@platform/contracts`** (re-exported by `@platform/testing-engine`) so `@platform/llm` can throw `ModelProviderError` / `ContractError` / `CancelledError` without depending on the engine.
 - **`analyze` returns a draft; the orchestrator persists revision 1** (the plan's `compileRequirement` signature returns the stored requirement).
 - **`docs/ai-testing-platform-architecture.md`** is referenced by the plan but wasn't in the repo, so it hasn't been updated.

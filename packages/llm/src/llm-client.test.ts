@@ -341,4 +341,30 @@ describe("createTransport", () => {
   it("fake builds a scripted transport", () => {
     expect(createTransport({ provider: "fake" })).toBeInstanceOf(FakeTransport);
   });
+  it("gemini requires its own API key and sends the configured thinking level", async () => {
+    expect(() => createTransport({ provider: "gemini", anthropicApiKey: "sk-test" })).toThrow(/GEMINI_API_KEY/);
+
+    const bodies: unknown[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      const reply = { candidates: [{ content: { parts: [{ text: "{}" }], role: "model" }, finishReason: "STOP", index: 0 }] };
+      return new Response(JSON.stringify(reply), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    try {
+      const transport = createTransport({ provider: "gemini", geminiApiKey: "gm-test", geminiThinkingLevel: "high" });
+      expect(transport.provider).toBe("gemini");
+      await transport.complete({
+        model: "gemini-3.8-flash",
+        system: "",
+        messages: [{ role: "user", content: "hi" }],
+        jsonSchema: { type: "object" },
+        schemaName: "output",
+        maxTokens: 100,
+        signal: new AbortController().signal,
+      });
+      expect(bodies[0]).toMatchObject({ generationConfig: { thinkingConfig: { thinkingLevel: "HIGH" } } });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
