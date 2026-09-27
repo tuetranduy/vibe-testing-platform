@@ -143,19 +143,23 @@ export async function createRunContext(
     async dispose() {
       if (disposed) return;
       disposed = true;
-      clearTimeout(deadlineTimer);
-      clearInterval(heartbeat);
-      await lastBeat;
-      unwatch();
-      for (const fn of cleanups.reverse()) {
-        try {
-          await fn();
-        } catch (err) {
-          deps.logger.warn({ err, runId: run.id }, "cleanup failed");
+      try {
+        clearTimeout(deadlineTimer);
+        clearInterval(heartbeat);
+        await lastBeat;
+        unwatch();
+        for (const fn of cleanups.reverse()) {
+          try {
+            await fn();
+          } catch (err) {
+            deps.logger.warn({ err, runId: run.id }, "cleanup failed");
+          }
         }
+      } finally {
+        // Whatever failed above, the secrets and the run's log scope never outlive the run.
+        secretValues.clear();
+        releaseLog?.();
       }
-      secretValues.clear();
-      releaseLog?.();
     },
   };
 }
