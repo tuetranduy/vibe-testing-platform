@@ -1,6 +1,6 @@
-import type { ChildProcess } from "node:child_process";
+import { execFile, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { createWriteStream, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -8,20 +8,29 @@ import { fileURLToPath } from "node:url";
 import { startDemoShop, type RunningDemoShop } from "@platform/demo-shop";
 import { createTestDatabase, type TestDatabase } from "@platform/db/testing";
 import { Redis } from "ioredis";
-import { launchProcess } from "./process";
+import { launchComposeService, launchProcess, type LaunchedProcess } from "./process";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const COMPOSE_FILE = path.join(ROOT, "infra/compose/docker-compose.yml");
 
 export interface E2EStack {
   mode: "ci" | "live";
+  /** Where the API and worker run: child processes here, or containers of the compose services. */
+  platform: "local" | "compose";
   apiUrl: string;
   apiToken: string;
+  /** The demo shop as this process reaches it (its test endpoints). */
   shopUrl: string;
+  /** The demo shop as the platform reaches it: the base of every run's target URL. */
+  targetUrl: string;
   databaseUrl: string;
   redisUrl: string;
   workerMetricsUrl: string;
   logDir: string;
+  /** RUNNER_WORKSPACE_DIR as the worker sees it. */
   runnerDir: string;
+  /** The worker's container (platform `compose`), else null. */
+  workerContainer: string | null;
 }
 
 async function freePort(): Promise<number> {
@@ -45,17 +54,42 @@ async function until(what: string, check: () => Promise<boolean> | boolean, time
   throw new Error(`${what}: not ready after ${timeoutMs} ms`);
 }
 
+/** Runs a command to completion with its output in `logFile`; rejects (naming the log) on failure. */
+function runLogged(file: string, args: string[], logFile: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const log = createWriteStream(logFile);
+    const child = execFile(file, args, { maxBuffer: 256 * 1024 * 1024 }, (err) => {
+      log.end();
+      if (err) reject(new Error(`${file} ${args.join(" ")} failed; see ${logFile}`));
+      else resolve();
+    });
+    child.stdout?.pipe(log, { end: false });
+    child.stderr?.pipe(log, { end: false });
+  });
+}
+
+/** `url` with another host and port: how a container on the compose network reaches the same service. */
+function viaHost(url: string, host: string, port: number): string {
+  const u = new URL(url);
+  u.hostname = host;
+  u.port = String(port);
+  return u.toString();
+}
+
 /**
- * The real platform on this machine: a fresh database, Redis logical DB, MinIO bucket, the demo
- * shop (in-process, loopback, test endpoints on), and the API and worker as child processes (their
- * logs in `logDir`). A failure part-way through stops what already started, then rethrows.
+ * The real platform on this machine: a fresh database, Redis logical DB, S3 bucket, the demo shop
+ * (in-process, loopback, test endpoints on), and the API and worker — as child processes, or with
+ * E2E_PLATFORM=compose as containers of the compose `api` and `worker` services (their images built
+ * from this checkout, the worker with the compose file's seccomp profile), which reach the shop as
+ * `host.docker.internal`. Logs go to `logDir`. A failure part-way through stops what already started,
+ * then rethrows.
  */
 export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<void> }> {
   const mode = process.env.E2E_MODE === "live" ? "live" : "ci";
+  const platform = process.env.E2E_PLATFORM === "compose" ? "compose" : "local";
   if (mode === "live" && !process.env.ANTHROPIC_API_KEY) throw new Error("E2E_MODE=live needs ANTHROPIC_API_KEY");
   const work = realpathSync(mkdtempSync(path.join(os.tmpdir(), "platform-e2e-")));
   const logDir = path.join(work, "logs");
-  const runnerDir = path.join(work, "runs");
   mkdirSync(logDir);
   const stops: (() => Promise<void> | void)[] = [() => rmSync(work, { recursive: true, force: true })];
   const stop = async () => {
@@ -63,6 +97,11 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
   };
 
   try {
+    if (platform === "compose") {
+      // The containers must run this checkout: build (cached when nothing changed).
+      await runLogged("docker", ["compose", "-f", COMPOSE_FILE, "build", "api", "worker"], path.join(logDir, "build.log"));
+    }
+
     const db: TestDatabase = await createTestDatabase();
     stops.push(() => db.drop());
 
@@ -73,65 +112,100 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
 
     const shop: RunningDemoShop = await startDemoShop({ testEndpoints: true });
     stops.push(() => shop.close());
+    // Docker Desktop forwards host.docker.internal to this machine, loopback included.
+    const targetUrl = platform === "compose" ? `http://host.docker.internal:${shop.port}` : shop.url;
 
     const apiPort = await freePort();
     const metricsPort = await freePort();
     const apiToken = `e2e-${randomBytes(12).toString("hex")}`;
+    const s3Endpoint = process.env.E2E_S3_ENDPOINT ?? "http://localhost:9000";
+    const runnerDir = platform === "compose" ? "/work/runs" : path.join(work, "runs");
     const env: Record<string, string> = {
-      PATH: process.env.PATH ?? "",
-      HOME: process.env.HOME ?? "",
       NODE_ENV: "test",
-      DATABASE_URL: db.url,
-      REDIS_URL: redisUrl,
+      DATABASE_URL: platform === "compose" ? viaHost(db.url, "postgres", 5432) : db.url,
+      REDIS_URL: platform === "compose" ? viaHost(redisUrl, "redis", 6379) : redisUrl,
       ARTIFACT_STORAGE_TYPE: "s3",
       ARTIFACT_BUCKET: `platform-e2e-${randomBytes(4).toString("hex")}`,
-      S3_ENDPOINT: process.env.E2E_S3_ENDPOINT ?? "http://localhost:9000",
+      S3_ENDPOINT: platform === "compose" ? viaHost(s3Endpoint, "s3", 9000) : s3Endpoint,
+      // Signed artifact URLs are opened by this process.
+      ...(platform === "compose" ? { S3_PUBLIC_ENDPOINT: s3Endpoint } : {}),
       S3_ACCESS_KEY_ID: "s3admin",
       S3_SECRET_ACCESS_KEY: "s3admin-secret",
       BROWSER_MODE: "local",
       API_TOKEN: apiToken,
-      API_PORT: String(apiPort),
+      API_PORT: platform === "compose" ? "3001" : String(apiPort),
       DEFAULT_TENANT_ID: "t_default",
       SECRETS_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
       MAX_ACTIVE_RUNS_PER_TENANT: "10",
-      TARGET_PRIVATE_ALLOWLIST: `127.0.0.1:${shop.port}`,
+      TARGET_PRIVATE_ALLOWLIST: new URL(targetUrl).host,
       RUNNER_WORKSPACE_DIR: runnerDir,
-      WORKER_METRICS_PORT: String(metricsPort),
+      WORKER_METRICS_PORT: platform === "compose" ? "9464" : String(metricsPort),
       WORKER_CONCURRENCY: "2",
       LOG_LEVEL: "info",
-      ...(process.env.PLAYWRIGHT_BROWSERS_PATH ? { PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH } : {}),
+      ...(platform === "local"
+        ? {
+            PATH: process.env.PATH ?? "",
+            HOME: process.env.HOME ?? "",
+            ...(process.env.PLAYWRIGHT_BROWSERS_PATH ? { PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH } : {}),
+          }
+        : {}),
     };
 
-    const launch = (name: string, entry: string, extra: Record<string, string>): ChildProcess => {
-      const launched = launchProcess({ name, entry, cwd: ROOT, env: { ...env, ...extra }, logDir });
+    const suffix = randomBytes(4).toString("hex");
+    const launch = (service: "api" | "worker", extra: Record<string, string>, published: { port: number; target: number }): LaunchedProcess => {
+      const launched =
+        platform === "compose"
+          ? launchComposeService({
+              composeFile: COMPOSE_FILE,
+              service,
+              name: `platform-e2e-${service}-${suffix}`,
+              env: { ...env, ...extra },
+              publish: [`127.0.0.1:${published.port}:${published.target}`],
+              ...(service === "worker" ? { command: ["node", "--import", "tsx", "tests/e2e/support/worker-main.ts"] } : {}),
+              logDir,
+            })
+          : launchProcess({
+              name: service,
+              entry: service === "api" ? "apps/api/src/main.ts" : "tests/e2e/support/worker-main.ts",
+              cwd: ROOT,
+              env: { ...env, ...extra },
+              logDir,
+            });
       stops.push(launched.stop);
-      return launched.child;
+      return launched;
     };
 
-    const api = launch("api", "apps/api/src/main.ts", { LLM_PROVIDER: "fake" });
+    const api = launch("api", { LLM_PROVIDER: "fake" }, { port: apiPort, target: 3001 });
     const apiUrl = `http://127.0.0.1:${apiPort}`;
-    await until("API", async () => (await fetch(`${apiUrl}/healthz`)).ok, 60_000, api);
+    await until("API", async () => (await fetch(`${apiUrl}/healthz`)).ok, 120_000, api.child);
 
-    const worker = launch("worker", "tests/e2e/support/worker-main.ts", {
-      LLM_PROVIDER: "anthropic",
-      ANTHROPIC_API_KEY: mode === "live" ? process.env.ANTHROPIC_API_KEY! : "sk-e2e-scripted-not-a-key",
-      ...(process.env.LLM_MODEL ? { LLM_MODEL: process.env.LLM_MODEL } : {}),
-      E2E_MODE: mode,
-    });
+    const worker = launch(
+      "worker",
+      {
+        LLM_PROVIDER: "anthropic",
+        ANTHROPIC_API_KEY: mode === "live" ? process.env.ANTHROPIC_API_KEY! : "sk-e2e-scripted-not-a-key",
+        ...(process.env.LLM_MODEL ? { LLM_MODEL: process.env.LLM_MODEL } : {}),
+        E2E_MODE: mode,
+      },
+      { port: metricsPort, target: 9464 },
+    );
     const workerLog = path.join(logDir, "worker.log");
-    await until("worker", () => readFileSync(workerLog, "utf8").includes('"msg":"worker started"'), 120_000, worker);
+    await until("worker", () => readFileSync(workerLog, "utf8").includes('"msg":"worker started"'), 120_000, worker.child);
 
     return {
       stack: {
         mode,
+        platform,
         apiUrl,
         apiToken,
         shopUrl: shop.url,
+        targetUrl,
         databaseUrl: db.url,
         redisUrl,
         workerMetricsUrl: `http://127.0.0.1:${metricsPort}/metrics`,
         logDir,
         runnerDir,
+        workerContainer: platform === "compose" ? `platform-e2e-worker-${suffix}` : null,
       },
       stop,
     };

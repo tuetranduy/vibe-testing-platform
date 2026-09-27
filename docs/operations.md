@@ -40,8 +40,13 @@ Enforce the same boundary in the network (defense in depth — it catches anythi
   and every other internal service, including databases other than the worker's own.
 - The API needs no internet egress (target URLs are validated with DNS only).
 - `TARGET_PRIVATE_ALLOWLIST` (testing private hosts) is refused when `NODE_ENV=production`.
-- Chromium keeps its own sandbox on. It needs Linux user namespaces, which Docker's default seccomp profile
-  denies; see README "Status" for the open decision (a seccomp profile that allows user namespaces is preferred).
+- Chromium keeps its own sandbox on (exploration's browser and the rerun's). It needs Linux user namespaces, which
+  Docker's default seccomp profile denies, so run the worker with `infra/seccomp/worker.json` (compose does): Docker's
+  default plus user, PID and network namespaces for `clone` / `unshare`, no extra capability. Never `--no-sandbox`
+  or `SYS_ADMIN`. The host must allow unprivileged user namespaces (see `infra/seccomp/README.md`); with the real
+  engine, the worker's start-up log says "browser sandbox preflight passed" or why it failed.
+- Run the worker with an init process as PID 1 (compose: `init: true`), so the helpers of the browsers it kills are
+  reaped.
 
 ## Rotating `SECRETS_ENCRYPTION_KEY`
 

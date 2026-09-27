@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { TestEvent, TestReport, TestRunSummary } from "@platform/contracts";
 import { ArtifactRepository, EventRepository, GeneratedTestRepository, SecretRepository, createDb } from "@platform/db";
@@ -87,10 +87,26 @@ export function logs(stack: E2EStack): string {
     .join("\n");
 }
 
-/** Command lines of the worker's live processes that mention `text` (e.g. a run id in a sandbox profile dir). */
-export function processesMentioning(_stack: E2EStack, text: string): string[] {
-  const out = execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+/**
+ * Command lines of the worker's live processes that mention `text` (e.g. a run id in a sandbox profile
+ * dir): on this machine, or inside the worker's container.
+ */
+export function processesMentioning(stack: E2EStack, text: string): string[] {
+  const ps = ["ps", "-axo", "pid=,command="];
+  const [file, ...args] = stack.workerContainer ? ["docker", "exec", stack.workerContainer, ...ps] : ps;
+  const out = execFileSync(file!, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return out.split("\n").filter((l) => l.includes(text) && !l.includes("ps -axo"));
+}
+
+/** Whether the run's Playwright workspace (`<RUNNER_WORKSPACE_DIR>/<runId>`) exists where the worker runs. */
+export function runnerWorkspaceExists(stack: E2EStack, runId: string): boolean {
+  if (!stack.workerContainer) return existsSync(path.join(stack.runnerDir, runId));
+  try {
+    execFileSync("docker", ["exec", stack.workerContainer, "test", "-e", path.posix.join(stack.runnerDir, runId)]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

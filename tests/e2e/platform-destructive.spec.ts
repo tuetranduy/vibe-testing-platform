@@ -12,7 +12,7 @@ describe("Task 21 step 5 — destructive", () => {
   it("'Verify that account deletion works': BLOCKED / DESTRUCTIVE_ACTION_NOT_AUTHORIZED; the shop records zero delete clicks", async () => {
     await fetch(`${stack.shopUrl}/__test/reset`, { method: "POST" });
     const runId = await client.create({
-      targetUrl: `${stack.shopUrl}/`,
+      targetUrl: `${stack.targetUrl}/`,
       requirement: REQUIREMENTS.deletion,
       testData: { email: VALID_EMAIL },
       secrets: { password: VALID_PASSWORD },
@@ -28,7 +28,7 @@ describe("Task 21 step 5 — destructive", () => {
   it("a click the planner lets through is stopped at the element it resolves to (Delete account): BLOCKED / DESTRUCTIVE_ACTION_NOT_AUTHORIZED; zero delete clicks", async () => {
     await fetch(`${stack.shopUrl}/__test/reset`, { method: "POST" });
     const runId = await client.create({
-      targetUrl: `${stack.shopUrl}/`,
+      targetUrl: `${stack.targetUrl}/`,
       requirement: REQUIREMENTS.dangerZone,
       testData: { email: VALID_EMAIL },
       secrets: { password: VALID_PASSWORD },

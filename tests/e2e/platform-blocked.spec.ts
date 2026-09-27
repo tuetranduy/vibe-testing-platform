@@ -11,7 +11,7 @@ afterAll(() => store.close());
 describe("Task 21 step 3 — BLOCKED / secrets", () => {
   it("without the password secret: BLOCKED / MISSING_SECRET, verdict BLOCKED", async () => {
     const runId = await client.create({
-      targetUrl: `${stack.shopUrl}/`,
+      targetUrl: `${stack.targetUrl}/`,
       requirement: REQUIREMENTS.account,
       testData: { email: VALID_EMAIL },
       options: { autoConfirmCriteria: true },
@@ -24,7 +24,7 @@ describe("Task 21 step 3 — BLOCKED / secrets", () => {
 
   it("with the secret: PASS; the value is absent from DB rows, events, logs and STANDARD artifacts; secrets are purged", async () => {
     const runId = await client.create({
-      targetUrl: `${stack.shopUrl}/`,
+      targetUrl: `${stack.targetUrl}/`,
       requirement: REQUIREMENTS.account,
       testData: { email: VALID_EMAIL },
       secrets: { password: VALID_PASSWORD },

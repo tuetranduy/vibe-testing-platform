@@ -10,7 +10,7 @@ afterAll(() => store.close());
 describe("Task 21 step 7 — SSRF", () => {
   it("an open redirect to the metadata address: every criterion BLOCKED / TARGET_BLOCKED_BY_POLICY", async () => {
     const runId = await client.create({
-      targetUrl: `${stack.shopUrl}/redirect?to=http://169.254.169.254/`,
+      targetUrl: `${stack.targetUrl}/redirect?to=http://169.254.169.254/`,
       requirement: REQUIREMENTS.cart,
       options: { autoConfirmCriteria: true },
     });
@@ -23,7 +23,7 @@ describe("Task 21 step 7 — SSRF", () => {
   });
 
   it("a page that loads from the metadata address: egress.blocked is recorded (and counted), the run still completes", async () => {
-    const runId = await client.create({ targetUrl: `${stack.shopUrl}/egress-probe`, requirement: REQUIREMENTS.probe, options: { autoConfirmCriteria: true } });
+    const runId = await client.create({ targetUrl: `${stack.targetUrl}/egress-probe`, requirement: REQUIREMENTS.probe, options: { autoConfirmCriteria: true } });
     expect(await client.finished(runId)).toMatchObject({ lifecycle: "COMPLETED" });
     const egress = (await store.events(runId)).filter((e) => e.type === "egress.blocked");
     expect(egress.map((e) => e.payload)).toContainEqual({ host: "169.254.169.254", reason: "NON_PUBLIC_ADDRESS" });

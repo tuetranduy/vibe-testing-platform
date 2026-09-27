@@ -10,7 +10,7 @@ afterAll(() => store.close());
 
 describe("Task 21 step 1 — PASS", () => {
   it("search → add to cart → cart: completes PASSED; every criterion PASS confirmed by the Playwright rerun; the generated test typechecks", async () => {
-    const runId = await client.create({ targetUrl: `${stack.shopUrl}/`, requirement: REQUIREMENTS.cart, options: { autoConfirmCriteria: true } });
+    const runId = await client.create({ targetUrl: `${stack.targetUrl}/`, requirement: REQUIREMENTS.cart, options: { autoConfirmCriteria: true } });
 
     const done = await client.finished(runId);
     expect(done).toMatchObject({ lifecycle: "COMPLETED", verdict: "PASSED" });
