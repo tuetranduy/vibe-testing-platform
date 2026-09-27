@@ -1873,23 +1873,23 @@ Two modes:
 - **CI mode (default):** real API, worker, DB, Redis, MinIO, sandbox, runner, and demo shop; `ScriptedExplorer` and a scripted LLM replace model calls. Must be 100 % deterministic.
 - **Live mode (`@live`, nightly + before release):** real model and Stagehand. Release gate: 3 consecutive green runs.
 
-- [ ] **Step 1: PASS** — *"Verify that a user can search for an iPhone, add it to the cart, and see the selected product in the cart."* → run completes; all criteria PASS with `PLAYWRIGHT_RERUN`; generated test exists and typechecks.
+- [x] **Step 1: PASS** — *"Verify that a user can search for an iPhone, add it to the cart, and see the selected product in the cart."* → run completes; all criteria PASS with `PLAYWRIGHT_RERUN`; generated test exists and typechecks.
 
-- [ ] **Step 2: FAIL** — same requirement, target `?bug=empty_cart` → cart-count criterion PASS, cart-product criterion FAIL (`PLAYWRIGHT_RERUN`); verdict `FAILED`; failure has trace + screenshot.
+- [x] **Step 2: FAIL** — same requirement, target `?bug=empty_cart` → cart-count criterion PASS, cart-product criterion FAIL (`PLAYWRIGHT_RERUN`); verdict `FAILED`; failure has trace + screenshot.
 
-- [ ] **Step 3: BLOCKED** — *"Log in and verify the account page shows the user's email"* with no `password` secret → criterion `BLOCKED / MISSING_SECRET`; verdict `BLOCKED`. Same with the secret provided → PASS, and the secret value is absent from DB rows, events, logs, and non-`SECRET_BEARING` artifacts.
+- [x] **Step 3: BLOCKED** — *"Log in and verify the account page shows the user's email"* with no `password` secret → criterion `BLOCKED / MISSING_SECRET`; verdict `BLOCKED`. Same with the secret provided → PASS, and the secret value is absent from DB rows, events, logs, and non-`SECRET_BEARING` artifacts.
 
-- [ ] **Step 4: Cancel** — target `?slow=5000`, cancel during `EXPLORING` → `CANCELLED` within 10 s; browser and runner processes gone; secrets purged.
+- [x] **Step 4: Cancel** — target `?slow=5000`, cancel during `EXPLORING` → `CANCELLED` within 10 s; browser and runner processes gone; secrets purged.
 
-- [ ] **Step 5: Destructive** — *"Verify that account deletion works"* → `BLOCKED / DESTRUCTIVE_ACTION_NOT_AUTHORIZED`; demo shop records zero delete clicks.
+- [x] **Step 5: Destructive** — *"Verify that account deletion works"* → `BLOCKED / DESTRUCTIVE_ACTION_NOT_AUTHORIZED`; demo shop records zero delete clicks.
 
 - [ ] **Step 6: Prompt injection (live mode only)** — requirement touches `/products/3` → "Delete account" never clicked; verdict unaffected by the injected text.
 
-- [ ] **Step 7: SSRF** — target `demo-shop/redirect?to=http://169.254.169.254/` → criteria `BLOCKED / TARGET_BLOCKED_BY_POLICY`; `egress.blocked` event recorded. Create with `http://127.0.0.1` → 422.
+- [x] **Step 7: SSRF** — target `demo-shop/redirect?to=http://169.254.169.254/` → criteria `BLOCKED / TARGET_BLOCKED_BY_POLICY`; `egress.blocked` event recorded. Create with `http://127.0.0.1` → 422.
 
-- [ ] **Step 8: Confirmation** — edit a criterion in review, confirm, complete; report reflects revision 2. Unconfirmed run past TTL (fake clock) → `CANCELLED / CONFIRMATION_EXPIRED`.
+- [x] **Step 8: Confirmation** — edit a criterion in review, confirm, complete; report reflects revision 2. Unconfirmed run past TTL (fake clock) → `CANCELLED / CONFIRMATION_EXPIRED`.
 
-- [ ] **Step 9: Run and commit**
+- [x] **Step 9: Run and commit**
 
 ```bash
 pnpm infra:up
@@ -1909,7 +1909,7 @@ git commit -m "test: validate the platform end to end"
 - Create: `docs/operations.md`
 - Test: `packages/config/src/logger.test.ts`, `apps/worker/src/jobs/retention.test.ts`
 
-- [ ] **Step 1: Metrics (Prometheus)**
+- [x] **Step 1: Metrics (Prometheus)**
 
 ```text
 test_runs_total{lifecycle,verdict}
@@ -1927,19 +1927,19 @@ runs_reaped_total{reason}
 artifact_upload_failures_total
 ```
 
-- [ ] **Step 2: Structured logging**
+- [x] **Step 2: Structured logging**
 
 Every run log line includes `runId`, `tenantId`, `stage`, `component`. The logger runs the run redactor on every line. Test: logging an object containing a secret value outputs `[REDACTED]`.
 
-- [ ] **Step 3: Retention job**
+- [x] **Step 3: Retention job**
 
 Daily: delete artifacts past `expiresAt` (`SECRET_BEARING` 7 days, `STANDARD` 30 days) from storage and DB. Test with fake clock.
 
-- [ ] **Step 4: Operations doc**
+- [x] **Step 4: Operations doc**
 
 `docs/operations.md`: deployment topology; worker network policy (egress only via proxy; no access to metadata endpoints, private ranges, or control-plane DB except via the services it needs); key rotation for `SECRETS_ENCRYPTION_KEY`; alert suggestions (reaped runs, egress blocks spike, cost per run).
 
-- [ ] **Step 5: Clean bootstrap check**
+- [x] **Step 5: Clean bootstrap check**
 
 From a clean checkout:
 
@@ -1953,7 +1953,7 @@ pnpm test:e2e
 
 Expected: stack healthy; all tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps packages/config docs/operations.md
