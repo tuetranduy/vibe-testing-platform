@@ -1,7 +1,8 @@
+import { RunRepository } from "@platform/db";
 import { TEST_TENANT_ID } from "@platform/db/testing";
 import type { ArtifactStorage } from "@platform/storage";
 import type { Counter, Gauge, Histogram } from "prom-client";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { storeArtifact } from "./artifacts";
 import { executeRunJob } from "./jobs/execute-run";
 import { reapJob } from "./jobs/reap";
@@ -72,11 +73,36 @@ describe("worker metrics", () => {
 
   it("the reaper counts what it reaped, by reason, and the runs it ended", async () => {
     const m = createWorkerMetrics();
-    await seedRun(h, { lifecycle: "AWAITING_CONFIRMATION" });
     const later = new Date(Date.now() + 25 * 3_600_000);
+    const runs = new RunRepository(h.tdb.db);
+    await seedRun(h, { lifecycle: "AWAITING_CONFIRMATION" });
+    await seedRun(h); // QUEUED and never picked up
+    await seedRun(h, { lifecycle: "ANALYZING_REQUIREMENT" }); // no heartbeat since
+    const stuck = await seedRun(h, { lifecycle: "PLANNING" }); // alive, but past its deadline
+    await runs.markExecutionStarted(stuck.id, { startedAt: new Date(), deadlineAt: new Date() });
+    await runs.heartbeat(stuck.id, later);
     await reapJob(h.deps(createFakeStages(), { metrics: m, now: () => later }));
-    expect(await value(m.runsReaped, { reason: "CONFIRMATION_EXPIRED" })).toBeGreaterThanOrEqual(1);
+    for (const reason of ["CONFIRMATION_EXPIRED", "NEVER_STARTED", "WORKER_LOST", "TIMEOUT"]) {
+      expect(await value(m.runsReaped, { reason }), reason).toBeGreaterThanOrEqual(1);
+    }
     expect(await value(m.testRuns, { lifecycle: "CANCELLED", verdict: "none" })).toBeGreaterThanOrEqual(1);
+    expect(await value(m.testRuns, { lifecycle: "ERRORED", verdict: "none" })).toBeGreaterThanOrEqual(3);
+  });
+
+  it("a reaper pass that fails midway still counts the runs it already reaped", async () => {
+    const m = createWorkerMetrics();
+    const run = await seedRun(h, { lifecycle: "ANALYZING_REQUIREMENT" });
+    await new RunRepository(h.tdb.db).heartbeat(run.id, new Date(Date.now() - 2 * 60_000));
+    // The WORKER_LOST sweep runs first; the deadline sweep's query then fails.
+    const spy = vi.spyOn(RunRepository.prototype, "findPastDeadline").mockRejectedValueOnce(new Error("db down"));
+    try {
+      await expect(reapJob(h.deps(createFakeStages(), { metrics: m }))).rejects.toThrow("db down");
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("ERRORED");
+    expect(await value(m.testRuns, { lifecycle: "ERRORED", verdict: "none" })).toBe(1);
+    expect(await value(m.runsReaped, { reason: "WORKER_LOST" })).toBe(1);
   });
 
   it("a failed artifact upload is counted and still thrown", async () => {
