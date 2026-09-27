@@ -9,10 +9,12 @@ import { CriteriaReview } from "./CriteriaReview";
 import { Disclosure } from "./Disclosure";
 import { Icon, type IconName } from "./Icon";
 import { LiveEvidence } from "./LiveEvidence";
+import { LiveStats } from "./LiveStats";
 import { RunProgress } from "./RunProgress";
 import { RunReport } from "./RunReport";
 import { RunTimeline } from "./RunTimeline";
 import { CANCEL_REASON_TEXT, ERROR_CATEGORY_LABEL, LIFECYCLE_LABEL, VERDICT_LABEL } from "./format";
+import { displayUrl, formatWhen } from "./report-format";
 
 /** After analysis completes, how long to poll the run summary for AWAITING_CONFIRMATION. */
 const SETTLE_POLL_MS = 750;
@@ -199,30 +201,55 @@ export function RunView({ runId }: { runId: string }) {
   const analyzing = lifecycle === "QUEUED" || lifecycle === "ANALYZING_REQUIREMENT";
 
   return (
-    <div className="stack">
+    <div className="stack-lg">
       <p className="visually-hidden" role="status" aria-live="polite" aria-atomic="true" data-announcer>
         {announcement}
       </p>
       <header className="run-header">
-        <div className="run-header-main">
-          <p className="eyebrow">Test run · {summary.runId}</p>
-          <h1 className="run-target">{summary.targetUrl}</h1>
-          <p className="muted run-requirement">{summary.requirementPreview}</p>
-        </div>
-        <div className="run-header-side">
-          <span className={`status status-${lifecycle.toLowerCase()}`}>
-            <Icon name={STATUS_ICON(lifecycle)} /> {LIFECYCLE_LABEL[lifecycle]}
-          </span>
-          {!terminal && cancel !== "confirming" && (
-            <button
-              type="button"
-              className="button button-danger-quiet"
-              onClick={() => setCancel("confirming")}
-              disabled={cancel === "pending" || cancel === "requested"}
-            >
-              {cancel === "idle" ? "Cancel run" : "Cancelling…"}
-            </button>
-          )}
+        <nav aria-label="Breadcrumb" className="breadcrumb">
+          <ol>
+            <li>
+              <a href="/runs">Test runs</a>
+            </li>
+            <li aria-current="page">{summary.runId}</li>
+          </ol>
+        </nav>
+        <div className="run-header-row">
+          <div className="run-header-main">
+            <h1 className="run-title">{summary.requirementPreview}</h1>
+            <div className="run-meta">
+              <span className={`status status-${lifecycle.toLowerCase()}`}>
+                <Icon name={STATUS_ICON(lifecycle)} /> {LIFECYCLE_LABEL[lifecycle]}
+              </span>
+              <span className="meta-chip" title={summary.targetUrl}>
+                <Icon name="globe" />
+                <span className="visually-hidden">Website: </span>
+                {displayUrl(summary.targetUrl)}
+              </span>
+              <span className="meta-text">
+                Created <time dateTime={summary.createdAt}>{formatWhen(summary.createdAt)}</time>
+              </span>
+            </div>
+          </div>
+          <div className="run-header-side">
+            {!terminal && cancel !== "confirming" && (
+              <button
+                type="button"
+                className="button button-danger-quiet"
+                onClick={() => setCancel("confirming")}
+                disabled={cancel === "pending" || cancel === "requested"}
+              >
+                <Icon name="stop" />
+                {cancel === "idle" ? "Cancel run" : "Cancelling…"}
+              </button>
+            )}
+            {terminal && (
+              <a className="button button-secondary" href={`/runs/new?from=${encodeURIComponent(runId)}`}>
+                <Icon name="restart" />
+                Run again
+              </a>
+            )}
+          </div>
         </div>
       </header>
 
@@ -260,6 +287,26 @@ export function RunView({ runId }: { runId: string }) {
           {connection === "reconnecting" ? "Connection lost — reconnecting…" : "Live updates are unavailable. Reload the page to retry."}
         </p>
       )}
+      {!terminal && confirmation && (
+        <div role="status" aria-labelledby="confirmed-title" className="banner banner-info">
+          <Icon name="check" />
+          <div>
+            <p id="confirmed-title" className="banner-title">
+              Criteria confirmed
+            </p>
+            <p>Revision {confirmation.revision} is frozen and the run is starting.</p>
+            {confirmation.warnings.length > 0 && (
+              <ul>
+                {confirmation.warnings.map((w, i) => (
+                  <li key={`${i}-${w}`}>{w}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!terminal && <RunProgress progress={progress} lifecycle={lifecycle} />}
 
       {analyzing ? (
         <section className="card analyzing" aria-labelledby="analyzing-title">
@@ -290,33 +337,13 @@ export function RunView({ runId }: { runId: string }) {
           </Disclosure>
         </>
       ) : (
-        <>
-          {confirmation && (
-            <div role="status" aria-labelledby="confirmed-title" className="banner banner-info">
-              <Icon name="check" />
-              <div>
-                <p id="confirmed-title" className="banner-title">
-                  Criteria confirmed
-                </p>
-                <p>Revision {confirmation.revision} is frozen and the run is starting.</p>
-                {confirmation.warnings.length > 0 && (
-                  <ul>
-                    {confirmation.warnings.map((w, i) => (
-                      <li key={`${i}-${w}`}>{w}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          )}
-          <div className="run-grid">
-            <div className="stack">
-              <RunProgress progress={progress} />
-              <RunTimeline items={progress.timeline} />
-            </div>
-            <LiveEvidence runId={runId} screenshot={progress.latestScreenshot} />
+        <div className="live-grid">
+          <LiveEvidence runId={runId} screenshot={progress.latestScreenshot} />
+          <div className="live-side">
+            <LiveStats progress={progress} />
+            <RunTimeline items={progress.timeline} />
           </div>
-        </>
+        </div>
       )}
     </div>
   );

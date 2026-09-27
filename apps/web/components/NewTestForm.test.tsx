@@ -154,6 +154,70 @@ describe("NewTestForm", () => {
     expect(bodyOf(fetch).options.autoConfirmCriteria).toBe(true);
   });
 
+  it("keeps test data and secrets collapsed, and says what is set in each", async () => {
+    const user = userEvent.setup();
+    render(<NewTestForm />);
+    const dataSection = screen.getByText("Test data").closest("details")!;
+    const secretSection = screen.getByText("Secrets").closest("details")!;
+    expect(dataSection).not.toHaveAttribute("open");
+    expect(secretSection).not.toHaveAttribute("open");
+    expect(within(dataSection).getByRole("button", { name: /add test data/i })).not.toBeVisible();
+    expect(within(dataSection.querySelector("summary")!).getByText("None")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Test data"));
+    expect(dataSection).toHaveAttribute("open");
+    await user.click(within(dataSection).getByRole("button", { name: /add test data/i }));
+    await user.type(screen.getByLabelText(/test data 1 key/i), "searchTerm");
+    expect(within(dataSection.querySelector("summary")!).getByText("1 value")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Secrets"));
+    await user.click(within(secretSection).getByRole("button", { name: /add secret/i }));
+    await user.type(screen.getByLabelText(/secret 1 name/i), "password");
+    expect(within(secretSection.querySelector("summary")!).getByText("1 secret")).toBeInTheDocument();
+  });
+
+  it("summarizes the advanced options while they are collapsed", async () => {
+    const user = userEvent.setup();
+    render(<NewTestForm />);
+    const summary = screen.getByText(/advanced options/i).closest("summary")!;
+    expect(summary).toHaveTextContent("40 steps · 5 min · rerun on");
+    await user.click(summary);
+    await user.clear(screen.getByLabelText(/max run time/i));
+    await user.type(screen.getByLabelText(/max run time/i), "90");
+    await user.click(screen.getByLabelText(/rerun the generated test/i));
+    expect(summary).toHaveTextContent("40 steps · 90s · no rerun");
+  });
+
+  it("opens a collapsed section to show an invalid field in it", async () => {
+    const user = userEvent.setup();
+    mockFetch();
+    render(<NewTestForm />);
+    await fillValid(user);
+    await user.click(screen.getByText("Test data"));
+    await user.click(screen.getByRole("button", { name: /add test data/i }));
+    await user.type(screen.getByLabelText(/test data 1 key/i), "1 bad key");
+    await user.click(screen.getByText("Test data")); // collapse it again
+    expect(screen.getByText("Test data").closest("details")).not.toHaveAttribute("open");
+
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    expect(screen.getByText("Test data").closest("details")).toHaveAttribute("open");
+    expect(screen.getByLabelText(/test data 1 key/i)).toHaveFocus();
+  });
+
+  it("offers example requirements while the requirement is empty", async () => {
+    const user = userEvent.setup();
+    render(<NewTestForm />);
+    const examples = screen.getByRole("group", { name: /examples/i });
+    await user.click(within(examples).getByRole("button", { name: "Search lists matching products" }));
+    const requirement = screen.getByLabelText(/requirement/i);
+    expect(requirement).toHaveValue("Searching for a product name lists only products whose names contain it.");
+    expect(requirement).toHaveFocus(); // the example buttons are gone, so focus moves on
+    expect(screen.queryByRole("group", { name: /examples/i })).not.toBeInTheDocument();
+
+    await user.clear(requirement);
+    expect(screen.getByRole("group", { name: /examples/i })).toBeInTheDocument();
+  });
+
   it("creates a run on an insecure origin, where crypto.randomUUID is unavailable", async () => {
     const real = globalThis.crypto;
     vi.stubGlobal("crypto", { getRandomValues: real.getRandomValues.bind(real) });

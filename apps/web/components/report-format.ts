@@ -135,6 +135,20 @@ export function hostOf(url: string): string {
   }
 }
 
-/** Local date and time, e.g. "26 Sep 2026, 10:01". */
-export const formatDateTime = (iso: string): string =>
-  new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+/** A target URL as people read it: no scheme, no bare trailing slash ("shop.example.com/cart?x=1"). */
+export const displayUrl = (url: string): string => url.replace(/^https?:\/\//i, "").replace(/^([^/?#]+)\/$/, "$1");
+
+const DAY_MS = 86_400_000;
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+/** When something happened, in the viewer's local time: "Today, 14:30", "Yesterday, 17:45", "20 Sep, 09:30", "31 Dec 2025, 09:30". */
+export function formatWhen(iso: string, now: Date = new Date()): string {
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const days = Math.round((startOfDay(now) - startOfDay(d)) / DAY_MS); // rounded: DST days are 23 or 25 hours
+  if (days === 0) return `Today, ${time}`;
+  if (days === 1) return `Yesterday, ${time}`;
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const date = d.toLocaleDateString(undefined, sameYear ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
+  return `${date}, ${time}`;
+}

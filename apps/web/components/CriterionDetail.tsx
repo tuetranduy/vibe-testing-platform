@@ -18,9 +18,10 @@ export interface CriterionDetailProps {
 /** A criterion's details, in a fixed order: requirement → expected → actual → steps → evidence → diagnostics. */
 export function CriterionDetail({ id, labelledBy, runId, result, criterion, diagnostics, artifacts, steps }: CriterionDetailProps) {
   const findings = diagnostics.filter((d) => d.criterionId === result.criterionId);
+  const failed = result.status === "FAIL";
   return (
     <div id={id} role="region" aria-labelledby={labelledBy} className="result-detail">
-      <section className="detail-section">
+      <section className="detail-section detail-wide">
         <h4>Requirement</h4>
         {criterion ? (
           <>
@@ -41,12 +42,16 @@ export function CriterionDetail({ id, labelledBy, runId, result, criterion, diag
 
       <section className="detail-section">
         <h4>Expected</h4>
-        <p className="detail-value">{result.expected}</p>
+        <div className="detail-box">
+          <p className="detail-value">{result.expected}</p>
+        </div>
       </section>
 
       <section className="detail-section">
         <h4>Actual</h4>
-        {result.actual === null ? <p className="muted">Not observed</p> : <p className="detail-value">{result.actual}</p>}
+        <div className={`detail-box${failed ? " detail-box-fail" : ""}`}>
+          {result.actual === null ? <p className="muted">Not observed</p> : <p className="detail-value">{result.actual}</p>}
+        </div>
       </section>
 
       <section className="detail-section">
@@ -73,7 +78,7 @@ export function CriterionDetail({ id, labelledBy, runId, result, criterion, diag
         />
       </section>
 
-      <section className="detail-section">
+      <section className="detail-section detail-wide">
         <h4>Diagnostics</h4>
         <FailureDiagnostics findings={findings} emptyText="No diagnostics for this criterion." />
       </section>

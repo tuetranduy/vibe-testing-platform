@@ -110,6 +110,8 @@ export interface ProgressState {
   criteriaConfirmed: boolean;
   plannedSteps: number | null;
   stepsRecorded: number;
+  /** When execution began: the first stage after confirmation started (the run's clock). */
+  executionStartedAt: string | null;
   latestScreenshot: ScreenshotRef | null;
   /** Every artifact and step announced so far, in event order. */
   artifacts: ArtifactInfo[];
@@ -131,6 +133,7 @@ export function initialProgress(): ProgressState {
     criteriaConfirmed: false,
     plannedSteps: null,
     stepsRecorded: 0,
+    executionStartedAt: null,
     latestScreenshot: null,
     artifacts: [],
     steps: [],
@@ -226,6 +229,7 @@ export function progressReducer(state: ProgressState, e: TestEvent): ProgressSta
       settleBefore(stages, s);
       stages[s] = "current";
       currentStage = s;
+      if (!state.executionStartedAt && lifecycleRank(s) >= lifecycleRank("PLANNING")) next.executionStartedAt = e.timestamp;
       break;
     }
     case "stage.completed": {
@@ -293,4 +297,19 @@ export function progressReducer(state: ProgressState, e: TestEvent): ProgressSta
   next.currentStage = currentStage;
   next.percent = percentOf(next);
   return next;
+}
+
+/**
+ * The stages as shown for a run in `lifecycle`. Events mark stages current, but some lifecycles have
+ * no event of their own (awaiting confirmation), and a page may render before the events arrive: the
+ * lifecycle's stage is then shown as current, with the stages before it done. Pure; `state` is untouched.
+ */
+export function stagesFor(state: ProgressState, lifecycle: RunLifecycle): Pick<ProgressState, "stages" | "currentStage"> {
+  if (state.currentStage || state.outcome || !isProgressStage(lifecycle) || state.stages[lifecycle] !== "pending") {
+    return { stages: state.stages, currentStage: state.currentStage };
+  }
+  const stages = { ...state.stages };
+  settleBefore(stages, lifecycle);
+  stages[lifecycle] = "current";
+  return { stages, currentStage: lifecycle };
 }

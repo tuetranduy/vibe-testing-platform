@@ -224,6 +224,29 @@ describe("RunView", () => {
     expect(within(screen.getByRole("list", { name: /stages/i })).getByText(/exploring website/i).closest("li")).toHaveTextContent(/stopped/i);
   });
 
+  it("heads the page with the requirement, the target and a way back to the history", async () => {
+    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING", targetUrl: "https://shop.example.com/cart?bug=empty_cart" })) });
+    render(<RunView runId="run_1" />);
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent(summaryFixture().requirementPreview);
+    const trail = screen.getByRole("navigation", { name: /breadcrumb/i });
+    expect(within(trail).getByRole("link", { name: "Test runs" })).toHaveAttribute("href", "/runs");
+    expect(within(trail).getByText("run_1")).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("shop.example.com/cart?bug=empty_cart")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /run again/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the stages while the criteria await confirmation, with confirming as the current one", async () => {
+    routeFetch({
+      [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "AWAITING_CONFIRMATION" })),
+      [`GET ${RUN}/criteria`]: () => json(200, requirementFixture()),
+    });
+    render(<RunView runId="run_1" />);
+    await screen.findAllByRole("article");
+    const stages = screen.getByRole("list", { name: /stages/i });
+    expect(within(stages).getByText(/confirming criteria/i).closest("li")).toHaveAttribute("aria-current", "step");
+    expect(within(stages).getByText(/analyzing requirement/i).closest("li")).toHaveTextContent(/done/i);
+  });
+
   it("shows the report of a completed run", async () => {
     routeFetch({
       [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "COMPLETED", verdict: "FAILED" })),
@@ -231,6 +254,7 @@ describe("RunView", () => {
     });
     render(<RunView runId="run_1" />);
     expect(await screen.findByRole("heading", { name: /verdict: failed/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /run again/i })).toHaveAttribute("href", "/runs/new?from=run_1");
     expect(screen.getByRole("button", { name: /^AC-1\b/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /run activity/i })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("list", { name: /stages/i })).not.toBeInTheDocument();

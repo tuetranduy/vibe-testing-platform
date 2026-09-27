@@ -31,7 +31,7 @@ function listFetch(pages: Record<string, () => Response>) {
 const FIRST = "/api/v1/test-runs?limit=50";
 
 describe("RunHistory", () => {
-  it("lists runs with created time, target host, requirement preview, result and duration", async () => {
+  it("lists runs with result, requirement preview, target host, created time and duration", async () => {
     listFetch({
       [FIRST]: () =>
         json(200, {
@@ -46,13 +46,13 @@ describe("RunHistory", () => {
     });
     render(<RunHistory />);
     const table = await screen.findByRole("table", { name: /test runs/i });
-    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Created", "Target", "Requirement", "Result", "Duration"]);
+    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Result", "Requirement", "Created", "Duration"]);
     const rows = within(table).getAllByRole("row").slice(1);
     expect(rows).toHaveLength(4);
 
     const first = rows[0]!;
-    expect(within(first).getByRole("link", { name: "shop1.example.com" })).toHaveAttribute("href", "/runs/run_1");
-    expect(within(first).getByText("Requirement number 1")).toBeInTheDocument();
+    expect(within(first).getByRole("link", { name: "Requirement number 1" })).toHaveAttribute("href", "/runs/run_1");
+    expect(within(first).getByText("shop1.example.com")).toBeInTheDocument();
     expect(within(first).getByText("Passed")).toBeInTheDocument();
     expect(within(first).getByText("1m 35s")).toBeInTheDocument();
     expect(first.querySelector("time")).toHaveAttribute("dateTime", "2026-09-26T10:01:00.000Z");
@@ -72,10 +72,10 @@ describe("RunHistory", () => {
       [`${FIRST}&cursor=c%2F2%2B`]: () => json(200, { items: [run(3)], nextCursor: null }),
     });
     render(<RunHistory />);
-    await screen.findByRole("link", { name: "shop2.example.com" });
+    await screen.findByRole("link", { name: "Requirement number 2" });
     await user.click(screen.getByRole("button", { name: /load more/i }));
 
-    expect(await screen.findByRole("link", { name: "shop3.example.com" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Requirement number 3" })).toBeInTheDocument();
     expect(screen.getAllByRole("row").slice(1)).toHaveLength(3);
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("button", { name: /load more/i })).not.toBeInTheDocument();
@@ -91,11 +91,11 @@ describe("RunHistory", () => {
     render(<RunHistory />);
     await user.click(await screen.findByRole("button", { name: /load more/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/couldn.t load more/i);
-    expect(screen.getByRole("link", { name: "shop1.example.com" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Requirement number 1" })).toBeInTheDocument();
 
     fail = false;
     await user.click(screen.getByRole("button", { name: /load more/i }));
-    expect(await screen.findByRole("link", { name: "shop2.example.com" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Requirement number 2" })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -117,7 +117,104 @@ describe("RunHistory", () => {
     expect(alert).toHaveTextContent("The API is unreachable");
     fail = false;
     await user.click(within(alert).getByRole("button", { name: /try again/i }));
-    expect(await screen.findByRole("link", { name: "shop1.example.com" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Requirement number 1" })).toBeInTheDocument();
+  });
+
+  it("summarizes the results of the loaded runs", async () => {
+    listFetch({
+      [FIRST]: () =>
+        json(200, {
+          items: [run(1), run(2), run(3, { verdict: "FAILED" }), run(4, { lifecycle: "CANCELLED", verdict: null, cancelReason: "USER_REQUESTED" })],
+          nextCursor: null,
+        }),
+    });
+    render(<RunHistory />);
+    const overview = await screen.findByRole("region", { name: /results of the last 4 runs/i });
+    expect(overview).toHaveTextContent("2 of 3");
+    expect(overview).toHaveTextContent(/finished runs passed/i);
+    expect(within(overview).getByText(/2 passed/)).toBeInTheDocument();
+    expect(within(overview).getByText(/1 failed/)).toBeInTheDocument();
+    expect(within(overview).getByText(/1 running, cancelled or errored/)).toBeInTheDocument();
+  });
+
+  it("links to the newest run that is still going", async () => {
+    listFetch({
+      [FIRST]: () =>
+        json(200, {
+          items: [
+            run(5, { lifecycle: "EXPLORING", verdict: null, finishedAt: null }),
+            run(4, { lifecycle: "AWAITING_CONFIRMATION", verdict: null, startedAt: null, finishedAt: null }),
+            run(3),
+          ],
+          nextCursor: null,
+        }),
+    });
+    render(<RunHistory />);
+    const running = await screen.findByRole("link", { name: /running now/i });
+    expect(running).toHaveAttribute("href", "/runs/run_5");
+    expect(running).toHaveTextContent("Requirement number 5");
+    expect(running).toHaveTextContent("Exploring website");
+    expect(running).toHaveTextContent("Stage 4 of 8");
+    expect(running).toHaveTextContent("+1 more in progress");
+  });
+
+  it("offers a new test when nothing is running", async () => {
+    listFetch({ [FIRST]: () => json(200, { items: [run(1)], nextCursor: null }) });
+    render(<RunHistory />);
+    const idle = await screen.findByRole("region", { name: /test something new/i });
+    expect(within(idle).getByRole("link", { name: /new test/i })).toHaveAttribute("href", "/runs/new");
+    expect(screen.queryByRole("link", { name: /running now/i })).not.toBeInTheDocument();
+  });
+
+  it("filters the list by result", async () => {
+    const user = userEvent.setup();
+    listFetch({
+      [FIRST]: () =>
+        json(200, {
+          items: [run(1), run(2, { verdict: "FAILED" }), run(3, { verdict: "BLOCKED" }), run(4, { lifecycle: "EXPLORING", verdict: null, finishedAt: null })],
+          nextCursor: null,
+        }),
+    });
+    render(<RunHistory />);
+    const filters = await screen.findByRole("group", { name: "Show" });
+    expect(within(filters).getByRole("button", { name: /^all 4$/i })).toHaveAttribute("aria-pressed", "true");
+    // Only results that occur are offered.
+    expect(within(filters).queryByRole("button", { name: /cancelled or errored/i })).not.toBeInTheDocument();
+
+    await user.click(within(filters).getByRole("button", { name: /^failed 1$/i }));
+    expect(within(filters).getByRole("button", { name: /^failed 1$/i })).toHaveAttribute("aria-pressed", "true");
+    const rows = () => within(screen.getByRole("table")).getAllByRole("row").slice(1);
+    expect(rows()).toHaveLength(1);
+    expect(within(rows()[0]!).getByRole("link", { name: "Requirement number 2" })).toBeInTheDocument();
+    expect(screen.getByText("1 of 4 runs")).toBeInTheDocument();
+
+    await user.click(within(filters).getByRole("button", { name: /^in progress 1$/i }));
+    expect(within(rows()[0]!).getByRole("link", { name: "Requirement number 4" })).toBeInTheDocument();
+    await user.click(within(filters).getByRole("button", { name: /^blocked or inconclusive 1$/i }));
+    expect(within(rows()[0]!).getByRole("link", { name: "Requirement number 3" })).toBeInTheDocument();
+  });
+
+  it("filters the list by website or requirement text, and says when nothing matches", async () => {
+    const user = userEvent.setup();
+    listFetch({ [FIRST]: () => json(200, { items: [run(1), run(2), run(3, { requirementPreview: "Checkout needs a postcode" })], nextCursor: "c2" }) });
+    render(<RunHistory />);
+    const search = await screen.findByRole("searchbox", { name: /filter runs/i });
+
+    await user.type(search, "SHOP2.example");
+    expect(within(screen.getByRole("table")).getAllByRole("row").slice(1)).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Requirement number 2" })).toBeInTheDocument();
+    expect(screen.getByText("1 of 3 runs loaded so far")).toBeInTheDocument();
+
+    await user.clear(search);
+    await user.type(search, "postcode");
+    expect(screen.getByRole("link", { name: "Checkout needs a postcode" })).toBeInTheDocument();
+
+    await user.type(search, " and a phone number");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.getByText(/no runs match/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /show all runs/i }));
+    expect(search).toHaveValue("");
+    expect(within(screen.getByRole("table")).getAllByRole("row").slice(1)).toHaveLength(3);
   });
 
   it("shows a loading state first", async () => {
