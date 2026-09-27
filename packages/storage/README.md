@@ -15,6 +15,10 @@ Artifact storage (screenshots, traces, videos, generated tests, Playwright repor
   against this endpoint instead of `endpoint`, for when the endpoint the process uses isn't reachable
   by whoever opens the URL (compose: the api uses `http://s3:9000`, the browser needs
   `http://localhost:9000`). A separate client signs them, because SigV4 signs the `Host` header.
+- Timeouts: `connectionTimeoutMs` (default 5 s) bounds connecting to the store, and `socketTimeoutMs`
+  (default 30 s) fails a request whose socket sits idle that long (an idle limit, so a large upload
+  that keeps moving is never cut off). The SDK retries a timed-out attempt (3 attempts), then the call
+  throws `StorageError`; without them a store that stops answering would hold a call forever.
 
 Object keys: `tenants/<tenantId>/runs/<runId>/<typeDir>/<sanitizedBase>-<16 hex>.<ext>`.
 Signed URL TTL is clamped to `MAX_SIGNED_URL_TTL_SECONDS` (300). Infrastructure failures throw
