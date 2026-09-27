@@ -14,7 +14,7 @@ afterAll(() => store.close());
 
 describe("Task 21 step 8 — confirmation", () => {
   it("edit a check in review, confirm, complete: the report reflects revision 2", async () => {
-    const runId = await client.create({ targetUrl: `${stack.shopUrl}/`, requirement: REQUIREMENTS.cart, options: { autoConfirmCriteria: false } });
+    const runId = await client.create({ targetUrl: `${stack.targetUrl}/`, requirement: REQUIREMENTS.cart, options: { autoConfirmCriteria: false } });
     await client.waitFor(runId, (r) => r.lifecycle === "AWAITING_CONFIRMATION", 60_000);
 
     const rev1 = await client.criteria(runId);
@@ -40,7 +40,7 @@ describe("Task 21 step 8 — confirmation", () => {
   });
 
   it("an unconfirmed run past the TTL (fake clock, the worker's real reaper) ends CANCELLED / CONFIRMATION_EXPIRED", async () => {
-    const runId = await client.create({ targetUrl: `${stack.shopUrl}/`, requirement: REQUIREMENTS.cart, options: { autoConfirmCriteria: false } });
+    const runId = await client.create({ targetUrl: `${stack.targetUrl}/`, requirement: REQUIREMENTS.cart, options: { autoConfirmCriteria: false } });
     await client.waitFor(runId, (r) => r.lifecycle === "AWAITING_CONFIRMATION", 60_000);
 
     const redis = new Redis(stack.redisUrl);

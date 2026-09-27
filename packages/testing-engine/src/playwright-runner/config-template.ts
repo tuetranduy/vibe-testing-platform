@@ -13,8 +13,9 @@ import { OUTPUT_DIR } from "./result-parser";
  *   (the child never gets PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK: env allow-list).
  * - `launchOptions.chromiumSandbox: true` — Chromium's own sandbox stays on, as in exploration's
  *   browser-launcher: Playwright adds `--no-sandbox` unless this is true, and the rerun's browser
- *   loads the untrusted target site. Where no usable sandbox exists (the Docker worker today, see
- *   README), Chromium fails to start and the rerun is ERRORED (Ruling R41) — never unsandboxed.
+ *   loads the untrusted target site. Where no usable sandbox exists (e.g. a container without the
+ *   worker's seccomp profile, infra/seccomp), Chromium fails to start and the rerun is ERRORED
+ *   (Ruling R41) — never unsandboxed.
  * - trace / screenshot / video kept on failure only (the evidence of a failed criterion).
  * - bounded action / navigation timeouts, so a missing element fails that action (the later criteria
  *   are NOT_REACHED) instead of consuming the whole budget.

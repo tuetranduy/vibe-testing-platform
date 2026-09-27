@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import path from "node:path";
 
@@ -54,5 +54,53 @@ export function launchProcess(opts: LaunchOptions): LaunchedProcess {
       signalGroup("SIGTERM");
       setTimeout(() => signalGroup("SIGKILL"), opts.killAfterMs ?? 10_000).unref();
     });
+  return { child, stop };
+}
+
+export interface ComposeServiceOptions {
+  composeFile: string;
+  service: string;
+  /** Container name (unique per stack). */
+  name: string;
+  /** Passed by name (`-e KEY`), so no value appears on a command line. */
+  env: Record<string, string>;
+  /** `docker compose run -p` values, e.g. `127.0.0.1:4100:3001`. */
+  publish: string[];
+  /** Replaces the service's command. */
+  command?: string[];
+  logDir: string;
+  /** Grace after SIGTERM (`docker stop --time`). */
+  stopAfterS?: number;
+}
+
+/**
+ * A compose service as a one-off container (`docker compose run --rm`): the service's image, network
+ * and security options, with this stack's environment. Its output goes to `<logDir>/<service>.log`.
+ * Stopping goes through `docker stop` (SIGTERM, then SIGKILL after the grace): a signal to the CLI
+ * does not reliably reach the container.
+ */
+export function launchComposeService(opts: ComposeServiceOptions): LaunchedProcess {
+  const log = createWriteStream(path.join(opts.logDir, `${opts.service}.log`));
+  const args = [
+    ...["compose", "-f", opts.composeFile, "run", "--rm", "--no-deps", "-T", "--name", opts.name],
+    ...opts.publish.flatMap((p) => ["-p", p]),
+    ...Object.keys(opts.env).flatMap((key) => ["-e", key]),
+    opts.service,
+    ...(opts.command ?? []),
+  ];
+  const child = spawn("docker", args, { env: { ...process.env, ...opts.env }, stdio: ["ignore", "pipe", "pipe"] });
+  child.stdout!.pipe(log);
+  child.stderr!.pipe(log);
+  const docker = (...a: string[]) => new Promise<void>((resolve) => execFile("docker", a, { timeout: 60_000 }, () => resolve()));
+  const stop = async () => {
+    await docker("stop", "--time", String(opts.stopAfterS ?? 10), opts.name);
+    if (child.exitCode === null && child.signalCode === null) {
+      await new Promise<void>((resolve) => {
+        child.once("exit", () => resolve());
+        setTimeout(resolve, 15_000).unref();
+      });
+    }
+    await docker("rm", "--force", opts.name); // `--rm` normally did this already
+  };
   return { child, stop };
 }

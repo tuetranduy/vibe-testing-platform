@@ -109,6 +109,12 @@ services:
     build:
       context: ../..
       target: worker
+    # Chromium keeps its own sandbox on, which needs user namespaces: Docker's default seccomp profile
+    # plus user, PID and network namespaces for clone/unshare (infra/seccomp/README.md). No extra
+    # capabilities, and never --no-sandbox.
+    security_opt: ["seccomp=../seccomp/worker.json"]
+    # An init process (PID 1) reaps the helpers of browsers the worker kills and forwards signals.
+    init: true
     environment:
       <<: *app-env
       FAKE_ENGINE_STEP_DELAY_MS: "500"

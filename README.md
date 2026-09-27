@@ -21,7 +21,7 @@ Plan: [`docs/ai-testing-platform-implementation-plan.md`](docs/ai-testing-platfo
 
 **First run against the real provider: 2026-09-26** (`claude-sonnet-5`). The eval baselines are recorded in `evals/BASELINE.md`; `pnpm test:live` and `scripts/milestone-b-demo.sh` (local API + real-engine worker) pass. The integration and live test projects transpile TypeScript the way `tsx` does (esbuild `keepNames`), because functions sent into the browser with `evaluate` fail there with "`__name` is not defined" when they declare a named inner function.
 
-**Real exploration and the Playwright rerun do not run in the Docker worker yet.** Chromium's own sandbox needs Linux user namespaces, which Docker's default container confinement (seccomp profile and capability set) denies, so in the compose `worker` container Chromium aborts with "No usable sandbox!" and exploring runs end `ERRORED / BROWSER_PROVIDER` (with a real provider configured, the worker's start-up preflight logs the failure). The rerun's Chromium (launched by `@playwright/test` in the runner child process) keeps its sandbox on as well (`chromiumSandbox: true` in the generated `playwright.config.js`; Playwright would otherwise add `--no-sandbox`), so the same caveat applies to it: in the container it cannot start, the rerun ends `ERRORED`, and criteria fall back to their exploration evidence (`EXPLORATION_ONLY` / `UNVERIFIED_EVIDENCE`). How to allow it is an open security decision: a seccomp profile that permits user namespaces for the worker (preferred), `cap_add: SYS_ADMIN` (broad), or Chromium's `--no-sandbox` (not recommended: the browser runs untrusted pages). Until then, run the real engine with a **local worker** — see [Real engine (Milestone B)](#real-engine-milestone-b).
+**Real exploration and the Playwright rerun run in the Docker worker, with Chromium's sandbox on** (2026-09-27, [KI-002](docs/known-issues.md#ki-002--chromiums-sandbox-cannot-start-in-the-compose-worker)). Chromium's sandbox needs Linux user namespaces, which Docker's default seccomp profile denies ("No usable sandbox!", runs `ERRORED / BROWSER_PROVIDER`). Of the options — a seccomp profile that permits user namespaces, `cap_add: SYS_ADMIN` (broad), or Chromium's `--no-sandbox` (the browser runs untrusted pages) — the compose `worker` uses the first: [`infra/seccomp/worker.json`](infra/seccomp/README.md) is Docker's default profile plus user, PID and network namespaces for `clone` / `unshare`, with no extra capability. Both exploration's Chromium and the rerun's (launched by `@playwright/test`, `chromiumSandbox: true`) start sandboxed in the container, and `pnpm test:e2e:compose` runs the E2E suite against the compose API and worker. A deployment elsewhere needs the same profile (a Kubernetes `Localhost` profile) and a host that allows unprivileged user namespaces; see the profile's README.
 
 ## Run everything with Docker
 
@@ -34,8 +34,10 @@ pnpm stack:down
 ```
 
 The compose stack runs the **fake** engine (`LLM_PROVIDER=fake`). The `worker` image bundles Playwright's
-Chromium (matching the workspace's `playwright-core` pin) and its OS dependencies under `/ms-playwright`, but
-Chromium can't start its sandbox in the container yet (see Status), so use a local worker for the real engine.
+Chromium (matching the workspace's `playwright-core` pin) and its OS dependencies under `/ms-playwright`, and the
+`worker` service runs with the seccomp profile that lets Chromium's sandbox start (`infra/seccomp/worker.json`)
+and an init process that reaps the browsers' helpers. For the real engine, set `LLM_PROVIDER=anthropic` and
+`ANTHROPIC_API_KEY` in `infra/compose/.env`.
 
 | Service | URL |
 |---|---|
@@ -111,8 +113,9 @@ set `S3_PUBLIC_ENDPOINT` only if the API reaches S3 under a name the browser can
 
 ### Real engine (Milestone B)
 
-The working route today: compose for the infrastructure, and the API and the worker on your machine. The API
-runs locally too because the compose API only allowlists `demo-shop:4000`, a name a local worker can't resolve.
+The route for development: compose for the infrastructure, and the API and the worker on your machine (the compose
+`worker` runs the real engine too, with `LLM_PROVIDER=anthropic` in `infra/compose/.env`). The API runs locally as
+well because the compose API only allowlists `demo-shop:4000`, a name a local worker can't resolve.
 
 ```bash
 pnpm install
@@ -223,6 +226,7 @@ pnpm test:integration   # tests/integration/**: real-Chromium sandbox + Stagehan
 pnpm test:live          # @live only: needs a real Chromium + ANTHROPIC_API_KEY; excluded from `pnpm test`
 pnpm test:e2e           # end-to-end acceptance suite, CI mode (scripted model + explorer; real API, worker, sandbox, runner)
 pnpm test:e2e:live      # the same against the real model and Stagehand (ANTHROPIC_API_KEY; billed)
+pnpm test:e2e:compose   # CI mode with the API and worker in the compose containers (builds the api and worker images; Docker Desktop)
 ./scripts/e2e-live-gate.sh   # release gate: the live suite green 3 times in a row
 pnpm typecheck
 pnpm eval requirement-compiler   # needs ANTHROPIC_API_KEY; scores a suite against the real model
@@ -286,11 +290,11 @@ Each proposed criterion shows its wording and *what will be checked*. You can ad
   - **A rerun that fails on its own is rerun `ERRORED`, not run `ERRORED`** (Ruling R41): a workspace, spawn, proxy or browser-launch failure, a crashed runner, unreadable results or an exhausted rerun budget ends the rerun `ERRORED` (criteria whose `[AC-n]` step completed keep their outcome, the rest `NOT_REACHED`), and the run still completes on its exploration evidence. The cause is in the worker log; only a cancel or the run's hard deadline ends the run itself. The rerun budget is capped by the time left before the run's deadline, minus a reserve for the report.
   - **A test-generation failure skips the rerun** (Ruling R45): a compiler exception, or the guard rejecting the source after redaction, is logged and the run continues without a generated test (every criterion's rerun outcome `UNAVAILABLE`).
   - **The API depends on `@platform/testing-engine`, through its `./reporting` subpath only** (Rulings R36, R43), so the report route reuses the worker's pure report assembler without loading Stagehand. The rerun's per-criterion outcomes are persisted in the `playwright.completed` event (`perCriterion`) rather than in new columns; partial reports read them from there.
-  - **Unbuilt images:** `infra/runner/Dockerfile` (the runner base image) and the root `Dockerfile`'s worker-target changes (`RUNNER_WORKSPACE_DIR`, `procps`) have not been built or run; and the Docker worker cannot start a sandboxed Chromium yet (see Status).
+  - **Unbuilt image:** `infra/runner/Dockerfile` (the runner base image) has not been built or run. The root `Dockerfile`'s worker target (`RUNNER_WORKSPACE_DIR`, `procps`) is built and runs the E2E suite (`pnpm test:e2e:compose`).
 - **Criteria review edits checks, not wording** (spec `docs/superpowers/specs/2026-09-26-criteria-check-edit-design.md`; supersedes Milestone D's Ruling R55 and plan Task 11's statement-text edits). A criterion's wording can no longer be changed on its own: the verifier judges the check, so wording edits could make a report show a result next to text it was never judged against.
 - **Milestone E (Tasks 21–22):**
   - **The E2E suite runs on Vitest** (`pnpm test:e2e` → project `e2e`), not `playwright test`: it drives the HTTP API and inspects the database, logs, processes and metrics, never a browser of its own.
-  - **The API and worker run as local processes**, not the compose containers, because the compose worker's Chromium cannot start its sandbox yet (see Status).
+  - **The API and worker run as local processes by default**; `pnpm test:e2e:compose` (`E2E_PLATFORM=compose`) runs the same suite with them as containers of the compose `api` and `worker` services (images built from the checkout, the worker's seccomp profile applied), which reach the in-process demo shop as `host.docker.internal` (Docker Desktop).
   - **`egress.blocked` is asserted on `/egress-probe`, not on the redirect run.** An open redirect to `169.254.169.254` is stopped by the navigation guard inside the browser, before any connection, so it produces `BLOCKED / TARGET_BLOCKED_BY_POLICY` and no egress event; the probe page's metadata image is what the egress proxy denies.
   - **The confirmation-TTL test runs the worker's real reaper in the test process** with its clock moved 25 hours ahead (the "fake clock"), against the E2E database.
   - **`queue_depth` is exported by the API**, not the worker: the backlog matters most when workers are down.

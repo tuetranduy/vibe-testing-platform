@@ -17,7 +17,7 @@ function resultOf(report: TestReport, kind: string) {
 
 describe("Task 21 step 2 — FAIL", () => {
   it("?bug=empty_cart: the cart count still PASSES, the cart contents FAIL (rerun-confirmed); verdict FAILED; the failure keeps a trace and a screenshot", async () => {
-    const runId = await client.create({ targetUrl: `${stack.shopUrl}/?bug=empty_cart`, requirement: REQUIREMENTS.cart, options: { autoConfirmCriteria: true } });
+    const runId = await client.create({ targetUrl: `${stack.targetUrl}/?bug=empty_cart`, requirement: REQUIREMENTS.cart, options: { autoConfirmCriteria: true } });
 
     expect(await client.finished(runId)).toMatchObject({ lifecycle: "COMPLETED", verdict: "FAILED" });
     const report = await client.report(runId);
