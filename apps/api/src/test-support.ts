@@ -34,8 +34,11 @@ export class FakeQueue implements RunQueue {
   }
   depthValue = 0;
   depthFails = false;
+  /** Like the real queue while Redis is down: ioredis holds the command until it reconnects. */
+  depthHangs = false;
   async depth() {
     if (this.depthFails) throw new Error("redis down");
+    if (this.depthHangs) return new Promise<number>(() => {});
     return this.depthValue;
   }
   async close() {}
