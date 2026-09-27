@@ -44,6 +44,9 @@ Chromium can't start its sandbox in the container yet (see Status), so use a loc
 | Demo shop (test target) | http://localhost:4000 — use `http://demo-shop:4000/` as `targetUrl` |
 | S3 artifact store | http://localhost:9000 (s3admin / s3admin-secret) |
 
+The worker's `/metrics` (unauthenticated) is published on `127.0.0.1` only, on a random port per replica so
+`--scale worker=N` works: `curl "http://$(docker compose -f infra/compose/docker-compose.yml port worker 9464)/metrics"`.
+
 Override secrets in `infra/compose/.env` (`API_TOKEN`, `SECRETS_ENCRYPTION_KEY`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, …).
 
 Signed artifact URLs (screenshots, traces, videos) are opened by your browser, which can't resolve the compose-internal

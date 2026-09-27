@@ -113,7 +113,9 @@ services:
       <<: *app-env
       FAKE_ENGINE_STEP_DELAY_MS: "500"
       WORKER_METRICS_PORT: "9464"
-    ports: ["9464:9464"]
+    # Metrics are unauthenticated: loopback only, and a random host port per replica so
+    # `--scale worker=N` works (`docker compose port --index N worker 9464` finds it).
+    ports: ["127.0.0.1::9464"]
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
