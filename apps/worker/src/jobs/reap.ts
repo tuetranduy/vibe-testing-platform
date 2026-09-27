@@ -12,6 +12,9 @@ export interface ReapResult {
   secretsPurged: string[];
 }
 
+/** `runs_reaped_total` reason of each category the reaper errors a run with. */
+const REAPED_REASON = { WORKER_LOST: "WORKER_LOST", TIMEOUT: "TIMEOUT", INTERNAL: "NEVER_STARTED" } as const;
+
 /**
  * Maintenance (every 60 s):
  *  - active run with a stale heartbeat → ERRORED / WORKER_LOST (unless its execute-run job is still waiting)
@@ -31,9 +34,11 @@ export async function reapJob(deps: WorkerDeps): Promise<ReapResult> {
   });
   const result: ReapResult = { workerLost: [], timedOut: [], neverStarted: [], confirmationExpired: [], secretsPurged: [] };
 
-  const errorRun = async (run: TestRun, category: "WORKER_LOST" | "TIMEOUT" | "INTERNAL", message: string) => {
+  // Each run is counted as soon as it is ended, so a pass that fails later still counts it.
+  const errorRun = async (run: TestRun, category: keyof typeof REAPED_REASON, message: string) => {
     await runs.transition(run.id, run.lifecycle, "ERRORED", { errorCategory: category, errorMessage: message });
     deps.metrics?.testRuns.inc({ lifecycle: "ERRORED", verdict: NO_VERDICT });
+    deps.metrics?.runsReaped.inc({ reason: REAPED_REASON[category] });
     await secrets.purge(run.id);
     await publisher.publish({
       runId: run.id,
@@ -83,6 +88,7 @@ export async function reapJob(deps: WorkerDeps): Promise<ReapResult> {
     await safely(run, async () => {
       await runs.transition(run.id, "AWAITING_CONFIRMATION", "CANCELLED", { cancelReason: "CONFIRMATION_EXPIRED" });
       deps.metrics?.testRuns.inc({ lifecycle: "CANCELLED", verdict: NO_VERDICT });
+      deps.metrics?.runsReaped.inc({ reason: "CONFIRMATION_EXPIRED" });
       await secrets.purge(run.id);
       await publisher.publish({
         runId: run.id,
@@ -98,12 +104,5 @@ export async function reapJob(deps: WorkerDeps): Promise<ReapResult> {
   for (const runId of await secrets.findTerminalRunIdsWithActiveSecrets()) {
     if ((await secrets.purge(runId)) > 0) result.secretsPurged.push(runId);
   }
-  const reaped: Record<string, number> = {
-    WORKER_LOST: result.workerLost.length,
-    TIMEOUT: result.timedOut.length,
-    NEVER_STARTED: result.neverStarted.length,
-    CONFIRMATION_EXPIRED: result.confirmationExpired.length,
-  };
-  for (const [reason, n] of Object.entries(reaped)) if (n > 0) deps.metrics?.runsReaped.inc({ reason }, n);
   return result;
 }
