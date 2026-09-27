@@ -92,8 +92,10 @@ increase(runs_reaped_total{reason="WORKER_LOST"}[15m]) > 0
 # Runs keep hitting the hard deadline.
 increase(runs_reaped_total{reason="TIMEOUT"}[1h]) > 3
 
-# Egress blocks spike: 5x the same window yesterday.
-sum(rate(egress_blocked_total[10m])) > 5 * sum(rate(egress_blocked_total[10m] offset 1d))
+# Egress blocks spike: 5x the same window yesterday (none yesterday counts as 0), and above an absolute
+# floor of 0.1/s, so a quiet yesterday does not turn a single block into an alert.
+sum(rate(egress_blocked_total[10m])) > 5 * (sum(rate(egress_blocked_total[10m] offset 1d)) or vector(0))
+  and sum(rate(egress_blocked_total[10m])) > 0.1
 
 # Cost per run above $0.50 over the last hour.
 sum(increase(llm_cost_usd_total[1h])) / clamp_min(sum(increase(test_runs_total[1h])), 1) > 0.50
