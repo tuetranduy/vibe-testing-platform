@@ -1,4 +1,4 @@
-import { loadEnvOrExit } from "@platform/config";
+import { createLogger, createRunLogRegistry, loadEnvOrExit } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
 import { createRunQueue } from "@platform/event-bus";
 import { createArtifactStorage } from "@platform/storage";
@@ -13,17 +13,8 @@ import { startWorkers } from "./worker";
 
 const env = loadEnvOrExit();
 
-const levels = ["trace", "debug", "info", "warn", "error", "fatal"];
-const min = levels.indexOf(env.LOG_LEVEL);
-const log =
-  (level: string) =>
-  (obj: object, msg?: string) => {
-    if (levels.indexOf(level) < min) return;
-    const o = obj as Record<string, unknown>;
-    const err = o.err instanceof Error ? { message: o.err.message, name: o.err.name } : o.err;
-    console.log(JSON.stringify({ level, time: new Date().toISOString(), component: "worker", msg, ...o, err }));
-  };
-const logger: WorkerLogger = { info: log("info"), warn: log("warn"), error: log("error") };
+const runLogs = createRunLogRegistry();
+const logger: WorkerLogger = createLogger({ component: "worker", level: env.LOG_LEVEL, runs: runLogs });
 
 const handle = createDb(env.DATABASE_URL);
 if (process.env.RUN_MIGRATIONS_ON_START !== "false") await runMigrations(handle.db);
@@ -85,6 +76,7 @@ const workers = await startWorkers(
     queue,
     stages,
     logger,
+    runLogs,
   },
   { connection, concurrency: env.WORKER_CONCURRENCY },
 );

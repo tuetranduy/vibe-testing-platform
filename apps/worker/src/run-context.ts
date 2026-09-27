@@ -103,6 +103,7 @@ export async function createRunContext(
     async transition(to, patch = {}) {
       await runs.transition(run.id, lifecycle, to, patch);
       lifecycle = to;
+      deps.runLogs?.setStage(run.id, to);
     },
     publish: ctx.publish,
     saveRequirement: (draft) => new RequirementRepository(deps.db).createRevision(run.id, draft),
@@ -121,6 +122,9 @@ export async function createRunContext(
     },
     enqueueExecute: () => deps.queue.enqueueExecute(run.id),
   };
+
+  // Registered last: nothing above can fail after it, so a registration is always released by dispose().
+  const releaseLog = deps.runLogs?.register(run.id, { tenantId: run.tenantId, stage: lifecycle, redact });
 
   let disposed = false;
   return {
@@ -142,6 +146,7 @@ export async function createRunContext(
         }
       }
       secretValues.clear();
+      releaseLog?.();
     },
   };
 }
