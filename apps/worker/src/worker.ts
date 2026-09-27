@@ -4,6 +4,7 @@ import {
   JOB_REAP,
   JOB_RETENTION,
   MAINTENANCE_QUEUE,
+  RETENTION_QUEUE,
   RUNS_QUEUE,
   type RunJobData,
 } from "@platform/event-bus";
@@ -44,13 +45,6 @@ export async function startWorkers(
     { every: opts.reapEveryMs ?? 60_000 },
     { name: JOB_REAP, opts: { attempts: 1, removeOnComplete: 100, removeOnFail: 100 } },
   );
-  if (deps.storage) {
-    await maintenanceQueue.upsertJobScheduler(
-      JOB_RETENTION,
-      { every: opts.retentionEveryMs ?? 24 * 3_600_000 },
-      { name: JOB_RETENTION, opts: { attempts: 1, removeOnComplete: 30, removeOnFail: 30 } },
-    );
-  }
   const maintenance = new Worker(
     MAINTENANCE_QUEUE,
     async (job) => {
@@ -60,15 +54,32 @@ export async function startWorkers(
           deps.logger.info(r, "reaper acted");
         }
       }
-      if (job.name === JOB_RETENTION && deps.storage) {
-        const r = await retentionJob({ db: deps.db, storage: deps.storage, logger: deps.logger, ...(deps.now ? { now: deps.now } : {}) });
-        if (r.deleted > 0 || r.failed > 0) deps.logger.info(r, "retention acted");
-      }
     },
     { connection: opts.connection, concurrency: 1, maxStalledCount: 0 },
   );
 
-  for (const w of [runs, maintenance]) {
+  // Retention has its own queue and worker: a pass stuck on the artifact store (or a large backlog)
+  // must never hold up the reaper, which detects lost workers.
+  const retentionQueue = new Queue(RETENTION_QUEUE, { connection: opts.connection });
+  const storage = deps.storage;
+  let retention: Worker | undefined;
+  if (storage) {
+    await retentionQueue.upsertJobScheduler(
+      JOB_RETENTION,
+      { every: opts.retentionEveryMs ?? 24 * 3_600_000 },
+      { name: JOB_RETENTION, opts: { attempts: 1, removeOnComplete: 30, removeOnFail: 30 } },
+    );
+    retention = new Worker(
+      RETENTION_QUEUE,
+      async () => {
+        const r = await retentionJob({ db: deps.db, storage, logger: deps.logger, ...(deps.now ? { now: deps.now } : {}) });
+        if (r.deleted > 0 || r.failed > 0) deps.logger.info(r, "retention acted");
+      },
+      { connection: opts.connection, concurrency: 1, maxStalledCount: 0 },
+    );
+  }
+
+  for (const w of [runs, maintenance, ...(retention ? [retention] : [])]) {
     w.on("failed", (job, err) => deps.logger.error({ job: job?.name, runId: job?.data?.runId, err }, "job failed"));
     w.on("error", (err) => deps.logger.error({ err }, "worker error"));
   }
@@ -77,7 +88,9 @@ export async function startWorkers(
     async close() {
       await runs.close();
       await maintenance.close();
+      await retention?.close();
       await maintenanceQueue.close();
+      await retentionQueue.close();
     },
   };
 }

@@ -1,4 +1,6 @@
-import { RunRepository } from "@platform/db";
+import { ArtifactRepository, RunRepository } from "@platform/db";
+import { TEST_TENANT_ID } from "@platform/db/testing";
+import type { ArtifactStorage } from "@platform/storage";
 import { createRunQueue } from "@platform/event-bus";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -45,4 +47,48 @@ describe("BullMQ wiring", () => {
       await queue.close();
     }
   }, 45_000);
+
+  it("a retention pass stuck on the artifact store never holds up the reaper (crashes are still detected)", async () => {
+    let release!: () => void;
+    const released = new Promise<void>((r) => (release = r));
+    let deleting = false;
+    const hung: ArtifactStorage = {
+      put: async () => Promise.reject(new Error("unused")),
+      getSignedReadUrl: async () => "unused",
+      ensureReady: async () => {},
+      delete: async () => {
+        deleting = true;
+        await released;
+      },
+    };
+    const later = new Date(Date.now() + 25 * 3_600_000);
+    const queue = createRunQueue(connection);
+    const owner = await seedRun(h);
+    await new ArtifactRepository(h.tdb.db).create({
+      tenantId: TEST_TENANT_ID,
+      runId: owner.id,
+      type: "SCREENSHOT",
+      objectKey: "unused",
+      sha256: "0".repeat(64),
+      bytes: 1,
+      contentType: "image/png",
+      sensitivity: "STANDARD",
+      expiresAt: new Date(Date.now() - 1000),
+    });
+    const deps = h.deps(createFakeStages(), { queue, storage: hung, now: () => later });
+    const workers = await startWorkers(deps, { connection, concurrency: 1, reapEveryMs: 300, retentionEveryMs: 100 });
+    try {
+      await vi.waitFor(() => expect(deleting).toBe(true), { timeout: 10_000, interval: 50 });
+      // Retention is now stuck on the store; a run awaiting confirmation past its TTL must still be reaped.
+      const waiting = await seedRun(h, { lifecycle: "AWAITING_CONFIRMATION" });
+      await vi.waitFor(
+        async () => expect((await new RunRepository(h.tdb.db).getById(waiting.id)).lifecycle).toBe("CANCELLED"),
+        { timeout: 10_000, interval: 100 },
+      );
+    } finally {
+      release();
+      await workers.close();
+      await queue.close();
+    }
+  }, 30_000);
 });

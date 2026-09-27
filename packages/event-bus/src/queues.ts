@@ -2,6 +2,8 @@ import { Queue, type ConnectionOptions } from "bullmq";
 
 export const RUNS_QUEUE = "runs";
 export const MAINTENANCE_QUEUE = "maintenance";
+/** Artifact retention runs apart from `maintenance`, so a slow artifact store never delays the reaper. */
+export const RETENTION_QUEUE = "retention";
 export const JOB_ANALYZE_RUN = "analyze-run";
 export const JOB_EXECUTE_RUN = "execute-run";
 export const JOB_REAP = "reap";
