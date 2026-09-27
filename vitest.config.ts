@@ -44,7 +44,8 @@ export default defineConfig({
           name: "e2e",
           include: ["tests/e2e/**/*.spec.ts"],
           globalSetup: ["tests/e2e/support/global-setup.ts"],
-          // One stack, one worker: specs run one file at a time, runs one at a time.
+          // One stack for the whole suite: spec files run one at a time against it. Its worker still
+          // takes up to two jobs at once (WORKER_CONCURRENCY in support/stack.ts).
           fileParallelism: false,
           testTimeout: 180_000,
           hookTimeout: 180_000,
