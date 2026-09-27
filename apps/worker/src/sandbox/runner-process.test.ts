@@ -260,6 +260,7 @@ describe("runner child process environment", () => {
     API_TOKEN: "worker-api-token-0123456789",
     SECRETS_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString("base64"),
     ANTHROPIC_API_KEY: "sk-ant-planted",
+    GEMINI_API_KEY: "gm-planted",
     PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK: "1",
     NODE_OPTIONS: "--require /nonexistent/evil.js",
     SECRET_OTHER_RUN: "belongs-to-another-run",
@@ -285,7 +286,7 @@ describe("runner child process environment", () => {
       const result = await spawn({ cwd: dir, cliPath: script, args: [], env: { SECRET_PASSWORD: "pw-this-run" }, tmpDir: dir, signal: new AbortController().signal });
       expect(result).toEqual({ exitCode: 0, signal: null });
       const env = JSON.parse(readFileSync(path.join(dir, "env.json"), "utf8")) as Record<string, string>;
-      for (const k of ["DATABASE_URL", "API_TOKEN", "SECRETS_ENCRYPTION_KEY", "ANTHROPIC_API_KEY", "PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK", "NODE_OPTIONS", "SECRET_OTHER_RUN", "HOME"]) {
+      for (const k of ["DATABASE_URL", "API_TOKEN", "SECRETS_ENCRYPTION_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK", "NODE_OPTIONS", "SECRET_OTHER_RUN", "HOME"]) {
         expect(env[k], k).toBeUndefined();
       }
       expect(env.SECRET_PASSWORD).toBe("pw-this-run");

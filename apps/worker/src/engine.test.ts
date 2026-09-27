@@ -17,7 +17,7 @@ import {
 import { FakeTransport } from "@platform/llm";
 import { createLocalStorage } from "@platform/storage";
 import type { RunnerProcessInput, SpawnRunner } from "@platform/testing-engine";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { silentLogger } from "./deps";
 import { createEngine } from "./engine";
 import { analyzeRunJob } from "./jobs/analyze-run";
@@ -163,6 +163,48 @@ describe("createEngine (Ruling R7)", () => {
     expect(() =>
       createEngine({ LLM_PROVIDER: "openai", LLM_MODEL: "gpt-x", OPENAI_API_KEY: "k" }, { db: h.tdb.db, logger: silentLogger }),
     ).toThrow(/not implemented in V1/);
+  });
+
+  it("LLM_PROVIDER=gemini runs the real engine on Gemini with the configured key, model and thinking level", async () => {
+    const sent: { url: string; headers: Headers; body: { generationConfig: Record<string, unknown> } }[] = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      sent.push({ url: String(url), headers: new Headers(init.headers), body: JSON.parse(String(init.body)) });
+      const reply = {
+        candidates: [{ content: { parts: [{ text: '{"ok":true}' }], role: "model" }, finishReason: "STOP", index: 0 }],
+        usageMetadata: { promptTokenCount: 1000, candidatesTokenCount: 100, thoughtsTokenCount: 300, totalTokenCount: 1400 },
+        modelVersion: "gemini-3.8-flash",
+      };
+      return new Response(JSON.stringify(reply), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    try {
+      const engine = createEngine(
+        { LLM_PROVIDER: "gemini", LLM_MODEL: "gemini-3.8-flash", GEMINI_API_KEY: "gm-test", GEMINI_THINKING_LEVEL: "low" },
+        { db: h.tdb.db, logger: silentLogger, storage: createLocalStorage({ rootDir: artifactDir }) },
+      );
+      expect(engine.kind).toBe("real");
+      const run = await seedRun(h);
+
+      await engine.llm!.generateJson({
+        system: "",
+        messages: [{ role: "user", content: "ping" }],
+        jsonSchema: { type: "object" },
+        stage: "PLANNING",
+        runId: run.id,
+        signal: new AbortController().signal,
+        redact: (v) => v,
+      });
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.url).toMatch(/\/models\/gemini-3\.8-flash:generateContent$/);
+      expect(sent[0]!.headers.get("x-goog-api-key")).toBe("gm-test");
+      expect(sent[0]!.body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "LOW" });
+      // Thinking tokens are priced as output: 1000 × $0.75 + 400 × $3.75 per MTok.
+      expect(await new LlmCallRepository(h.tdb.db).listByRun(run.id)).toMatchObject([
+        { stage: "PLANNING", provider: "gemini", model: "gemini-3.8-flash", inputTokens: 1000, outputTokens: 400, estimatedCostUsd: 0.00225, status: "SUCCESS" },
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("a real provider compiles criteria with the LLM, persists revision 1, and records llm_calls rows", async () => {

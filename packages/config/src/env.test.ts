@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadEnv } from "./env";
+import { loadEnv, loadLiveLlmEnv } from "./env";
 
 const validEnv: Record<string, string | undefined> = {
   NODE_ENV: "development",
@@ -88,10 +88,53 @@ describe("loadEnv", () => {
     expect(loadEnv({ ...validEnv, LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-test" }).LLM_PROVIDER).toBe("anthropic");
   });
 
-  it("LLM_MODEL defaults to claude-sonnet-5 and can be overridden", () => {
+  it("LLM_PROVIDER=gemini requires GEMINI_API_KEY (compose passes an unset key as empty)", () => {
+    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "gemini" })).toThrow(/GEMINI_API_KEY/);
+    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "" })).toThrow(/GEMINI_API_KEY/);
+    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", ANTHROPIC_API_KEY: "sk-test" })).toThrow(/GEMINI_API_KEY/);
+    expect(loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test" }).LLM_PROVIDER).toBe("gemini");
+  });
+
+  it("LLM_MODEL defaults to the provider's model, can be overridden, and is unset when empty (compose)", () => {
     expect(loadEnv(validEnv).LLM_MODEL).toBe("claude-sonnet-5");
+    expect(loadEnv({ ...validEnv, LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-test" }).LLM_MODEL).toBe("claude-sonnet-5");
+    const gemini = { ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test" };
+    expect(loadEnv(gemini).LLM_MODEL).toBe("gemini-3.8-flash");
+    expect(loadEnv({ ...gemini, LLM_MODEL: "" }).LLM_MODEL).toBe("gemini-3.8-flash");
+    expect(loadEnv({ ...gemini, LLM_MODEL: "gemini-3.1-pro-preview" }).LLM_MODEL).toBe("gemini-3.1-pro-preview");
     expect(loadEnv({ ...validEnv, LLM_MODEL: "claude-opus-5" }).LLM_MODEL).toBe("claude-opus-5");
-    expect(() => loadEnv({ ...validEnv, LLM_MODEL: "" })).toThrow(/LLM_MODEL/);
+  });
+
+  it("rejects the other provider's model, e.g. a leftover LLM_MODEL=claude-… with LLM_PROVIDER=gemini", () => {
+    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test", LLM_MODEL: "claude-sonnet-5" })).toThrow(
+      /LLM_MODEL: claude-sonnet-5 is not a gemini model/,
+    );
+    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-test", LLM_MODEL: "gemini-3.8-flash" })).toThrow(
+      /LLM_MODEL/,
+    );
+    // The fake engine ignores the model.
+    expect(loadEnv({ ...validEnv, LLM_PROVIDER: "fake", LLM_MODEL: "gemini-3.8-flash" }).LLM_MODEL).toBe("gemini-3.8-flash");
+  });
+
+  it("rejects a provider key that can't be an HTTP header value, without printing the key", () => {
+    let message = "";
+    try {
+      loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-secret\nkey" });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toMatch(/GEMINI_API_KEY/);
+    expect(message).not.toContain("gm-secret");
+    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-ant\u0000x" })).toThrow(/ANTHROPIC_API_KEY/);
+    // Surrounding whitespace is dropped from header values, so such a key keeps working, as before.
+    expect(loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test\n" }).GEMINI_API_KEY).toBe("gm-test\n");
+  });
+
+  it("GEMINI_THINKING_LEVEL is optional (empty means unset) and must be a Gemini level", () => {
+    expect(loadEnv(validEnv).GEMINI_THINKING_LEVEL).toBeUndefined();
+    expect(loadEnv({ ...validEnv, GEMINI_THINKING_LEVEL: "" }).GEMINI_THINKING_LEVEL).toBeUndefined();
+    expect(loadEnv({ ...validEnv, GEMINI_THINKING_LEVEL: "low" }).GEMINI_THINKING_LEVEL).toBe("low");
+    expect(() => loadEnv({ ...validEnv, GEMINI_THINKING_LEVEL: "extreme" })).toThrow(/GEMINI_THINKING_LEVEL/);
   });
 
   it("disallows the fake LLM provider in production", () => {
@@ -115,5 +158,31 @@ describe("loadEnv", () => {
     expect(() => loadEnv({ ...validEnv, RUNNER_WORKSPACE_DIR: "work/runs" })).toThrow(/RUNNER_WORKSPACE_DIR/);
     expect(() => loadEnv({ ...validEnv, RUNNER_WORKSPACE_DIR: "/" })).toThrow(/RUNNER_WORKSPACE_DIR/);
     expect(() => loadEnv({ ...validEnv, RUNNER_NODE_MODULES_DIR: "./node_modules" })).toThrow(/RUNNER_NODE_MODULES_DIR/);
+  });
+});
+
+describe("loadLiveLlmEnv (evals, live tests and the live gate: a real provider, no database)", () => {
+  it("LLM_PROVIDER picks anthropic or gemini; unset or fake (a shell set up for the fake worker) means anthropic, as before", () => {
+    expect(loadLiveLlmEnv({ ANTHROPIC_API_KEY: "sk-test" })).toMatchObject({ LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5" });
+    expect(loadLiveLlmEnv({ LLM_PROVIDER: "", ANTHROPIC_API_KEY: "sk-test" })).toMatchObject({ LLM_PROVIDER: "anthropic" });
+    expect(loadLiveLlmEnv({ LLM_PROVIDER: "fake", LLM_MODEL: "claude-opus-5", ANTHROPIC_API_KEY: "sk-test" })).toMatchObject({
+      LLM_PROVIDER: "anthropic",
+      LLM_MODEL: "claude-opus-5",
+    });
+    expect(loadLiveLlmEnv({ LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test", GEMINI_THINKING_LEVEL: "low" })).toEqual({
+      LLM_PROVIDER: "gemini",
+      LLM_MODEL: "gemini-3.8-flash",
+      GEMINI_API_KEY: "gm-test",
+      GEMINI_THINKING_LEVEL: "low",
+    });
+    expect(() => loadLiveLlmEnv({ LLM_PROVIDER: "gemni", GEMINI_API_KEY: "gm-test" })).toThrow(/LLM_PROVIDER/);
+    expect(() => loadLiveLlmEnv({ LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-test" })).toThrow(/LLM_PROVIDER/);
+  });
+
+  it("names the key to set when it is unset; any other problem throws, as loadEnv would", () => {
+    expect(loadLiveLlmEnv({ LLM_PROVIDER: "fake" })).toEqual({ missingKey: "ANTHROPIC_API_KEY" });
+    expect(loadLiveLlmEnv({ LLM_PROVIDER: "gemini", GEMINI_API_KEY: "", ANTHROPIC_API_KEY: "sk-test" })).toEqual({ missingKey: "GEMINI_API_KEY" });
+    expect(() => loadLiveLlmEnv({ LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test", GEMINI_THINKING_LEVEL: "hi" })).toThrow(/GEMINI_THINKING_LEVEL/);
+    expect(() => loadLiveLlmEnv({ LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test", LLM_MODEL: "claude-sonnet-5" })).toThrow(/LLM_MODEL/);
   });
 });

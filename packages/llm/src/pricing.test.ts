@@ -21,4 +21,11 @@ describe("priceFor", () => {
   it("estimates cost per million tokens", () => {
     expect(estimateCostUsd("claude-sonnet-5", 1000, 500)).toBe(0.007);
   });
+  it("prices Gemini models, each variant at its own price", () => {
+    expect(estimateCostUsd("gemini-3.8-flash", 1000, 500)).toBe(0.002625);
+    // Not gemini-3.5-flash's price through the snapshot-prefix rule.
+    expect(priceFor("gemini-3.5-flash-lite")).toEqual({ inputUsdPerMTok: 0.3, outputUsdPerMTok: 2.5 });
+    // The ≤200k-token prompt tier.
+    expect(priceFor("gemini-3.1-pro-preview")).toEqual({ inputUsdPerMTok: 2, outputUsdPerMTok: 12 });
+  });
 });

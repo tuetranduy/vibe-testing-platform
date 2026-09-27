@@ -23,6 +23,7 @@
     "test:e2e:compose": "E2E_PLATFORM=compose vitest run --project e2e"
   },
   "devDependencies": {
+    "@platform/config": "workspace:*",
     "@platform/contracts": "workspace:*",
     "@platform/db": "workspace:*",
     "@platform/demo-shop": "workspace:*",

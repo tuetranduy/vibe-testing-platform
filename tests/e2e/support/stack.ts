@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadLiveLlmEnv } from "@platform/config";
 import { startDemoShop, type RunningDemoShop } from "@platform/demo-shop";
 import { createTestDatabase, type TestDatabase } from "@platform/db/testing";
 import { Redis } from "ioredis";
@@ -77,6 +78,24 @@ function viaHost(url: string, host: string, port: number): string {
 }
 
 /**
+ * E2E_MODE=live: the worker's real provider — LLM_PROVIDER=gemini, or anthropic when unset or fake —
+ * with its model and settings, and only that provider's key. Throws naming what is missing or wrong.
+ */
+function liveLlmEnv(): Record<string, string> {
+  const llm = loadLiveLlmEnv();
+  if ("missingKey" in llm) throw new Error(`E2E_MODE=live needs ${llm.missingKey}`);
+  if (llm.LLM_PROVIDER === "gemini") {
+    return {
+      LLM_PROVIDER: "gemini",
+      LLM_MODEL: llm.LLM_MODEL,
+      GEMINI_API_KEY: llm.GEMINI_API_KEY!,
+      ...(llm.GEMINI_THINKING_LEVEL ? { GEMINI_THINKING_LEVEL: llm.GEMINI_THINKING_LEVEL } : {}),
+    };
+  }
+  return { LLM_PROVIDER: "anthropic", LLM_MODEL: llm.LLM_MODEL, ANTHROPIC_API_KEY: llm.ANTHROPIC_API_KEY! };
+}
+
+/**
  * The real platform on this machine: a fresh database, Redis logical DB, S3 bucket, the demo shop
  * (in-process, loopback, test endpoints on), and the API and worker — as child processes, or with
  * E2E_PLATFORM=compose as containers of the compose `api` and `worker` services (their images built
@@ -87,7 +106,8 @@ function viaHost(url: string, host: string, port: number): string {
 export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<void> }> {
   const mode = process.env.E2E_MODE === "live" ? "live" : "ci";
   const platform = process.env.E2E_PLATFORM === "compose" ? "compose" : "local";
-  if (mode === "live" && !process.env.ANTHROPIC_API_KEY) throw new Error("E2E_MODE=live needs ANTHROPIC_API_KEY");
+  // CI: the scripted model stands in for the transport, so any real provider name and key will do.
+  const workerLlm = mode === "live" ? liveLlmEnv() : { LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-e2e-scripted-not-a-key" };
   const work = realpathSync(mkdtempSync(path.join(os.tmpdir(), "platform-e2e-")));
   const logDir = path.join(work, "logs");
   mkdirSync(logDir);
@@ -181,12 +201,7 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
 
     const worker = launch(
       "worker",
-      {
-        LLM_PROVIDER: "anthropic",
-        ANTHROPIC_API_KEY: mode === "live" ? process.env.ANTHROPIC_API_KEY! : "sk-e2e-scripted-not-a-key",
-        ...(process.env.LLM_MODEL ? { LLM_MODEL: process.env.LLM_MODEL } : {}),
-        E2E_MODE: mode,
-      },
+      { ...workerLlm, E2E_MODE: mode },
       { port: metricsPort, target: 9464 },
     );
     const workerLog = path.join(logDir, "worker.log");

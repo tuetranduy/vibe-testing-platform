@@ -25,6 +25,8 @@ export type EngineConfig = Pick<Env, "LLM_PROVIDER" | "LLM_MODEL"> &
     Pick<
       Env,
       | "ANTHROPIC_API_KEY"
+      | "GEMINI_API_KEY"
+      | "GEMINI_THINKING_LEVEL"
       | "OPENAI_API_KEY"
       | "TARGET_PRIVATE_ALLOWLIST"
       | "ARTIFACT_RETENTION_DAYS"
@@ -77,7 +79,13 @@ export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSele
   }
 
   const transport =
-    deps.transport ?? createTransport({ provider: config.LLM_PROVIDER, anthropicApiKey: config.ANTHROPIC_API_KEY });
+    deps.transport ??
+    createTransport({
+      provider: config.LLM_PROVIDER,
+      anthropicApiKey: config.ANTHROPIC_API_KEY,
+      geminiApiKey: config.GEMINI_API_KEY,
+      geminiThinkingLevel: config.GEMINI_THINKING_LEVEL,
+    });
   if (!deps.storage) throw new Error("The real test engine needs artifact storage (exploration screenshots)");
   const calls = new LlmCallRepository(deps.db);
   const llm = new LlmClient({

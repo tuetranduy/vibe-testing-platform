@@ -6,7 +6,8 @@ to when it is picked up; mark it resolved here (with the commit) rather than del
 Severity: **High** blocks the V1 release gate or can hide a real failure; **Medium** is a correctness or
 operability gap a user or operator will hit; **Low** is polish, test hygiene or a misleading edge case.
 
-All but KI-001 were resolved on 2026-09-27 (branch `fix/known-issues`); each entry names its commit.
+KI-002 to KI-017 were resolved on 2026-09-27 (branch `fix/known-issues`); each entry names its commit. KI-001,
+KI-018 and KI-019 are open.
 
 | ID | Severity | Area | Summary | Status |
 |---|---|---|---|---|
@@ -27,6 +28,8 @@ All but KI-001 were resolved on 2026-09-27 (branch `fix/known-issues`); each ent
 | KI-015 | Low | Docs | Spec checkboxes for Tasks 21–22 are unticked (spec file is read-only) | Resolved `04ca3c7` |
 | KI-016 | Env | Dev machine | Stale sandbox profile in `$TMPDIR` fails `sandbox-preflight.test.ts` | Resolved `6d7bcf5` + machine cleanup |
 | KI-017 | Env | Dev machine | Default shell Node 22.13 is below `engines` and its Corepack is broken | Resolved (machine setup) |
+| KI-018 | Medium | LLM provider | The Gemini provider has not been run against the live API | Open |
+| KI-019 | Low | Cost metrics | Gemini 3.6–3.8 Flash prices double on 2027-01-01 | Open |
 
 ---
 
@@ -191,3 +194,28 @@ All but KI-001 were resolved on 2026-09-27 (branch `fix/known-issues`); each ent
 - **To close:** `nvm alias default 24` (or install ≥ 22.18), and `corepack enable` on that version.
 - **Resolved:** `nvm alias default 24` (→ 24.15.0) and `corepack enable` on it; a new login shell gets Node 24.15.0
   and pnpm 10.28.0 through Corepack 0.34.6.
+
+## KI-018 — The Gemini provider has not been run against the live API
+- **Severity:** Medium (the adapter is tested only against response shapes taken from Google's API reference).
+- **Where:** `packages/llm/src/providers/gemini.ts`, `packages/llm/src/providers/gemini-json-schema.ts`.
+- **What:** `LLM_PROVIDER=gemini` (2026-09-27) was built from the Gemini API reference and the `@google/genai`
+  2.24 type docs; there was no `GEMINI_API_KEY` in the implementation environment. Unverified against the live
+  API: that `responseJsonSchema` accepts the compiler's schema (the largest: a six-way union; Google warns that very
+  large or deeply nested schemas may be rejected), the `thinkingLevel` values as sent (`LOW`, …), and the output
+  quality on the eval suites.
+- **Risk:** Thinking tokens count against each call's output limit (the report diagnostics call is capped at
+  4,000). A truncated answer shows up as `INVALID_OUTPUT` records and, after the correction round, a
+  `ContractError`; `GEMINI_THINKING_LEVEL=low` is the lever.
+- **To close:** `LLM_PROVIDER=gemini GEMINI_API_KEY=… LLM_MODEL= pnpm eval requirement-compiler` and `… pnpm eval
+  planner` (record the scores in `evals/BASELINE.md`), `… pnpm test:live -- stagehand-smoke`, then the live gate with
+  `LLM_PROVIDER=gemini` (see KI-001). `LLM_MODEL=` clears a Claude model exported from `.env`. Note each call's
+  `thoughtsTokenCount` for the diagnostics call and Stagehand's operation latency: if they run short, document
+  `GEMINI_THINKING_LEVEL=low` for the worker.
+
+## KI-019 — Gemini 3.6–3.8 Flash prices double on 2027-01-01
+- **Severity:** Low (cost estimates only).
+- **Where:** `packages/llm/src/pricing.ts`.
+- **What:** Google's list price for `gemini-3.8-flash` (the Gemini default), `gemini-3.7-flash` and
+  `gemini-3.6-flash` is $0.75 / $3.75 per MTok through 2026-12-31 and $1.50 / $7.50 from 2027-01-01. The table holds
+  today's price, so from 2027 `estimatedCostUsd` and `llm_cost_usd_total` report half the real cost.
+- **To close:** on 2027-01-01, set those three entries to $1.50 / $7.50 (and re-check Google's price list).

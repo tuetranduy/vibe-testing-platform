@@ -12,10 +12,11 @@ How to record it:
 ```bash
 ANTHROPIC_API_KEY=sk-ant-... pnpm eval requirement-compiler          # model: claude-sonnet-5 (default)
 ANTHROPIC_API_KEY=sk-ant-... LLM_MODEL=claude-opus-5 pnpm eval requirement-compiler
+LLM_PROVIDER=gemini GEMINI_API_KEY=... pnpm eval requirement-compiler   # model: gemini-3.8-flash (default)
 ```
 
-Copy the `Total:` line into the table, with the date, model, the commit of
-`packages/testing-engine/src/requirement/prompts.ts`, and any failing case ids.
+Copy the `Total:` line into the table, with the date, model (for Gemini, with any `GEMINI_THINKING_LEVEL`), the
+commit of `packages/testing-engine/src/requirement/prompts.ts`, and any failing case ids.
 
 | Date | Model | Prompt commit | Passed | Tokens in / out | Est. cost | Failing cases |
 |------|-------|---------------|--------|-----------------|-----------|---------------|
@@ -44,6 +45,7 @@ case that ended in an error.
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-... pnpm eval planner          # model: claude-sonnet-5 (default)
+LLM_PROVIDER=gemini GEMINI_API_KEY=... pnpm eval planner   # model: gemini-3.8-flash (default)
 ```
 
 Record the `Total:` line with the commit of `packages/testing-engine/src/planner/prompts.ts`.

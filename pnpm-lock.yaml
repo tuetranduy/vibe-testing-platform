@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@platform/config':
+        specifier: workspace:*
+        version: link:packages/config
       '@platform/contracts':
         specifier: workspace:*
         version: link:packages/contracts
