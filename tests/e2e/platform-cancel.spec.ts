@@ -32,7 +32,8 @@ describe("Task 21 step 4 — cancel", () => {
     expect((await store.events(runId)).map((e) => e.type)).toContain("run.cancelled");
   });
 
-  it("?slow=1500, cancelled while RUNNING_PLAYWRIGHT: CANCELLED within 10 s; the runner's processes and its workspace are gone; secrets purged", async () => {
+  // CI mode only: with a real model, whether (and when) a run reaches the rerun depends on what it compiles.
+  it.skipIf(stack.mode === "live")("?slow=1500, cancelled while RUNNING_PLAYWRIGHT: CANCELLED within 10 s; the runner's processes and its workspace are gone; secrets purged", async () => {
     // Every page takes 1.5 s, so the rerun of the cart flow runs for several seconds.
     const runId = await client.create({
       targetUrl: `${stack.targetUrl}/?slow=1500`,
