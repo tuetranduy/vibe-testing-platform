@@ -4,7 +4,7 @@ import { createRunEventPublisher } from "@platform/event-bus";
 import { redactByKey } from "@platform/security";
 import { CancelledError, errorCategoryOf, errorMessageOf } from "@platform/testing-engine";
 import type { WorkerDeps } from "../deps";
-import { NO_VERDICT } from "../metrics";
+import { NO_VERDICT, observeStage } from "../metrics";
 import type { RunContextHandle } from "../run-context";
 
 /**
@@ -55,6 +55,7 @@ export async function failBeforeContext(deps: WorkerDeps, run: TestRun, err: unk
   deps.logger.error({ runId: run.id, tenantId: run.tenantId, stage: run.lifecycle, category, err: errorMessageOf(err) }, message);
   try {
     await new RunRepository(deps.db).transition(run.id, run.lifecycle, "ERRORED", { errorCategory: category, errorMessage: message });
+    observeStage(deps.metrics, run.lifecycle, run.lifecycleChangedAt, (deps.now ?? (() => new Date()))());
     deps.metrics?.testRuns.inc({ lifecycle: "ERRORED", verdict: NO_VERDICT });
     await new SecretRepository(deps.db).purge(run.id);
     await createRunEventPublisher({ events: new EventRepository(deps.db), redis: deps.redis, redact: redactByKey }).publish({

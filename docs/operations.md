@@ -68,7 +68,7 @@ manager, never in compose files or images.
 | Metric | Labels | Exported by | Counts |
 |---|---|---|---|
 | `test_runs_total` | `lifecycle`, `verdict` (`none` when absent) | worker, API | runs reaching COMPLETED / ERRORED / CANCELLED (the API counts runs it ends itself: cancel before a worker holds them, enqueue failures) |
-| `test_run_duration_seconds` | `stage` | worker | histogram of time spent in each lifecycle stage |
+| `test_run_duration_seconds` | `stage` | worker, API | histogram of time spent in each lifecycle stage, observed when the run leaves it (from when it entered it, so `QUEUED` includes the queue wait) by whichever process moves it on: the API for `AWAITING_CONFIRMATION` → `PLANNING` and its cancels, the reaper for the runs it ends |
 | `queue_depth` | `queue` (`runs`) | API | jobs waiting to be picked up (absent for a scrape when Redis cannot answer) |
 | `active_worker_runs` | — | worker | analyze / execute jobs in progress |
 | `browser_sessions_active` | — | worker | open exploration sandboxes and running rerun processes |

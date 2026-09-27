@@ -20,7 +20,7 @@ import { createRunRedactor, encryptSecret, redactByKey, validateTargetUrl } from
 import { createHmac } from "node:crypto";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
-import { NO_VERDICT } from "../metrics";
+import { NO_VERDICT, observeStage } from "../metrics";
 
 const ENQUEUE_FAILED = "Queue unavailable at creation";
 
@@ -151,7 +151,7 @@ export class TestRunService {
     try {
       await this.deps.queue.enqueueAnalyze(created.run.id);
     } catch {
-      await this.failEnqueue(created.run.id);
+      await this.failEnqueue(created.run);
       throw new HttpError(503, "QUEUE_UNAVAILABLE", "The run could not be queued; please retry");
     }
     return { status: 202, body: this.response(created.run) };
@@ -170,16 +170,17 @@ export class TestRunService {
     return { status: 202, body: this.response(existing) };
   }
 
-  private async failEnqueue(runId: string): Promise<void> {
+  private async failEnqueue(run: TestRun): Promise<void> {
     try {
-      await this.runs.transition(runId, "QUEUED", "ERRORED", {
+      const errored = await this.runs.transition(run.id, "QUEUED", "ERRORED", {
         errorCategory: "INTERNAL",
         errorMessage: ENQUEUE_FAILED,
       });
+      observeStage(this.deps.metrics, "QUEUED", run.lifecycleChangedAt, errored.lifecycleChangedAt);
       this.deps.metrics?.testRuns.inc({ lifecycle: "ERRORED", verdict: NO_VERDICT });
-      await new SecretRepository(this.deps.db).purge(runId);
+      await new SecretRepository(this.deps.db).purge(run.id);
       await this.publisher().publish({
-        runId,
+        runId: run.id,
         stage: "ERRORED",
         type: "run.errored",
         message: "Run could not be queued",
@@ -216,6 +217,7 @@ export class TestRunService {
           cancelReason: "USER_REQUESTED",
           cancelRequestedAt: new Date(),
         });
+        observeStage(this.deps.metrics, run.lifecycle, run.lifecycleChangedAt, cancelled.lifecycleChangedAt);
         this.deps.metrics?.testRuns.inc({ lifecycle: "CANCELLED", verdict: NO_VERDICT });
         await new SecretRepository(this.deps.db).purge(run.id);
         await this.publisher().publish({

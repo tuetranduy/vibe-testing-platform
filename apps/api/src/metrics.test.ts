@@ -1,3 +1,5 @@
+import { RequirementRepository, RunRepository, schema } from "@platform/db";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApiMetrics } from "./metrics";
 import { FakeQueue, auth, createTestApi, validBody, type TestApi } from "./test-support";
@@ -29,6 +31,45 @@ describe("GET /metrics", () => {
     const { runId } = created.json();
     expect((await t.app.inject({ method: "POST", url: `/v1/test-runs/${runId}/cancel`, headers: auth })).statusCode).toBe(202);
     expect((await scrape()).text).toMatch(/^test_runs_total\{lifecycle="CANCELLED",verdict="none"\} 1$/m);
+  });
+
+  it("times the stages it ends: AWAITING_CONFIRMATION when criteria are confirmed, QUEUED when a run is cancelled", async () => {
+    const runs = new RunRepository(t.tdb.db);
+    /** Moves the run's entry into its current stage `seconds` into the past. */
+    const enteredAgo = (runId: string, seconds: number) =>
+      t.tdb.db.update(schema.testRuns).set({ lifecycleChangedAt: new Date(Date.now() - seconds * 1000) }).where(eq(schema.testRuns.id, runId));
+    const created = async () => (await t.app.inject({ method: "POST", url: "/v1/test-runs", headers: auth, payload: validBody() })).json().runId as string;
+
+    const awaiting = await created();
+    await runs.transition(awaiting, "QUEUED", "ANALYZING_REQUIREMENT");
+    await runs.transition(awaiting, "ANALYZING_REQUIREMENT", "AWAITING_CONFIRMATION");
+    await new RequirementRepository(t.tdb.db).createRevision(awaiting, {
+      originalText: validBody().requirement,
+      criteria: [
+        {
+          id: "AC-1",
+          sourceText: "add a product to the cart",
+          statement: "The cart shows the product",
+          expectedOutcome: { kind: "text_matches", fact: { key: "cart", checkpoint: "after_add" }, match: { mode: "contains", value: "x", caseSensitive: false } },
+          preconditions: [],
+          ambiguity: null,
+        },
+      ],
+      facts: [{ key: "cart", checkpoint: "after_add", description: "The cart", valueType: "string" }],
+    });
+    await enteredAgo(awaiting, 120);
+    expect((await t.app.inject({ method: "POST", url: `/v1/test-runs/${awaiting}/criteria/confirm`, headers: auth })).statusCode).toBe(202);
+
+    const queued = await created();
+    await enteredAgo(queued, 30);
+    expect((await t.app.inject({ method: "POST", url: `/v1/test-runs/${queued}/cancel`, headers: auth })).statusCode).toBe(202);
+
+    const { text } = await scrape();
+    const sample = (series: string, stage: string) =>
+      Number(new RegExp(`^test_run_duration_seconds_${series}\\{stage="${stage}"\\} (\\S+)$`, "m").exec(text)?.[1] ?? 0);
+    expect(sample("count", "AWAITING_CONFIRMATION")).toBe(1);
+    expect(sample("sum", "AWAITING_CONFIRMATION")).toBeGreaterThanOrEqual(120);
+    expect(sample("sum", "QUEUED")).toBeGreaterThanOrEqual(30);
   });
 
   it("still answers when the queue cannot be read (Redis down): everything but queue_depth", async () => {

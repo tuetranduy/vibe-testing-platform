@@ -19,7 +19,7 @@ import {
   type StageContext,
 } from "@platform/testing-engine";
 import type { WorkerDeps } from "./deps";
-import { NO_VERDICT } from "./metrics";
+import { NO_VERDICT, observeStage } from "./metrics";
 
 export interface RunContextHandle {
   ctx: StageContext;
@@ -58,7 +58,9 @@ export async function createRunContext(
   });
 
   let lifecycle = run.lifecycle;
-  let stageStartedAt = now();
+  // When the run entered the stage it is in, not when this job started: the first stage's time
+  // includes the wait for this job (QUEUED: the queue; PLANNING: confirmation to pick-up).
+  let stageStartedAt = run.lifecycleChangedAt;
 
   const abort = (reason: Error) => {
     if (!controller.signal.aborted) controller.abort(reason);
@@ -106,7 +108,7 @@ export async function createRunContext(
     async transition(to, patch = {}) {
       await runs.transition(run.id, lifecycle, to, patch);
       const at = now();
-      deps.metrics?.runDuration.observe({ stage: lifecycle }, Math.max(0, at.getTime() - stageStartedAt.getTime()) / 1000);
+      observeStage(deps.metrics, lifecycle, stageStartedAt, at);
       stageStartedAt = at;
       lifecycle = to;
       deps.runLogs?.setStage(run.id, to);

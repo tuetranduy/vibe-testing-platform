@@ -1,9 +1,11 @@
-import { RunRepository } from "@platform/db";
+import { RunRepository, SecretRepository } from "@platform/db";
 import { TEST_TENANT_ID } from "@platform/db/testing";
+import { encryptSecret } from "@platform/security";
 import type { ArtifactStorage } from "@platform/storage";
 import type { Counter, Gauge, Histogram } from "prom-client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { storeArtifact } from "./artifacts";
+import { analyzeRunJob } from "./jobs/analyze-run";
 import { executeRunJob } from "./jobs/execute-run";
 import { reapJob } from "./jobs/reap";
 import { countEgressBlock, createWorkerMetrics, recordLlmCall, startMetricsServer, type WorkerMetrics } from "./metrics";
@@ -21,10 +23,12 @@ async function value(metric: Counter<string> | Gauge<string>, labels: Record<str
   const hit = values.find((v) => Object.entries(labels).every(([k, want]) => v.labels[k] === want));
   return hit?.value ?? 0;
 }
-async function observations(metric: Histogram<string>, labels: Record<string, string>): Promise<number> {
+async function observations(metric: Histogram<string>, labels: Record<string, string>, series = "_count"): Promise<number> {
   const { values } = await metric.get();
-  return values.find((v) => v.metricName?.endsWith("_count") && Object.entries(labels).every(([k, w]) => v.labels[k] === w))?.value ?? 0;
+  return values.find((v) => v.metricName?.endsWith(series) && Object.entries(labels).every(([k, w]) => v.labels[k] === w))?.value ?? 0;
 }
+/** Total seconds observed for one labelled series. */
+const secondsIn = (metric: Histogram<string>, labels: Record<string, string>) => observations(metric, labels, "_sum");
 
 describe("worker metrics", () => {
   it("recordLlmCall counts requests, tokens by direction and cost", async () => {
@@ -69,6 +73,44 @@ describe("worker metrics", () => {
       expect(await observations(m.runDuration, { stage })).toBe(1);
     }
     expect(await value(m.activeRuns)).toBe(0);
+  });
+
+  it("a job times the stage its run was already in from when the run entered it, not from the job's start", async () => {
+    const m = createWorkerMetrics();
+    const queued = await seedRun(h);
+    const planned = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
+    // Both jobs are picked up 90 s after their run entered its stage.
+    const later = () => new Date(Date.now() + 90_000);
+    await analyzeRunJob(h.deps(createFakeStages({ stepDelayMs: 0 }), { metrics: m, now: later }), queued.id);
+    await executeRunJob(h.deps(createFakeStages({ stepDelayMs: 0, explorationSteps: 2 }), { metrics: m, now: later }), planned.id);
+
+    expect(await secondsIn(m.runDuration, { stage: "QUEUED" })).toBeGreaterThanOrEqual(90);
+    expect(await secondsIn(m.runDuration, { stage: "PLANNING" })).toBeGreaterThanOrEqual(90);
+    // Stages entered during the job are timed from that transition.
+    expect(await observations(m.runDuration, { stage: "ANALYZING_REQUIREMENT" })).toBe(1);
+    expect(await secondsIn(m.runDuration, { stage: "ANALYZING_REQUIREMENT" })).toBeLessThan(90);
+  });
+
+  it("the reaper, and a run the worker cannot start, time the stage the run was in", async () => {
+    const m = createWorkerMetrics();
+    const awaiting = await seedRun(h, { lifecycle: "AWAITING_CONFIRMATION" });
+    const lost = await seedRun(h, { lifecycle: "ANALYZING_REQUIREMENT" });
+    const unstartable = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
+    // Encrypted with another key: the run context cannot be built.
+    await new SecretRepository(h.tdb.db).insertMany(unstartable.id, [
+      { name: "password", ...encryptSecret("pw-123456", { runId: unstartable.id, name: "password" }, Buffer.alloc(32, 7)) },
+    ]);
+    const later = new Date(Date.now() + 25 * 3_600_000);
+
+    await executeRunJob(h.deps(createFakeStages(), { metrics: m, now: () => later }), unstartable.id);
+    const reaped = await reapJob(h.deps(createFakeStages(), { metrics: m, now: () => later }));
+
+    expect(reaped.confirmationExpired).toContain(awaiting.id);
+    expect(reaped.workerLost).toContain(lost.id);
+    expect((await new RunRepository(h.tdb.db).getById(unstartable.id)).lifecycle).toBe("ERRORED");
+    for (const stage of ["AWAITING_CONFIRMATION", "ANALYZING_REQUIREMENT", "PLANNING"]) {
+      expect(await secondsIn(m.runDuration, { stage }), stage).toBeGreaterThanOrEqual(25 * 3600);
+    }
   });
 
   it("the reaper counts what it reaped, by reason, and the runs it ended", async () => {
