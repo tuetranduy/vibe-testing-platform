@@ -38,6 +38,18 @@ export default defineConfig({
           testTimeout: 180_000,
         },
       },
+      {
+        plugins: [tsxTransform()],
+        test: {
+          name: "e2e",
+          include: ["tests/e2e/**/*.spec.ts"],
+          globalSetup: ["tests/e2e/support/global-setup.ts"],
+          // One stack, one worker: specs run one file at a time, runs one at a time.
+          fileParallelism: false,
+          testTimeout: 180_000,
+          hookTimeout: 180_000,
+        },
+      },
     ],
   },
 });

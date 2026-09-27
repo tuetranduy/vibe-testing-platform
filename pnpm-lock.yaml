@@ -17,6 +17,9 @@ importers:
       '@platform/demo-shop':
         specifier: workspace:*
         version: link:tests/fixtures/demo-shop
+      '@platform/event-bus':
+        specifier: workspace:*
+        version: link:packages/event-bus
       '@platform/llm':
         specifier: workspace:*
         version: link:packages/llm
@@ -35,9 +38,15 @@ importers:
       '@types/node':
         specifier: ^22.19.0
         version: 22.20.4
+      drizzle-orm:
+        specifier: ^0.45.3
+        version: 0.45.3(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)
       esbuild:
         specifier: ~0.28.2
         version: 0.28.2
+      ioredis:
+        specifier: ^6.0.0
+        version: 6.0.0
       playwright-core:
         specifier: 1.56.1
         version: 1.56.1
