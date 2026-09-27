@@ -1,4 +1,4 @@
-import { loadEnvOrExit } from "@platform/config";
+import { createLogger, loadEnvOrExit } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
 import { RunEventHub, createRunQueue } from "@platform/event-bus";
 import { defaultResolver } from "@platform/security";
@@ -7,19 +7,21 @@ import { Redis } from "ioredis";
 import { buildApp } from "./app";
 import { createCancelSignal } from "./services/cancel-signal";
 
+const env = loadEnvOrExit();
+const log = createLogger({ component: "api", level: env.LOG_LEVEL });
+
 async function retry(fn: () => Promise<void>, what: string, attempts = 30): Promise<void> {
   for (let i = 1; ; i++) {
     try {
       return await fn();
     } catch (err) {
       if (i >= attempts) throw err;
-      console.warn(`${what} not ready (attempt ${i}/${attempts}): ${(err as Error).message}`);
+      log.warn({ err, attempt: i, attempts }, `${what} not ready`);
       await new Promise((r) => setTimeout(r, 2000));
     }
   }
 }
 
-const env = loadEnvOrExit();
 const handle = createDb(env.DATABASE_URL);
 if (process.env.RUN_MIGRATIONS_ON_START !== "false") await runMigrations(handle.db);
 await ensureTenant(handle.db, env.DEFAULT_TENANT_ID);

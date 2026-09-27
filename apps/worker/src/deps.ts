@@ -1,3 +1,4 @@
+import type { RunLogRegistry } from "@platform/config";
 import type { Database } from "@platform/db";
 import type { RunQueue } from "@platform/event-bus";
 import type { EngineStages } from "@platform/testing-engine";
@@ -33,6 +34,8 @@ export interface WorkerDeps {
   queue: RunQueue;
   stages: EngineStages;
   logger: WorkerLogger;
+  /** Active runs' log scopes (tenant, stage, run redactor); see createLogger in @platform/config. */
+  runLogs?: RunLogRegistry;
   now?: () => Date;
 }
 
