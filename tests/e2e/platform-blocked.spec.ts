@@ -1,6 +1,6 @@
 import { VALID_EMAIL, VALID_PASSWORD } from "@platform/demo-shop";
 import { afterAll, describe, expect, inject, it } from "vitest";
-import { api, db, logs } from "./support/client";
+import { api, db, logs, secretForms } from "./support/client";
 import { REQUIREMENTS } from "./support/scenarios";
 
 const stack = inject("e2e");
@@ -34,22 +34,20 @@ describe("Task 21 step 3 — BLOCKED / secrets", () => {
     for (const c of (await client.report(runId)).criteria) expect(c).toMatchObject({ status: "PASS", verdictSource: "PLAYWRIGHT_RERUN" });
 
     // Guards against a vacuous pass: each source really holds this run.
-    const rows = await store.rowsOf(runId);
-    const events = JSON.stringify(await store.events(runId));
-    const logText = logs(stack);
-    for (const text of [rows, events, logText]) expect(text).toContain(runId);
-    expect(rows).not.toContain(VALID_PASSWORD);
-    expect(events).not.toContain(VALID_PASSWORD);
-    expect(logText).not.toContain(VALID_PASSWORD);
+    const sources = { "DB rows": await store.rowsOf(runId), events: JSON.stringify(await store.events(runId)), logs: logs(stack) };
+    for (const text of Object.values(sources)) expect(text).toContain(runId);
+    // Not in any form the redactors mask (encoded forms are how a secret hides in URLs, bodies, traces).
+    const forms = secretForms(VALID_PASSWORD);
+    expect(forms.length).toBeGreaterThan(1);
+    for (const [where, text] of Object.entries(sources)) {
+      for (const form of forms) expect(text, `${where} contain ${JSON.stringify(form)}`).not.toContain(form);
+    }
     expect(await store.secretsActive(runId)).toEqual([]);
 
+    // A run with a secret stores all its evidence as SECRET_BEARING, so it has no STANDARD artifact that
+    // could carry the value.
     const artifacts = await store.artifacts(runId);
-    for (const a of artifacts.filter((x) => x.sensitivity === "STANDARD")) {
-      const signed = await client.artifactUrl(runId, a.id);
-      expect(Buffer.from(await (await fetch(signed.url)).arrayBuffer()).toString("latin1")).not.toContain(VALID_PASSWORD);
-    }
-    // A run with a secret stores its evidence as SECRET_BEARING.
     expect(artifacts.length).toBeGreaterThan(0);
-    expect(artifacts.every((a) => a.sensitivity === "SECRET_BEARING")).toBe(true);
+    expect(artifacts.filter((a) => a.sensitivity !== "SECRET_BEARING")).toEqual([]);
   });
 });
