@@ -4,6 +4,7 @@ import type { ArtifactStorage } from "@platform/storage";
 import type { EvidenceStore, RunTestStageDeps, StageContext } from "@platform/testing-engine";
 import { storeArtifact, type ArtifactRetention } from "./artifacts";
 import type { WorkerLogger } from "./deps";
+import { countEgressBlock, type WorkerMetrics } from "./metrics";
 import { createEgressEventReporter } from "./sandbox/egress-events";
 import { startEgressProxy } from "./sandbox/egress-proxy";
 import { createRunnerSpawn } from "./sandbox/runner-process";
@@ -19,7 +20,7 @@ export interface RerunConfig extends ArtifactRetention {
 
 /** The rerun evidence port for one run: object storage + `artifacts` row (retention by sensitivity). */
 export function createRerunEvidenceStore(
-  deps: { db: Database; storage: ArtifactStorage; config: ArtifactRetention; now?: () => Date },
+  deps: { db: Database; storage: ArtifactStorage; config: ArtifactRetention; now?: () => Date; metrics?: WorkerMetrics },
   ctx: Pick<StageContext, "runId" | "tenantId">,
 ): EvidenceStore {
   return {
@@ -33,6 +34,7 @@ export interface RerunDepsInput {
   storage: ArtifactStorage;
   logger: WorkerLogger;
   config: RerunConfig;
+  metrics?: WorkerMetrics;
   /** Test seams: replace the proxy, the child process or the evidence store. */
   overrides?: Partial<RunTestStageDeps>;
 }
@@ -50,18 +52,38 @@ export function createRunTestDeps(input: RerunDepsInput): RunTestStageDeps {
   return {
     openProxy:
       overrides.openProxy ??
-      ((ctx) =>
-        startEgressProxy({
+      ((ctx) => {
+        const report = createEgressEventReporter({ publish: (e) => ctx.publish(e), logger });
+        const count = countEgressBlock(input.metrics);
+        return startEgressProxy({
           resolve: defaultResolver,
           privateAllowlist: config.privateAllowlist,
-          onBlock: createEgressEventReporter({ publish: (e) => ctx.publish(e), logger }),
-        })),
-    spawn: overrides.spawn ?? createRunnerSpawn({ logger }),
+          onBlock: (e) => {
+            count(e);
+            report(e);
+          },
+        });
+      }),
+    spawn: countedSpawn(overrides.spawn ?? createRunnerSpawn({ logger }), input.metrics),
     workspace: overrides.workspace ?? { baseDir: config.workspaceDir, nodeModulesDir: config.nodeModulesDir },
-    evidence: overrides.evidence ?? ((ctx) => createRerunEvidenceStore({ db, storage, config }, ctx)),
+    evidence: overrides.evidence ?? ((ctx) => createRerunEvidenceStore({ db, storage, config, metrics: input.metrics }, ctx)),
     // Infrastructure failures (proxy, workspace, spawn, browser launch) reach the worker log with their cause.
     logger: overrides.logger ?? logger,
     ...(overrides.actionTimeoutMs !== undefined ? { actionTimeoutMs: overrides.actionTimeoutMs } : {}),
     ...(overrides.expectTimeoutMs !== undefined ? { expectTimeoutMs: overrides.expectTimeoutMs } : {}),
   };
+}
+
+/** A rerun child runs its own Chromium: it counts as a browser session while it runs. */
+function countedSpawn(spawn: RunTestStageDeps["spawn"], metrics: WorkerMetrics | undefined): RunTestStageDeps["spawn"] {
+  if (!metrics) return spawn;
+  const counted: RunTestStageDeps["spawn"] = async (runnerInput) => {
+    metrics.browserSessions.inc();
+    try {
+      return await spawn(runnerInput);
+    } finally {
+      metrics.browserSessions.dec();
+    }
+  };
+  return Object.assign(counted, spawn);
 }

@@ -4,6 +4,7 @@ import type { RunQueue } from "@platform/event-bus";
 import type { EngineStages } from "@platform/testing-engine";
 import type { Redis } from "ioredis";
 import type { CancelWatcher } from "./cancel-watcher";
+import type { WorkerMetrics } from "./metrics";
 
 export interface WorkerLogger {
   info(obj: object, msg?: string): void;
@@ -36,6 +37,8 @@ export interface WorkerDeps {
   logger: WorkerLogger;
   /** Active runs' log scopes (tenant, stage, run redactor); see createLogger in @platform/config. */
   runLogs?: RunLogRegistry;
+  /** Prometheus metrics; absent in most tests. */
+  metrics?: WorkerMetrics;
   now?: () => Date;
 }
 

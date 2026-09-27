@@ -9,12 +9,19 @@ import type { WorkerLogger } from "./deps";
 import { createEngine, rerunWorkspaceConfig } from "./engine";
 import { stagehandExtension } from "./exploration";
 import { preflightBrowserSandbox, preflightRunner } from "./sandbox/preflight";
+import { createWorkerMetrics, startMetricsServer } from "./metrics";
 import { startWorkers } from "./worker";
 
 const env = loadEnvOrExit();
 
 const runLogs = createRunLogRegistry();
 const logger: WorkerLogger = createLogger({ component: "worker", level: env.LOG_LEVEL, runs: runLogs });
+
+const metrics = createWorkerMetrics();
+if (env.WORKER_METRICS_PORT > 0) {
+  const server = await startMetricsServer(metrics.registry, env.WORKER_METRICS_PORT);
+  logger.info({ port: server.port }, "metrics listening");
+}
 
 const handle = createDb(env.DATABASE_URL);
 if (process.env.RUN_MIGRATIONS_ON_START !== "false") await runMigrations(handle.db);
@@ -34,6 +41,7 @@ const engine = createEngine(env, {
   db: handle.db,
   logger,
   storage,
+  metrics,
   fake: { stepDelayMs: Number(process.env.FAKE_ENGINE_STEP_DELAY_MS ?? 500), explorationSteps: 4 },
 });
 if (engine.kind === "fake") logger.warn({ engine: "fake" }, "using the fake test engine (LLM_PROVIDER=fake)");
@@ -77,6 +85,7 @@ const workers = await startWorkers(
     stages,
     logger,
     runLogs,
+    metrics,
   },
   { connection, concurrency: env.WORKER_CONCURRENCY },
 );

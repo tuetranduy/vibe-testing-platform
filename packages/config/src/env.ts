@@ -55,6 +55,8 @@ const EnvSchema = z
     ARTIFACT_RETENTION_DAYS: intWithDefault(30),
     SECRET_ARTIFACT_RETENTION_DAYS: intWithDefault(7),
     API_PORT: intWithDefault(3001, 1, 65535),
+    /** The worker's Prometheus endpoint (`GET /metrics`); 0 disables it. */
+    WORKER_METRICS_PORT: intWithDefault(9464, 0, 65535),
     API_URL: z.string().default("http://localhost:3001"),
     LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
     /**
