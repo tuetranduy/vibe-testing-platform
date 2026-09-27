@@ -74,13 +74,13 @@ export interface TestApi {
 
 export async function createTestApi(
   overrides: Partial<ApiDeps["config"]> = {},
-  extra: Partial<Omit<ApiDeps, "config">> = {},
+  // `queue` is returned as `TestApi.queue`, so only a FakeQueue is accepted.
+  { queue = new FakeQueue(), ...extra }: Partial<Omit<ApiDeps, "config" | "queue">> & { queue?: FakeQueue } = {},
 ): Promise<TestApi> {
   const tdb = await createTestDatabase();
   const redis = new Redis(REDIS_URL);
   const sub = new Redis(REDIS_URL);
   const hub = new RunEventHub(sub);
-  const queue = new FakeQueue();
   const audit: Record<string, unknown>[] = [];
   const deps: ApiDeps = {
     config: {
@@ -108,7 +108,7 @@ export async function createTestApi(
     app,
     deps,
     tdb,
-    queue: (extra.queue as FakeQueue | undefined) ?? queue,
+    queue,
     redis,
     audit,
     async close() {
