@@ -13,7 +13,7 @@
     "test:e2e": "vitest run --project e2e",
     "test:live": "vitest run --project live",
     "eval": "tsx evals/run-evals.ts",
-    "typecheck": "pnpm -r typecheck && tsc -p evals/tsconfig.json",
+    "typecheck": "pnpm -r typecheck && tsc -p evals/tsconfig.json && tsc -p tests/e2e/tsconfig.json",
     "db:migrate": "pnpm --filter @platform/db migrate",
     "infra:up": "docker compose -f infra/compose/docker-compose.yml up -d --wait postgres redis s3 demo-shop",
     "infra:down": "docker compose -f infra/compose/docker-compose.yml down -v",
