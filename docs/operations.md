@@ -11,13 +11,14 @@ metrics and alerts, logs, retention, and the release checks.
 | `api` (Fastify) | PostgreSQL, Redis, S3 | 3001: `/healthz`, `/metrics`, `/v1/*` |
 | `worker` × N | PostgreSQL, Redis, S3, the LLM provider; runs each run's sandboxed Chromium and Playwright runner as child processes | 9464: `/metrics` (`WORKER_METRICS_PORT`, `0` disables it) |
 | PostgreSQL | — | runs, events, criteria, results, artifacts metadata, encrypted secrets |
-| Redis | — | BullMQ queues `runs` and `maintenance`; pub/sub for live events and cancel signals |
+| Redis | — | BullMQ queues `runs`, `maintenance` (reaper) and `retention`; pub/sub for live events and cancel signals |
 | S3-compatible storage | — | screenshots, traces, videos (compose uses rclone's S3 server; any S3 store works) |
 
 The demo shop (`tests/fixtures/demo-shop`) is a development and test target only.
 
 Scale by adding workers: each takes `WORKER_CONCURRENCY` runs at a time. The maintenance jobs (the reaper every
 60 s, retention daily) are BullMQ job schedulers, so exactly one worker runs each tick however many are deployed.
+Retention has its own queue, so a slow artifact store never delays the reaper.
 
 The API and the worker port 9464 must stay on a private network. `/metrics` and `/healthz` are unauthenticated,
 and the web app's proxy never forwards either.
@@ -114,8 +115,10 @@ sum(rate(llm_requests_total{status="PROVIDER_ERROR"}[10m])) / clamp_min(sum(rate
 
 ## Logs
 
-Both processes write one JSON object per line to stdout (`level`, `time`, `component`, `msg`, fields). Every line
-that names a run carries `runId`, `tenantId`, `stage` and `component`. Two layers of redaction run on every line:
+Both processes write one JSON object per line to stdout (`level`, `time`, `component`, `msg`, fields). Every line a
+worker writes about a run it is processing carries `runId`, `tenantId`, `stage` and `component`, whichever code logged
+it (including a run it skips or cannot start). Lines about a run written from outside its job (reaper, retention,
+the queue's job-failure handler) carry `runId` and whatever else is at hand. Two layers of redaction run on every line:
 key-based (`password`, `token`, `authorization`, `cookie`, …) and the run's own redactor, which masks the run's
 secret values in any encoded form, including inside error messages. Useful filters: all lines of one run
 (`runId`), and errors by `component`. The API's HTTP access log is Fastify's (pino), with the `authorization` and
@@ -123,7 +126,7 @@ secret values in any encoded form, including inside error messages. Useful filte
 
 ## Retention
 
-A daily `retention` job on the maintenance queue deletes expired artifacts, the object first and then its row.
+A daily `retention` job (its own queue) deletes expired artifacts, the object first and then its row.
 `expires_at` is set when an artifact is stored: `SECRET_BEARING` after `SECRET_ARTIFACT_RETENTION_DAYS` (7),
 `STANDARD` after `ARTIFACT_RETENTION_DAYS` (30). A failed delete is logged and retried on the next pass. As a
 backstop, configure an S3 lifecycle rule that expires objects some time after the longest retention (e.g. 45 days).

@@ -9,7 +9,7 @@ export async function analyzeRunJob(deps: WorkerDeps, runId: string): Promise<vo
   const now = deps.now ?? (() => new Date());
   const run = await new RunRepository(deps.db).findById(runId);
   if (!run || run.lifecycle !== "QUEUED") {
-    deps.logger.info({ runId, lifecycle: run?.lifecycle }, "analyze-run skipped: run is not QUEUED");
+    deps.logger.info({ runId, tenantId: run?.tenantId, stage: run?.lifecycle }, "analyze-run skipped: run is not QUEUED");
     return;
   }
   deps.metrics?.activeRuns.inc();
