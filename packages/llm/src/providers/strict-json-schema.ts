@@ -1,4 +1,5 @@
 import type { JsonSchema } from "../types";
+import { appendHints } from "./schema-hints";
 
 const SUPPORTED_STRING_FORMATS = new Set(["date-time", "time", "date", "duration", "email", "hostname", "uri", "ipv4", "ipv6", "uuid"]);
 /** Keywords Anthropic structured outputs accept as-is (besides the structural ones handled below). */
@@ -55,11 +56,5 @@ function strict(node: JsonSchema): JsonSchema {
   if (out.type === "string" && typeof rest.format === "string" && SUPPORTED_STRING_FORMATS.has(rest.format)) {
     out.format = take("format");
   }
-
-  const hints = Object.entries(rest);
-  if (hints.length > 0) {
-    const text = `{${hints.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ")}}`;
-    out.description = typeof out.description === "string" ? `${out.description}\n\n${text}` : text;
-  }
-  return out;
+  return appendHints(out, rest);
 }
