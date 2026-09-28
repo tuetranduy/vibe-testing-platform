@@ -43,6 +43,16 @@ const base = (signal = new AbortController().signal) => ({
 });
 
 describe("LlmClient.generateStructured", () => {
+  it("prices a call at the price in force on the client's clock, so an announced price change applies from its date", async () => {
+    const { client, transport, calls } = setup({ model: "gemini-3.8-flash", now: () => Date.parse("2027-01-02T00:00:00Z") });
+    transport.enqueue({ json: { answer: "42", count: 2 }, usage: { inputTokens: 1000, outputTokens: 500 } });
+
+    const res = await client.generateStructured({ ...base(), schema: Answer });
+
+    expect(res.usage.estimatedCostUsd).toBe(0.00525);
+    expect(calls[0]).toMatchObject({ model: "gemini-3.8-flash", estimatedCostUsd: 0.00525 });
+  });
+
   it("returns valid structured output and records one LlmCall with tokens, model, cost and latency", async () => {
     const { client, transport, calls } = setup();
     transport.enqueue({ json: { answer: "42", count: 2 }, usage: { inputTokens: 1000, outputTokens: 500 } });
