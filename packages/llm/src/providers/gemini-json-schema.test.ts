@@ -3,10 +3,14 @@ import { z } from "zod";
 import type { JsonSchema } from "../types";
 import { toGeminiJsonSchema } from "./gemini-json-schema";
 
-/** The keywords `responseJsonSchema` supports (@google/genai GenerateContentConfig docs); `oneOf` is rewritten. */
+/**
+ * The keywords the rewrite may send: those `responseJsonSchema` supports (@google/genai GenerateContentConfig
+ * docs), less `oneOf` (rewritten) and array bounds, which the live API rejects on arrays of objects
+ * (400 INVALID_ARGUMENT for the planner's 1–50 steps, 2026-09-27).
+ */
 const SUPPORTED = new Set([
   "$id", "$defs", "$ref", "$anchor", "type", "format", "title", "description", "enum", "items", "prefixItems",
-  "minItems", "maxItems", "minimum", "maximum", "anyOf", "properties", "additionalProperties", "required", "propertyOrdering",
+  "minimum", "maximum", "anyOf", "properties", "additionalProperties", "required", "propertyOrdering",
 ]);
 
 /** Every keyword in the schema that Gemini does not support, with its path. */
@@ -80,7 +84,7 @@ describe("toGeminiJsonSchema", () => {
     });
   });
 
-  it("moves constraints Gemini does not enforce into the description (validated client-side instead)", () => {
+  it("moves constraints Gemini does not enforce (patterns, lengths, array bounds, defaults, …) into the description (validated client-side instead)", () => {
     const out = toGeminiJsonSchema({
       type: "object",
       properties: {
@@ -104,7 +108,7 @@ describe("toGeminiJsonSchema", () => {
         email: { type: "string", description: '{format: "email"}' },
         at: { type: "string", format: "date-time" },
         count: { type: "integer", minimum: 0, maximum: 10, description: "{exclusiveMinimum: 0}" },
-        tags: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 3, description: "{uniqueItems: true}" },
+        tags: { type: "array", items: { type: "string" }, description: "{minItems: 1, maxItems: 3, uniqueItems: true}" },
       },
       required: ["key"],
       additionalProperties: false,
