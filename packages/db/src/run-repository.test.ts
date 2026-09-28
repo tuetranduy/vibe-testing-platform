@@ -19,6 +19,15 @@ afterAll(async () => tdb?.drop());
 const create = (tenantId = TEST_TENANT_ID) =>
   runs.create({ tenantId, targetUrl: "https://shop.example.com", request: storedRequest() });
 
+/**
+ * Resolves once `Date.now()` has moved on, so the next run gets its own `createdAt` millisecond: runs created in
+ * the same millisecond are ordered by their random id suffix, not by creation order.
+ */
+async function nextMillisecond(): Promise<void> {
+  const start = Date.now();
+  while (Date.now() === start) await new Promise((resolve) => setTimeout(resolve, 1));
+}
+
 describe("RunRepository", () => {
   it("creates runs as QUEUED without a verdict", async () => {
     const run = await create();
@@ -97,7 +106,10 @@ describe("RunRepository", () => {
     const t = `t_list_${Date.now()}`;
     await tdb.db.execute(sql`INSERT INTO tenants (id, name) VALUES (${t}, 'list')`);
     const created = [];
-    for (let i = 0; i < 5; i++) created.push(await create(t));
+    for (let i = 0; i < 5; i++) {
+      await nextMillisecond(); // distinct createdAt values: this test checks creation order, not same-millisecond ties
+      created.push(await create(t));
+    }
     await create(OTHER_TENANT_ID);
     const page1 = await runs.list(t, { limit: 2 });
     expect(page1.items.map((r) => r.id)).toEqual([created[4]!.id, created[3]!.id]);
