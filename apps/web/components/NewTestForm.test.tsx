@@ -146,7 +146,7 @@ describe("NewTestForm", () => {
     const fetch = mockFetch(json(202, { runId: "run_1", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_1/events" }));
     render(<NewTestForm />);
     expect(screen.getByLabelText(/confirm criteria automatically/i)).not.toBeVisible();
-    await user.click(screen.getByText(/advanced options/i));
+    await user.click(screen.getByText("Advanced options"));
     await user.click(screen.getByLabelText(/confirm criteria automatically/i));
     await fillValid(user);
     await user.click(screen.getByRole("button", { name: /start test/i }));
@@ -179,7 +179,7 @@ describe("NewTestForm", () => {
   it("summarizes the advanced options while they are collapsed", async () => {
     const user = userEvent.setup();
     render(<NewTestForm />);
-    const summary = screen.getByText(/advanced options/i).closest("summary")!;
+    const summary = screen.getByText("Advanced options").closest("summary")!;
     expect(summary).toHaveTextContent("40 steps · 5 min · rerun on");
     await user.click(summary);
     await user.clear(screen.getByLabelText(/max run time/i));
@@ -352,5 +352,138 @@ describe("NewTestForm starting over from a run", () => {
     const fetch = mockFetch();
     render(<NewTestForm />);
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("NewTestForm — destructive actions", () => {
+  const openAdvanced = (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByText("Advanced options"));
+  const destructive = () => screen.getByLabelText(/allow destructive actions/i);
+  const rerun = () => screen.getByLabelText(/rerun the generated test/i);
+  const created = () => json(202, { runId: "run_9", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_9/events" });
+  const fill = async (user: ReturnType<typeof userEvent.setup>, url: string) => {
+    await user.type(screen.getByLabelText(/website url/i), url);
+    await user.type(screen.getByLabelText(/requirement/i), "A user can delete a saved address.");
+  };
+
+  it("can be allowed in staging and in production, and the summary says so", async () => {
+    const user = userEvent.setup();
+    render(<NewTestForm />);
+    expect(screen.getByText("Destructive actions are blocked unless you allow them under Advanced options.")).toBeInTheDocument();
+    await openAdvanced(user);
+    expect(destructive()).toBeEnabled();
+    await user.click(screen.getByLabelText("Production"));
+    expect(destructive()).toBeEnabled();
+    await user.click(destructive());
+    expect(screen.getByText("Advanced options").closest("summary")).toHaveTextContent("destructive allowed");
+  });
+
+  it("turns the rerun off when ticked, says why, warns when it is turned back on, and restores it when unticked", async () => {
+    const user = userEvent.setup();
+    render(<NewTestForm />);
+    await openAdvanced(user);
+    expect(rerun()).toBeChecked();
+    await user.click(destructive());
+    expect(rerun()).not.toBeChecked();
+    expect(
+      screen.getByText("Rerun is off: it repeats the whole test, so destructive actions would run a second time. You can turn it back on."),
+    ).toBeInTheDocument();
+    await user.click(rerun());
+    expect(screen.getByText("Destructive actions will run twice: once while exploring and again in the rerun.")).toBeInTheDocument();
+    await user.click(rerun());
+    await user.click(destructive());
+    expect(rerun()).toBeChecked(); // what it was before destructive actions were allowed
+  });
+
+  it("keeps the rerun off after unticking when it was off before", async () => {
+    const user = userEvent.setup();
+    render(<NewTestForm />);
+    await openAdvanced(user);
+    await user.click(rerun());
+    await user.click(destructive());
+    await user.click(destructive());
+    expect(rerun()).not.toBeChecked();
+  });
+
+  it("in production asks for the website's host (lowercase, with its port) and sends it", async () => {
+    const user = userEvent.setup();
+    const fetch = mockFetch(created());
+    render(<NewTestForm />);
+    await fill(user, "https://Shop.Example.com:8443/");
+    await user.click(screen.getByLabelText("Production"));
+    await openAdvanced(user);
+    await user.click(destructive());
+    expect(screen.getByText(/this run can create, change or delete real data/i)).toHaveTextContent(
+      "This run can create, change or delete real data and place real orders or payments on shop.example.com:8443.",
+    );
+    await user.type(screen.getByLabelText("Type shop.example.com:8443 to confirm"), "SHOP.example.com:8443");
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_9"));
+    expect(bodyOf(fetch)).toMatchObject({
+      environment: "production",
+      options: { allowDestructiveActions: true, rerunGeneratedTest: false, confirmProductionHost: "SHOP.example.com:8443" },
+    });
+  });
+
+  it.each([
+    ["", "left empty"],
+    ["shop.example.com", "without the port"],
+  ])("in production refuses to start with the confirmation %j (%s), on the field, opening Advanced options", async (typed) => {
+    const user = userEvent.setup();
+    const fetch = mockFetch();
+    render(<NewTestForm />);
+    await fill(user, "https://shop.example.com:8443");
+    await user.click(screen.getByLabelText("Production"));
+    await openAdvanced(user);
+    await user.click(destructive());
+    if (typed) await user.type(screen.getByLabelText(/to confirm$/i), typed);
+    await openAdvanced(user); // collapse it: the submit must open it again
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    const field = screen.getByLabelText(/to confirm$/i);
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(field).toHaveAccessibleDescription(/Type shop\.example\.com:8443 exactly to confirm\./);
+    expect(field).toHaveFocus();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the URL changed after the host was typed", async () => {
+    const user = userEvent.setup();
+    const fetch = mockFetch();
+    render(<NewTestForm />);
+    await fill(user, "https://shop.example.com");
+    await user.click(screen.getByLabelText("Production"));
+    await openAdvanced(user);
+    await user.click(destructive());
+    await user.type(screen.getByLabelText(/to confirm$/i), "shop.example.com");
+    await user.clear(screen.getByLabelText(/website url/i));
+    await user.type(screen.getByLabelText(/website url/i), "https://other.example.com");
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    expect(screen.getByLabelText("Type other.example.com to confirm")).toHaveAccessibleDescription(/Type other\.example\.com exactly to confirm\./);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("asks for the URL first while it isn't valid", async () => {
+    const user = userEvent.setup();
+    render(<NewTestForm />);
+    await user.click(screen.getByLabelText("Production"));
+    await openAdvanced(user);
+    await user.click(destructive());
+    expect(screen.getByText("Enter the website URL first.")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/to confirm$/i)).not.toBeInTheDocument();
+  });
+
+  it("never sends the confirmation outside production (typed, then switched back to Staging)", async () => {
+    const user = userEvent.setup();
+    const fetch = mockFetch(created());
+    render(<NewTestForm />);
+    await fill(user, "https://shop.example.com");
+    await user.click(screen.getByLabelText("Production"));
+    await openAdvanced(user);
+    await user.click(destructive());
+    await user.type(screen.getByLabelText(/to confirm$/i), "shop.example.com");
+    await user.click(screen.getByLabelText("Staging"));
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_9"));
+    expect(bodyOf(fetch)).toMatchObject({ environment: "staging", options: { allowDestructiveActions: true } });
+    expect(bodyOf(fetch).options).not.toHaveProperty("confirmProductionHost");
   });
 });
