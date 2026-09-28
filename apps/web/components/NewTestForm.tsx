@@ -31,6 +31,7 @@ interface Options {
   rerunGeneratedTest: boolean;
   autoConfirmCriteria: boolean;
   allowDestructiveActions: boolean;
+  confirmProductionHost: string;
   additionalAllowedHosts: string;
 }
 type Errors = Record<string, string>;
@@ -46,6 +47,7 @@ const DEFAULT_OPTIONS: Options = {
   rerunGeneratedTest: true,
   autoConfirmCriteria: false,
   allowDestructiveActions: false,
+  confirmProductionHost: "",
   additionalAllowedHosts: "",
 };
 
@@ -57,6 +59,7 @@ const MSG = {
   secretValue: "Enter at least 4 characters.",
   secretMissing: "Enter the secret value.",
   duplicate: "This name is already used.",
+  confirmHost: (host: string) => `Type ${host} exactly to confirm.`,
 };
 
 // Field ids double as error keys, so a server issue path maps straight onto a field.
@@ -68,6 +71,11 @@ const fid = {
   secretValue: (id: number) => `secret-${id}-value`,
   option: (name: string) => `options-${name}`,
 };
+
+/** The URL's host as the API compares it (lowercase, with a non-default port), or null while the URL is invalid. */
+function hostOf(url: string): string | null {
+  return HttpUrlSchema.safeParse(url).success ? new URL(url).host : null;
+}
 
 function build(
   targetUrl: string,
@@ -102,6 +110,13 @@ function build(
     if (!errors[fid.secretName(row.id)] && !errors[fid.secretValue(row.id)]) secretValues[name] = row.value;
   }
 
+  // Production needs the target host typed as confirmation; the API enforces the same rule.
+  const confirming = environment === "production" && options.allowDestructiveActions;
+  const host = hostOf(url);
+  if (confirming && host !== null && options.confirmProductionHost.trim().toLowerCase() !== host) {
+    errors[fid.option("confirmProductionHost")] = MSG.confirmHost(host);
+  }
+
   const int = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN);
   const body: CreateTestRunRequestInput = {
     targetUrl: url,
@@ -115,7 +130,8 @@ function build(
       generatePlaywright: options.generatePlaywright,
       rerunGeneratedTest: options.generatePlaywright && options.rerunGeneratedTest,
       autoConfirmCriteria: options.autoConfirmCriteria,
-      allowDestructiveActions: environment === "staging" && options.allowDestructiveActions,
+      allowDestructiveActions: options.allowDestructiveActions,
+      ...(confirming ? { confirmProductionHost: options.confirmProductionHost.trim() } : {}),
       additionalAllowedHosts: options.additionalAllowedHosts
         .split(/[\s,]+/)
         .map((h) => h.trim())
@@ -217,6 +233,21 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
   };
 
   const setOption = <K extends keyof Options>(name: K, value: Options[K]) => setOptions((o) => ({ ...o, [name]: value }));
+
+  /** The rerun setting from before destructive actions were allowed, restored when they are unticked. */
+  const rerunBeforeDestructive = useRef<boolean | null>(null);
+  const toggleDestructive = (allow: boolean) => {
+    if (allow) {
+      rerunBeforeDestructive.current = options.rerunGeneratedTest;
+      setOptions((o) => ({ ...o, allowDestructiveActions: true, rerunGeneratedTest: false }));
+    } else {
+      const rerun = rerunBeforeDestructive.current ?? options.rerunGeneratedTest;
+      rerunBeforeDestructive.current = null;
+      setOptions((o) => ({ ...o, allowDestructiveActions: false, rerunGeneratedTest: rerun }));
+    }
+  };
+  const host = hostOf(targetUrl.trim());
+  const rerunOn = options.generatePlaywright && options.rerunGeneratedTest;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -395,15 +426,7 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
                 </label>
               ))}
             </div>
-            <p className="hint">
-              {environment === "production" ? (
-                <>
-                  <Icon name="info" /> Destructive actions are always blocked in production.
-                </>
-              ) : (
-                "You can allow destructive actions on staging."
-              )}
-            </p>
+            <p className="hint">Destructive actions are blocked unless you allow them under Advanced options.</p>
           </div>
         </fieldset>
       </div>
@@ -539,7 +562,7 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
           icon="sliders"
           title="Advanced options"
           description="Step and time limits, the Playwright test, confirmation and extra hosts."
-          summary={optionsSummary(options, environment)}
+          summary={optionsSummary(options)}
         >
           <div className="field-pair">
             <div className="field">
@@ -594,14 +617,48 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
             Confirm criteria automatically (skip the review step)
           </label>
           <label className="choice">
-            <input
-              type="checkbox"
-              checked={environment === "staging" && options.allowDestructiveActions}
-              disabled={environment === "production"}
-              onChange={(e) => setOption("allowDestructiveActions", e.target.checked)}
-            />
-            Allow destructive actions (e.g. placing an order){environment === "production" ? " — not in production" : ""}
+            <input type="checkbox" checked={options.allowDestructiveActions} onChange={(e) => toggleDestructive(e.target.checked)} />
+            Allow destructive actions (create, change or delete data, place orders, pay)
           </label>
+          {options.allowDestructiveActions &&
+            (rerunOn ? (
+              <p className="hint hint-warning">
+                <Icon name="warning" /> Destructive actions will run twice: once while exploring and again in the rerun.
+              </p>
+            ) : (
+              <p className="hint">
+                <Icon name="info" /> Rerun is off: it repeats the whole test, so destructive actions would run a second time. You can turn it
+                back on.
+              </p>
+            ))}
+          {environment === "production" && options.allowDestructiveActions && (
+            <div className="danger-panel">
+              {host === null ? (
+                <p>Enter the website URL first.</p>
+              ) : (
+                <>
+                  <p>
+                    This run can create, change or delete real data and place real orders or payments on <strong>{host}</strong>.
+                  </p>
+                  <div className="field">
+                    <label htmlFor={fid.option("confirmProductionHost")}>
+                      Type <strong>{host}</strong> to confirm
+                    </label>
+                    <input
+                      id={fid.option("confirmProductionHost")}
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={options.confirmProductionHost}
+                      onChange={(e) => setOption("confirmProductionHost", e.target.value)}
+                      aria-invalid={errors[fid.option("confirmProductionHost")] ? true : undefined}
+                      aria-describedby={describedBy(fid.option("confirmProductionHost"))}
+                    />
+                    {fieldError(fid.option("confirmProductionHost"))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="field">
             <label htmlFor={fid.option("additionalAllowedHosts")}>Additional allowed hosts</label>
@@ -677,7 +734,7 @@ function FormSection({
 }
 
 /** "40 steps · 5 min · rerun on": the advanced options at a glance (only the values that parse). */
-function optionsSummary(o: Options, environment: "staging" | "production"): string {
+function optionsSummary(o: Options): string {
   const whole = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : null);
   const steps = whole(o.maxExplorationSteps);
   const seconds = whole(o.maxRunSeconds);
@@ -686,7 +743,7 @@ function optionsSummary(o: Options, environment: "staging" | "production"): stri
     seconds !== null ? (seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds}s`) : null,
     !o.generatePlaywright ? "no Playwright test" : o.rerunGeneratedTest ? "rerun on" : "no rerun",
     o.autoConfirmCriteria ? "auto-confirm" : null,
-    environment === "staging" && o.allowDestructiveActions ? "destructive allowed" : null,
+    o.allowDestructiveActions ? "destructive allowed" : null,
   ];
   return parts.filter(Boolean).join(" · ");
 }

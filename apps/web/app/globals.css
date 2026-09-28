@@ -828,6 +828,20 @@ input[type="radio"] {
   color: var(--text-muted);
   cursor: not-allowed;
 }
+.danger-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg);
+}
+.danger-panel p {
+  margin: 0;
+}
+.hint-warning {
+  color: var(--warning);
+}
 
 
 .row {
