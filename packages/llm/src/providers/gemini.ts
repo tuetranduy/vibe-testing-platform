@@ -9,7 +9,7 @@ export interface GeminiTransportOptions {
   apiKey: string;
   /** Unset: the model's default. Thinking tokens count against the request's `maxTokens`. */
   thinkingLevel?: GeminiThinkingLevel;
-  /** Per-request HTTP timeout. */
+  /** Per-request HTTP timeout (default 25 s, see DEFAULT_TIMEOUT_MS). */
   timeoutMs?: number;
   baseURL?: string;
   /** For tests: a fetch implementation (no network). */
@@ -40,6 +40,14 @@ interface GeminiErrorBody {
 }
 
 const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
+/**
+ * Gemini sometimes holds a request for minutes before answering (free tier, 2026-09-27: 1 call in
+ * 5, up to 185 s for a 400-token answer) while a retry answers in seconds. So a request gives up
+ * after 25 s: two stalled attempts and the client's retry still fit in one Stagehand step (60 s)
+ * and in the analysis budget (120 s). An answer that legitimately takes longer is cut off too
+ * (answers took 1–8 s on the live runs).
+ */
+const DEFAULT_TIMEOUT_MS = 25_000;
 /** Finish reasons that carry the model's answer (MAX_TOKENS a truncated one, left to the client's correction round). */
 const ANSWERED = new Set(["STOP", "MAX_TOKENS"]);
 
@@ -56,7 +64,7 @@ export class GeminiTransport implements LlmTransport {
 
   constructor(private readonly opts: GeminiTransportOptions) {
     this.baseURL = opts.baseURL ?? DEFAULT_BASE_URL;
-    this.timeoutMs = opts.timeoutMs ?? 120_000;
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
   async complete(req: LlmTransportRequest): Promise<LlmTransportResponse> {
@@ -78,7 +86,8 @@ export class GeminiTransport implements LlmTransport {
       throw new LlmTransportError("The Gemini API key is not a valid HTTP header value", { retryable: false });
     }
     const doFetch = this.opts.fetch ?? fetch;
-    const timeout = AbortSignal.timeout(this.timeoutMs);
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(), this.timeoutMs);
     let res: Response;
     let text: string;
     try {
@@ -86,14 +95,16 @@ export class GeminiTransport implements LlmTransport {
         method: "POST",
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.any([req.signal, timeout]),
+        signal: AbortSignal.any([req.signal, timeout.signal]),
       });
       text = await res.text();
     } catch (err) {
       if (req.signal.aborted) throw new LlmTransportError("Request aborted", { retryable: false, cause: err });
-      if (timeout.aborted) throw new LlmTransportError(`Request timed out after ${this.timeoutMs} ms`, { retryable: true, cause: err });
+      if (timeout.signal.aborted) throw new LlmTransportError(`Request timed out after ${this.timeoutMs} ms`, { retryable: true, cause: err });
       if (err instanceof TypeError) throw new LlmTransportError(`Connection error: ${messageWithCause(err)}`, { retryable: true, cause: err });
       throw new LlmTransportError(`Unexpected error: ${messageWithCause(err)}`, { retryable: false, cause: err });
+    } finally {
+      clearTimeout(timer);
     }
     if (!res.ok) throw httpError(res, text);
     const data = parseJson(text);
