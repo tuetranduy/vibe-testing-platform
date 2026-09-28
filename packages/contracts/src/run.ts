@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DataKeySchema, HostnameSchema, HttpUrlSchema, IsoDateTime, SecretNameSchema } from "./common";
+import type { LlmChoice } from "./llm";
 
 export const RunLifecycleSchema = z.enum([
   "QUEUED",
@@ -128,7 +129,14 @@ export const CreateTestRunRequestSchema = z
 export type CreateTestRunRequestInput = z.input<typeof CreateTestRunRequestSchema>;
 export type CreateTestRunRequest = z.output<typeof CreateTestRunRequestSchema>;
 /** The request as persisted: never contains secret values, only their names. */
-export type StoredTestRunRequest = Omit<CreateTestRunRequest, "secrets"> & { secretNames: string[] };
+export type StoredTestRunRequest = Omit<CreateTestRunRequest, "secrets" | "llm"> & {
+  secretNames: string[];
+  /**
+   * The model the run uses, resolved when it was created (request override → Settings → environment).
+   * Absent on runs created before model choice existed: they use the environment's (resolveEnvLlmChoice).
+   */
+  llm?: LlmChoice;
+};
 
 /**
  * D9, amended 2026-09-28: destructive actions are allowed only when the run sets `allowDestructiveActions` — and,
