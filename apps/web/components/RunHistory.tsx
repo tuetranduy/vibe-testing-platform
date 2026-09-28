@@ -249,6 +249,7 @@ function RunTable({ runs }: { runs: TestRunSummary[] }) {
                 {r.requirementPreview}
               </a>
               <span className="history-host">{hostOf(r.targetUrl)}</span>
+              {r.environment === "production" && r.allowDestructiveActions && <span className="history-tag">Production · destructive</span>}
             </td>
             <td role="cell" className="history-created">
               <time dateTime={r.createdAt}>{formatWhen(r.createdAt)}</time>

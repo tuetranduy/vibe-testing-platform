@@ -223,4 +223,18 @@ describe("RunHistory", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/loading/i);
     await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
   });
+
+  it("tags production runs that allow destructive actions", async () => {
+    listFetch({
+      [FIRST]: () =>
+        json(200, {
+          items: [run(1, { environment: "production", allowDestructiveActions: true }), run(2, { environment: "staging", allowDestructiveActions: true }), run(3)],
+          nextCursor: null,
+        }),
+    });
+    render(<RunHistory />);
+    const tagged = await screen.findByText("Production · destructive");
+    expect(tagged.closest("tr")).toHaveTextContent("Requirement number 1");
+    expect(screen.getAllByText("Production · destructive")).toHaveLength(1);
+  });
 });

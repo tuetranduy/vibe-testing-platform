@@ -235,6 +235,22 @@ describe("RunView", () => {
     expect(screen.queryByRole("link", { name: /run again/i })).not.toBeInTheDocument();
   });
 
+  it.each([
+    [{ environment: "production", allowDestructiveActions: true }, "Production · destructive actions allowed"],
+    [{ environment: "staging", allowDestructiveActions: true }, "Destructive actions allowed"],
+  ] as const)("marks a run that allows destructive actions (%j)", async (patch, text) => {
+    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING", ...patch })) });
+    render(<RunView runId="run_1" />);
+    expect(await screen.findByText(text)).toBeInTheDocument();
+  });
+
+  it("shows no destructive marker when the run doesn't allow destructive actions", async () => {
+    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING", environment: "production" })) });
+    render(<RunView runId="run_1" />);
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.queryByText(/destructive actions allowed/i)).not.toBeInTheDocument();
+  });
+
   it("shows the stages while the criteria await confirmation, with confirming as the current one", async () => {
     routeFetch({
       [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "AWAITING_CONFIRMATION" })),

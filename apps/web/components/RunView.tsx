@@ -226,6 +226,12 @@ export function RunView({ runId }: { runId: string }) {
                 <span className="visually-hidden">Website: </span>
                 {displayUrl(summary.targetUrl)}
               </span>
+              {summary.allowDestructiveActions && (
+                <span className={`meta-chip ${summary.environment === "production" ? "meta-chip-danger" : "meta-chip-warning"}`}>
+                  <Icon name="warning" />
+                  {summary.environment === "production" ? "Production · destructive actions allowed" : "Destructive actions allowed"}
+                </span>
+              )}
               <span className="meta-text">
                 Created <time dateTime={summary.createdAt}>{formatWhen(summary.createdAt)}</time>
               </span>
