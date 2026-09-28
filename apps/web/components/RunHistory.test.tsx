@@ -228,7 +228,12 @@ describe("RunHistory", () => {
     listFetch({
       [FIRST]: () =>
         json(200, {
-          items: [run(1, { environment: "production", allowDestructiveActions: true }), run(2, { environment: "staging", allowDestructiveActions: true }), run(3)],
+          items: [
+            run(1, { environment: "production", allowDestructiveActions: true }),
+            run(2, { environment: "staging", allowDestructiveActions: true }),
+            run(3),
+            run(4, { environment: "production", allowDestructiveActions: false }),
+          ],
           nextCursor: null,
         }),
     });

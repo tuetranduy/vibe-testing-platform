@@ -472,7 +472,9 @@ class ExplorationRun {
     } catch (err) {
       this.rethrowIfFatal(err);
       await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
-      return "failed";
+      // The click may already have been dispatched before actOn rejected: a failed report can still
+      // follow a dispatched click, so a destructive step gets no retry (repeating it could delete or pay twice).
+      return this.policy.allowDestructive && isDestructiveStep(step) ? "final" : "failed";
     }
     await this.settle();
     const [block] = result.navigationBlocks;
@@ -482,7 +484,9 @@ class ExplorationRun {
     }
     if (!result.success) {
       await this.record({ ...base, outcome: "FAILED", error: `Action did not succeed: ${result.message}`, llm: result.llm });
-      return "failed";
+      // Same reasoning: `success: false` can still mean the click landed and something downstream
+      // failed, so a destructive step is not repeated on the strength of that report alone.
+      return this.policy.allowDestructive && isDestructiveStep(step) ? "final" : "failed";
     }
     await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true, llm: result.llm });
     return "ok";

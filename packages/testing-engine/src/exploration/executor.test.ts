@@ -545,6 +545,36 @@ describe("runExploration (fake explorer)", () => {
     expect(session.ops()).not.toContain("actOn");
   });
 
+  it("with destructive actions allowed, a destructive step whose actOn reports failure is never retried (a dispatched click must not repeat)", async () => {
+    const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+    const session = new FakeSession({ actOn: () => ({ success: false, message: "payment gateway timed out" }) });
+    const { recorder } = fakeRecorder();
+    const plan = planOf(
+      step("navigate", "Open"),
+      step("click", "Click Pay now", { destructive: true }),
+      step("capture_checkpoint", "Capture", { checkpoint: "after_pay" }),
+    );
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+
+    expect(session.actOnCount).toBe(1);
+    expect(outcome.steps.find((s) => s.kind === "act" && s.plannedStepId === "PS-2")).toMatchObject({
+      outcome: "FAILED",
+      error: expect.stringContaining("payment gateway timed out"),
+    });
+    expect(outcome.steps.some((s) => s.plannedStepId === "PS-3")).toBe(false); // exploration stopped before the checkpoint
+  });
+
+  it("the same actOn failure on a non-destructive step still retries (two actOn calls) — unchanged", async () => {
+    const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+    const session = new FakeSession({ actOn: () => ({ success: false, message: "element detached" }) });
+    const { recorder } = fakeRecorder();
+    const plan = planOf(step("navigate", "Open"), step("click", "Click Add to cart"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+
+    expect(session.actOnCount).toBe(2);
+    expect(outcome.steps.filter((s) => s.kind === "act" && s.outcome === "FAILED")).toHaveLength(2);
+  });
+
   it("a navigation blocked by the sandbox guard → BLOCKED_BY_POLICY with the guard's reason", async () => {
     const { ctx } = fakeCtx();
     const session = new FakeSession({
