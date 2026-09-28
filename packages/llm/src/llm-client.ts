@@ -128,9 +128,10 @@ export class LlmClient {
     const usage: LlmUsage = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
     let messages = input.messages;
     for (let round = 0; ; round++) {
-      const { response, latencyMs } = await this.request(input, messages, jsonSchema);
-      // Priced and recorded by the requested model: providers may echo a resolved snapshot id.
-      const cost = estimateCostUsd(this.opts.model, response.usage.inputTokens, response.usage.outputTokens) ?? 0;
+      const { response, latencyMs, answeredAt } = await this.request(input, messages, jsonSchema);
+      // Priced and recorded by the requested model (providers may echo a resolved snapshot id), at
+      // the price in force when it answered.
+      const cost = estimateCostUsd(this.opts.model, response.usage.inputTokens, response.usage.outputTokens, new Date(answeredAt)) ?? 0;
       usage.inputTokens += response.usage.inputTokens;
       usage.outputTokens += response.usage.outputTokens;
       usage.estimatedCostUsd = round6(usage.estimatedCostUsd + cost);
@@ -163,7 +164,7 @@ export class LlmClient {
     input: LlmCallInput,
     messages: LlmMessage[],
     jsonSchema: JsonSchema,
-  ): Promise<{ response: LlmTransportResponse; latencyMs: number }> {
+  ): Promise<{ response: LlmTransportResponse; latencyMs: number; answeredAt: number }> {
     const { signal } = input;
     const redacted = input.redact({ system: input.system, messages }) as { system: string; messages: LlmMessage[] };
     for (let attempt = 0; ; attempt++) {
@@ -182,7 +183,8 @@ export class LlmClient {
           }),
           signal,
         );
-        return { response, latencyMs: this.now() - started };
+        const answeredAt = this.now();
+        return { response, latencyMs: answeredAt - started, answeredAt };
       } catch (err) {
         const latencyMs = this.now() - started;
         if (signal.aborted) {
