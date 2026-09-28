@@ -178,6 +178,7 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
       runId: RUN_ID,
       signal: new AbortController().signal,
       redact,
+      allowDestructive: false,
     });
     cleanups.push(() => session.close());
     return session;
@@ -393,7 +394,7 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
       cleanups.push(() => browser.close());
 
       const { llm } = llmClient();
-      const session = await new StagehandExplorer({ llm, connectTimeoutMs: 90_000 }).start({ page: browser, runId: RUN_ID, signal: new AbortController().signal, redact });
+      const session = await new StagehandExplorer({ llm, connectTimeoutMs: 90_000 }).start({ page: browser, runId: RUN_ID, signal: new AbortController().signal, redact, allowDestructive: false });
       await session.navigate(`${target}products/1`);
       await session.observe("find the add to cart button");
       await session.close(); // flushes the trace exporter
@@ -439,6 +440,7 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
         runId: RUN_ID,
         signal: new AbortController().signal,
         redact,
+        allowDestructive: false,
       });
       cleanups.push(() => session.close());
       await session.navigate(`${target}products/1`);

@@ -122,6 +122,11 @@ export interface ExplorerStartInput {
   signal: AbortSignal;
   /** The run redactor (by key and value) applied to every model request and forwarded log. Required: no fail-open default. */
   redact: (value: unknown) => unknown;
+  /**
+   * The run's action policy (`allowDestructive`). Picks the guardrail text Stagehand is given; enforcement
+   * stays with the executor. Required, like `redact`: no fail-open default.
+   */
+  allowDestructive: boolean;
   /** Model retries never back off past this instant. */
   deadlineAt?: Date | null;
 }
