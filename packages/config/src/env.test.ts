@@ -82,17 +82,15 @@ describe("loadEnv", () => {
     expect(() => loadEnv({ ...validEnv, S3_PUBLIC_ENDPOINT: "ftp://localhost:9000" })).toThrow(/S3_PUBLIC_ENDPOINT/);
   });
 
-  it("requires provider keys for real LLM providers", () => {
-    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "anthropic" })).toThrow(/ANTHROPIC_API_KEY/);
-    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "openai" })).toThrow(/OPENAI_API_KEY/);
-    expect(loadEnv({ ...validEnv, LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-test" }).LLM_PROVIDER).toBe("anthropic");
+  it("provider keys are optional for anthropic and gemini: Settings may hold them (compose passes an unset key as empty)", () => {
+    expect(loadEnv({ ...validEnv, LLM_PROVIDER: "anthropic" }).ANTHROPIC_API_KEY).toBeUndefined();
+    expect(loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "" }).LLM_PROVIDER).toBe("gemini");
+    expect(loadEnv({ ...validEnv, LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-test" }).ANTHROPIC_API_KEY).toBe("sk-test");
+    expect(loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test" }).GEMINI_API_KEY).toBe("gm-test");
   });
 
-  it("LLM_PROVIDER=gemini requires GEMINI_API_KEY (compose passes an unset key as empty)", () => {
-    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "gemini" })).toThrow(/GEMINI_API_KEY/);
-    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "" })).toThrow(/GEMINI_API_KEY/);
-    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", ANTHROPIC_API_KEY: "sk-test" })).toThrow(/GEMINI_API_KEY/);
-    expect(loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test" }).LLM_PROVIDER).toBe("gemini");
+  it("LLM_PROVIDER=openai still needs OPENAI_API_KEY (resolveEnvLlmChoice then refuses it: not built in V1)", () => {
+    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "openai" })).toThrow(/OPENAI_API_KEY/);
   });
 
   it("LLM_MODEL defaults to the provider's model, can be overridden, and is unset when empty (compose)", () => {
@@ -128,6 +126,18 @@ describe("loadEnv", () => {
     expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-ant\u0000x" })).toThrow(/ANTHROPIC_API_KEY/);
     // Surrounding whitespace is dropped from header values, so such a key keeps working, as before.
     expect(loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test\n" }).GEMINI_API_KEY).toBe("gm-test\n");
+  });
+
+  it("checks every provider key that is set, whatever LLM_PROVIDER is (a run may choose either provider)", () => {
+    let message = "";
+    try {
+      loadEnv({ ...validEnv, LLM_PROVIDER: "fake", GEMINI_API_KEY: "gm secret-value" });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toMatch(/GEMINI_API_KEY/);
+    expect(message).not.toContain("secret-value");
+    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test", ANTHROPIC_API_KEY: "sk ant" })).toThrow(/ANTHROPIC_API_KEY/);
   });
 
   it("GEMINI_THINKING_LEVEL is optional (empty means unset) and must be a Gemini level", () => {

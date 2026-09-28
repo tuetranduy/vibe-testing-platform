@@ -212,6 +212,9 @@ importers:
 
   packages/config:
     dependencies:
+      '@platform/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@platform/security':
         specifier: workspace:*
         version: link:../security

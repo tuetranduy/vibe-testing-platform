@@ -29,23 +29,29 @@ const LlmFields = z.object({
 type LlmFields = z.output<typeof LlmFields>;
 
 const PROVIDER_KEYS = { fake: null, anthropic: "ANTHROPIC_API_KEY", gemini: "GEMINI_API_KEY", openai: "OPENAI_API_KEY" } as const;
+/** The keys a run may use from the environment: its provider comes from its model choice, so either one. */
+const MODEL_PROVIDER_KEYS = ["ANTHROPIC_API_KEY", "GEMINI_API_KEY"] as const;
 /** Model ids of each real provider: the other's (e.g. a leftover LLM_MODEL) would fail at the first call. */
 const MODEL_PREFIXES = { anthropic: "claude-", gemini: "gemini-" } as const;
 
 /**
- * A real provider needs its API key, usable as an HTTP header value (the runtime's error for an
- * invalid one quotes it, so it is checked here, where the message never includes values), and a
- * model of its own.
+ * Provider keys are optional (Settings may hold them), but a key that is set must be usable as an HTTP
+ * header value (the runtime's error for an invalid one quotes it, so it is checked here, where the message
+ * never includes values). LLM_MODEL must be the provider's own. openai still needs its key (and is then
+ * refused by resolveEnvLlmChoice: not built in V1).
  */
 function checkLlmSettings(env: LlmFields, ctx: z.core.$RefinementCtx<LlmFields>): void {
-  const keyVar = PROVIDER_KEYS[env.LLM_PROVIDER];
-  if (!keyVar) return;
-  const key = env[keyVar];
-  if (!key) ctx.addIssue({ code: "custom", path: [keyVar], message: `is required when LLM_PROVIDER=${env.LLM_PROVIDER}` });
-  else if (!/^[\x21-\x7e]+$/.test(key.trim())) {
-    ctx.addIssue({ code: "custom", path: [keyVar], message: "must be one line of printable ASCII without spaces" });
+  for (const keyVar of MODEL_PROVIDER_KEYS) {
+    const key = env[keyVar];
+    if (key && !/^[\x21-\x7e]+$/.test(key.trim())) {
+      ctx.addIssue({ code: "custom", path: [keyVar], message: "must be one line of printable ASCII without spaces" });
+    }
   }
-  if (env.LLM_PROVIDER === "openai") return;
+  if (env.LLM_PROVIDER === "openai") {
+    if (!env.OPENAI_API_KEY) ctx.addIssue({ code: "custom", path: ["OPENAI_API_KEY"], message: "is required when LLM_PROVIDER=openai" });
+    return;
+  }
+  if (env.LLM_PROVIDER === "fake") return;
   const other = env.LLM_PROVIDER === "gemini" ? "anthropic" : "gemini";
   if (env.LLM_MODEL?.startsWith(MODEL_PREFIXES[other])) {
     ctx.addIssue({
