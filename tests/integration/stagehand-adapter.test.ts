@@ -5,7 +5,7 @@ import type net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { startDemoShop, type RunningDemoShop } from "@platform/demo-shop";
-import { LlmClient, type LlmCallRecord } from "@platform/llm";
+import { LlmClient, LlmTransportError, type LlmCallRecord, type LlmTransport } from "@platform/llm";
 import {
   DEFAULT_TELEMETRY_ENDPOINT,
   NavigationBlockedError,
@@ -405,6 +405,50 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
       expect(raw.some((e) => e.host === "example.com")).toBe(false);
       expect(resolver.calls).not.toContain(STAGEHAND_TELEMETRY_HOST);
       expect(resolver.calls).not.toContain("example.com");
+    },
+    120_000,
+  );
+
+  it(
+    "a step that gives up on a stalled model call does not hold up the next step's call: the stalled call is aborted (KI-020)",
+    async () => {
+      const scripted = new ScriptedTransport(TARGETS);
+      let stalled = 0;
+      let stalledAborted = false;
+      // The first observation is never answered (a provider stall with no timeout of its own).
+      const transport: LlmTransport = {
+        provider: "scripted",
+        complete(req) {
+          if (req.schemaName !== "Observation" || stalled++ > 0) return scripted.complete(req);
+          return new Promise((_, reject) => {
+            req.signal.addEventListener(
+              "abort",
+              () => {
+                stalledAborted = true;
+                reject(new LlmTransportError("aborted", { retryable: false }));
+              },
+              { once: true },
+            );
+          });
+        },
+      };
+      const llm = new LlmClient({ transport, model: MODEL, logger: silent, retry: { maxRetries: 0 } });
+      const { sandbox } = await openSandbox();
+      const session = await new StagehandExplorer({ llm, connectTimeoutMs: 90_000, operationTimeoutMs: 2_000 }).start({
+        page: sandbox,
+        runId: RUN_ID,
+        signal: new AbortController().signal,
+        redact,
+      });
+      cleanups.push(() => session.close());
+      await session.navigate(`${target}products/1`);
+
+      // Stagehand gives up on its own timeout (it never cancels the call in flight)...
+      await expect(session.observe("find the add to cart button")).rejects.toThrow();
+      expect(stalledAborted).toBe(true);
+      // ...and the next step's call is answered, not queued behind the stalled one.
+      const next = await session.observe("find the add to cart button");
+      expect(next.elements[0]).toMatchObject({ method: "click" });
     },
     120_000,
   );

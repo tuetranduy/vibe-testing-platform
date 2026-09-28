@@ -9,7 +9,9 @@ import type { JsonSchema, LlmClient, LlmContentPart, LlmMessage } from "@platfor
  * `ModelConfig` path (inference inside the browser) is never used.
  *
  * Calls are serialized (spike caveat 8: requests carry no correlation id), so the explorer can
- * attribute all usage between two `takeUsage()` calls to the one Stagehand operation it ran.
+ * attribute all usage between two `takeUsage()` calls to the one Stagehand operation it ran. The
+ * explorer runs each Stagehand operation through `operation()`: Stagehand's timeout never cancels a
+ * model call in flight, so the bridge does when the operation ends (KI-020).
  */
 
 type GenerateRequest = Parameters<ClientLLM["generate"]>[0];
@@ -39,6 +41,12 @@ export interface ClientLlmBridge {
   /** Pass as `Stagehand.create({ model })`. */
   readonly client: ClientLLM;
   readonly model: string;
+  /**
+   * Runs one Stagehand operation. A model call it leaves running (Stagehand gave up on it) is
+   * aborted when it ends, so the next operation's call starts at once, and a call made after it
+   * ended (the abandoned operation carrying on) is refused. Neither one's error is reported.
+   */
+  operation<T>(fn: () => Promise<T>): Promise<T>;
   /** Usage since the previous call (and resets it). */
   takeUsage(): BridgeUsage;
   /** The first error a generate call raised since the previous call (and resets it). */
@@ -78,8 +86,10 @@ export function createClientLlmBridge(opts: ClientLlmBridgeOptions): ClientLlmBr
   let usage: BridgeUsage = { calls: 0, inputTokens: 0, outputTokens: 0 };
   let firstError: unknown;
   let chain: Promise<unknown> = Promise.resolve();
+  /** The running operation's calls end with it: undefined before the first operation, null between two. */
+  let current: AbortController | null | undefined;
 
-  const call = async (req: GenerateRequest): Promise<GenerateResult> => {
+  const call = async (req: GenerateRequest, signal: AbortSignal): Promise<GenerateResult> => {
     const rf = "responseFormat" in req ? req.responseFormat : undefined;
     const json = rf?.type === "json_schema" ? rf : undefined;
     if (!json && "tools" in req && Array.isArray(req.tools) && req.tools.length > 0) {
@@ -95,7 +105,7 @@ export function createClientLlmBridge(opts: ClientLlmBridgeOptions): ClientLlmBr
       check: json ? objectCheck : textEnvelopeCheck,
       stage: "EXPLORING",
       runId: opts.runId,
-      signal: opts.signal,
+      signal,
       redact: opts.redact,
       deadlineAt: opts.deadlineAt ?? null,
       maxTokens: opts.maxTokens,
@@ -127,10 +137,13 @@ export function createClientLlmBridge(opts: ClientLlmBridgeOptions): ClientLlmBr
 
   const client: ClientLLM = {
     generate: (req: GenerateRequest) => {
-      const run = chain.then(() => call(req));
+      if (current === null) return Promise.reject(new Error("The Stagehand operation that made this model call has ended"));
+      const operation = current?.signal;
+      const run = chain.then(() => call(req, operation ? AbortSignal.any([opts.signal, operation]) : opts.signal));
       chain = run.catch(() => {});
       return run.catch((err: unknown) => {
-        firstError ??= err;
+        // A call cancelled because its operation ended fails for no reason of its own.
+        if (!operation?.aborted) firstError ??= err;
         throw err;
       });
     },
@@ -139,6 +152,16 @@ export function createClientLlmBridge(opts: ClientLlmBridgeOptions): ClientLlmBr
   return {
     client,
     model: opts.llm.model,
+    async operation<T>(fn: () => Promise<T>): Promise<T> {
+      const controller = new AbortController();
+      current = controller;
+      try {
+        return await fn();
+      } finally {
+        controller.abort(new Error("The Stagehand operation ended"));
+        current = null;
+      }
+    },
     takeUsage() {
       const u = usage;
       usage = { calls: 0, inputTokens: 0, outputTokens: 0 };
