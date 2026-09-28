@@ -1,6 +1,7 @@
 import { BrowserProviderError, CancelledError, EngineError, type ExplorationOutcome } from "@platform/contracts";
 import type { BrowserExplorer, ExplorerSession, SandboxedPage } from "@platform/stagehand-adapter/browser-explorer";
 import type { EngineStages, StageContext } from "../orchestrator/stages";
+import { actionPolicyFor } from "../shared/action-policy";
 import { runExploration, type ExplorationStore, type RecorderPort } from "./executor";
 
 /** A run's sandboxed browser (the worker's `RunSandbox`): the explorer's page plus teardown. */
@@ -53,6 +54,7 @@ export function createExploreStage(deps: ExploreStageDeps): EngineStages["explor
         signal: budget,
         redact: ctx.redact,
         deadlineAt: ctx.deadlineAt,
+        allowDestructive: actionPolicyFor(ctx.request).allowDestructive,
       });
       const started = session;
       ctx.addCleanup(() => started.close());

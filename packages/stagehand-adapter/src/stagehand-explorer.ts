@@ -20,7 +20,7 @@ import {
   type ObserveResult,
 } from "./browser-explorer";
 import { createClientLlmBridge, type ClientLlmBridge, type StructuredLlm } from "./client-llm";
-import { GUARDRAIL_SYSTEM_PROMPT } from "./guardrails";
+import { guardrailSystemPrompt } from "./guardrails";
 import { DEFAULT_TELEMETRY_ENDPOINT } from "./telemetry";
 
 /**
@@ -450,7 +450,7 @@ export class StagehandExplorer implements BrowserExplorer {
       sh = await Stagehand.create({
         browser,
         model: bridge.client,
-        systemPrompt: GUARDRAIL_SYSTEM_PROMPT,
+        systemPrompt: guardrailSystemPrompt({ allowDestructive: input.allowDestructive }),
         telemetry: { traces: { endpoint: this.opts.telemetryEndpoint ?? DEFAULT_TELEMETRY_ENDPOINT, headers: {} } },
         logging: {
           level: "off", // see StagehandExplorerOptions.logger: any other level writes unredacted to stderr

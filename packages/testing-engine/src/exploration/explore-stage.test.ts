@@ -15,7 +15,7 @@ const plan = {
 } as TestPlan;
 const requirement = { facts: [], criteria: [] } as unknown as NormalizedRequirement;
 
-function harness(opts: { startDelayMs?: number; openError?: unknown; startError?: unknown } = {}) {
+function harness(opts: { startDelayMs?: number; openError?: unknown; startError?: unknown; allowDestructiveActions?: boolean } = {}) {
   const run = new AbortController();
   const budget = new AbortController();
   const cleanups: (() => unknown)[] = [];
@@ -24,7 +24,7 @@ function harness(opts: { startDelayMs?: number; openError?: unknown; startError?
   const redact = (v: unknown) => v;
   const ctx = {
     runId: "run_stage",
-    request: { targetUrl: "https://shop.test/", environment: "staging", testData: {}, secretNames: [], options: { maxExplorationSteps: 10, allowDestructiveActions: false } },
+    request: { targetUrl: "https://shop.test/", environment: "staging", testData: {}, secretNames: [], options: { maxExplorationSteps: 10, allowDestructiveActions: opts.allowDestructiveActions ?? false } },
     signal: run.signal,
     deadlineAt: null,
     budgets: { explorationMs: 1000, rerunMs: 1000 },
@@ -76,9 +76,15 @@ describe("createExploreStage", () => {
     const outcome = await h.stage(h.ctx, plan, requirement);
     expect(outcome.stopReason).toBe("COMPLETED");
     expect(outcome.steps.map((s) => s.kind)).toEqual(["navigate"]);
-    expect(h.started()).toMatchObject({ page: expect.objectContaining({ cdpUrl: "http://127.0.0.1:1" }), runId: "run_stage", signal: h.budget.signal, redact: h.redact });
+    expect(h.started()).toMatchObject({ page: expect.objectContaining({ cdpUrl: "http://127.0.0.1:1" }), runId: "run_stage", signal: h.budget.signal, redact: h.redact, allowDestructive: false });
     expect(h.log).toEqual(["sandbox.open", "navigate https://shop.test/", "session.close", "session.close", "sandbox.close"]);
     expect(h.cleanups).toHaveLength(2); // sandbox + session, for abandoned stages
+  });
+
+  it("tells the explorer the run allows destructive actions when it does", async () => {
+    const h = harness({ allowDestructiveActions: true });
+    await h.stage(h.ctx, plan, requirement);
+    expect(h.started()).toMatchObject({ allowDestructive: true });
   });
 
   it("budget exhausted while the explorer starts → EXPLORATION_BUDGET_EXHAUSTED with nothing explored, sandbox closed", async () => {
