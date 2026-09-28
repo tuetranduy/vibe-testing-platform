@@ -51,6 +51,7 @@ const request = (overrides: Partial<LlmTransportRequest> = {}): LlmTransportRequ
   },
   schemaName: "output",
   maxTokens: 1000,
+  reasoning: "default",
   signal: new AbortController().signal,
   ...overrides,
 });
@@ -97,10 +98,21 @@ describe("GeminiTransport", () => {
     expect(seen[0]!.body).not.toHaveProperty("systemInstruction");
   });
 
-  it("sends the configured thinking level", async () => {
+  it.each([
+    ["minimal", "MINIMAL"],
+    ["low", "LOW"],
+    ["medium", "MEDIUM"],
+    ["high", "HIGH"],
+  ] as const)("sends reasoning %s as thinkingLevel %s", async (reasoning, thinkingLevel) => {
     const { fn, seen } = fakeFetch(() => json(200, okResponse([{ text: "{}" }])));
-    await new GeminiTransport({ apiKey: "gm-test-key", thinkingLevel: "low", fetch: fn }).complete(request());
-    expect((seen[0]!.body.generationConfig as Record<string, unknown>).thinkingConfig).toEqual({ thinkingLevel: "LOW" });
+    await new GeminiTransport({ apiKey: "gm-test-key", fetch: fn }).complete(request({ reasoning }));
+    expect((seen[0]!.body.generationConfig as Record<string, unknown>).thinkingConfig).toEqual({ thinkingLevel });
+  });
+
+  it("sends no thinkingConfig for the model's default level", async () => {
+    const { fn, seen } = fakeFetch(() => json(200, okResponse([{ text: "{}" }])));
+    await new GeminiTransport({ apiKey: "gm-test-key", fetch: fn }).complete(request({ reasoning: "default" }));
+    expect(seen[0]!.body.generationConfig).not.toHaveProperty("thinkingConfig");
   });
 
   it("never returns thought summaries as answer text", async () => {

@@ -10,7 +10,7 @@
  * badge again; the count after adding must be 1, read from the DOM (DOM_VERIFIED).
  * Skipped (with the reason on stderr) when the provider's API key is not set.
  */
-import { loadLiveLlmEnv } from "@platform/config";
+import { loadLiveLlmEnv, resolveEnvLlmChoice } from "@platform/config";
 import type { ExplorationStep, NormalizedRequirement, ObservedFact, StoredTestRunRequest, TestPlan } from "@platform/contracts";
 import { startDemoShop, type RunningDemoShop } from "@platform/demo-shop";
 import { LlmClient, createTransport, type LlmCallRecord } from "@platform/llm";
@@ -91,14 +91,11 @@ describe("@live Stagehand smoke against the demo shop", () => {
 
     const records: LlmCallRecord[] = [];
     const env = LLM!;
+    const choice = resolveEnvLlmChoice(env);
     const llm = new LlmClient({
-      transport: createTransport({
-        provider: env.LLM_PROVIDER,
-        anthropicApiKey: env.ANTHROPIC_API_KEY,
-        geminiApiKey: env.GEMINI_API_KEY,
-        geminiThinkingLevel: env.GEMINI_THINKING_LEVEL,
-      }),
-      model: env.LLM_MODEL,
+      transport: createTransport({ provider: choice.provider, apiKey: env.LLM_PROVIDER === "gemini" ? env.GEMINI_API_KEY : env.ANTHROPIC_API_KEY }),
+      model: choice.model,
+      reasoning: choice.reasoning,
       logger: silent,
       recordCall: (c) => void records.push(c),
     });

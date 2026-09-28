@@ -1,3 +1,4 @@
+import type { ReasoningLevel } from "@platform/contracts";
 import type { JsonSchema, LlmMessage } from "./types";
 
 export interface LlmTransportRequest {
@@ -9,6 +10,8 @@ export interface LlmTransportRequest {
   jsonSchema: JsonSchema;
   schemaName: string;
   maxTokens: number;
+  /** `default`: no reasoning parameter (the model's own level). */
+  reasoning: ReasoningLevel;
   signal: AbortSignal;
 }
 

@@ -42,6 +42,7 @@ const request = (overrides: Partial<LlmTransportRequest> = {}): LlmTransportRequ
   },
   schemaName: "output",
   maxTokens: 1000,
+  reasoning: "default",
   signal: new AbortController().signal,
   ...overrides,
 });
@@ -111,5 +112,27 @@ describe("AnthropicTransport", () => {
     const err = await new AnthropicTransport({ apiKey: "sk-test", fetch: fn }).complete(request()).catch((e) => e);
     expect(err).toMatchObject({ retryable: false });
     expect(err.message).toMatch(/declined/);
+  });
+
+  it.each(["low", "medium", "high"] as const)("sends reasoning %s as output_config.effort, next to the format", async (reasoning) => {
+    const { fn, seen } = fakeFetch(() => json(200, okMessage("{}")));
+    await new AnthropicTransport({ apiKey: "sk-test", fetch: fn }).complete(request({ reasoning }));
+    const config = seen[0]!.body.output_config as { effort?: string; format: { type: string } };
+    expect(config.effort).toBe(reasoning);
+    expect(config.format.type).toBe("json_schema");
+  });
+
+  it("sends no effort for the model's default level", async () => {
+    const { fn, seen } = fakeFetch(() => json(200, okMessage("{}")));
+    await new AnthropicTransport({ apiKey: "sk-test", fetch: fn }).complete(request({ reasoning: "default" }));
+    expect(seen[0]!.body.output_config).not.toHaveProperty("effort");
+  });
+
+  it("refuses minimal, a level Claude does not have, without calling the API (non-retryable)", async () => {
+    const { fn, seen } = fakeFetch(() => json(200, okMessage("{}")));
+    const err = await new AnthropicTransport({ apiKey: "sk-test", fetch: fn }).complete(request({ reasoning: "minimal" })).catch((e) => e);
+    expect(err).toBeInstanceOf(LlmTransportError);
+    expect(err).toMatchObject({ retryable: false });
+    expect(seen).toHaveLength(0);
   });
 });

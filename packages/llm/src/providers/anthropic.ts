@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { ReasoningLevel } from "@platform/contracts";
 import { LlmTransportError, type LlmTransport, type LlmTransportRequest, type LlmTransportResponse } from "../transport";
 import type { LlmMessage } from "../types";
 import { retryAfterMs } from "./retry-after";
@@ -15,9 +16,23 @@ export interface AnthropicTransportOptions {
 
 type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 
+/** A run's reasoning level as Claude's `output_config.effort`; "default" sends none (the model's own). */
+function effortOf(reasoning: ReasoningLevel): { effort: "low" | "medium" | "high" } | Record<string, never> {
+  switch (reasoning) {
+    case "default":
+      return {};
+    case "low":
+    case "medium":
+    case "high":
+      return { effort: reasoning };
+    case "minimal":
+      throw new LlmTransportError("Claude models take the reasoning levels low, medium and high, not minimal", { retryable: false });
+  }
+}
+
 /**
  * Anthropic Messages API adapter. Structured output uses `output_config.format` with the JSON
- * Schema rewritten to the supported strict subset. SDK retries are disabled: LlmClient owns retry policy.
+ * Schema rewritten to the supported strict subset, and the run's reasoning level as `output_config.effort`. SDK retries are disabled: LlmClient owns retry policy.
  */
 export class AnthropicTransport implements LlmTransport {
   readonly provider = "anthropic";
@@ -41,6 +56,7 @@ export class AnthropicTransport implements LlmTransport {
     } catch (err) {
       throw new LlmTransportError(`Unsupported JSON schema: ${(err as Error).message}`, { retryable: false, cause: err });
     }
+    const effort = effortOf(req.reasoning); // before the request: a level Claude lacks never reaches the API
     let message: Anthropic.Message;
     try {
       message = await this.client.messages.create(
@@ -49,7 +65,7 @@ export class AnthropicTransport implements LlmTransport {
           max_tokens: req.maxTokens,
           ...(req.system ? { system: req.system } : {}),
           messages: req.messages.map(toMessageParam),
-          output_config: { format: { type: "json_schema", schema } },
+          output_config: { format: { type: "json_schema", schema }, ...effort },
         },
         { signal: req.signal, timeout: this.timeoutMs, maxRetries: 0 },
       );

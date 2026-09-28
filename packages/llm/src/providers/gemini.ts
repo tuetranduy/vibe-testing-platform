@@ -3,12 +3,8 @@ import type { LlmContentPart, LlmMessage } from "../types";
 import { toGeminiJsonSchema } from "./gemini-json-schema";
 import { retryAfterMs } from "./retry-after";
 
-export type GeminiThinkingLevel = "minimal" | "low" | "medium" | "high";
-
 export interface GeminiTransportOptions {
   apiKey: string;
-  /** Unset: the model's default. Thinking tokens count against the request's `maxTokens`. */
-  thinkingLevel?: GeminiThinkingLevel;
   /** Per-request HTTP timeout (default 25 s, see DEFAULT_TIMEOUT_MS). */
   timeoutMs?: number;
   baseURL?: string;
@@ -75,7 +71,8 @@ export class GeminiTransport implements LlmTransport {
         responseMimeType: "application/json",
         responseJsonSchema: toGeminiJsonSchema(req.jsonSchema),
         maxOutputTokens: req.maxTokens,
-        ...(this.opts.thinkingLevel ? { thinkingConfig: { thinkingLevel: this.opts.thinkingLevel.toUpperCase() } } : {}),
+        // "default": no thinkingConfig, the model's own level. Thinking tokens count against maxOutputTokens.
+        ...(req.reasoning !== "default" ? { thinkingConfig: { thinkingLevel: req.reasoning.toUpperCase() } } : {}),
       },
     };
     let headers: Headers;
