@@ -5,7 +5,7 @@
  * evals/BASELINE.md, not enforced. Without the provider's API key it validates the cases and explains
  * how to run it; invalid LLM settings exit 1.
  */
-import { EnvValidationError, defaultLlmModel, loadLiveLlmEnv } from "@platform/config";
+import { EnvValidationError, defaultLlmModel, loadLiveLlmEnv, resolveEnvLlmChoice } from "@platform/config";
 import { LlmClient, createTransport } from "@platform/llm";
 import { loadPlannerCases, runPlannerSuite } from "./planner/suite";
 import { loadCases, runRequirementCompilerSuite } from "./requirement-compiler/suite";
@@ -60,14 +60,11 @@ async function main(): Promise<number> {
 
   // Usage is counted per provider request (failed attempts included) through the call-record sink.
   const meter = createUsageMeter();
-  const transport = createTransport({
-    provider: env.LLM_PROVIDER,
-    anthropicApiKey: env.ANTHROPIC_API_KEY,
-    geminiApiKey: env.GEMINI_API_KEY,
-    geminiThinkingLevel: env.GEMINI_THINKING_LEVEL,
-  });
-  const llm = new LlmClient({ transport, model: env.LLM_MODEL, recordCall: meter.sink });
-  const thinking = env.LLM_PROVIDER === "gemini" ? `, thinking: ${env.GEMINI_THINKING_LEVEL ?? "model default"}` : "";
+  // GEMINI_THINKING_LEVEL is the client's reasoning level (gemini only), as for a run on the environment's defaults.
+  const choice = resolveEnvLlmChoice(env);
+  const transport = createTransport({ provider: choice.provider, apiKey: env.LLM_PROVIDER === "gemini" ? env.GEMINI_API_KEY : env.ANTHROPIC_API_KEY });
+  const llm = new LlmClient({ transport, model: choice.model, reasoning: choice.reasoning, recordCall: meter.sink });
+  const thinking = choice.provider === "gemini" ? `, thinking: ${choice.reasoning === "default" ? "model default" : choice.reasoning}` : "";
   console.log(`provider: ${env.LLM_PROVIDER}, model: ${env.LLM_MODEL}${thinking}\n`);
   const started = Date.now();
   const results = await loaded.run(llm, meter);

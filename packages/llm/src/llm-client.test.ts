@@ -340,38 +340,51 @@ describe("LlmClient.generateJson (JSON-Schema level, for the Stagehand bridge)",
   });
 });
 
+describe("LlmClient reasoning", () => {
+  it("sends the client's level with every request, and a call's own level when it names one", async () => {
+    const { client, transport } = setup({ reasoning: "high" });
+    transport.enqueue({ json: { answer: "a", count: 1 } }, { json: { answer: "b", count: 2 } });
+    expect(client.reasoning).toBe("high");
+    await client.generateStructured({ ...base(), schema: Answer });
+    await client.generateStructured({ ...base(), schema: Answer, reasoning: "default" });
+    expect(transport.requests.map((r) => r.reasoning)).toEqual(["high", "default"]);
+  });
+
+  it("without a level, sends default (the model's own), on retries and the correction round too", async () => {
+    const { client, transport } = setup();
+    transport.enqueue(
+      { error: new LlmTransportError("rate limited", { status: 429, retryable: true }) },
+      { json: { answer: "" } },
+      { json: { answer: "ok", count: 1 } },
+    );
+    await client.generateStructured({ ...base(), schema: Answer });
+    expect(client.reasoning).toBe("default");
+    expect(transport.requests.map((r) => r.reasoning)).toEqual(["default", "default", "default"]);
+  });
+});
+
 describe("createTransport", () => {
-  it("LLM_PROVIDER=openai fails fast: not implemented in V1", () => {
-    expect(() => createTransport({ provider: "openai" })).toThrow(/not implemented in V1/);
-  });
-  it("anthropic requires an API key", () => {
-    expect(() => createTransport({ provider: "anthropic" })).toThrow(/ANTHROPIC_API_KEY/);
-    expect(createTransport({ provider: "anthropic", anthropicApiKey: "sk-test" }).provider).toBe("anthropic");
-  });
-  it("fake builds a scripted transport", () => {
+  it("builds the chosen provider's adapter with the run's key", () => {
+    expect(createTransport({ provider: "anthropic", apiKey: "sk-test" }).provider).toBe("anthropic");
+    expect(createTransport({ provider: "gemini", apiKey: "gm-test" }).provider).toBe("gemini");
     expect(createTransport({ provider: "fake" })).toBeInstanceOf(FakeTransport);
   });
-  it("gemini requires its own API key and sends the configured thinking level", async () => {
-    expect(() => createTransport({ provider: "gemini", anthropicApiKey: "sk-test" })).toThrow(/GEMINI_API_KEY/);
 
+  it("a real provider without a key fails before any request", () => {
+    expect(() => createTransport({ provider: "anthropic" })).toThrow(/API key/);
+    expect(() => createTransport({ provider: "gemini", apiKey: "" })).toThrow(/API key/);
+  });
+
+  it("the client's reasoning reaches Gemini as its thinking level (no longer a transport option)", async () => {
     const bodies: unknown[] = [];
     vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
       bodies.push(JSON.parse(String(init.body)));
-      const reply = { candidates: [{ content: { parts: [{ text: "{}" }], role: "model" }, finishReason: "STOP", index: 0 }] };
+      const reply = { candidates: [{ content: { parts: [{ text: '{"answer":"ok","count":1}' }], role: "model" }, finishReason: "STOP", index: 0 }] };
       return new Response(JSON.stringify(reply), { status: 200, headers: { "content-type": "application/json" } });
     });
     try {
-      const transport = createTransport({ provider: "gemini", geminiApiKey: "gm-test", geminiThinkingLevel: "high" });
-      expect(transport.provider).toBe("gemini");
-      await transport.complete({
-        model: "gemini-3.8-flash",
-        system: "",
-        messages: [{ role: "user", content: "hi" }],
-        jsonSchema: { type: "object" },
-        schemaName: "output",
-        maxTokens: 100,
-        signal: new AbortController().signal,
-      });
+      const client = new LlmClient({ transport: createTransport({ provider: "gemini", apiKey: "gm-test" }), model: "gemini-3.8-flash", reasoning: "high" });
+      await client.generateStructured({ ...base(), schema: Answer });
       expect(bodies[0]).toMatchObject({ generationConfig: { thinkingConfig: { thinkingLevel: "HIGH" } } });
     } finally {
       vi.unstubAllGlobals();

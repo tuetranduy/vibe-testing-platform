@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import type { Env } from "@platform/config";
+import { resolveEnvLlmChoice, type Env } from "@platform/config";
 import { LlmCallRepository, type Database } from "@platform/db";
 import { LlmClient, createTransport, type LlmTransport } from "@platform/llm";
 import type { ArtifactStorage } from "@platform/storage";
@@ -78,19 +78,17 @@ export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSele
     return { kind: "fake", stages: createFakeStages(fake), llm: null };
   }
 
+  // The environment's model choice; throws for LLM_PROVIDER=openai (not built in V1).
+  const choice = resolveEnvLlmChoice(config);
   const transport =
     deps.transport ??
-    createTransport({
-      provider: config.LLM_PROVIDER,
-      anthropicApiKey: config.ANTHROPIC_API_KEY,
-      geminiApiKey: config.GEMINI_API_KEY,
-      geminiThinkingLevel: config.GEMINI_THINKING_LEVEL,
-    });
+    createTransport({ provider: choice.provider, apiKey: choice.provider === "gemini" ? config.GEMINI_API_KEY : config.ANTHROPIC_API_KEY });
   if (!deps.storage) throw new Error("The real test engine needs artifact storage (exploration screenshots)");
   const calls = new LlmCallRepository(deps.db);
   const llm = new LlmClient({
     transport,
-    model: config.LLM_MODEL,
+    model: choice.model,
+    reasoning: choice.reasoning,
     logger: deps.logger,
     recordCall: async (call) => {
       if (deps.metrics) recordLlmCall(deps.metrics, call);

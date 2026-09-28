@@ -3,6 +3,7 @@ import {
   ContractError,
   EngineError,
   ModelProviderError,
+  type ReasoningLevel,
   type RunLifecycle,
 } from "@platform/contracts";
 import { z, type ZodType } from "zod";
@@ -14,6 +15,8 @@ import type { JsonSchema, LlmCallRecord, LlmCallSink, LlmCallStatus, LlmMessage,
 export interface LlmClientOptions {
   transport: LlmTransport;
   model: string;
+  /** The run's reasoning level (default "default": no reasoning parameter). A call's `reasoning` overrides it. */
+  reasoning?: ReasoningLevel;
   recordCall?: LlmCallSink;
   /** Called when `recordCall` throws; the model call itself still succeeds. */
   onRecordError?: (err: unknown, call: LlmCallRecord) => void;
@@ -39,6 +42,8 @@ export interface LlmCallInput {
   maxTokens?: number;
   /** Identifies the call to the provider (e.g. Stagehand's "Act", "Observation"). */
   schemaName?: string;
+  /** This call's reasoning level instead of the client's (the Stagehand bridge always sends "default"). */
+  reasoning?: ReasoningLevel;
 }
 
 export interface GenerateStructuredInput<T> extends LlmCallInput {
@@ -96,6 +101,11 @@ export class LlmClient {
 
   get provider(): string {
     return this.opts.transport.provider;
+  }
+
+  /** The level every call sends unless it names its own. */
+  get reasoning(): ReasoningLevel {
+    return this.opts.reasoning ?? "default";
   }
 
   /** Structured output validated with a Zod schema (plus optional `check`). */
@@ -179,6 +189,7 @@ export class LlmClient {
             jsonSchema,
             schemaName: input.schemaName ?? "output",
             maxTokens: input.maxTokens ?? this.opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+            reasoning: input.reasoning ?? this.reasoning,
             signal,
           }),
           signal,
