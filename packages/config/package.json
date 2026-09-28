@@ -9,5 +9,5 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": { "@platform/security": "workspace:*", "zod": "4.4.3" }
+  "dependencies": { "@platform/contracts": "workspace:*", "@platform/security": "workspace:*", "zod": "4.4.3" }
 }
