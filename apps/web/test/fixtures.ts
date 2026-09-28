@@ -54,6 +54,8 @@ export const summaryFixture = (patch: Partial<TestRunSummary> = {}): TestRunSumm
   errorCategory: null,
   cancelReason: null,
   targetUrl: "https://shop.example.com/",
+  environment: "staging",
+  allowDestructiveActions: false,
   requirementPreview: "Add a product to the cart; the cart count goes up and the page feels fast.",
   createdAt: "2026-09-26T10:00:00.000Z",
   startedAt: null,

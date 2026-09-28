@@ -1,4 +1,4 @@
-import { ArtifactSensitivitySchema, ArtifactTypeSchema, CancelReasonSchema, CriterionStatusSchema, ErrorCategorySchema, RunLifecycleSchema, RunVerdictSchema } from "@platform/contracts";
+import { ArtifactSensitivitySchema, ArtifactTypeSchema, CancelReasonSchema, CriterionStatusSchema, ErrorCategorySchema, RunLifecycleSchema, RunVerdictSchema, type StoredTestRunRequest } from "@platform/contracts";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { NotFoundError, RunInvariantError, StaleTransitionError, IllegalRunTransitionError } from "./errors";
@@ -167,6 +167,28 @@ describe("RunRepository", () => {
     await runs.transition(run.id, "ANALYZING_REQUIREMENT", "AWAITING_CONFIRMATION");
     expect((await runs.findAwaitingConfirmationSince(new Date(Date.now() + 1000))).map((r) => r.id)).toContain(run.id);
     expect((await runs.findAwaitingConfirmationSince(new Date(Date.now() - 60_000))).map((r) => r.id)).not.toContain(run.id);
+  });
+
+  it("summarizes the environment and whether destructive actions are allowed for the run", async () => {
+    const withOptions = (environment: StoredTestRunRequest["environment"], options: Partial<StoredTestRunRequest["options"]>) =>
+      runs.create({
+        tenantId: TEST_TENANT_ID,
+        targetUrl: "https://shop.example.com",
+        request: storedRequest({ environment, options: { ...storedRequest().options, ...options } }),
+      });
+    expect(toRunSummary(await create())).toMatchObject({ environment: "staging", allowDestructiveActions: false });
+    expect(toRunSummary(await withOptions("staging", { allowDestructiveActions: true }))).toMatchObject({
+      environment: "staging",
+      allowDestructiveActions: true,
+    });
+    expect(
+      toRunSummary(await withOptions("production", { allowDestructiveActions: true, confirmProductionHost: "shop.example.com" })),
+    ).toMatchObject({ environment: "production", allowDestructiveActions: true });
+    // Stored without the confirmation (the API refuses that on create): not allowed.
+    expect(toRunSummary(await withOptions("production", { allowDestructiveActions: true }))).toMatchObject({
+      environment: "production",
+      allowDestructiveActions: false,
+    });
   });
 });
 

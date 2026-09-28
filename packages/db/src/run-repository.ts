@@ -1,4 +1,5 @@
 import {
+  destructiveActionsAllowed,
   isTerminalLifecycle,
   type CancelReason,
   type ErrorCategory,
@@ -77,6 +78,8 @@ export function toRunSummary(run: TestRun): TestRunSummary {
     errorCategory: run.errorCategory,
     cancelReason: run.lifecycle === "CANCELLED" ? run.cancelReason : null,
     targetUrl: run.targetUrl,
+    environment: run.request.environment,
+    allowDestructiveActions: destructiveActionsAllowed(run.request),
     requirementPreview: run.request.requirement.slice(0, 200),
     createdAt: run.createdAt.toISOString(),
     startedAt: run.startedAt?.toISOString() ?? null,
