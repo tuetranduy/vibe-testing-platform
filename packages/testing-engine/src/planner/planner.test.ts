@@ -591,6 +591,7 @@ describe("createPlanStage", () => {
     const { llm } = setup({ json: deletePlan() });
     const plan = await createPlanStage(llm)(stageContext(storedRequest("production", true)), deleteRequirement());
     expect(blocked(plan)).toEqual([["AC-2", "DESTRUCTIVE_ACTION_NOT_AUTHORIZED"]]);
+    expect(plan.blockedCriteria[0]!.detail).toContain("destructive actions are not allowed for this run (allowDestructiveActions is off)");
   });
 
   it("production with the host confirmed plans the destructive step unblocked", async () => {

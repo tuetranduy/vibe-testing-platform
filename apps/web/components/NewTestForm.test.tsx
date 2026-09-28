@@ -404,6 +404,16 @@ describe("NewTestForm — destructive actions", () => {
     expect(rerun()).not.toBeChecked();
   });
 
+  it("shows no rerun note when there is no Playwright test to rerun", async () => {
+    const user = userEvent.setup();
+    render(<NewTestForm />);
+    await openAdvanced(user);
+    await user.click(screen.getByLabelText(/generate a playwright test/i));
+    await user.click(destructive());
+    expect(screen.queryByText(/rerun is off/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/destructive actions will run twice/i)).not.toBeInTheDocument();
+  });
+
   it("in production asks for the website's host (lowercase, with its port) and sends it", async () => {
     const user = userEvent.setup();
     const fetch = mockFetch(created());
@@ -469,6 +479,28 @@ describe("NewTestForm — destructive actions", () => {
     await user.click(destructive());
     expect(screen.getByText("Enter the website URL first.")).toBeInTheDocument();
     expect(screen.queryByLabelText(/to confirm$/i)).not.toBeInTheDocument();
+  });
+
+  it("with an invalid URL, submitting shows only the URL error, not a raw contract message on the (not yet rendered) confirmation field", async () => {
+    const user = userEvent.setup();
+    const fetch = mockFetch(created());
+    const { container } = render(<NewTestForm />);
+    await user.type(screen.getByLabelText(/requirement/i), "A user can delete a saved address.");
+    await user.click(screen.getByLabelText("Production"));
+    await openAdvanced(user);
+    await user.click(destructive());
+    await user.type(screen.getByLabelText(/website url/i), "not-a-url");
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+
+    expect(screen.getByLabelText(/website url/i)).toHaveAttribute("aria-invalid", "true");
+    expect(container.querySelectorAll(".field-error")).toHaveLength(1); // only the URL error
+    expect(fetch).not.toHaveBeenCalled();
+
+    // Fixing the URL renders the confirmation field; it must not carry a stale/raw error.
+    await user.clear(screen.getByLabelText(/website url/i));
+    await user.type(screen.getByLabelText(/website url/i), "https://shop.example.com");
+    const confirmField = screen.getByLabelText(/to confirm$/i);
+    expect(confirmField).not.toHaveAttribute("aria-invalid", "true");
   });
 
   it("never sends the confirmation outside production (typed, then switched back to Staging)", async () => {

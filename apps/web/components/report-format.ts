@@ -38,7 +38,7 @@ export const STATUS_REASON_TEXT: Record<StatusReason, string> = {
   // BLOCKED
   MISSING_SECRET: "A secret this check needs (for example a password) was not provided",
   MISSING_TEST_DATA: "Test data this check needs was not provided",
-  DESTRUCTIVE_ACTION_NOT_AUTHORIZED: "Checking it needs an action that could change or delete data, which this run was not allowed to take",
+  DESTRUCTIVE_ACTION_NOT_AUTHORIZED: "Checking it needs an action that could change or delete data, which this run's policy did not allow at that step",
   TARGET_BLOCKED_BY_POLICY: "The page it needs is not allowed by the network policy",
   OFF_DOMAIN_NAVIGATION: "Checking it would have meant leaving the allowed website",
   LOGIN_FAILED: "Logging in failed with the credentials provided",

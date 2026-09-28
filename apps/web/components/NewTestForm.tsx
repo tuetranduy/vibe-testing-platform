@@ -131,7 +131,10 @@ function build(
       rerunGeneratedTest: options.generatePlaywright && options.rerunGeneratedTest,
       autoConfirmCriteria: options.autoConfirmCriteria,
       allowDestructiveActions: options.allowDestructiveActions,
-      ...(confirming ? { confirmProductionHost: options.confirmProductionHost.trim() } : {}),
+      // Only sent when there is a non-empty value to confirm: a valid URL with an empty value is
+      // already refused above, and an empty string here would otherwise surface the contract's raw
+      // min(1) message once the confirmation field renders (it doesn't exist yet while the URL is invalid).
+      ...(confirming && options.confirmProductionHost.trim() !== "" ? { confirmProductionHost: options.confirmProductionHost.trim() } : {}),
       additionalAllowedHosts: options.additionalAllowedHosts
         .split(/[\s,]+/)
         .map((h) => h.trim())
@@ -621,6 +624,7 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
             Allow destructive actions (create, change or delete data, place orders, pay)
           </label>
           {options.allowDestructiveActions &&
+            options.generatePlaywright &&
             (rerunOn ? (
               <p className="hint hint-warning">
                 <Icon name="warning" /> Destructive actions will run twice: once while exploring and again in the rerun.

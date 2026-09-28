@@ -97,6 +97,12 @@ describe("CreateTestRunRequestSchema", () => {
     });
   });
 
+  it("allows destructive actions in staging", () => {
+    expect(
+      CreateTestRunRequestSchema.safeParse({ ...baseReq, options: { allowDestructiveActions: true } }).success,
+    ).toBe(true);
+  });
+
   it("defaults the rerun off when destructive actions are allowed, on otherwise, and keeps an explicit value", () => {
     expect(CreateTestRunRequestSchema.parse(baseReq).options.rerunGeneratedTest).toBe(true);
     expect(CreateTestRunRequestSchema.parse({ ...baseReq, options: { allowDestructiveActions: true } }).options.rerunGeneratedTest).toBe(false);
