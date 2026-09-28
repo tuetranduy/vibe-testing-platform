@@ -6,8 +6,8 @@ to when it is picked up; mark it resolved here (with the commit) rather than del
 Severity: **High** blocks the V1 release gate or can hide a real failure; **Medium** is a correctness or
 operability gap a user or operator will hit; **Low** is polish, test hygiene or a misleading edge case.
 
-KI-002 to KI-017 were resolved on 2026-09-27 (branch `fix/known-issues`); each entry names its commit. KI-001 and
-KI-018 to KI-020 are open.
+KI-002 to KI-017 were resolved on 2026-09-27 (branch `fix/known-issues`); each entry names its commit. KI-001, KI-018
+and KI-019 are open; KI-020 was resolved on 2026-09-28.
 
 | ID | Severity | Area | Summary | Status |
 |---|---|---|---|---|
@@ -30,7 +30,7 @@ KI-018 to KI-020 are open.
 | KI-017 | Env | Dev machine | Default shell Node 22.13 is below `engines` and its Corepack is broken | Resolved (machine setup) |
 | KI-018 | Medium | LLM provider | The Gemini provider has only been run live on a free-tier key | Open |
 | KI-019 | Low | Cost metrics | Gemini 3.6–3.8 Flash prices double on 2027-01-01 | Open |
-| KI-020 | Medium | Exploration | A Stagehand step that times out holds up the next step's model call | Open |
+| KI-020 | Medium | Exploration | A Stagehand step that times out holds up the next step's model call | Resolved `5c64c0c` |
 
 ---
 
@@ -236,3 +236,8 @@ KI-018 to KI-020 are open.
   while one request was held for 120 s.
 - **Fix:** end a call when its Stagehand operation gives up, e.g. abort it on the operation's own timeout, so the
   next call starts at once.
+- **Resolved** (`5c64c0c`): the explorer runs each Stagehand call through `bridge.operation()`. When the operation
+  ends, a model call it left running is aborted (recorded `CANCELLED`), a call made after it ended is refused
+  without reaching the model (Stagehand's timeout only stops waiting, and `extract` makes its two calls back to
+  back), and neither one's error is reported for the next operation. Tested on the bridge alone and with real
+  Chromium and Stagehand (`tests/integration/stagehand-adapter.test.ts`).
