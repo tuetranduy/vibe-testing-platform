@@ -6,8 +6,8 @@ to when it is picked up; mark it resolved here (with the commit) rather than del
 Severity: **High** blocks the V1 release gate or can hide a real failure; **Medium** is a correctness or
 operability gap a user or operator will hit; **Low** is polish, test hygiene or a misleading edge case.
 
-KI-002 to KI-017 were resolved on 2026-09-27 (branch `fix/known-issues`); each entry names its commit. KI-001, KI-018
-and KI-019 are open; KI-020 was resolved on 2026-09-28.
+KI-002 to KI-017 were resolved on 2026-09-27 (branch `fix/known-issues`); each entry names its commit. KI-001 and KI-018
+are open: both need a paid model key. KI-019 and KI-020 were resolved on 2026-09-28.
 
 | ID | Severity | Area | Summary | Status |
 |---|---|---|---|---|
@@ -29,7 +29,7 @@ and KI-019 are open; KI-020 was resolved on 2026-09-28.
 | KI-016 | Env | Dev machine | Stale sandbox profile in `$TMPDIR` fails `sandbox-preflight.test.ts` | Resolved `6d7bcf5` + machine cleanup |
 | KI-017 | Env | Dev machine | Default shell Node 22.13 is below `engines` and its Corepack is broken | Resolved (machine setup) |
 | KI-018 | Medium | LLM provider | The Gemini provider has only been run live on a free-tier key | Open |
-| KI-019 | Low | Cost metrics | Gemini 3.6–3.8 Flash prices double on 2027-01-01 | Open |
+| KI-019 | Low | Cost metrics | Gemini 3.6–3.8 Flash prices double on 2027-01-01 | Resolved `13ac37a` |
 | KI-020 | Medium | Exploration | A Stagehand step that times out holds up the next step's model call | Resolved `5c64c0c` |
 
 ---
@@ -37,15 +37,20 @@ and KI-019 are open; KI-020 was resolved on 2026-09-28.
 ## KI-001 — Live E2E gate has not been run
 - **Severity:** High (Milestone E acceptance: "live suite green 3 times in a row").
 - **Where:** `scripts/e2e-live-gate.sh`, `tests/e2e/platform-*.spec.ts`, `tests/e2e/platform-injection.spec.ts`.
-- **What:** Live mode (`E2E_MODE=live`: real model + Stagehand) has never run end to end; there was no
-  `ANTHROPIC_API_KEY` in the implementation environment. The prompt-injection spec (Task 21 step 6) runs only in
-  live mode.
+- **What:** The gate (live mode, `E2E_MODE=live`: real model + Stagehand, green 3 times in a row) has never
+  run; the prompt-injection spec (Task 21 step 6) runs only in live mode. The live suite ran twice on a free-tier
+  Gemini key on 2026-09-27/28 (6 and 7 of 12 cases green; see KI-018), but the gate needs a paid key: the
+  `ANTHROPIC_API_KEY` in the implementation environment has no credit ("Your credit balance is too low",
+  re-checked 2026-09-28), and the free Gemini tier allows 15 requests a minute on `gemini-3.5-flash-lite` and 5 a
+  minute (20 a day) on `gemini-3.8-flash`, which one run of the suite exceeds.
 - **Risk:** Some specs identify criteria by check kind (`numeric_compare`, `collection_contains`); a real model
   may phrase criteria differently. Loosen only assertions that pin model wording, never platform guarantees
   (`verdictSource`, blocking reasons, secret hygiene). The two cases added for KI-006 and KI-009 are CI-only
   (they depend on the scripted plan), so the live suite runs the same cases as before.
-- **To close:** `pnpm infra:up && ANTHROPIC_API_KEY=… ./scripts/e2e-live-gate.sh`, then record the date and result in
-  README "Status", and tick Task 21 step 6 in the plan.
+- **To close:** with Anthropic credit, `pnpm infra:up && ANTHROPIC_API_KEY=… ./scripts/e2e-live-gate.sh`; or with a
+  billing-enabled Gemini project, `pnpm infra:up && LLM_PROVIDER=gemini GEMINI_API_KEY=… LLM_MODEL=
+  ./scripts/e2e-live-gate.sh`. Then record the date and result in README "Status", and tick Task 21 step 6 in the
+  plan.
 
 ## KI-002 — Chromium's sandbox cannot start in the compose worker
 - **Severity:** High for deployment (pre-existing; see README "Status").
@@ -225,6 +230,9 @@ and KI-019 are open; KI-020 was resolved on 2026-09-28.
   `gemini-3.6-flash` is $0.75 / $3.75 per MTok through 2026-12-31 and $1.50 / $7.50 from 2027-01-01. The table holds
   today's price, so from 2027 `estimatedCostUsd` and `llm_cost_usd_total` report half the real cost.
 - **To close:** on 2027-01-01, set those three entries to $1.50 / $7.50 (and re-check Google's price list).
+- **Resolved** (`13ac37a`): a price in `pricing.ts` can carry changes the provider announced, each from a UTC date,
+  and the three models switch to $1.50 / $7.50 on 2027-01-01 without an edit; `LlmClient` prices a call when its
+  answer arrives. Two tests that priced `gemini-3.8-flash` at "now" (and would have failed in 2027) are dated.
 
 ## KI-020 — A Stagehand step that times out holds up the next step's model call
 - **Severity:** Medium (seen on the live Gemini run; any provider stall triggers it).
