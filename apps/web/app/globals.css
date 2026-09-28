@@ -1712,6 +1712,17 @@ a.running-card:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.history-tag {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 0.75rem;
+  font-weight: 560;
+}
 .history-created,
 .history-duration {
   white-space: nowrap;
@@ -1937,6 +1948,20 @@ a.running-card:hover {
 }
 .meta-chip .icon {
   color: var(--text-subtle);
+}
+.meta-chip-warning {
+  border-color: var(--warning-border);
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.meta-chip-danger {
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.meta-chip-warning .icon,
+.meta-chip-danger .icon {
+  color: inherit;
 }
 .meta-text {
   padding-left: 4px;
