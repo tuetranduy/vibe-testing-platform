@@ -553,6 +553,7 @@ const storedRequest = (
   environment: StoredTestRunRequest["environment"],
   allowDestructiveActions: boolean,
   testData: StoredTestRunRequest["testData"] = {},
+  confirmProductionHost?: string,
 ): StoredTestRunRequest => ({
   targetUrl: "https://shop.example.com",
   requirement: DELETE_TEXT,
@@ -568,25 +569,35 @@ const storedRequest = (
     autoConfirmCriteria: false,
     allowDestructiveActions,
     additionalAllowedHosts: [],
+    ...(confirmProductionHost === undefined ? {} : { confirmProductionHost }),
   },
 });
 
-describe("actionPolicyFor (D9)", () => {
+describe("actionPolicyFor (D9, amended 2026-09-28)", () => {
   it.each([
-    ["staging", false, false],
-    ["staging", true, true],
-    ["production", true, false],
-    ["production", false, false],
-  ] as const)("%s, allowDestructiveActions=%s → allowDestructive=%s", (env, allow, expected) => {
-    expect(actionPolicyFor(storedRequest(env, allow))).toEqual({ allowDestructive: expected });
+    ["staging", false, undefined, false],
+    ["staging", true, undefined, true],
+    ["production", false, undefined, false],
+    // Stored without the confirmation (the contract refuses it on create): still denied.
+    ["production", true, undefined, false],
+    ["production", true, "shop.example.com", true],
+  ] as const)("%s, allowDestructiveActions=%s, confirmProductionHost=%s → allowDestructive=%s", (env, allow, host, expected) => {
+    expect(actionPolicyFor(storedRequest(env, allow, {}, host))).toEqual({ allowDestructive: expected });
   });
 });
 
 describe("createPlanStage", () => {
-  it("production blocks destructive steps even when allowDestructiveActions is on", async () => {
+  it("production without a confirmed host blocks destructive steps even when allowDestructiveActions is on", async () => {
     const { llm } = setup({ json: deletePlan() });
     const plan = await createPlanStage(llm)(stageContext(storedRequest("production", true)), deleteRequirement());
     expect(blocked(plan)).toEqual([["AC-2", "DESTRUCTIVE_ACTION_NOT_AUTHORIZED"]]);
+  });
+
+  it("production with the host confirmed plans the destructive step unblocked", async () => {
+    const { llm } = setup({ json: deletePlan() });
+    const plan = await createPlanStage(llm)(stageContext(storedRequest("production", true, {}, "shop.example.com")), deleteRequirement());
+    expect(plan.blockedCriteria).toEqual([]);
+    expect(plan.scenarios[0]!.steps[3]!.destructive).toBe(true);
   });
 
   it("reads testData keys (not values) and secret names from the context", async () => {
