@@ -2,13 +2,17 @@ import type { JsonSchema } from "../types";
 import { appendHints } from "./schema-hints";
 
 const SUPPORTED_STRING_FORMATS = new Set(["date-time", "date", "time"]);
-/** Keywords Gemini's `responseJsonSchema` accepts as-is (besides the structural ones handled below). */
-const PASSTHROUGH = ["$id", "$anchor", "type", "title", "description", "required", "minItems", "maxItems", "minimum", "maximum", "propertyOrdering"] as const;
+/**
+ * Keywords Gemini's `responseJsonSchema` accepts as-is (besides the structural ones handled below).
+ * Not `minItems` / `maxItems`, though documented: the API rejects a schema whose bounded arrays hold
+ * objects (400 INVALID_ARGUMENT for the planner's 1–50 steps, 2026-09-27).
+ */
+const PASSTHROUGH = ["$id", "$anchor", "type", "title", "description", "required", "minimum", "maximum", "propertyOrdering"] as const;
 
 /**
- * Rewrite a JSON Schema into the subset Gemini's `responseJsonSchema` supports: `oneOf` → `anyOf`, a
+ * Rewrite a JSON Schema into the subset Gemini's `responseJsonSchema` accepts: `oneOf` → `anyOf`, a
  * string or number `const` → a one-value `enum` (so discriminated unions keep their tag), no root
- * `$schema`, nothing beside a `$ref`, and every other unsupported keyword (patterns, lengths,
+ * `$schema`, nothing beside a `$ref`, and every other keyword (patterns, lengths, array bounds,
  * defaults, exclusive bounds, …) moved into the description as a hint. The caller still validates
  * the full schema client-side.
  */
