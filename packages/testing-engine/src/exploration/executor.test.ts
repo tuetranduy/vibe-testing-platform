@@ -497,16 +497,43 @@ describe("runExploration (fake explorer)", () => {
   });
 
   it.each([
-    [{ allowDestructiveActions: true }, "production", true],
-    [{ allowDestructiveActions: false }, "staging", true],
-    [{ allowDestructiveActions: true }, "staging", false],
-  ] as const)("destructive policy (R17): options %j in %s → blocked=%s", async (options, environment, blocked) => {
+    ["off in staging", { allowDestructiveActions: false }, "staging", true],
+    ["allowed in staging", { allowDestructiveActions: true }, "staging", false],
+    ["production without a confirmed host", { allowDestructiveActions: true }, "production", true],
+    ["production with the host confirmed", { allowDestructiveActions: true, confirmProductionHost: new URL(TARGET).host }, "production", false],
+  ] as const)("destructive policy: %s → blocked=%s (a step worded as destructive)", async (_name, options, environment, blocked) => {
     const { ctx } = fakeCtx({ options, environment });
     const session = new FakeSession();
     const { recorder } = fakeRecorder({ describe: () => ({ role: "button", name: "Delete account", text: null }) });
-    const outcome = await runExploration(ctx, { plan: planOf(step("navigate", "Open"), step("click", "Click the danger button")), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the Delete account button"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
     expect(outcome.stopReason).toBe(blocked ? "BLOCKED_BY_POLICY" : "COMPLETED");
     expect(session.ops().includes("actOn")).toBe(!blocked);
+  });
+
+  it("with destructive actions allowed, a destructive element on a step the plan does not mark destructive is blocked", async () => {
+    const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+    const session = new FakeSession();
+    const { recorder } = fakeRecorder({ describe: () => ({ role: "button", name: "Delete account", text: "Delete account" }) });
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the button in the danger zone"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("BLOCKED_BY_POLICY");
+    expect(outcome.steps.at(-1)).toMatchObject({
+      outcome: "BLOCKED_BY_POLICY",
+      blockReason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED",
+      error: "The element is destructive but the planned step is not",
+    });
+    expect(session.ops()).not.toContain("actOn");
+  });
+
+  it("with destructive actions allowed, a step the planner flagged destructive acts on the destructive element", async () => {
+    const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+    const session = new FakeSession();
+    const { recorder } = fakeRecorder({ describe: () => ({ role: "button", name: "Delete account", text: null }) });
+    const plan = planOf(step("navigate", "Open"), step("click", "Press the red button", { destructive: true }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(session.ops()).toContain("actOn");
   });
 
   it("a planned step the planner marked destructive is blocked under the default policy even if no term matches", async () => {

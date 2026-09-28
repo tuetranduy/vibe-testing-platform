@@ -1,4 +1,4 @@
-import { ContractError, TestPlanSchema, type NormalizedRequirement, type StoredTestRunRequest, type TestPlan } from "@platform/contracts";
+import { ContractError, TestPlanSchema, type NormalizedRequirement, type TestPlan } from "@platform/contracts";
 import type { ActionPolicy } from "@platform/security";
 import type { StageContext } from "../orchestrator/stages";
 import type { RequirementLlm } from "../requirement/compiler";
@@ -6,6 +6,9 @@ import { applyBlocking } from "./blocking";
 import { PlannerOutputSchema } from "./model-output";
 import { validatePlanOutput } from "./post-validate";
 import { PLANNER_SYSTEM_PROMPT, buildPlannerPrompt } from "./prompts";
+import { actionPolicyFor } from "../shared/action-policy";
+
+export { actionPolicyFor };
 
 export interface PlanTestInput {
   runId: string;
@@ -20,11 +23,6 @@ export interface PlanTestInput {
   deadlineAt?: Date | null;
   /** The run redactor (masks secret values). */
   redact: (value: unknown) => unknown;
-}
-
-/** D9: destructive actions only when the run allows them, and never in production. */
-export function actionPolicyFor(request: StoredTestRunRequest): ActionPolicy {
-  return { allowDestructive: request.options.allowDestructiveActions && request.environment !== "production" };
 }
 
 /**

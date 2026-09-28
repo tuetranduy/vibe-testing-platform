@@ -17,6 +17,7 @@
  */
 import type { AcceptanceCriterion, BlockedCriterion, PlannedStep } from "@platform/contracts";
 import { assertActionAllowed, type ActionPolicy } from "@platform/security";
+import { isDestructiveStep } from "../shared/action-policy";
 import { neededCheckpoints } from "./post-validate";
 
 export interface BlockingInput {
@@ -39,14 +40,12 @@ type Block = Omit<BlockedCriterion, "criterionId">;
 
 const MAX_QUOTE = 150;
 const quote = (text: string) => `"${text.length > MAX_QUOTE ? `${text.slice(0, MAX_QUOTE - 1)}…` : text}"`;
-const NOT_AUTHORIZED =
-  "destructive actions are not authorized for this run (allowDestructiveActions is off, or the environment is production)";
+const NOT_AUTHORIZED = "destructive actions are not allowed for this run (allowDestructiveActions is off)";
 
 export function applyBlocking(input: BlockingInput): BlockingResult {
   // A step is destructive if the model says so or the policy's terms match it. Checking the terms with
   // allowDestructive=false keeps the flag truthful when the run is allowed to perform it.
-  const matchesTerm = (s: PlannedStep) => !assertActionAllowed({ instruction: s.description }, { allowDestructive: false }).allowed;
-  const steps = input.steps.map((s) => ({ ...s, destructive: s.destructive || matchesTerm(s) }));
+  const steps = input.steps.map((s) => ({ ...s, destructive: isDestructiveStep(s) }));
   const stop = firstDisallowed(input.steps, input.policy);
 
   const provided = { secret: new Set(input.secretNames), testData: new Set(input.testDataKeys) };

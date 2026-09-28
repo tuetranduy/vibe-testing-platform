@@ -30,6 +30,7 @@ import {
 import type { Page } from "playwright-core";
 import { z } from "zod";
 import type { StageContext } from "../orchestrator/stages";
+import { actionPolicyFor, isDestructiveStep } from "../shared/action-policy";
 import { captureFact, factFromReadings, modeForValueType, urlFact, type FactCaptureInput, type FactReadMode } from "./fact-reader";
 import { describeElement, fillElement, recordElement, selectElementOption } from "./recorder";
 
@@ -48,9 +49,9 @@ import { describeElement, fillElement, recordElement, selectElementOption } from
  *                No URL → like `click` on the described link.
  * - click, submit, login, other, navigate-by-link
  *                `observe(description)` → first element → recorder: ElementRef + role/name/text →
- *                `assertActionAllowed` (instruction + element; `allowDestructive =
- *                allowDestructiveActions && environment !== "production"`, R17; a planner
- *                `destructive: true` also blocks) → `actOn(element)` with method `click` and no
+ *                `assertActionAllowed` (instruction + element; the run's
+ *                `actionPolicyFor`, D9 amended; a planner `destructive: true` also blocks; with
+ *                destructive actions allowed, a destructive element only for a destructive step) → `actOn(element)` with method `click` and no
  *                arguments (deterministic, zero model calls; model-chosen arguments are never
  *                replayed). `other` may keep a non-value method (hover, double click, scroll into
  *                view). Recorded: `observe` + `act`.
@@ -139,6 +140,8 @@ const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const LOAD_SETTLE_TIMEOUT_MS = 10_000;
 /** `other` steps may keep these observed methods (none takes a value); everything else clicks. */
 const SAFE_OTHER_METHODS = new Set(["click", "doubleClick", "hover", "scrollIntoView"]);
+/** Term matching regardless of what the run allows: what the step and the element are, not what may run. */
+const DENY_DESTRUCTIVE: ActionPolicy = { allowDestructive: false };
 
 const OUTCOME_LABEL: Record<ExplorationStep["outcome"], string> = {
   SUCCESS: "succeeded",
@@ -263,7 +266,7 @@ class ExplorationRun {
     const { request } = ctx;
     this.session = input.session;
     this.recorder = deps.recorder ?? playwrightRecorder;
-    this.policy = { allowDestructive: request.options.allowDestructiveActions && request.environment !== "production" };
+    this.policy = actionPolicyFor(request);
     this.sensitivity = ctx.secrets.names.length > 0 || request.secretNames.length > 0 ? "SECRET_BEARING" : "STANDARD";
     this.max = request.options.maxExplorationSteps;
     this.visibleFacts = new Set(
@@ -647,14 +650,27 @@ class ExplorationRun {
     return { element, ref, info };
   }
 
-  /** Checked against the observed element before acting (the element acted on is the one checked). */
+  /**
+   * Checked against the observed element before acting (the element acted on is the one checked). Without
+   * destructive actions allowed, a destructive element or a step the planner flagged destructive is blocked.
+   * With them allowed, a destructive element is acted on only by a destructive step (flagged, or worded as
+   * one), so a page cannot turn a harmless step into a destructive one.
+   */
   private async enforcePolicy(step: PlannedStep, instruction: string, located: Located, kind: "act" | "fill"): Promise<void> {
-    const decision = assertActionAllowed(
+    const match = assertActionAllowed(
       { instruction, elementRole: located.info.role, elementName: located.info.name, elementText: located.info.text },
-      this.policy,
+      DENY_DESTRUCTIVE,
     );
-    const flagged = step.destructive && !this.policy.allowDestructive;
-    if (decision.allowed && !flagged) return;
+    const error = this.policy.allowDestructive
+      ? !match.allowed && !isDestructiveStep(step)
+        ? "The element is destructive but the planned step is not"
+        : null
+      : !match.allowed
+        ? `Matches destructive term "${match.matched}"`
+        : step.destructive
+          ? "The planner marked this step destructive"
+          : null;
+    if (error === null) return;
     await this.reserve();
     await this.record({
       plannedStepId: step.id,
@@ -665,7 +681,7 @@ class ExplorationRun {
       urlBefore: this.url(),
       outcome: "BLOCKED_BY_POLICY",
       blockReason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED",
-      error: decision.allowed ? "The planner marked this step destructive" : `Matches destructive term "${decision.matched}"`,
+      error,
       startedAt: this.ctx.now(),
     });
     throw new Stop("BLOCKED_BY_POLICY");
