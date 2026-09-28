@@ -162,6 +162,9 @@ export const TestRunSummarySchema = z.object({
   errorCategory: ErrorCategorySchema.nullable(),
   cancelReason: CancelReasonSchema.nullable(),
   targetUrl: z.string(),
+  environment: EnvironmentSchema,
+  /** Effective for this run: `destructiveActionsAllowed(request)`. */
+  allowDestructiveActions: z.boolean(),
   requirementPreview: z.string().max(200),
   createdAt: IsoDateTime,
   startedAt: IsoDateTime.nullable(),

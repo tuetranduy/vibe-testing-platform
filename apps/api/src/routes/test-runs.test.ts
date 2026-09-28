@@ -171,6 +171,26 @@ describe("POST /v1/test-runs", () => {
     const events = await new EventRepository(t.tdb.db).listAfter(row!.id, 0);
     expect(events.map((e) => e.type)).toEqual(["run.created", "run.errored"]);
   });
+
+  it("production + destructive actions needs the target host confirmed: 400 on options.confirmProductionHost, 202 with it", async () => {
+    const bad = await post(validBody({ environment: "production", options: { allowDestructiveActions: true } }));
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toMatchObject({ code: "VALIDATION_FAILED", issues: [{ path: ["options", "confirmProductionHost"] }] });
+
+    const ok = await post(
+      validBody({ environment: "production", options: { allowDestructiveActions: true, confirmProductionHost: "shop.example.com" } }),
+    );
+    expect(ok.statusCode).toBe(202);
+    const summary = await t.app.inject({ method: "GET", url: `/v1/test-runs/${ok.json().runId}`, headers: auth });
+    expect(summary.json()).toMatchObject({ environment: "production", allowDestructiveActions: true });
+  });
+
+  it("answers 400 on targetUrl (not 500) for a URL that doesn't parse, in production with destructive actions", async () => {
+    const res = await post(validBody({ targetUrl: "not a url", environment: "production", options: { allowDestructiveActions: true } }));
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION_FAILED");
+    expect(res.json().issues.map((i: { path: unknown[] }) => i.path)).toContainEqual(["targetUrl"]);
+  });
 });
 
 describe("GET /v1/test-runs/:runId and list", () => {
@@ -181,6 +201,8 @@ describe("GET /v1/test-runs/:runId and list", () => {
     const summary = TestRunSummarySchema.parse(res.json());
     expect(summary.lifecycle).toBe("QUEUED");
     expect(summary.verdict).toBeNull();
+    expect(summary.environment).toBe("staging");
+    expect(summary.allowDestructiveActions).toBe(false);
   });
 
   it("returns 404 for another tenant's run", async () => {
