@@ -6,8 +6,8 @@ to when it is picked up; mark it resolved here (with the commit) rather than del
 Severity: **High** blocks the V1 release gate or can hide a real failure; **Medium** is a correctness or
 operability gap a user or operator will hit; **Low** is polish, test hygiene or a misleading edge case.
 
-KI-002 to KI-017 were resolved on 2026-09-27 (branch `fix/known-issues`); each entry names its commit. KI-001,
-KI-018 and KI-019 are open.
+KI-002 to KI-017 were resolved on 2026-09-27 (branch `fix/known-issues`); each entry names its commit. KI-001 and
+KI-018 to KI-020 are open.
 
 | ID | Severity | Area | Summary | Status |
 |---|---|---|---|---|
@@ -28,8 +28,9 @@ KI-018 and KI-019 are open.
 | KI-015 | Low | Docs | Spec checkboxes for Tasks 21–22 are unticked (spec file is read-only) | Resolved `04ca3c7` |
 | KI-016 | Env | Dev machine | Stale sandbox profile in `$TMPDIR` fails `sandbox-preflight.test.ts` | Resolved `6d7bcf5` + machine cleanup |
 | KI-017 | Env | Dev machine | Default shell Node 22.13 is below `engines` and its Corepack is broken | Resolved (machine setup) |
-| KI-018 | Medium | LLM provider | The Gemini provider has not been run against the live API | Open |
+| KI-018 | Medium | LLM provider | The Gemini provider has only been run live on a free-tier key | Open |
 | KI-019 | Low | Cost metrics | Gemini 3.6–3.8 Flash prices double on 2027-01-01 | Open |
+| KI-020 | Medium | Exploration | A Stagehand step that times out holds up the next step's model call | Open |
 
 ---
 
@@ -195,22 +196,25 @@ KI-018 and KI-019 are open.
 - **Resolved:** `nvm alias default 24` (→ 24.15.0) and `corepack enable` on it; a new login shell gets Node 24.15.0
   and pnpm 10.28.0 through Corepack 0.34.6.
 
-## KI-018 — The Gemini provider has not been run against the live API
-- **Severity:** Medium (the adapter is tested only against response shapes taken from Google's API reference).
+## KI-018 — The Gemini provider has only been run live on a free-tier key
+- **Severity:** Medium (the default Gemini model has not been scored, and the live gate has not run on Gemini).
 - **Where:** `packages/llm/src/providers/gemini.ts`, `packages/llm/src/providers/gemini-json-schema.ts`.
-- **What:** `LLM_PROVIDER=gemini` (2026-09-27) was built from the Gemini API reference and the `@google/genai`
-  2.24 type docs; there was no `GEMINI_API_KEY` in the implementation environment. Unverified against the live
-  API: that `responseJsonSchema` accepts the compiler's schema (the largest: a six-way union; Google warns that very
-  large or deeply nested schemas may be rejected), the `thinkingLevel` values as sent (`LOW`, …), and the output
-  quality on the eval suites.
-- **Risk:** Thinking tokens count against each call's output limit (the report diagnostics call is capped at
-  4,000). A truncated answer shows up as `INVALID_OUTPUT` records and, after the correction round, a
-  `ContractError`; `GEMINI_THINKING_LEVEL=low` is the lever.
-- **To close:** `LLM_PROVIDER=gemini GEMINI_API_KEY=… LLM_MODEL= pnpm eval requirement-compiler` and `… pnpm eval
-  planner` (record the scores in `evals/BASELINE.md`), `… pnpm test:live -- stagehand-smoke`, then the live gate with
-  `LLM_PROVIDER=gemini` (see KI-001). `LLM_MODEL=` clears a Claude model exported from `.env`. Note each call's
-  `thoughtsTokenCount` for the diagnostics call and Stagehand's operation latency: if they run short, document
-  `GEMINI_THINKING_LEVEL=low` for the worker.
+- **What:** First live run, 2026-09-27, with a free-tier key. It found that the API rejected the compiler's and
+  planner's schemas (400 INVALID_ARGUMENT on array bounds; fixed in `c00e140`). With the fix, on
+  `gemini-3.5-flash-lite`: the evals score 23/25 and 12/14 (`evals/BASELINE.md`), the `@live` Stagehand smoke
+  passes, and the live E2E suite passes cancel, destructive, SSRF and confirmation expiry. The six other cases
+  failed on free-tier stalls (about 1 call in 5 was held 60–185 s before a normal answer; a run past the analysis
+  budget ended `ERRORED / TIMEOUT`, others ran out of their time) and, in the prompt-injection case, on
+  Flash-Lite planning a search on a page without one (`INCONCLUSIVE`; zero delete clicks). Every verdict followed
+  the plan's rules, the demo password reached no row or log, and every call was priced. Not yet run: the default
+  `gemini-3.8-flash` (the free tier allows it 5 requests a minute and 20 a day) and the live gate.
+- **Risk:** Free-tier stalls make live runs fail on time, and on the free tier Google may use the prompts to
+  improve its products: use a billing-enabled key. Thinking tokens count against each call's output limit (the
+  report diagnostics call is capped at 4,000); `GEMINI_THINKING_LEVEL=low` is the lever if answers are cut short.
+- **To close:** with a billing-enabled key, `LLM_PROVIDER=gemini GEMINI_API_KEY=… LLM_MODEL= pnpm eval
+  requirement-compiler` and `… pnpm eval planner` (record the scores in `evals/BASELINE.md`), `… pnpm test:live --
+  stagehand-smoke`, then the live gate with `LLM_PROVIDER=gemini` (see KI-001). `LLM_MODEL=` clears a Claude model
+  exported from `.env`.
 
 ## KI-019 — Gemini 3.6–3.8 Flash prices double on 2027-01-01
 - **Severity:** Low (cost estimates only).
@@ -219,3 +223,14 @@ KI-018 and KI-019 are open.
   `gemini-3.6-flash` is $0.75 / $3.75 per MTok through 2026-12-31 and $1.50 / $7.50 from 2027-01-01. The table holds
   today's price, so from 2027 `estimatedCostUsd` and `llm_cost_usd_total` report half the real cost.
 - **To close:** on 2027-01-01, set those three entries to $1.50 / $7.50 (and re-check Google's price list).
+
+## KI-020 — A Stagehand step that times out holds up the next step's model call
+- **Severity:** Medium (seen on the live Gemini run; any provider stall triggers it).
+- **Where:** `packages/stagehand-adapter/src/client-llm.ts` (calls run one at a time, on the run's signal).
+- **What:** Stagehand gives each observe/act/extract 60 s. When a step times out, its model call keeps going,
+  retries included, because the bridge only has the run's abort signal. The bridge runs calls one at a time (so
+  usage is attributed to one operation), so the next step's call waits for the abandoned one, and a single stall
+  can fail two steps: on the live Gemini run (KI-018), two consecutive `observe` steps failed about 70 s apart
+  while one request was held for 120 s.
+- **Fix:** end a call when its Stagehand operation gives up, e.g. abort it on the operation's own timeout, so the
+  next call starts at once.
