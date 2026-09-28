@@ -172,3 +172,73 @@ describe("ClientLLM bridge → @platform/llm", () => {
     await expect(pending).rejects.toBeInstanceOf(CancelledError);
   });
 });
+
+/** Stagehand's operation timeout never cancels a model call in flight: it only gives up waiting (KI-020). */
+const stagehandGivesUp = (bridge: ReturnType<typeof setup>["bridge"], abandoned: Promise<unknown>[] = []) =>
+  bridge.operation(async () => {
+    const call = bridge.client.generate(actRequest());
+    call.catch(() => {});
+    abandoned.push(call);
+    await new Promise((r) => setTimeout(r, 10));
+    throw new Error("RPC response timed out: stagehand.observe");
+  });
+
+describe("ClientLLM bridge: a Stagehand operation that gives up (KI-020)", () => {
+  it("cancels the model call the operation left running, so the next operation's call starts at once", async () => {
+    const { transport, calls, bridge } = setup();
+    transport.enqueue("hang", { json: { second: true } });
+    const abandoned: Promise<unknown>[] = [];
+
+    await expect(stagehandGivesUp(bridge, abandoned)).rejects.toThrow(/timed out/);
+    const next = await bridge.operation(() => bridge.client.generate(actRequest()));
+
+    expect(next).toMatchObject({ structuredContent: { second: true } });
+    await expect(abandoned[0]).rejects.toBeDefined();
+    expect(calls.map((c) => c.status)).toEqual(["CANCELLED", "SUCCESS"]);
+  });
+
+  it("refuses a model call made between operations (an abandoned operation's late call) without calling the model", async () => {
+    const { transport, bridge } = setup();
+    transport.enqueue("hang");
+    await expect(stagehandGivesUp(bridge)).rejects.toThrow(/timed out/);
+
+    // e.g. extract's Metadata call, which Stagehand makes right after the Extraction call without re-checking its timeout.
+    await expect(bridge.client.generate(actRequest())).rejects.toThrow(/operation.*ended/i);
+    expect(transport.requests).toHaveLength(1);
+  });
+
+  it("does not report the abandoned call's error for the next operation", async () => {
+    const transport = new FakeTransport().enqueue("hang", { json: { ok: true }, usage: { inputTokens: 7, outputTokens: 3 } });
+    let releaseRecord!: () => void;
+    const recorded = new Promise<void>((r) => (releaseRecord = r));
+    // The abandoned call's rejection settles only after its CANCELLED record is written: hold that
+    // until the next operation has started, as a slow database write would.
+    const llm = new LlmClient({
+      transport,
+      model: "claude-sonnet-5",
+      recordCall: async (c) => {
+        if (c.status === "CANCELLED") await recorded;
+      },
+      logger: silent,
+      retry: { maxRetries: 0 },
+    });
+    const bridge = createClientLlmBridge({ llm, runId: "run_1", signal: new AbortController().signal, redact: (v) => v });
+
+    await expect(
+      bridge.operation(async () => {
+        void bridge.client.generate(actRequest()).catch(() => {});
+        await new Promise((r) => setTimeout(r, 10));
+        throw new Error("RPC response timed out: stagehand.observe");
+      }),
+    ).rejects.toThrow(/timed out/);
+    // The explorer starts each operation by taking what the previous one left.
+    bridge.takeUsage();
+    bridge.takeError();
+    const next = bridge.operation(() => bridge.client.generate(actRequest()));
+    releaseRecord();
+    await next;
+
+    expect(bridge.takeError()).toBeUndefined();
+    expect(bridge.takeUsage()).toEqual({ calls: 1, inputTokens: 7, outputTokens: 3 });
+  });
+});

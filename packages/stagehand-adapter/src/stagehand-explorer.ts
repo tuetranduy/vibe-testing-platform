@@ -236,12 +236,14 @@ class StagehandExplorerSession implements ExplorerSession {
   }
 
   /**
-   * Runs one Stagehand call. If it fails, a model error raised inside it (by our bridge) is thrown
-   * instead of Stagehand's wrapper, so typed engine errors (cancelled, provider, contract) survive.
+   * Runs one Stagehand call as a bridge operation, so a model call it leaves running when its
+   * timeout gives up is aborted rather than holding up the next step's (KI-020). If it fails, a
+   * model error raised inside it (by our bridge) is thrown instead of Stagehand's wrapper, so typed
+   * engine errors (cancelled, provider, contract) survive.
    */
   private async stagehand<T>(call: () => Promise<T>): Promise<T> {
     try {
-      return await call();
+      return await this.bridge.operation(call);
     } catch (err) {
       throw this.bridge.takeError() ?? err;
     }
