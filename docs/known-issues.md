@@ -214,7 +214,9 @@ KI-018 to KI-020 are open.
 - **To close:** with a billing-enabled key, `LLM_PROVIDER=gemini GEMINI_API_KEY=… LLM_MODEL= pnpm eval
   requirement-compiler` and `… pnpm eval planner` (record the scores in `evals/BASELINE.md`), `… pnpm test:live --
   stagehand-smoke`, then the live gate with `LLM_PROVIDER=gemini` (see KI-001). `LLM_MODEL=` clears a Claude model
-  exported from `.env`.
+  exported from `.env`. Compare the compile's answer time on `gemini-3.8-flash` (with thinking) with the Gemini
+  request timeout, 25 s: a slower answer is cut off and retried, so raise `DEFAULT_TIMEOUT_MS` in `gemini.ts` if
+  answers get close to it.
 
 ## KI-019 — Gemini 3.6–3.8 Flash prices double on 2027-01-01
 - **Severity:** Low (cost estimates only).

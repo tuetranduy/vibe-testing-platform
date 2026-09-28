@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { LlmClient } from "../llm-client";
 import { LlmTransportError, type LlmTransportRequest } from "../transport";
 import { GeminiTransport } from "./gemini";
@@ -210,6 +210,43 @@ describe("GeminiTransport", () => {
     const err = await failure(new GeminiTransport({ apiKey: "gm-test-key", fetch: fn }));
     expect(err).toMatchObject({ retryable: true });
     expect((err as Error).message).toMatch(/fetch failed.*ECONNRESET/);
+  });
+
+  it("a stalled request gives up in time for the client's retries: two stalls and an answer fit in one Stagehand step (60 s)", async () => {
+    // Seen live on the free tier: ~1 call in 5 held for minutes, while a retry answered in seconds.
+    vi.useFakeTimers();
+    const run = new AbortController();
+    try {
+      let calls = 0;
+      const fn = (async (input: string | URL | Request, init?: RequestInit) => {
+        calls++;
+        return calls <= 2 ? hangingFetch(input, init) : json(200, okResponse([{ text: '{"name":"x","kind":"a"}' }]));
+      }) as typeof fetch;
+      const llm = new LlmClient({ transport: new GeminiTransport({ apiKey: "gm-test-key", fetch: fn }), model: "gemini-3.8-flash" });
+      let settled = false;
+      const result = llm.generateJson({
+        system: "",
+        messages: [{ role: "user", content: "hello" }],
+        jsonSchema: request().jsonSchema,
+        stage: "EXPLORING",
+        runId: "run_1",
+        signal: run.signal,
+        redact: (v) => v,
+      });
+      void result.then(
+        () => (settled = true),
+        () => (settled = true),
+      );
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(settled).toBe(true);
+      await expect(result).resolves.toMatchObject({ data: { name: "x", kind: "a" } });
+      expect(calls).toBe(3);
+    } finally {
+      run.abort();
+      vi.useRealTimers();
+    }
   });
 
   it("a request slower than timeoutMs is a retryable timeout; the caller's abort is not retryable", async () => {
