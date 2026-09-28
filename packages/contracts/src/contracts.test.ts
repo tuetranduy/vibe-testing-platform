@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CreateTestRunRequestSchema,
   CriterionResultSchema,
+  destructiveActionsAllowed,
   ElementRefSchema,
   NormalizedRequirementSchema,
   ObservedFactSchema,
@@ -56,19 +57,52 @@ describe("CreateTestRunRequestSchema", () => {
     expect(CreateTestRunRequestSchema.safeParse({ ...baseReq, requirement: "   short   " }).success).toBe(false);
   });
 
-  it("rejects destructive actions in production", () => {
-    const r = CreateTestRunRequestSchema.safeParse({
-      ...baseReq,
-      environment: "production",
-      options: { allowDestructiveActions: true },
+  describe("destructive actions in production (D9, amended 2026-09-28)", () => {
+    const prod = (options: Record<string, unknown>, targetUrl = "https://Shop.Example.com:8443/path") =>
+      CreateTestRunRequestSchema.safeParse({ ...baseReq, targetUrl, environment: "production", options });
+    const paths = (r: { error?: { issues: { path: PropertyKey[] }[] } }) => r.error?.issues.map((i) => i.path);
+
+    it("need the target host typed as confirmation", () => {
+      const r = prod({ allowDestructiveActions: true });
+      expect(paths(r)).toEqual([["options", "confirmProductionHost"]]);
+      expect(r.error?.issues[0]?.message).toBe(
+        "Type the website's host (shop.example.com:8443) to allow destructive actions in production",
+      );
     });
-    expect(r.success).toBe(false);
-    expect(r.error?.issues[0]?.path).toEqual(["options", "allowDestructiveActions"]);
+
+    it("reject a different host (the port is part of it)", () => {
+      expect(paths(prod({ allowDestructiveActions: true, confirmProductionHost: "shop.example.com" }))).toEqual([
+        ["options", "confirmProductionHost"],
+      ]);
+    });
+
+    it("accept the host in any case, trimmed, with its port", () => {
+      expect(prod({ allowDestructiveActions: true, confirmProductionHost: "  SHOP.example.com:8443 " }).success).toBe(true);
+    });
+
+    it("leave a URL that doesn't parse to its own issue (no crash, no confirmation issue)", () => {
+      const r = prod({ allowDestructiveActions: true }, "not a url");
+      expect(r.success).toBe(false);
+      expect(paths(r)).toContainEqual(["targetUrl"]);
+      expect(paths(r)).not.toContainEqual(["options", "confirmProductionHost"]);
+    });
+
+    it.each([
+      ["staging", { allowDestructiveActions: true, confirmProductionHost: "x.com" }],
+      ["production", { confirmProductionHost: "x.com" }],
+    ] as const)("reject the confirmation where it is not used (%s)", (environment, options) => {
+      const r = CreateTestRunRequestSchema.safeParse({ ...baseReq, environment, options });
+      expect(paths(r)).toEqual([["options", "confirmProductionHost"]]);
+      expect(r.error?.issues[0]?.message).toBe("Only used when destructive actions are allowed in production");
+    });
   });
 
-  it("allows destructive actions in staging", () => {
+  it("defaults the rerun off when destructive actions are allowed, on otherwise, and keeps an explicit value", () => {
+    expect(CreateTestRunRequestSchema.parse(baseReq).options.rerunGeneratedTest).toBe(true);
+    expect(CreateTestRunRequestSchema.parse({ ...baseReq, options: { allowDestructiveActions: true } }).options.rerunGeneratedTest).toBe(false);
     expect(
-      CreateTestRunRequestSchema.safeParse({ ...baseReq, options: { allowDestructiveActions: true } }).success,
+      CreateTestRunRequestSchema.parse({ ...baseReq, options: { allowDestructiveActions: true, rerunGeneratedTest: true } }).options
+        .rerunGeneratedTest,
     ).toBe(true);
   });
 
@@ -372,5 +406,25 @@ describe("RerunResultSchema", () => {
     expect(RerunResultSchema.parse(base)).toEqual({ ...base, errorText: {}, artifactIds: [] });
     expect(RerunResultSchema.parse({ ...base, artifactIds: ["art_1", "art_2"] }).artifactIds).toEqual(["art_1", "art_2"]);
     expect(RerunResultSchema.safeParse({ ...base, artifactIds: [1] }).success).toBe(false);
+  });
+});
+
+describe("destructiveActionsAllowed", () => {
+  const defaults = CreateTestRunRequestSchema.parse(baseReq).options;
+  const req = (environment: "staging" | "production", allowDestructiveActions: boolean, confirmProductionHost?: string) => ({
+    targetUrl: "https://shop.example.com/",
+    environment,
+    options: { ...defaults, allowDestructiveActions, ...(confirmProductionHost === undefined ? {} : { confirmProductionHost }) },
+  });
+
+  it.each([
+    ["staging", false, undefined, false],
+    ["staging", true, undefined, true],
+    ["production", false, undefined, false],
+    ["production", true, undefined, false],
+    ["production", true, "other.example.com", false],
+    ["production", true, "SHOP.example.com", true],
+  ] as const)("%s, allowDestructiveActions=%s, confirmProductionHost=%s → %s", (environment, allow, host, expected) => {
+    expect(destructiveActionsAllowed(req(environment, allow, host))).toBe(expected);
   });
 });

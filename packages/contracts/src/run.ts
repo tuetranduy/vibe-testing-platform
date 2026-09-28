@@ -67,22 +67,33 @@ export type InconclusiveReason = z.infer<typeof InconclusiveReasonSchema>;
 export const TestDataValueSchema = z.union([z.string().max(2000), z.number(), z.boolean(), z.null()]);
 export type TestDataValue = z.infer<typeof TestDataValueSchema>;
 
-export const RunOptionsSchema = z.object({
-  maxExplorationSteps: z.number().int().min(1).max(100).default(40),
-  maxRunSeconds: z.number().int().min(60).max(1800).default(300),
-  generatePlaywright: z.boolean().default(true),
-  rerunGeneratedTest: z.boolean().default(true),
-  autoConfirmCriteria: z.boolean().default(false),
-  allowDestructiveActions: z.boolean().default(false),
-  additionalAllowedHosts: z.array(HostnameSchema).max(10).default([]),
-});
+export const EnvironmentSchema = z.enum(["staging", "production"]);
+export type Environment = z.infer<typeof EnvironmentSchema>;
+
+export const RunOptionsSchema = z
+  .object({
+    maxExplorationSteps: z.number().int().min(1).max(100).default(40),
+    maxRunSeconds: z.number().int().min(60).max(1800).default(300),
+    generatePlaywright: z.boolean().default(true),
+    /** Omitted: off when destructive actions are allowed (the rerun repeats every action), on otherwise. */
+    rerunGeneratedTest: z.boolean().optional(),
+    autoConfirmCriteria: z.boolean().default(false),
+    allowDestructiveActions: z.boolean().default(false),
+    /** Production only: the target URL's host, typed as the confirmation that destructive actions may run there. */
+    confirmProductionHost: z.string().trim().min(1).max(255).optional(),
+    additionalAllowedHosts: z.array(HostnameSchema).max(10).default([]),
+  })
+  .transform(({ rerunGeneratedTest, ...options }) => ({
+    ...options,
+    rerunGeneratedTest: rerunGeneratedTest ?? !options.allowDestructiveActions,
+  }));
 export type RunOptions = z.infer<typeof RunOptionsSchema>;
 
 export const CreateTestRunRequestSchema = z
   .object({
     targetUrl: HttpUrlSchema,
     requirement: z.string().trim().min(10).max(20_000),
-    environment: z.enum(["staging", "production"]).default("staging"),
+    environment: EnvironmentSchema.default("staging"),
     browser: z.literal("chromium").default("chromium"),
     testData: z
       .record(DataKeySchema, TestDataValueSchema)
@@ -96,9 +107,19 @@ export const CreateTestRunRequestSchema = z
     // .prefault({}) — Zod 4 .default() short-circuits and would skip nested defaults.
     options: RunOptionsSchema.prefault({}),
   })
-  .refine((r) => !(r.environment === "production" && r.options.allowDestructiveActions), {
-    message: "Destructive actions are never allowed in production",
-    path: ["options", "allowDestructiveActions"],
+  .superRefine((r, ctx) => {
+    // D9, amended 2026-09-28: production allows destructive actions only with the target host typed as confirmation.
+    // Zod 4 runs this even when a field failed its own check (e.g. a string that is not a URL): an unparseable URL
+    // is left to its own issue, never parsed here unguarded.
+    const path = ["options", "confirmProductionHost"];
+    if (r.environment === "production" && r.options.allowDestructiveActions) {
+      const host = hostOf(r.targetUrl);
+      if (host !== null && !hostConfirmed(r.targetUrl, r.options.confirmProductionHost)) {
+        ctx.addIssue({ code: "custom", path, message: `Type the website's host (${host}) to allow destructive actions in production` });
+      }
+    } else if (r.options.confirmProductionHost !== undefined) {
+      ctx.addIssue({ code: "custom", path, message: "Only used when destructive actions are allowed in production" });
+    }
   })
   .refine((r) => r.options.generatePlaywright || !r.options.rerunGeneratedTest, {
     message: "rerunGeneratedTest requires generatePlaywright",
@@ -108,6 +129,31 @@ export type CreateTestRunRequestInput = z.input<typeof CreateTestRunRequestSchem
 export type CreateTestRunRequest = z.output<typeof CreateTestRunRequestSchema>;
 /** The request as persisted: never contains secret values, only their names. */
 export type StoredTestRunRequest = Omit<CreateTestRunRequest, "secrets"> & { secretNames: string[] };
+
+/**
+ * D9, amended 2026-09-28: destructive actions are allowed only when the run sets `allowDestructiveActions` — and,
+ * in production, also confirms the target host. The contract enforces the confirmation on create; the engine and
+ * the run summary decide with this, so a stored request without it is still denied.
+ */
+export function destructiveActionsAllowed(request: Pick<StoredTestRunRequest, "targetUrl" | "environment" | "options">): boolean {
+  if (!request.options.allowDestructiveActions) return false;
+  return request.environment !== "production" || hostConfirmed(request.targetUrl, request.options.confirmProductionHost);
+}
+
+/** The URL's host as the confirmation names it (lowercase, a non-default port included), or null if it doesn't parse. */
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
+/** `typed` names the target URL's host: case-insensitive, the port included when the URL has one. */
+function hostConfirmed(targetUrl: string, typed: string | undefined): boolean {
+  const host = hostOf(targetUrl);
+  return host !== null && typed !== undefined && typed.trim().toLowerCase() === host;
+}
 
 export const TestRunSummarySchema = z.object({
   runId: z.string(),
