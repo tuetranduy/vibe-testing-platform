@@ -827,3 +827,29 @@ describe("NewTestForm saved credentials (V1.1)", () => {
     expect(screen.getByLabelText("Saved credentials")).toHaveValue("cp_1");
   });
 });
+
+describe("NewTestForm exploration cache (V1.1)", () => {
+  const created = () => json(202, { runId: "run_8", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_8/events" });
+
+  it("leaves the cache on by default (the option is not sent)", async () => {
+    const user = userEvent.setup();
+    const fetch = mockFetch(created());
+    render(<NewTestForm />);
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    expect(bodyOf(fetch).options).not.toHaveProperty("useExplorationCache");
+  });
+
+  it("sends useExplorationCache: false when unticked", async () => {
+    const user = userEvent.setup();
+    const fetch = mockFetch(created());
+    render(<NewTestForm />);
+    await fillValid(user);
+    await user.click(screen.getByText("Advanced options"));
+    await user.click(screen.getByRole("checkbox", { name: /reuse element lookups/i }));
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    expect(bodyOf(fetch).options.useExplorationCache).toBe(false);
+  });
+});

@@ -7,6 +7,7 @@ import {
   ObservedFactSchema,
   type ArtifactSensitivity,
   type BlockReason,
+  type CachedElement,
   type ElementRef,
   type ExplorationOutcome,
   type ExplorationStep,
@@ -32,6 +33,7 @@ import { z } from "zod";
 import type { StageContext } from "../orchestrator/stages";
 import { actionPolicyFor, isDestructiveStep } from "../shared/action-policy";
 import { captureFact, factFromReadings, modeForValueType, urlFact, type FactCaptureInput, type FactReadMode } from "./fact-reader";
+import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
 import { describeElement, fillElement, recordElement, selectElementOption } from "./recorder";
 
 /**
@@ -88,6 +90,13 @@ import { describeElement, fillElement, recordElement, selectElementOption } from
  *
  * Secrets (D7): every persisted row, published event, error text and every string passed to the
  * explorer goes through `ctx.redact` first; values are filled only by our recorder.
+ *
+ * Exploration cache (V1.1 F8, `deps.cache`): before an `observe`, the lookup of the same instruction on the
+ * same page (origin + path) from an earlier run is tried. It is reused only when its selector still
+ * resolves to an element whose chosen locator is the one recorded then; the step is recorded as an
+ * `observe` with `llm.cacheHit: true` and no tokens. The action policy checks the element either way. A new
+ * lookup is written only once the planned step that used it succeeded, so a failed, blocked or retried
+ * attempt never populates the cache. A failing cache is a miss.
  */
 
 /** Persistence ports (Ruling R12), implemented by the worker. Rows arrive validated and redacted. */
@@ -132,6 +141,8 @@ export interface ExplorationDeps {
   recorder?: RecorderPort;
   /** Delay between `wait_for` polls. */
   pollIntervalMs?: number;
+  /** Cached element lookups from earlier runs (V1.1 F8); absent: every lookup asks the explorer. */
+  cache?: ObserveCache;
 }
 
 const MAX_ATTEMPTS = 2; // one retry per planned step
@@ -251,6 +262,8 @@ class ExplorationRun {
   private readonly facts: ObservedFact[] = [];
   /** Steps of an execution in progress whose golden flag depends on its outcome (see `asOneExecution`). */
   private held: ExplorationStep[] | null = null;
+  /** New lookups of the planned step in progress, written to the cache only if it succeeds. */
+  private cacheWrites: { key: string; where: CacheWhere; entry: CachedElement }[] = [];
   private readonly session: ExplorerSession;
   private readonly recorder: RecorderPort;
   private readonly policy: ActionPolicy;
@@ -355,10 +368,21 @@ class ExplorationRun {
   /** At most one retry; a planned step that still fails stops exploration. */
   private async withRetry(attempt: () => Promise<Attempt>): Promise<void> {
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
-      const result = await attempt();
-      if (result === "ok") return;
+      this.cacheWrites = [];
+      let result: Attempt;
+      try {
+        result = await attempt();
+      } catch (err) {
+        this.cacheWrites = [];
+        throw err;
+      }
+      if (result === "ok") {
+        await this.writeCache();
+        return;
+      }
       if (result === "final") break;
     }
+    this.cacheWrites = [];
     if (this.pageClosed()) throw new BrowserProviderError("The browser page closed during exploration");
     throw new Stop("COMPLETED");
   }
@@ -622,11 +646,27 @@ class ExplorationRun {
   // Building blocks
   // -------------------------------------------------------------------------------------------
 
-  /** `observe` → first element → ElementRef + accessibility facts. Recorded as an `observe` step. */
+  /**
+   * `observe` → first element → ElementRef + accessibility facts. Recorded as an `observe` step. With the
+   * cache, a verified earlier lookup replaces the `observe` (see the header).
+   */
   private async locate(step: PlannedStep, instruction: string): Promise<Located | null> {
     await this.reserve();
     const startedAt = this.ctx.now();
     const base = { plannedStepId: step.id, kind: "observe" as const, instruction, urlBefore: this.url(), startedAt };
+    const cacheAt = this.deps.cache ? observeCacheKey(this.url(), this.redactString(instruction)) : null;
+    if (cacheAt) {
+      const hit = await this.fromCache(cacheAt.key);
+      if (hit) {
+        await this.record({
+          ...base,
+          outcome: "SUCCESS",
+          element: hit.ref,
+          llm: { model: this.ctx.llm?.model ?? "cache", inputTokens: 0, outputTokens: 0, cacheHit: true },
+        });
+        return hit;
+      }
+    }
     let observed;
     try {
       observed = await this.session.observe(this.redactString(instruction));
@@ -651,7 +691,42 @@ class ExplorationRun {
       return null;
     }
     await this.record({ ...base, outcome: "SUCCESS", element: ref, llm: observed.llm });
+    if (cacheAt) {
+      const entry = this.ctx.redact({ selector: element.selector, description: element.description, method: element.method, element: ref }) as CachedElement;
+      this.cacheWrites.push({ key: cacheAt.key, where: cacheAt.where, entry });
+    }
     return { element, ref, info };
+  }
+
+  /** A cached lookup that still holds on this page, or null (a miss, a stale entry, or a failing cache). */
+  private async fromCache(key: string): Promise<Located | null> {
+    const cache = this.deps.cache!;
+    let cached: CachedElement | null;
+    try {
+      cached = await cache.get(key);
+    } catch {
+      return null;
+    }
+    if (!cached) return null;
+    try {
+      const ref = await this.recorder.record(this.page, cached.selector);
+      const chosen = (r: ElementRef) => JSON.stringify([r.candidates[r.chosenIndex], r.framePath]);
+      if (chosen(ref) !== chosen(cached.element)) return null;
+      const info = await this.recorder.describe(this.page, cached.selector);
+      cache.touch(key).catch(() => {});
+      const element: ObservedElement = { selector: cached.selector, description: cached.description, method: cached.method, arguments: [] };
+      return { element, ref, info };
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      return null;
+    }
+  }
+
+  /** Writes the lookups of a planned step that succeeded; a failing write is ignored. */
+  private async writeCache(): Promise<void> {
+    const writes = this.cacheWrites;
+    this.cacheWrites = [];
+    for (const w of writes) await this.deps.cache?.put(w.key, w.where, w.entry).catch(() => {});
   }
 
   /**

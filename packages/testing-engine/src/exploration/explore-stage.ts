@@ -1,8 +1,9 @@
-import { BrowserProviderError, CancelledError, EngineError, type ExplorationOutcome } from "@platform/contracts";
+import { BrowserProviderError, CancelledError, EngineError, explorationCacheOn, type ExplorationOutcome } from "@platform/contracts";
 import type { BrowserExplorer, ExplorerSession, SandboxedPage } from "@platform/stagehand-adapter/browser-explorer";
 import { requireLlm, type EngineStages, type StageContext } from "../orchestrator/stages";
 import { actionPolicyFor } from "../shared/action-policy";
 import { runExploration, type ExplorationStore, type RecorderPort } from "./executor";
+import type { ObserveCache } from "./observe-cache";
 
 /** A run's sandboxed browser (the worker's `RunSandbox`): the explorer's page plus teardown. */
 export interface ExplorationSandbox extends SandboxedPage {
@@ -18,6 +19,8 @@ export interface ExploreStageDeps {
   store(ctx: StageContext): ExplorationStore;
   recorder?: RecorderPort;
   pollIntervalMs?: number;
+  /** The tenant's exploration cache (V1.1 F8), used unless the run sets `useExplorationCache: false`. */
+  cache?(ctx: StageContext): ObserveCache;
   /**
    * Receives the raw error when the sandbox or the explorer fails to start (it may carry Chromium's
    * stderr). Only the log sees it: the run records a short template message.
@@ -66,6 +69,7 @@ export function createExploreStage(deps: ExploreStageDeps): EngineStages["explor
         store: deps.store(ctx),
         ...(deps.recorder ? { recorder: deps.recorder } : {}),
         ...(deps.pollIntervalMs !== undefined ? { pollIntervalMs: deps.pollIntervalMs } : {}),
+        ...(deps.cache && explorationCacheOn(ctx.request) ? { cache: deps.cache(ctx) } : {}),
       });
     } catch (err) {
       if (ctx.signal.aborted) throw ctx.signal.reason;

@@ -1,14 +1,14 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ArtifactRepository } from "@platform/db";
+import { ArtifactRepository, ExplorationCacheRepository } from "@platform/db";
 import { TEST_TENANT_ID } from "@platform/db/testing";
 import { createLocalStorage, resolveLocalObjectPath, type ArtifactStorage } from "@platform/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { storeArtifact } from "../artifacts";
 import { silentLogger } from "../deps";
 import { createHarness, seedRun, type WorkerHarness } from "../test-support";
-import { retentionJob } from "./retention";
+import { pruneExplorationCache, retentionJob } from "./retention";
 
 let h: WorkerHarness;
 let root: string;
@@ -129,5 +129,23 @@ describe("retentionJob (fake clock)", () => {
     // The next pass, with a store that answers, deletes them.
     expect(await retentionJob({ db: h.tdb.db, storage: good, logger: silentLogger, now: () => at(31) })).toMatchObject({ failed: 0, stoppedEarly: false });
     expect(await new ArtifactRepository(h.tdb.db).listByRun(run.id)).toEqual([]);
+  });
+});
+
+describe("pruneExplorationCache (V1.1 F8)", () => {
+  it("deletes entries unused for 30 days and keeps the rest", async () => {
+    const cache = new ExplorationCacheRepository(h.tdb.db);
+    const entry = {
+      selector: "xpath=/html[1]/body[1]/a[1]",
+      description: "a link",
+      method: "click",
+      element: { candidates: [{ strategy: "xpath" as const, selector: "/html[1]/body[1]/a[1]" }], chosenIndex: 0, framePath: [] },
+    };
+    await cache.put(TEST_TENANT_ID, "prune-old", { origin: "https://x.test", path: "/" }, entry);
+    await cache.put(TEST_TENANT_ID, "prune-new", { origin: "https://x.test", path: "/" }, entry);
+    await h.tdb.pool.query("UPDATE exploration_cache SET last_used_at = now() - interval '31 days' WHERE key = 'prune-old'");
+    expect(await pruneExplorationCache({ db: h.tdb.db })).toBe(1);
+    expect(await cache.get(TEST_TENANT_ID, "prune-old")).toBeNull();
+    expect(await cache.get(TEST_TENANT_ID, "prune-new")).not.toBeNull();
   });
 });

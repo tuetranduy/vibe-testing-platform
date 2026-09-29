@@ -1,7 +1,7 @@
-import { ExplorationStepRepository, ObservedFactRepository, type Database } from "@platform/db";
+import { ExplorationCacheRepository, ExplorationStepRepository, ObservedFactRepository, type Database } from "@platform/db";
 import { StagehandExplorer, resolveStagehandExtensionDir } from "@platform/stagehand-adapter";
 import type { ArtifactStorage } from "@platform/storage";
-import type { ExplorationStore, ExploreStageDeps, StageContext } from "@platform/testing-engine";
+import type { ExplorationStore, ExploreStageDeps, ObserveCache, StageContext } from "@platform/testing-engine";
 import { storeArtifact } from "./artifacts";
 import type { WorkerLogger } from "./deps";
 import { countEgressBlock, type WorkerMetrics } from "./metrics";
@@ -104,9 +104,21 @@ export function createExplorationDeps(input: ExplorationDepsInput): ExploreStage
         start: (startInput) => new StagehandExplorer({ extensionId: stagehandExtension().id, logger }).start(startInput),
       },
     store: overrides.store ?? ((ctx) => createExplorationStore({ db, storage, config, metrics: input.metrics }, ctx)),
+    // The tenant's exploration cache (V1.1 F8); the stage skips it for runs that turned it off.
+    cache: overrides.cache ?? ((ctx) => createObserveCache(db, ctx.tenantId)),
     // Start-up failures (e.g. Chromium's stderr tail) are logged here; the run records a template message.
     logger: overrides.logger ?? logger,
     ...(overrides.recorder ? { recorder: overrides.recorder } : {}),
     ...(overrides.pollIntervalMs !== undefined ? { pollIntervalMs: overrides.pollIntervalMs } : {}),
+  };
+}
+
+/** The exploration cache port over `exploration_cache`, scoped to one tenant (V1.1 F8). */
+export function createObserveCache(db: Database, tenantId: string): ObserveCache {
+  const repo = new ExplorationCacheRepository(db);
+  return {
+    get: (key) => repo.get(tenantId, key),
+    put: (key, where, entry) => repo.put(tenantId, key, where, entry),
+    touch: (key) => repo.touch(tenantId, key),
   };
 }

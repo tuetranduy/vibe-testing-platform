@@ -4,6 +4,7 @@ import {
   ExplorationStepSchema,
   ModelProviderError,
   ObservedFactSchema,
+  type CachedElement,
   type ElementRef,
   type ExplorationStep,
   type NormalizedRequirement,
@@ -26,6 +27,7 @@ import type { ZodType } from "zod";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
 import { runExploration, type ExplorationStore, type RecorderPort } from "./executor";
 import { factFromReadings, type FactCaptureInput } from "./fact-reader";
+import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
 
 // ---------------------------------------------------------------------------------------------
 // Fakes
@@ -839,5 +841,103 @@ describe("runExploration (fake explorer)", () => {
       [1, "observe", "PS-2", "FAILED", false],
       [2, "observe", "PS-2", "SUCCESS", false],
     ]);
+  });
+});
+
+describe("exploration cache (V1.1 F8)", () => {
+  function memoryCache(seed: Record<string, CachedElement> = {}, opts: { fail?: boolean } = {}) {
+    const entries = new Map(Object.entries(seed));
+    const touched: string[] = [];
+    const puts: { key: string; where: CacheWhere; entry: CachedElement }[] = [];
+    const cache: ObserveCache = {
+      async get(key) {
+        if (opts.fail) throw new Error("db down");
+        return entries.get(key) ?? null;
+      },
+      async put(key, where, entry) {
+        if (opts.fail) throw new Error("db down");
+        puts.push({ key, where, entry });
+        entries.set(key, entry);
+      },
+      async touch(key) {
+        touched.push(key);
+      },
+    };
+    return { cache, entries, touched, puts };
+  }
+  const clickPlan = () => planOf(step("navigate", "Open the product page"), step("click", "Click Add to cart"));
+  const keyFor = (instruction: string) => observeCacheKey(TARGET, instruction)!.key;
+  const cached = (selector: string): CachedElement => ({
+    selector,
+    description: "Add to cart button",
+    method: "click",
+    element: { candidates: [{ strategy: "xpath", selector }], chosenIndex: 0, framePath: [] },
+  });
+
+  it("keys on origin + path + the redacted instruction, never the query or fragment", () => {
+    const a = observeCacheKey("https://shop.test/products/1?session=abc#x", "Click Add to cart")!;
+    const b = observeCacheKey("https://shop.test/products/1", "Click Add to cart")!;
+    expect(a.key).toBe(b.key);
+    expect(a.where).toEqual({ origin: "https://shop.test", path: "/products/1" });
+    expect(observeCacheKey("https://shop.test/products/2", "Click Add to cart")!.key).not.toBe(b.key);
+    expect(observeCacheKey("about:blank", "x")).toBeNull();
+  });
+
+  it("a miss observes, and the lookup is written only after the planned step succeeded", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const mem = memoryCache();
+    await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache });
+    expect(session.ops().filter((o) => o === "observe")).toHaveLength(1);
+    expect(mem.puts).toEqual([{ key: keyFor("Click Add to cart"), where: { origin: "https://shop.test", path: "/products/1" }, entry: { ...cached("xpath=/html[1]/body[1]/el[1]"), description: "an element" } }]);
+  });
+
+  it("a hit replaces the observe: no model call, recorded with cacheHit, and counted", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const mem = memoryCache({ [keyFor("Click Add to cart")]: cached("xpath=/html[1]/body[1]/button[3]") });
+    const outcome = await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache });
+    expect(session.ops()).not.toContain("observe");
+    expect(session.calls.find((c) => c.op === "actOn")!.arg).toMatchObject({ selector: "xpath=/html[1]/body[1]/button[3]", method: "click", arguments: [] });
+    expect(outcome.steps.find((s) => s.kind === "observe")).toMatchObject({ outcome: "SUCCESS", llm: { inputTokens: 0, outputTokens: 0, cacheHit: true } });
+    expect(mem.touched).toEqual([keyFor("Click Add to cart")]);
+    expect(mem.puts).toEqual([]);
+  });
+
+  it("a stale entry (another element's locator now) is a miss", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const stale = { ...cached("xpath=/html[1]/body[1]/button[3]"), element: { candidates: [{ strategy: "testId" as const, value: "old-button" }], chosenIndex: 0, framePath: [] } };
+    const mem = memoryCache({ [keyFor("Click Add to cart")]: stale });
+    await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache });
+    expect(session.ops().filter((o) => o === "observe")).toHaveLength(1);
+    expect(mem.puts.map((p) => p.entry.selector)).toEqual(["xpath=/html[1]/body[1]/el[1]"]);
+  });
+
+  it("never caches a failed or blocked step, and the policy still checks a cached element", async () => {
+    const { ctx } = fakeCtx();
+    const failing = new FakeSession({ actOn: () => ({ success: false, message: "detached" }) });
+    const mem = memoryCache();
+    await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session: failing, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache });
+    expect(mem.puts).toEqual([]);
+
+    const { ctx: ctx2 } = fakeCtx();
+    const destructive = memoryCache({ [keyFor("Click Add to cart")]: cached("xpath=/html[1]/body[1]/button[9]") });
+    const session = new FakeSession();
+    const outcome = await runExploration(
+      ctx2,
+      { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx2.budgetSignal(1) },
+      { store: memoryStore().store, recorder: fakeRecorder({ describe: () => ({ role: "button", name: "Delete account", text: "Delete account" }) }).recorder, cache: destructive.cache },
+    );
+    expect(outcome.stopReason).toBe("BLOCKED_BY_POLICY");
+    expect(session.ops()).not.toContain("actOn");
+  });
+
+  it("a failing cache is only a miss", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const outcome = await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: memoryCache({}, { fail: true }).cache });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(session.ops()).toContain("actOn");
   });
 });

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ExplorationCacheCard } from "../../components/ExplorationCacheCard";
 import { LlmSettings } from "../../components/LlmSettings";
 import { SettingsNav } from "../../components/SettingsNav";
 
@@ -17,6 +18,7 @@ export default function SettingsPage() {
       </div>
       <SettingsNav />
       <LlmSettings />
+      <ExplorationCacheCard />
     </div>
   );
 }
