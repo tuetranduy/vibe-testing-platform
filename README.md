@@ -25,6 +25,26 @@ Plan: [`docs/ai-testing-platform-implementation-plan.md`](docs/ai-testing-platfo
 
 **Real exploration and the Playwright rerun run in the Docker worker, with Chromium's sandbox on** (2026-09-27, [KI-002](docs/known-issues.md#ki-002--chromiums-sandbox-cannot-start-in-the-compose-worker)). Chromium's sandbox needs Linux user namespaces, which Docker's default seccomp profile denies ("No usable sandbox!", runs `ERRORED / BROWSER_PROVIDER`). Of the options — a seccomp profile that permits user namespaces, `cap_add: SYS_ADMIN` (broad), or Chromium's `--no-sandbox` (the browser runs untrusted pages) — the compose `worker` uses the first: [`infra/seccomp/worker.json`](infra/seccomp/README.md) is Docker's default profile plus user, PID and network namespaces for `clone` / `unshare`, with no extra capability. Both exploration's Chromium and the rerun's (launched by `@playwright/test`, `chromiumSandbox: true`) start sandboxed in the container, and `pnpm test:e2e:compose` runs the E2E suite against the compose API and worker. A deployment elsewhere needs the same profile (a Kubernetes `Localhost` profile) and a host that allows unprivileged user namespaces; see the profile's README.
 
+**Suggested tests: the requirement is optional (2026-09-28, spec [`docs/superpowers/specs/2026-09-28-suggest-tests-design.md`](docs/superpowers/specs/2026-09-28-suggest-tests-design.md)).**
+Left empty ("Explore and suggest tests" on the new-test form), the run explores the website before any criteria
+exist: `QUEUED → SURVEYING → AWAITING_SELECTION`. The worker opens the run's sandbox (egress proxy, navigation guard,
+the run's allowed hosts; no Stagehand session) and platform code loads the start page and up to 5 same-site pages it
+links to by URL — header/navigation links first; never downloads, other sites, links whose text or URL reads as
+destructive or as signing out — and reads each with a fixed in-page script (title, headings, links, forms, buttons;
+about 6 KB per page, secret values masked). Nothing is clicked, typed or submitted, and the model never drives the
+browser. One model call (`test_suggestions`, at the run's model and reasoning level) proposes 3–8 tests, each with
+the secrets / test data it needs and whether it changes data. The run then waits at "Choose what to test":
+`GET /v1/test-runs/:runId/suggestions` returns them (`409 SUGGESTIONS_NOT_READY` while exploring, `404
+NO_SUGGESTIONS` for a run created with a requirement), and `POST /v1/test-runs/:runId/suggestions/select` with
+`{ suggestionId, requirement? }` makes the chosen — optionally edited — text the run's requirement and moves it to
+`ANALYZING_REQUIREMENT`; from there it is an ordinary run (criteria review → test → report). Any other suggestion
+starts as a separate test from `/runs/new?from=<runId>&suggestion=<id>`. A blank requirement always waits for the
+user, whatever `autoConfirmCriteria` says (that option applies to the chosen test's criteria). The survey's hard
+deadline is `SURVEY_TIMEOUT_SECONDS` (default 180; page loading stops at 60% of it, each page gets at most 20 s); a
+run nobody chooses for is cancelled `SELECTION_EXPIRED` after `CONFIRMATION_TTL_HOURS`, and `AWAITING_SELECTION`
+counts towards `MAX_ACTIVE_RUNS_PER_TENANT`. The fake engine suggests three fixed demo-shop tests, so the compose
+demo supports the flow without a key.
+
 ## Run everything with Docker
 
 Requires Docker Desktop. (`pnpm stack:up` needs Node ≥ 22.18; if Corepack fails with "Cannot find matching keyid", upgrade Node — e.g. `nvm install 22`.)
@@ -238,6 +258,7 @@ pnpm test:e2e:compose   # CI mode with the API and worker in the compose contain
 pnpm typecheck
 pnpm eval requirement-compiler   # needs the provider's key; scores a suite against the real model
 pnpm eval planner                # same, for the planner prompt
+pnpm eval survey                 # same, for the survey's test suggestions
 ```
 
 The live commands, the gate and the evals run on Gemini with `LLM_PROVIDER=gemini` and `GEMINI_API_KEY`; with
@@ -271,7 +292,7 @@ packages/storage             artifact storage (local, S3)
 packages/event-bus           event publisher, Redis fan-out, queue names
 packages/llm                 provider-neutral LLM client (redaction, retries, LlmCall records, reasoning level), Anthropic and Gemini adapters, the model catalog
 packages/stagehand-adapter    Stagehand v4 explorer, ClientLLM bridge, the runtime extension (Task 14)
-packages/testing-engine       orchestrator + engine stages: requirement compiler, planner, exploration, verifier (Tasks 10-15), test compiler, Playwright rerun + evidence, reconciliation + report (Tasks 16-18)
+packages/testing-engine       orchestrator + engine stages: requirement compiler, planner, exploration, verifier (Tasks 10-15), test compiler, Playwright rerun + evidence, reconciliation + report (Tasks 16-18), survey (suggested tests for a blank requirement)
 evals                         `pnpm eval <suite>` harness and cases; BASELINE.md records scores
 tests/integration             real-Chromium/sandbox/Stagehand-adapter tests + the `@live` Stagehand smoke test
 tests/e2e                     end-to-end acceptance suite (Task 21): specs, scripted explorer, scripted model, stack harness
@@ -329,6 +350,8 @@ worker must share the `LLM_*` variables (see [`docs/operations.md`](docs/operati
   - **The API depends on `@platform/testing-engine`, through its `./reporting` subpath only** (Rulings R36, R43), so the report route reuses the worker's pure report assembler without loading Stagehand. The rerun's per-criterion outcomes are persisted in the `playwright.completed` event (`perCriterion`) rather than in new columns; partial reports read them from there.
   - **Unbuilt image:** `infra/runner/Dockerfile` (the runner base image) has not been built or run. The root `Dockerfile`'s worker target (`RUNNER_WORKSPACE_DIR`, `procps`) is built and runs the E2E suite (`pnpm test:e2e:compose`).
 - **Criteria review edits checks, not wording** (spec `docs/superpowers/specs/2026-09-26-criteria-check-edit-design.md`; supersedes Milestone D's Ruling R55 and plan Task 11's statement-text edits). A criterion's wording can no longer be changed on its own: the verifier judges the check, so wording edits could make a report show a result next to text it was never judged against.
+- **A selection gate before D5's confirmation gate** (spec `docs/superpowers/specs/2026-09-28-suggest-tests-design.md`). A run created without a requirement has two lifecycle states before `ANALYZING_REQUIREMENT` (plan Section 2.1): `SURVEYING` (a worker holds it; heartbeat) and `AWAITING_SELECTION` (held by nobody, like `AWAITING_CONFIRMATION`). The chosen suggestion is written into the stored request (`request_json.requirement`) at selection, so the requirement is no longer fixed from creation for those runs.
+- **The survey is the only stage that browses before criteria exist.** It is read-only by construction: platform code loads pages by URL in the run's sandbox and never clicks, types or submits; destructive-looking and sign-out links are never followed. Page content still reaches the model in the suggestion call; suggestions are only text a person reads and picks, and the chosen test keeps every existing guard (criteria review, planner blocking, the executor's element check, the egress proxy).
 - **Milestone E (Tasks 21–22):**
   - **The E2E suite runs on Vitest** (`pnpm test:e2e` → project `e2e`), not `playwright test`: it drives the HTTP API and inspects the database, logs, processes and metrics, never a browser of its own.
   - **The API and worker run as local processes by default**; `pnpm test:e2e:compose` (`E2E_PLATFORM=compose`) runs the same suite with them as containers of the compose `api` and `worker` services (images built from the checkout, the worker's seccomp profile applied), which reach the in-process demo shop as `host.docker.internal` (Docker Desktop).
