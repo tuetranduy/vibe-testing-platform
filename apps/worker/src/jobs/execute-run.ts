@@ -29,7 +29,7 @@ export async function executeRunJob(deps: WorkerDeps, runId: string): Promise<vo
       return;
     }
     try {
-      const { verdict } = await runExecution(handle.ctx, handle.ports, deps.stages);
+      const { verdict } = await runExecution(handle.ctx, handle.ports, deps.engines.for(handle.choice));
       deps.logger.info({ runId, verdict }, "run completed");
     } catch (err) {
       await failRun(deps, handle, err);

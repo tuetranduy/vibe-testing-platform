@@ -9,8 +9,8 @@ metrics and alerts, logs, retention, and the release checks.
 |---|---|---|
 | `web` (Next.js) | `api` only, over `API_URL`, with the API token added server-side | 3000 |
 | `api` (Fastify) | PostgreSQL, Redis, S3 | 3001: `/healthz`, `/metrics`, `/v1/*` |
-| `worker` × N | PostgreSQL, Redis, S3, the LLM provider; runs each run's sandboxed Chromium and Playwright runner as child processes | 9464: `/metrics` (`WORKER_METRICS_PORT`, `0` disables it) |
-| PostgreSQL | — | runs, events, criteria, results, artifacts metadata, encrypted secrets |
+| `worker` × N | PostgreSQL, Redis, S3, the model providers (Anthropic, Gemini); runs each run's sandboxed Chromium and Playwright runner as child processes | 9464: `/metrics` (`WORKER_METRICS_PORT`, `0` disables it) |
+| PostgreSQL | — | runs, events, criteria, results, artifacts metadata, encrypted run secrets, and the model settings: default model and the provider API keys saved in Settings (encrypted, long-lived) |
 | Redis | — | BullMQ queues `runs`, `maintenance` (reaper) and `retention`; pub/sub for live events and cancel signals |
 | S3-compatible storage | — | screenshots, traces, videos (compose uses rclone's S3 server; any S3 store works) |
 
@@ -23,6 +23,12 @@ Retention has its own queue, so a slow artifact store never delays the reaper.
 The API and the worker port 9464 must stay on a private network. `/metrics` and `/healthz` are unauthenticated,
 and the web app's proxy never forwards either.
 
+Give the API and every worker the same `LLM_*` variables and provider keys (compose's `x-app-env` does). The API
+decides from them which model a new test uses and whether its provider has a key; the worker then builds that
+run's model client from the key saved in Settings or its own environment key. If they differ, a test can be
+accepted and then end `ERRORED / MODEL_PROVIDER` ("No API key for Anthropic: add one in Settings"). Keys saved in
+Settings avoid the question: both read them from the database.
+
 ## Worker network policy
 
 Browsers reach targets only through the per-run egress proxy: exploration's Chromium runs with
@@ -33,11 +39,13 @@ guard also keeps top-level navigation on the target's hosts.
 
 Enforce the same boundary in the network (defense in depth — it catches anything that bypasses the proxy):
 
-- **Allow** the worker to reach: its PostgreSQL, Redis and S3 endpoints; the LLM provider (`api.anthropic.com:443`,
-  or `generativelanguage.googleapis.com:443` with `LLM_PROVIDER=gemini`); DNS; and public internet on TCP 80/443 for
-  targets.
-- With `LLM_PROVIDER=gemini`, use a `GEMINI_API_KEY` from a billing-enabled Google project: on the Gemini API's free
-  tier, Google may use prompts and responses (here: redacted page content and screenshots) to improve its products.
+- **Allow** the worker to reach: its PostgreSQL, Redis and S3 endpoints; the model providers its tests use
+  (`api.anthropic.com:443` for Claude models, `generativelanguage.googleapis.com:443` for Gemini models — each test
+  picks its model in Settings or the new-test form, so allow both unless one provider is never used); DNS; and
+  public internet on TCP 80/443 for targets.
+- For Gemini models, use an API key (Settings or `GEMINI_API_KEY`) from a billing-enabled Google project: on the
+  Gemini API's free tier, Google may use prompts and responses (here: redacted page content and screenshots) to
+  improve its products.
 - **Deny**: cloud metadata (`169.254.169.254/32`, `fd00:ec2::254/128`), RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`,
   `192.168.0.0/16`), CGNAT (`100.64.0.0/10`), link-local and ULA ranges (`169.254.0.0/16`, `fe80::/10`, `fc00::/7`),
   and every other internal service, including databases other than the worker's own.
@@ -65,11 +73,19 @@ behind. There is no key id, so rotation is a drain, not a re-encryption:
    ```
 
 3. Deploy the new key to the API **and** every worker at the same time.
-4. Reopen.
+4. Enter again every provider key saved in Settings → AI providers ("Save key"). Keys that come from the
+   environment (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) need nothing.
+5. Reopen.
 
 A run still pending with secrets encrypted under the old key ends `ERRORED` ("Run could not be started by the
 worker") when a worker with the new key picks it up. It never runs with a wrong secret. Keep the key in a secret
 manager, never in compose files or images.
+
+Provider API keys saved in Settings are encrypted with the same key but are long-lived, so a drain does not clear
+them. Until one is entered again, every test on that provider ends `ERRORED / MODEL_PROVIDER` with "The saved
+Anthropic key can't be read (was SECRETS_ENCRYPTION_KEY rotated?): enter it again in Settings" (Gemini: "Google
+Gemini"), even when the environment also holds a key for it: a saved key takes precedence, so remove it in
+Settings to fall back to the environment's.
 
 ## Metrics
 

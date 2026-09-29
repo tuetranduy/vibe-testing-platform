@@ -26,7 +26,7 @@ export async function analyzeRunJob(deps: WorkerDeps, runId: string): Promise<vo
       return;
     }
     try {
-      await runAnalysis(handle.ctx, handle.ports, deps.stages);
+      await runAnalysis(handle.ctx, handle.ports, deps.engines.for(handle.choice));
     } catch (err) {
       await failRun(deps, handle, err);
     } finally {

@@ -1,4 +1,4 @@
-import type { FactValue, RunLifecycle, StoredTestRunRequest, TestEvent } from "@platform/contracts";
+import type { FactValue, LlmChoice, RunLifecycle, StoredTestRunRequest, TestEvent } from "@platform/contracts";
 import { EventRepository, RequirementRepository, RunRepository, SecretRepository, type TestRun } from "@platform/db";
 import { TEST_TENANT_ID, createTestDatabase, type TestDatabase } from "@platform/db/testing";
 import { runCancelChannel, type RunQueue } from "@platform/event-bus";
@@ -16,6 +16,8 @@ import { Redis } from "ioredis";
 import type { Page } from "playwright-core";
 import { CancelWatcher } from "./cancel-watcher";
 import { silentLogger, type WorkerDeps } from "./deps";
+import type { Engines } from "./engine";
+import type { RunLlmFactory } from "./run-llm";
 
 export const SECRETS_KEY = Buffer.alloc(32, 5);
 // A dedicated logical DB by default: tests never touch DB 0, where a developer's worker takes jobs.
@@ -41,10 +43,20 @@ export class FakeQueue implements RunQueue {
   async close() {}
 }
 
+/** Engines that give every run `stages`, whatever its model choice (most tests exercise one engine). */
+export function onlyEngine(stages: EngineStages): Engines {
+  return { fake: stages, real: stages, for: () => stages };
+}
+
+/** The fake engine's choice, with no model client, for every run. */
+export const FAKE_CHOICE: LlmChoice = { provider: "fake", model: "fake", reasoning: "default" };
+export const noRunLlm: RunLlmFactory = { forRun: async () => ({ choice: FAKE_CHOICE, llm: null }) };
+
 export interface WorkerHarness {
   tdb: TestDatabase;
   redis: Redis;
   queue: FakeQueue;
+  /** Every run on `stages` with no model client, unless `overrides` sets `engines` / `runLlm`. */
   deps(stages: EngineStages, overrides?: Partial<WorkerDeps>): WorkerDeps;
   close(): Promise<void>;
 }
@@ -74,7 +86,8 @@ export async function createHarness(): Promise<WorkerHarness> {
       redis,
       cancelWatcher: watcher,
       queue,
-      stages,
+      engines: onlyEngine(stages),
+      runLlm: noRunLlm,
       logger: silentLogger,
       ...overrides,
     }),
@@ -110,14 +123,20 @@ export function request(overrides: Partial<StoredTestRunRequest["options"]> = {}
 /** Creates a run and walks it to `lifecycle` (PLANNING includes a confirmed requirement). */
 export async function seedRun(
   h: WorkerHarness,
-  opts: { lifecycle?: RunLifecycle; options?: Partial<StoredTestRunRequest["options"]>; secrets?: Record<string, string> } = {},
+  opts: {
+    lifecycle?: RunLifecycle;
+    options?: Partial<StoredTestRunRequest["options"]>;
+    secrets?: Record<string, string>;
+    /** The run's recorded model choice; unset, a run created before model choice (the environment's). */
+    llm?: LlmChoice;
+  } = {},
 ): Promise<TestRun> {
   const runs = new RunRepository(h.tdb.db);
   const secrets = opts.secrets ?? {};
   const run = await runs.create({
     tenantId: TEST_TENANT_ID,
     targetUrl: "https://shop.example.com",
-    request: request(opts.options, Object.keys(secrets)),
+    request: { ...request(opts.options, Object.keys(secrets)), ...(opts.llm ? { llm: opts.llm } : {}) },
   });
   await new SecretRepository(h.tdb.db).insertMany(
     run.id,

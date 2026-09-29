@@ -8,21 +8,24 @@ import {
   ExplorationStepRepository,
   GeneratedTestRepository,
   LlmCallRepository,
+  LlmSettingsRepository,
   ObservedFactRepository,
   PlanRepository,
   RequirementRepository,
   ResultRepository,
   RunRepository,
 } from "@platform/db";
-import { FakeTransport } from "@platform/llm";
+import { TEST_TENANT_ID } from "@platform/db/testing";
+import { FakeTransport, type LlmTransport } from "@platform/llm";
 import { createLocalStorage } from "@platform/storage";
 import type { RunnerProcessInput, SpawnRunner } from "@platform/testing-engine";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { silentLogger } from "./deps";
-import { createEngine } from "./engine";
+import { createEngines, type EngineDeps } from "./engine";
 import { analyzeRunJob } from "./jobs/analyze-run";
 import { executeRunJob } from "./jobs/execute-run";
-import { createHarness, eventsOf, fakeExploration, seedRun, type WorkerHarness } from "./test-support";
+import { createRunLlmFactory, type RunLlmEnv } from "./run-llm";
+import { SECRETS_KEY, createHarness, eventsOf, fakeExploration, seedRun, type WorkerHarness } from "./test-support";
 
 let h: WorkerHarness;
 let artifactDir: string;
@@ -87,6 +90,16 @@ const realDeps = (
   };
 };
 
+/**
+ * The worker as boot.ts wires it: both engines, and each run's model client from its choice (runs seeded
+ * without one use `env`'s) on the scripted `transport`.
+ */
+function wire(env: RunLlmEnv, { transport, ...deps }: EngineDeps & { transport?: LlmTransport }) {
+  const engines = createEngines({}, deps);
+  const runLlm = createRunLlmFactory({ db: h.tdb.db, secretsKey: SECRETS_KEY, env, logger: deps.logger, ...(transport ? { transport } : {}) });
+  return { engines, deps: () => h.deps(engines.real, { engines, runLlm }) };
+}
+
 const compiled = {
   criteria: [
     {
@@ -135,21 +148,20 @@ const planned = {
 /** The report's diagnostics reply (Task 18): nothing to add. */
 const noDiagnostics = { json: { findings: [], notes: [] } };
 
-describe("createEngine (Ruling R7)", () => {
-  it("LLM_PROVIDER=fake keeps the full fake engine", async () => {
-    const engine = createEngine({ LLM_PROVIDER: "fake", LLM_MODEL: "claude-sonnet-5" }, { db: h.tdb.db, logger: silentLogger });
-    expect(engine.kind).toBe("fake");
-    expect(engine.llm).toBeNull();
+describe("createEngines (Ruling R7: both engines, chosen per run)", () => {
+  it("a run whose choice is the fake engine runs the fake stages; any other choice, the real ones", () => {
+    const { engines } = wire(REAL, realDeps(new FakeTransport()).deps);
+    expect(engines.fake).not.toBe(engines.real);
+    expect(engines.for({ provider: "fake", model: "fake", reasoning: "default" })).toBe(engines.fake);
+    expect(engines.for({ provider: "anthropic", model: "claude-sonnet-5", reasoning: "high" })).toBe(engines.real);
+    expect(engines.for({ provider: "gemini", model: "gemini-3.8-flash", reasoning: "default" })).toBe(engines.real);
   });
 
-  it("LLM_PROVIDER=fake persists its generated test, so the run's report can show it", async () => {
-    const engine = createEngine(
-      { LLM_PROVIDER: "fake", LLM_MODEL: "claude-sonnet-5" },
-      { db: h.tdb.db, logger: silentLogger, fake: { stepDelayMs: 0, explorationSteps: 4 } },
-    );
+  it("LLM_PROVIDER=fake: a run without a model choice runs the fake engine, which persists its generated test for the report", async () => {
+    const engine = wire({ LLM_PROVIDER: "fake", LLM_MODEL: "claude-sonnet-5" }, realDeps(new FakeTransport(), { fake: { stepDelayMs: 0, explorationSteps: 4 } }).deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
-    await executeRunJob(h.deps(engine.stages), run.id);
+    await executeRunJob(engine.deps(), run.id);
 
     expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("COMPLETED");
     const stored = await new GeneratedTestRepository(h.tdb.db).findByRun(run.id);
@@ -157,64 +169,43 @@ describe("createEngine (Ruling R7)", () => {
     expect(stored!.source).toContain("@playwright/test");
     const generated = (await eventsOf(h, run.id)).find((e) => e.type === "test.generated")!;
     expect(generated.payload).toMatchObject({ compiledCriteria: stored!.compiledCriteria });
+    expect(await new LlmCallRepository(h.tdb.db).listByRun(run.id)).toEqual([]);
   });
 
-  it("LLM_PROVIDER=openai fails fast at startup", () => {
-    expect(() =>
-      createEngine({ LLM_PROVIDER: "openai", LLM_MODEL: "gpt-x", OPENAI_API_KEY: "k" }, { db: h.tdb.db, logger: silentLogger }),
-    ).toThrow(/not implemented in V1/);
+  it("each run uses its own choice: a fake-engine run and a Claude Opus run side by side, on the Opus model and level", async () => {
+    const transport = new FakeTransport().enqueue({ json: planned }, noDiagnostics);
+    const engine = wire(REAL, realDeps(transport, { fake: { stepDelayMs: 0, explorationSteps: 2 } }).deps);
+    const fakeRun = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, llm: { provider: "fake", model: "fake", reasoning: "default" } });
+    const opusRun = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, llm: { provider: "anthropic", model: "claude-opus-5-5", reasoning: "low" } });
+
+    await executeRunJob(engine.deps(), fakeRun.id);
+    await executeRunJob(engine.deps(), opusRun.id);
+
+    expect(await new LlmCallRepository(h.tdb.db).listByRun(fakeRun.id)).toEqual([]);
+    expect((await new LlmCallRepository(h.tdb.db).listByRun(opusRun.id))[0]).toMatchObject({ stage: "PLANNING", model: "claude-opus-5-5" });
+    expect(transport.requests[0]).toMatchObject({ model: "claude-opus-5-5", reasoning: "low" });
   });
 
-  it("LLM_PROVIDER=gemini runs the real engine on Gemini with the configured key, model and thinking level", async () => {
-    const sent: { url: string; headers: Headers; body: { generationConfig: Record<string, unknown> } }[] = [];
-    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
-      sent.push({ url: String(url), headers: new Headers(init.headers), body: JSON.parse(String(init.body)) });
-      const reply = {
-        candidates: [{ content: { parts: [{ text: '{"ok":true}' }], role: "model" }, finishReason: "STOP", index: 0 }],
-        usageMetadata: { promptTokenCount: 1000, candidatesTokenCount: 100, thoughtsTokenCount: 300, totalTokenCount: 1400 },
-        modelVersion: "gemini-3.5-flash-lite",
-      };
-      return new Response(JSON.stringify(reply), { status: 200, headers: { "content-type": "application/json" } });
-    });
-    try {
-      const engine = createEngine(
-        { LLM_PROVIDER: "gemini", LLM_MODEL: "gemini-3.5-flash-lite", GEMINI_API_KEY: "gm-test", GEMINI_THINKING_LEVEL: "low" },
-        { db: h.tdb.db, logger: silentLogger, storage: createLocalStorage({ rootDir: artifactDir }) },
-      );
-      expect(engine.kind).toBe("real");
-      const run = await seedRun(h);
+  it("a run without a recorded choice (created before model choice) runs on the environment's model, never the defaults saved in Settings", async () => {
+    await new LlmSettingsRepository(h.tdb.db).upsertDefaults(TEST_TENANT_ID, { model: "claude-opus-5-5", reasoning: "high" });
+    const transport = new FakeTransport().enqueue({ json: planned }, noDiagnostics);
+    const engine = wire(REAL, realDeps(transport).deps);
+    const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
-      await engine.llm!.generateJson({
-        system: "",
-        messages: [{ role: "user", content: "ping" }],
-        jsonSchema: { type: "object" },
-        stage: "PLANNING",
-        runId: run.id,
-        signal: new AbortController().signal,
-        redact: (v) => v,
-      });
+    await executeRunJob(engine.deps(), run.id);
 
-      expect(sent).toHaveLength(1);
-      expect(sent[0]!.url).toMatch(/\/models\/gemini-3\.5-flash-lite:generateContent$/);
-      expect(sent[0]!.headers.get("x-goog-api-key")).toBe("gm-test");
-      expect(sent[0]!.body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "LOW" });
-      // Thinking tokens are priced as output: 1000 × $0.30 + 400 × $2.50 per MTok (a model with no
-      // announced price change, so the expectation holds on any date).
-      expect(await new LlmCallRepository(h.tdb.db).listByRun(run.id)).toMatchObject([
-        { stage: "PLANNING", provider: "gemini", model: "gemini-3.5-flash-lite", inputTokens: 1000, outputTokens: 400, estimatedCostUsd: 0.0013, status: "SUCCESS" },
-      ]);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    const calls = await new LlmCallRepository(h.tdb.db).listByRun(run.id);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(new Set(calls.map((c) => c.model))).toEqual(new Set(["claude-sonnet-5"]));
+    expect(transport.requests.every((r) => r.reasoning === "default")).toBe(true);
   });
 
   it("a real provider compiles criteria with the LLM, persists revision 1, and records llm_calls rows", async () => {
     const transport = new FakeTransport().enqueue({ json: compiled, usage: { inputTokens: 1200, outputTokens: 300 } });
-    const engine = createEngine(REAL, realDeps(transport).deps);
-    expect(engine.kind).toBe("real");
+    const engine = wire(REAL, realDeps(transport).deps);
     const run = await seedRun(h, { secrets: { password: "pw-Top-Secret-123" } });
 
-    await analyzeRunJob(h.deps(engine.stages), run.id);
+    await analyzeRunJob(engine.deps(), run.id);
 
     expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("AWAITING_CONFIRMATION");
     const req = await new RequirementRepository(h.tdb.db).getLatest(run.id);
@@ -243,10 +234,10 @@ describe("createEngine (Ruling R7)", () => {
 
   it("real engine plans with the LLM: plan persisted, plan.created published, PLANNING llm_calls row, no secret sent", async () => {
     const transport = new FakeTransport().enqueue({ json: planned, usage: { inputTokens: 2000, outputTokens: 500 } }, noDiagnostics);
-    const engine = createEngine(REAL, realDeps(transport).deps);
+    const engine = wire(REAL, realDeps(transport).deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, secrets: { password: "pw-Plan-Secret-456" } });
 
-    await executeRunJob(h.deps(engine.stages), run.id);
+    await executeRunJob(engine.deps(), run.id);
 
     const plan = (await new PlanRepository(h.tdb.db).find(run.id))!;
     expect(plan.scenarios[0]!.criterionIds).toEqual(["AC-1", "AC-2"]);
@@ -280,10 +271,10 @@ describe("createEngine (Ruling R7)", () => {
       },
     };
     const real = realDeps(new FakeTransport().enqueue({ json: planned }, noDiagnostics), {}, page);
-    const engine = createEngine(REAL, real.deps);
+    const engine = wire(REAL, real.deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
-    await executeRunJob(h.deps(engine.stages), run.id);
+    await executeRunJob(engine.deps(), run.id);
 
     const test = (await new GeneratedTestRepository(h.tdb.db).findByRun(run.id))!;
     expect(test.id).toMatch(/^gt_/);
@@ -312,16 +303,12 @@ describe("createEngine (Ruling R7)", () => {
     expect((await new RunRepository(h.tdb.db).findById(run.id))!.lifecycle).toBe("COMPLETED");
   });
 
-  it("the real engine needs artifact storage (fails fast at startup)", () => {
-    expect(() => createEngine(REAL, { db: h.tdb.db, logger: silentLogger, transport: new FakeTransport() })).toThrow(/artifact storage/);
-  });
-
   it("real engine explores (Task 14): steps, facts and screenshots persisted; sandbox and session released", async () => {
     const { deps, exploration } = realDeps(new FakeTransport().enqueue({ json: planned }));
-    const engine = createEngine(REAL, deps);
+    const engine = wire(REAL, deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, secrets: { password: "pw-Explore-789" } });
 
-    await executeRunJob(h.deps(engine.stages), run.id);
+    await executeRunJob(engine.deps(), run.id);
 
     expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("COMPLETED");
     const steps = await new ExplorationStepRepository(h.tdb.db).listByRun(run.id);
@@ -360,10 +347,10 @@ describe("createEngine (Ruling R7)", () => {
         throw new Error(stderr);
       },
     };
-    const engine = createEngine(REAL, deps);
+    const engine = wire(REAL, deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
-    await executeRunJob(h.deps(engine.stages), run.id);
+    await executeRunJob(engine.deps(), run.id);
 
     const after = await new RunRepository(h.tdb.db).getById(run.id);
     expect([after.lifecycle, after.errorCategory, after.errorMessage]).toEqual(["ERRORED", "BROWSER_PROVIDER", "Browser sandbox failed to start"]);
@@ -382,10 +369,10 @@ describe("createEngine (Ruling R7)", () => {
     const logger = { info: at("info"), warn: at("warn"), error: at("error") };
     const real = realDeps(new FakeTransport().enqueue({ json: planned }, noDiagnostics), { logger }, page);
     const nodeModulesDir = path.join(artifactDir, "no-runner-node-modules");
-    const engine = createEngine(REAL, { ...real.deps, rerun: { spawn: real.rerunSpawn, workspace: { baseDir: real.rerunDir, nodeModulesDir } } });
+    const engine = wire(REAL, { ...real.deps, rerun: { spawn: real.rerunSpawn, workspace: { baseDir: real.rerunDir, nodeModulesDir } } });
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
-    await executeRunJob(h.deps(engine.stages), run.id);
+    await executeRunJob(engine.deps(), run.id);
 
     expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("COMPLETED");
     expect(real.rerunSpawn.calls).toEqual([]);
@@ -399,10 +386,10 @@ describe("createEngine (Ruling R7)", () => {
 
   it("real engine verifies from recorded facts: nothing observed → INCONCLUSIVE / FACT_NOT_OBSERVED (a fallback set to PASS has no say)", async () => {
     // The fake page shows nothing (extract answers null): no criterion can be decided.
-    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), { fake: { provisionalStatus: "PASS" } }).deps);
+    const engine = wire(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), { fake: { provisionalStatus: "PASS" } }).deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
-    await executeRunJob(h.deps(engine.stages), run.id);
+    await executeRunJob(engine.deps(), run.id);
 
     const after = await new RunRepository(h.tdb.db).getById(run.id);
     expect(after.lifecycle).toBe("COMPLETED");
@@ -421,10 +408,10 @@ describe("createEngine (Ruling R7)", () => {
         "cartItems@cart_page": { value: ["iPhone 17 Pro"], dom: false },
       },
     };
-    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }, noDiagnostics), {}, page).deps);
+    const engine = wire(REAL, realDeps(new FakeTransport().enqueue({ json: planned }, noDiagnostics), {}, page).deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
-    await executeRunJob(h.deps(engine.stages), run.id);
+    await executeRunJob(engine.deps(), run.id);
 
     const facts = await new ObservedFactRepository(h.tdb.db).listByRun(run.id);
     expect(facts.filter((f) => f.key !== "url").map((f) => [f.key, f.checkpoint, f.value, f.provenance])).toEqual(
@@ -483,10 +470,10 @@ describe("createEngine (Ruling R7)", () => {
         "cartItems@cart_page": { value: ["Apple iPhone 17 Pro"], dom: true },
       },
     };
-    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), {}, page).deps);
+    const engine = wire(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), {}, page).deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
-    await executeRunJob(h.deps(engine.stages), run.id);
+    await executeRunJob(engine.deps(), run.id);
 
     const after = await new RunRepository(h.tdb.db).getById(run.id);
     expect([after.lifecycle, after.verdict]).toEqual(["COMPLETED", "PASSED"]);
@@ -505,10 +492,10 @@ describe("createEngine (Ruling R7)", () => {
       },
     };
     const real = realDeps(new FakeTransport().enqueue({ json: planned }), {}, page);
-    const engine = createEngine(REAL, real.deps);
+    const engine = wire(REAL, real.deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600, rerunGeneratedTest: false } });
 
-    await executeRunJob(h.deps(engine.stages), run.id);
+    await executeRunJob(engine.deps(), run.id);
 
     expect(real.rerunSpawn.calls).toHaveLength(0);
     expect((await new RunRepository(h.tdb.db).getById(run.id)).verdict).toBe("PASSED");
@@ -526,10 +513,10 @@ describe("createEngine (Ruling R7)", () => {
     };
     const finding = { criterionId: "AC-1", summary: "The cart badge stayed at 1: the Add to cart click may not have registered." };
     const transport = new FakeTransport().enqueue({ json: planned }, { json: { findings: [finding], notes: [] }, usage: { inputTokens: 900, outputTokens: 60 } });
-    const engine = createEngine(REAL, realDeps(transport, {}, page, ["AC-1"]).deps);
+    const engine = wire(REAL, realDeps(transport, {}, page, ["AC-1"]).deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, secrets: { password: "pw-Report-Secret-1" } });
 
-    await executeRunJob(h.deps(engine.stages), run.id);
+    await executeRunJob(engine.deps(), run.id);
 
     expect((await new RunRepository(h.tdb.db).getById(run.id)).verdict).toBe("FAILED");
     const results = (await new ResultRepository(h.tdb.db).listByRun(run.id)) as CriterionResult[];
@@ -563,10 +550,10 @@ describe("createEngine (Ruling R7)", () => {
     const warnings: string[] = [];
     const logger = { ...silentLogger, warn: (_obj: object, msg?: string) => void warnings.push(msg ?? "") };
     // No diagnostics reply scripted: the provider call fails.
-    const engine = createEngine(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), { logger }, page, ["AC-1"]).deps);
+    const engine = wire(REAL, realDeps(new FakeTransport().enqueue({ json: planned }), { logger }, page, ["AC-1"]).deps);
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 } });
 
-    await executeRunJob(h.deps(engine.stages), run.id);
+    await executeRunJob(engine.deps(), run.id);
 
     const after = await new RunRepository(h.tdb.db).getById(run.id);
     expect([after.lifecycle, after.verdict]).toEqual(["COMPLETED", "FAILED"]);

@@ -1,4 +1,4 @@
-import { isTerminalLifecycle } from "@platform/contracts";
+import { isTerminalLifecycle, type LlmChoice } from "@platform/contracts";
 import {
   EventRepository,
   PlanRepository,
@@ -24,6 +24,8 @@ import { NO_VERDICT, observeStage } from "./metrics";
 export interface RunContextHandle {
   ctx: StageContext;
   ports: RunPorts;
+  /** The run's model choice: it picks the run's engine (`deps.engines.for(choice)`). */
+  choice: LlmChoice;
   /** Why the run signal fired, if it did. */
   abortReason(): unknown;
   /** Releases everything: cleanups (reverse order), heartbeat, cancel watch, deadline timer. */
@@ -39,6 +41,9 @@ export async function createRunContext(
   run: TestRun,
   opts: { deadlineAt: Date; totalBudgetMs: number },
 ): Promise<RunContextHandle> {
+  // The run's model client, from its recorded choice. A missing or unreadable provider key fails here, before
+  // anything starts: the job ends the run ERRORED / MODEL_PROVIDER with the message naming the fix (finish.ts).
+  const { choice, llm } = await deps.runLlm.forRun(run);
   const now = deps.now ?? (() => new Date());
   const runs = new RunRepository(deps.db);
   const controller = new AbortController();
@@ -101,8 +106,7 @@ export async function createRunContext(
     },
     budgetSignal: (ms) => AbortSignal.any([controller.signal, AbortSignal.timeout(Math.max(0, ms))]),
     now,
-    // The real engine's stages get the worker's start-up client (engine.ts) until clients are built per run.
-    llm: null,
+    llm,
   };
 
   const ports: RunPorts = {
@@ -143,6 +147,7 @@ export async function createRunContext(
   return {
     ctx,
     ports,
+    choice,
     abortReason: () => (controller.signal.aborted ? controller.signal.reason : undefined),
     async dispose() {
       if (disposed) return;
