@@ -70,7 +70,12 @@ function toRun(row: Row): TestRun {
   return { ...rest, request: requestJson as StoredTestRunRequest };
 }
 
-export function toRunSummary(run: TestRun): TestRunSummary {
+/**
+ * `modelLabel` names the run's model for display: the API passes the model catalog's labels (@platform/llm,
+ * which db does not depend on); by default, the model id.
+ */
+export function toRunSummary(run: TestRun, modelLabel: (model: string) => string = (model) => model): TestRunSummary {
+  const llm = run.request.llm;
   return {
     runId: run.id,
     lifecycle: run.lifecycle,
@@ -84,6 +89,7 @@ export function toRunSummary(run: TestRun): TestRunSummary {
     createdAt: run.createdAt.toISOString(),
     startedAt: run.startedAt?.toISOString() ?? null,
     finishedAt: run.finishedAt?.toISOString() ?? null,
+    llm: llm ? { provider: llm.provider, model: llm.model, label: modelLabel(llm.model), reasoning: llm.reasoning } : null,
   };
 }
 

@@ -38,6 +38,22 @@ describe("RunRepository", () => {
     expect(toRunSummary(run).requirementPreview).toContain("add a product");
   });
 
+  it("the summary carries the run's recorded model choice, labelled by the caller; null for runs created before model choice", async () => {
+    const chosen = await runs.create({
+      tenantId: TEST_TENANT_ID,
+      targetUrl: "https://shop.example.com",
+      request: storedRequest({ llm: { provider: "anthropic", model: "claude-opus-5-5", reasoning: "high" } }),
+    });
+    expect(toRunSummary(chosen, (model) => `label of ${model}`).llm).toEqual({
+      provider: "anthropic",
+      model: "claude-opus-5-5",
+      label: "label of claude-opus-5-5",
+      reasoning: "high",
+    });
+    expect(toRunSummary(chosen).llm?.label).toBe("claude-opus-5-5");
+    expect(toRunSummary(await create()).llm).toBeNull();
+  });
+
   it("resolves concurrent transitions by CAS: exactly one wins", async () => {
     const run = await create();
     const results = await Promise.allSettled([

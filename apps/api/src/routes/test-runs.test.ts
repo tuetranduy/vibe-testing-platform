@@ -1,12 +1,13 @@
 import { TestRunSummarySchema } from "@platform/contracts";
-import { EventRepository, RunRepository, SecretRepository, schema } from "@platform/db";
-import { OTHER_TENANT_ID } from "@platform/db/testing";
+import { EventRepository, LlmSettingsRepository, ProviderKeyRepository, RunRepository, SecretRepository, schema } from "@platform/db";
+import { OTHER_TENANT_ID, TEST_TENANT_ID } from "@platform/db/testing";
 import { runCancelChannel } from "@platform/event-bus";
-import { decryptSecret } from "@platform/security";
+import { decryptSecret, encryptProviderKey } from "@platform/security";
 import { eq } from "drizzle-orm";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { REDIS_URL, SECRETS_KEY, auth, createTestApi, validBody, type TestApi } from "../test-support";
+import type { ApiLlmConfig } from "../deps";
+import { FAKE_LLM, REDIS_URL, SECRETS_KEY, auth, createTestApi, validBody, type TestApi } from "../test-support";
 
 let t: TestApi;
 beforeAll(async () => {
@@ -16,6 +17,7 @@ afterAll(async () => t?.close());
 beforeEach(() => {
   t.queue.fail = false;
   t.deps.config.maxActiveRunsPerTenant = 100;
+  t.deps.config.llm = FAKE_LLM;
 });
 
 const post = (body: unknown, headers: Record<string, string> = {}) =>
@@ -190,6 +192,113 @@ describe("POST /v1/test-runs", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe("VALIDATION_FAILED");
     expect(res.json().issues.map((i: { path: unknown[] }) => i.path)).toContainEqual(["targetUrl"]);
+  });
+});
+
+describe("POST /v1/test-runs: the run's model (request → Settings → environment)", () => {
+  /** LLM_PROVIDER=anthropic with ANTHROPIC_API_KEY set, no Gemini key. */
+  const ANTHROPIC_ENV: ApiLlmConfig = {
+    envChoice: { provider: "anthropic", model: "claude-sonnet-5", reasoning: "default" },
+    envKeys: { anthropic: true, gemini: false },
+    fakeAllowed: true,
+  };
+  const saveGeminiKey = () =>
+    new ProviderKeyRepository(t.tdb.db).set(TEST_TENANT_ID, "gemini", encryptProviderKey("AIza-Test-Key", { tenantId: TEST_TENANT_ID, provider: "gemini" }, SECRETS_KEY));
+  const saveDefaults = (model: string, reasoning: "default" | "low" | "medium" | "high") =>
+    new LlmSettingsRepository(t.tdb.db).upsertDefaults(TEST_TENANT_ID, { model, reasoning });
+  const storedLlm = async (res: { json(): { runId: string } }) => (await new RunRepository(t.tdb.db).findById(res.json().runId))!.request.llm;
+  const active = () => new RunRepository(t.tdb.db).countActive(TEST_TENANT_ID);
+
+  beforeEach(async () => {
+    t.deps.config.llm = ANTHROPIC_ENV;
+    await t.tdb.db.delete(schema.llmProviderKeys);
+    await t.tdb.db.delete(schema.llmSettings);
+  });
+
+  it("nothing saved, nothing requested: the environment's choice is recorded", async () => {
+    const res = await post(validBody());
+    expect(res.statusCode).toBe(202);
+    expect(await storedLlm(res)).toEqual({ provider: "anthropic", model: "claude-sonnet-5", reasoning: "default" });
+  });
+
+  it("the saved defaults win over the environment; the request's reasoning alone overrides their level", async () => {
+    await saveDefaults("claude-opus-5-5", "medium");
+    expect(await storedLlm(await post(validBody()))).toEqual({ provider: "anthropic", model: "claude-opus-5-5", reasoning: "medium" });
+    expect(await storedLlm(await post(validBody({ llm: { reasoning: "high" } })))).toEqual({ provider: "anthropic", model: "claude-opus-5-5", reasoning: "high" });
+  });
+
+  it("the request's model wins over Settings (its provider's key saved in Settings), its level defaulting to default", async () => {
+    await saveDefaults("claude-opus-5-5", "medium");
+    await saveGeminiKey();
+    expect(await storedLlm(await post(validBody({ llm: { model: "gemini-3.8-flash", reasoning: "low" } })))).toEqual({
+      provider: "gemini",
+      model: "gemini-3.8-flash",
+      reasoning: "low",
+    });
+    expect(await storedLlm(await post(validBody({ llm: { model: "claude-haiku-4-5" } })))).toEqual({
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      reasoning: "default",
+    });
+  });
+
+  it.each([
+    ["a model whose provider has no key", { model: "gemini-3.8-flash" }, ["llm", "model"], "Add a Google Gemini API key in Settings"],
+    ["an unknown model", { model: "gpt-x" }, ["llm", "model"], "not a model offered here"],
+    ["a level the model does not take", { model: "claude-haiku-4-5", reasoning: "high" }, ["llm", "reasoning"], "not high"],
+  ])("refuses %s: 422 MODEL_NOT_AVAILABLE on the field, no run created", async (_what, llm, path, message) => {
+    const before = await active();
+    const res = await post(validBody({ llm }));
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toMatchObject({ code: "MODEL_NOT_AVAILABLE", issues: [{ path, message: expect.stringContaining(message) }] });
+    expect(await active()).toBe(before);
+  });
+
+  it("defaults whose provider has no key → 422 at [\"llm\"], naming the fix; also after the key behind saved defaults is removed", async () => {
+    t.deps.config.llm = { ...ANTHROPIC_ENV, envKeys: { anthropic: false, gemini: false } };
+    const env = await post(validBody());
+    expect(env.statusCode).toBe(422);
+    expect(env.json()).toMatchObject({ code: "MODEL_NOT_AVAILABLE", message: expect.stringContaining("Add an Anthropic API key in Settings"), issues: [{ path: ["llm"] }] });
+
+    t.deps.config.llm = ANTHROPIC_ENV;
+    await saveGeminiKey();
+    await saveDefaults("gemini-3.8-flash", "low");
+    expect((await post(validBody())).statusCode).toBe(202);
+    await new ProviderKeyRepository(t.tdb.db).remove(TEST_TENANT_ID, "gemini");
+    expect((await post(validBody())).json()).toMatchObject({ code: "MODEL_NOT_AVAILABLE", issues: [{ path: ["llm"], message: expect.stringContaining("Add a Google Gemini API key in Settings") }] });
+  });
+
+  it("the fake engine is refused in production", async () => {
+    t.deps.config.llm = { ...ANTHROPIC_ENV, fakeAllowed: false };
+    expect((await post(validBody({ llm: { model: "fake" } }))).statusCode).toBe(422);
+    t.deps.config.llm = ANTHROPIC_ENV;
+    expect(await storedLlm(await post(validBody({ llm: { model: "fake" } })))).toEqual({ provider: "fake", model: "fake", reasoning: "default" });
+  });
+
+  it("a retry with the same Idempotency-Key replays the original run even after Settings changed; the hash covers the override", async () => {
+    await saveGeminiKey();
+    const body = validBody({ llm: { model: "gemini-3.8-flash" } });
+    const first = await post(body, { "idempotency-key": "llm-retry-1" });
+    expect(first.statusCode).toBe(202);
+    await new ProviderKeyRepository(t.tdb.db).remove(TEST_TENANT_ID, "gemini");
+    const retry = await post(body, { "idempotency-key": "llm-retry-1" });
+    expect(retry.statusCode).toBe(202);
+    expect(retry.json().runId).toBe(first.json().runId);
+    expect((await post(validBody({ llm: { model: "claude-sonnet-5" } }), { "idempotency-key": "llm-retry-1" })).statusCode).toBe(409);
+    expect((await post(body, { "idempotency-key": "llm-retry-2" })).statusCode).toBe(422);
+  });
+
+  it("the summary names the run's model with its catalog label; a run created before model choice has none", async () => {
+    const res = await post(validBody({ llm: { model: "claude-opus-5-5", reasoning: "medium" } }));
+    const { runId } = res.json();
+    const summary = TestRunSummarySchema.parse((await t.app.inject({ method: "GET", url: `/v1/test-runs/${runId}`, headers: auth })).json());
+    expect(summary.llm).toEqual({ provider: "anthropic", model: "claude-opus-5-5", label: "Claude Opus 5.5", reasoning: "medium" });
+    const list = (await t.app.inject({ method: "GET", url: "/v1/test-runs?limit=100", headers: auth })).json();
+    expect(list.items.find((i: { runId: string }) => i.runId === runId).llm.label).toBe("Claude Opus 5.5");
+
+    const { llm: _none, ...older } = (await new RunRepository(t.tdb.db).findById(runId))!.request;
+    const old = await new RunRepository(t.tdb.db).create({ tenantId: TEST_TENANT_ID, targetUrl: "https://shop.example.com", request: older });
+    expect((await t.app.inject({ method: "GET", url: `/v1/test-runs/${old.id}`, headers: auth })).json().llm).toBeNull();
   });
 });
 

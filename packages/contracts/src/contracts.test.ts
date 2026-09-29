@@ -14,6 +14,7 @@ import {
   TestEventSchema,
   TestPlanSchema,
   TestReportSchema,
+  TestRunSummarySchema,
   isTerminalEvent,
   isTerminalLifecycle,
   type NormalizedRequirement,
@@ -110,6 +111,14 @@ describe("CreateTestRunRequestSchema", () => {
       CreateTestRunRequestSchema.parse({ ...baseReq, options: { allowDestructiveActions: true, rerunGeneratedTest: true } }).options
         .rerunGeneratedTest,
     ).toBe(true);
+  });
+
+  it("takes an optional model / reasoning override for this run (shape only: the API checks the catalog)", () => {
+    expect(CreateTestRunRequestSchema.parse(baseReq).llm).toBeUndefined();
+    expect(CreateTestRunRequestSchema.parse({ ...baseReq, llm: { model: "gemini-3.8-flash" } }).llm).toEqual({ model: "gemini-3.8-flash" });
+    expect(CreateTestRunRequestSchema.parse({ ...baseReq, llm: { reasoning: "high" } }).llm).toEqual({ reasoning: "high" });
+    expect(CreateTestRunRequestSchema.safeParse({ ...baseReq, llm: { model: "" } }).success).toBe(false);
+    expect(CreateTestRunRequestSchema.safeParse({ ...baseReq, llm: { reasoning: "extreme" } }).success).toBe(false);
   });
 
   it("rejects rerun without generation", () => {
@@ -319,6 +328,30 @@ describe("TestEventSchema", () => {
     expect(TEST_EVENT_TYPES).toHaveLength(19);
     expect(isTerminalEvent({ type: "run.completed" })).toBe(true);
     expect(isTerminalEvent({ type: "stage.completed" })).toBe(false);
+  });
+});
+
+describe("TestRunSummarySchema", () => {
+  const summary = {
+    runId: "run_1",
+    lifecycle: "QUEUED",
+    verdict: null,
+    errorCategory: null,
+    cancelReason: null,
+    targetUrl: "https://x.com",
+    environment: "staging",
+    allowDestructiveActions: false,
+    requirementPreview: "Test the login page",
+    createdAt: "2026-09-28T10:00:00.000Z",
+    startedAt: null,
+    finishedAt: null,
+  };
+
+  it("carries the run's model choice with its catalog label, or null for runs created before model choice", () => {
+    const llm = { provider: "anthropic", model: "claude-sonnet-5", label: "Claude Sonnet 5", reasoning: "medium" };
+    expect(TestRunSummarySchema.safeParse({ ...summary, llm }).success).toBe(true);
+    expect(TestRunSummarySchema.safeParse({ ...summary, llm: null }).success).toBe(true);
+    expect(TestRunSummarySchema.safeParse(summary).success).toBe(false);
   });
 });
 

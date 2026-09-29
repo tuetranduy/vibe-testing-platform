@@ -16,11 +16,14 @@ import {
   type TestRun,
 } from "@platform/db";
 import { createRunEventPublisher, type RunEventPublisher } from "@platform/event-bus";
+import { catalogModel } from "@platform/llm/catalog";
 import { createRunRedactor, encryptSecret, redactByKey, validateTargetUrl } from "@platform/security";
 import { createHmac } from "node:crypto";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 import { NO_VERDICT, observeStage } from "../metrics";
+import { resolveRunLlm } from "./llm-choice";
+import { LlmSettingsService, modelNotAvailable } from "./llm-settings-service";
 
 const ENQUEUE_FAILED = "Queue unavailable at creation";
 
@@ -35,6 +38,9 @@ function canonical(value: unknown): string {
   }
   return JSON.stringify(value);
 }
+
+/** The run summary, with the model named as the catalog names it (the id when not in the catalog). */
+const summaryOf = (run: TestRun): TestRunSummary => toRunSummary(run, (model) => catalogModel(model)?.label ?? model);
 
 function isUniqueViolation(err: unknown): boolean {
   let e: unknown = err;
@@ -91,13 +97,22 @@ export class TestRunService {
       ]);
     }
 
-    const { secrets, ...rest } = req;
+    // The run's model: the request's override, else the defaults saved in Settings, else the environment's.
+    // Checked here, so a run whose provider has no key (or whose model or level is not offered) is refused now
+    // instead of failing in the worker. Changing Settings later never changes this run's choice.
+    const { saved, availability } = await new LlmSettingsService(this.deps).state(tenantId);
+    const resolved = resolveRunLlm({ override: req.llm, saved, env: this.deps.config.llm.envChoice, availability });
+    if (!resolved.ok) throw modelNotAvailable(resolved.issue);
+
+    // `llm` is stored as the resolved choice, not the override the request sent.
+    const { secrets, llm: _override, ...rest } = req;
     const redact = createRunRedactor(Object.values(secrets));
     // Secret values can also appear in the requirement text or test data: redact them by key and
     // value before anything is persisted (D7). The worker only ever sees this redacted copy.
     const stored: StoredTestRunRequest = {
       ...(redact(rest) as typeof rest),
       secretNames: Object.keys(secrets).sort(),
+      llm: resolved.choice,
     };
     const publisher = this.publisher(redact);
     const runId = newId("run");
@@ -192,12 +207,12 @@ export class TestRunService {
   }
 
   async get(runId: string): Promise<TestRunSummary> {
-    return toRunSummary(await this.runs.getRequired(this.deps.config.defaultTenantId, runId));
+    return summaryOf(await this.runs.getRequired(this.deps.config.defaultTenantId, runId));
   }
 
   async list(limit: number, cursor: string | null): Promise<{ items: TestRunSummary[]; nextCursor: string | null }> {
     const page = await this.runs.list(this.deps.config.defaultTenantId, { limit, cursor });
-    return { items: page.items.map(toRunSummary), nextCursor: page.nextCursor };
+    return { items: page.items.map(summaryOf), nextCursor: page.nextCursor };
   }
 
   /**
@@ -227,7 +242,7 @@ export class TestRunService {
           message: "Run cancelled by user",
           payload: { reason: "USER_REQUESTED" },
         });
-        return toRunSummary(cancelled);
+        return summaryOf(cancelled);
       } catch (err) {
         if (!(err instanceof StaleTransitionError)) throw err;
         run = await this.runs.getRequired(tenantId, runId); // a worker picked it up; fall through
@@ -238,6 +253,6 @@ export class TestRunService {
     const marked = await this.runs.requestCancel(run.id, "USER_REQUESTED");
     if (!marked) throw new HttpError(409, "RUN_TERMINAL", "Run already finished");
     await this.deps.cancelSignal.send(run.id);
-    return toRunSummary(marked);
+    return summaryOf(marked);
   }
 }
