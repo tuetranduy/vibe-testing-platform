@@ -54,6 +54,15 @@ describe("RunRepository", () => {
     expect(toRunSummary(await create()).llm).toBeNull();
   });
 
+  it("finds runs awaiting a selection longer than a cutoff", async () => {
+    const run = await runs.create({ tenantId: TEST_TENANT_ID, targetUrl: "https://shop.example.com", request: storedRequest({ requirement: "" }) });
+    await runs.transition(run.id, "QUEUED", "SURVEYING", { heartbeatAt: new Date() });
+    await runs.transition(run.id, "SURVEYING", "AWAITING_SELECTION", { heartbeatAt: null });
+    expect((await runs.findAwaitingSelectionSince(new Date(Date.now() + 1000))).map((r) => r.id)).toContain(run.id);
+    expect((await runs.findAwaitingSelectionSince(new Date(Date.now() - 60_000))).map((r) => r.id)).not.toContain(run.id);
+    expect((await runs.findAwaitingConfirmationSince(new Date(Date.now() + 1000))).map((r) => r.id)).not.toContain(run.id);
+  });
+
   it("resolves concurrent transitions by CAS: exactly one wins", async () => {
     const run = await create();
     const results = await Promise.allSettled([

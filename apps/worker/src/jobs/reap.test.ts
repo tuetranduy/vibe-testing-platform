@@ -1,5 +1,6 @@
 import { RunRepository, SecretRepository } from "@platform/db";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { createWorkerMetrics } from "../metrics";
 import { createFakeStages, createHarness, eventsOf, seedRun, type WorkerHarness } from "../test-support";
 import { reapJob } from "./reap";
 
@@ -22,6 +23,36 @@ describe("reaper", () => {
     expect(after.errorCategory).toBe("WORKER_LOST");
     expect((await eventsOf(h, run.id)).at(-1)).toMatchObject({ type: "run.errored", payload: { category: "WORKER_LOST" } });
     expect(await new SecretRepository(h.tdb.db).listActive(run.id)).toHaveLength(0);
+  });
+
+  it("cancels runs awaiting a selection past the TTL: CANCELLED / SELECTION_EXPIRED, secrets purged, counted", async () => {
+    const run = await seedRun(h, { lifecycle: "AWAITING_SELECTION", requirement: "", secrets: { password: "pw-123456" } });
+    const metrics = createWorkerMetrics();
+    const r = await reapJob(h.deps(createFakeStages(), { metrics, now: () => new Date(Date.now() + 25 * 3_600_000) }));
+    expect(r.selectionExpired).toContain(run.id);
+    expect(r.confirmationExpired).not.toContain(run.id);
+    const after = await new RunRepository(h.tdb.db).getById(run.id);
+    expect(after.lifecycle).toBe("CANCELLED");
+    expect(after.cancelReason).toBe("SELECTION_EXPIRED");
+    expect((await eventsOf(h, run.id)).at(-1)).toMatchObject({ type: "run.cancelled", stage: "CANCELLED", payload: { reason: "SELECTION_EXPIRED" } });
+    expect(await new SecretRepository(h.tdb.db).listActive(run.id)).toHaveLength(0);
+    const reaped = await metrics.runsReaped.get();
+    expect(reaped.values.find((v) => v.labels.reason === "SELECTION_EXPIRED")?.value).toBe(1);
+  });
+
+  it("leaves a run that has been awaiting a selection for less than the TTL alone", async () => {
+    const run = await seedRun(h, { lifecycle: "AWAITING_SELECTION", requirement: "" });
+    const r = await reapJob(h.deps(createFakeStages()));
+    expect(r.selectionExpired).not.toContain(run.id);
+    expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("AWAITING_SELECTION");
+  });
+
+  it("a SURVEYING run whose heartbeat stopped ends ERRORED / WORKER_LOST", async () => {
+    const run = await seedRun(h, { lifecycle: "SURVEYING", requirement: "" });
+    await new RunRepository(h.tdb.db).heartbeat(run.id, minutesAgo(2));
+    const r = await reapJob(h.deps(createFakeStages()));
+    expect(r.workerLost).toContain(run.id);
+    expect(await new RunRepository(h.tdb.db).getById(run.id)).toMatchObject({ lifecycle: "ERRORED", errorCategory: "WORKER_LOST" });
   });
 
   it("cancels runs awaiting confirmation past the TTL", async () => {
