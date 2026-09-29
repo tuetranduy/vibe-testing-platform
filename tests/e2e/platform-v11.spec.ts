@@ -118,3 +118,27 @@ describe("V1.1 F8 — exploration cache", () => {
     expect(await store.rowsOf(off)).not.toMatch(/"cacheHit": ?true/);
   });
 });
+
+describe("V1.1 F9 — several scenarios", () => {
+  it("runs each scenario from a clean session and compiles one Playwright test per scenario", async () => {
+    // Scripted plan: SC-1 adds the iPhone to the cart; SC-2 starts as a new visitor (empty cart) and signs in.
+    if (stack.mode !== "ci") return;
+    const runId = await service.create({
+      targetUrl: `${stack.targetUrl}/`,
+      requirement: REQUIREMENTS.twoScenarios,
+      testData: { email: VALID_EMAIL },
+      secrets: { password: VALID_PASSWORD },
+      options: { autoConfirmCriteria: true },
+    });
+    expect(await service.finished(runId)).toMatchObject({ lifecycle: "COMPLETED", verdict: "PASSED" });
+    const report = await service.report(runId);
+    expect(report.criteria.map((c) => [c.criterionId, c.status, c.verdictSource])).toEqual([
+      ["AC-1", "PASS", "PLAYWRIGHT_RERUN"],
+      ["AC-2", "PASS", "PLAYWRIGHT_RERUN"],
+      ["AC-3", "PASS", "PLAYWRIGHT_RERUN"],
+    ]);
+    expect(report.generatedTest?.source.match(/^test\("scenario SC-\d"/gm)).toEqual(['test("scenario SC-1"', 'test("scenario SC-2"']);
+    const plan = (await store.events(runId)).find((e) => e.type === "plan.created");
+    expect(plan?.message).toMatch(/in 2 scenarios$/);
+  });
+});

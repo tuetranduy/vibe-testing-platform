@@ -19,6 +19,7 @@ export const REQUIREMENTS = {
   deletion: "Verify that account deletion works",
   dangerZone: "Log in and verify that the button in the danger zone shows a confirmation",
   probe: "Verify that the egress probe page shows its heading",
+  twoScenarios: "Verify that the cart shows the iPhone after adding it, and that a new visitor starts with an empty cart and can sign in to see the account email",
 } as const;
 
 /**
@@ -73,8 +74,8 @@ export interface Scenario {
   requirement: string;
   /** Requirement-compiler reply (criteria + facts). */
   compiled: { criteria: unknown[]; facts: unknown[] };
-  /** Planner reply. */
-  plan: { title: string; steps: unknown[]; stopConditions: string[] };
+  /** Planner reply: one scenario (wrapped by the scripted model) or several (V1.1 F9). */
+  plan: { title: string; steps: unknown[]; stopConditions: string[] } | { scenarios: { title: string; steps: unknown[] }[]; stopConditions: string[] };
 }
 
 const loginSteps = [
@@ -209,6 +210,63 @@ export const SCENARIOS: Scenario[] = [
     },
   },
 ];
+
+// Two scenarios (V1.1 F9): the second starts from a cleared session, so its cart is empty although the
+// first one added the iPhone.
+SCENARIOS.push({
+  requirement: REQUIREMENTS.twoScenarios,
+  compiled: {
+    criteria: [
+      criterion("the cart shows the iPhone after adding it", "The cart lists the iPhone", {
+        kind: "collection_contains",
+        collection: { key: "cartItems", checkpoint: "cart_page" },
+        item: "iPhone",
+        match: "contains",
+      }),
+      criterion("a new visitor starts with an empty cart", "A new visitor's cart badge shows 0", {
+        kind: "numeric_compare",
+        left: { key: "cartCount", checkpoint: "fresh_start" },
+        operator: "eq",
+        right: 0,
+      }),
+      criterion("sign in to see the account email", `The account page shows ${VALID_EMAIL}`, {
+        kind: "text_matches",
+        fact: { key: "accountEmail", checkpoint: "logged_in" },
+        match: { mode: "contains", value: VALID_EMAIL, caseSensitive: false },
+      }),
+    ],
+    facts: [
+      { key: "cartItems", checkpoint: "cart_page", description: "The products listed in the cart", valueType: "string_list" },
+      { key: "cartCount", checkpoint: "fresh_start", description: "The number on the cart badge", valueType: "number" },
+      { key: "accountEmail", checkpoint: "logged_in", description: "The signed-in email on the account page", valueType: "string" },
+    ],
+  },
+  plan: {
+    scenarios: [
+      {
+        title: "Add the iPhone to the cart",
+        steps: [
+          step("navigate", "Open the shop home page"),
+          step("search", "Search for iPhone in the product search field", { inputRef: { source: "literal", key: "iPhone" } }),
+          step("click", "Open the first search result", { criterionIds: ["AC-1"] }),
+          step("click", "Click the Add to cart button", { criterionIds: ["AC-1"] }),
+          step("navigate", "Open the cart page at /cart"),
+          step("capture_checkpoint", "Read the cart contents", { checkpoint: "cart_page" }),
+        ],
+      },
+      {
+        title: "A new visitor signs in",
+        steps: [
+          step("navigate", "Open the shop home page"),
+          step("capture_checkpoint", "Read the cart badge on arrival", { checkpoint: "fresh_start" }),
+          ...loginSteps,
+          step("capture_checkpoint", "Read the account page", { checkpoint: "logged_in", criterionIds: ["AC-3"] }),
+        ],
+      },
+    ],
+    stopConditions: [],
+  },
+});
 
 /** Where the demo shop shows what the scenarios' descriptions name (first matching rule wins). */
 export const DEMO_SHOP_SCRIPT: ExplorerScript = {

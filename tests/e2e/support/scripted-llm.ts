@@ -28,7 +28,11 @@ export class ScenarioTransport implements LlmTransport {
       const scenario = this.scenarios.find((s) => prompt.includes(s.requirement));
       if (!scenario) throw new Error(`scripted model: no scenario for this "${req.system.slice(0, 40)}…" prompt`);
       if (req.system === REQUIREMENT_SYSTEM_PROMPT) json = scenario.compiled;
-      else if (req.system === PLANNER_SYSTEM_PROMPT) json = scenario.plan;
+      else if (req.system === PLANNER_SYSTEM_PROMPT) {
+        // One-scenario fixtures are written as `{ title, steps }`; the planner's output has `scenarios` (V1.1 F9).
+        const plan = scenario.plan;
+        json = "scenarios" in plan ? plan : { scenarios: [{ title: plan.title, steps: plan.steps }], stopConditions: plan.stopConditions };
+      }
       else throw new Error("scripted model: unknown stage prompt");
     }
     return { text: JSON.stringify(json), model: req.model, usage: { inputTokens: Math.ceil(prompt.length / 4), outputTokens: 50 } };

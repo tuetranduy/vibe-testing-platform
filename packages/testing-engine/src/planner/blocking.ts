@@ -28,6 +28,8 @@ export interface BlockingInput {
   testDataKeys: string[];
   secretNames: string[];
   policy: ActionPolicy;
+  /** The id of the one-step fallback when the whole scenario is cut (plan-unique; default PS-1). */
+  fallbackStepId?: string;
 }
 
 export interface BlockingResult {
@@ -61,7 +63,7 @@ export function applyBlocking(input: BlockingInput): BlockingResult {
   }
 
   const kept = stop ? steps.slice(0, stop.index) : steps;
-  return { steps: kept.length > 0 ? kept : [openTarget(input.targetUrl)], blockedCriteria };
+  return { steps: kept.length > 0 ? kept : [openTarget(input.targetUrl, input.fallbackStepId ?? "PS-1")], blockedCriteria };
 }
 
 /**
@@ -123,6 +125,6 @@ function missingInput(
 }
 
 /** The whole scenario was cut: keep a valid one-step plan (every dependent criterion is blocked). */
-function openTarget(targetUrl: string): PlannedStep {
-  return { id: "PS-1", kind: "navigate", description: `Open ${targetUrl}`.slice(0, 500), criterionIds: [], destructive: false };
+function openTarget(targetUrl: string, id: string): PlannedStep {
+  return { id, kind: "navigate", description: `Open ${targetUrl}`.slice(0, 500), criterionIds: [], destructive: false };
 }

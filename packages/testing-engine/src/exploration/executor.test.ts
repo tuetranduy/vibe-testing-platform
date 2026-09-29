@@ -941,3 +941,79 @@ describe("exploration cache (V1.1 F8)", () => {
     expect(session.ops()).toContain("actOn");
   });
 });
+
+describe("several scenarios (V1.1 F9)", () => {
+  function twoScenarioPlan(first: PlannedStep[], second: PlannedStep[]): TestPlan {
+    let n = 0;
+    const ids = (steps: PlannedStep[]) => steps.map((s) => ({ ...s, id: `PS-${++n}` }));
+    return {
+      runId: "run_exec",
+      requirementRevision: 1,
+      scenarios: [
+        { id: "SC-1", title: "signed out", criterionIds: ["AC-1"], steps: ids(first) },
+        { id: "SC-2", title: "signed in", criterionIds: ["AC-2"], steps: ids(second) },
+      ],
+      blockedCriteria: [],
+      stopConditions: [],
+    };
+  }
+  const run = (plan: TestPlan, session: FakeSession, extra: { resetSession?: (page: unknown, url: string) => Promise<void>; max?: number } = {}) => {
+    const { ctx } = fakeCtx(extra.max ? { options: { maxExplorationSteps: extra.max } } : {});
+    const resets: string[] = [];
+    const resetSession = extra.resetSession ?? (async (_page: unknown, url: string) => void resets.push(url));
+    const outcome = runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, resetSession });
+    return { outcome, resets };
+  };
+
+  it("runs the scenarios in order, each from a cleared session at the target, and tags each step with its scenario", async () => {
+    const session = new FakeSession();
+    const { outcome, resets } = run(twoScenarioPlan([step("navigate", "Open the home page"), step("click", "Open the banner")], [step("navigate", "Open the home page"), step("click", "Open My orders")]), session);
+    const result = await outcome;
+    expect(resets).toEqual([TARGET]);
+    expect(session.calls.filter((c) => c.op === "navigate").map((c) => c.arg)).toEqual([TARGET, TARGET]);
+    expect(result.steps.map((s) => [s.scenarioId, s.kind, s.plannedStepId])).toEqual([
+      ["SC-1", "navigate", "PS-1"],
+      ["SC-1", "observe", "PS-2"],
+      ["SC-1", "act", "PS-2"],
+      ["SC-2", "navigate", "PS-3"],
+      ["SC-2", "observe", "PS-4"],
+      ["SC-2", "act", "PS-4"],
+    ]);
+    expect(result).toMatchObject({ stopReason: "COMPLETED", scenarioStops: { "SC-1": "COMPLETED", "SC-2": "COMPLETED" } });
+  });
+
+  it("a step that fails or is blocked ends only its own scenario", async () => {
+    const session = new FakeSession();
+    const blocked = step("click", "Click Delete account", { destructive: true });
+    const { outcome } = run(twoScenarioPlan([step("navigate", "Open the home page"), blocked], [step("navigate", "Open the home page"), step("click", "Open My orders")]), session);
+    const result = await outcome;
+    expect(result).toMatchObject({ stopReason: "BLOCKED_BY_POLICY", scenarioStops: { "SC-1": "BLOCKED_BY_POLICY", "SC-2": "COMPLETED" } });
+    expect(result.steps.filter((s) => s.scenarioId === "SC-2").map((s) => s.outcome)).toEqual(["SUCCESS", "SUCCESS", "SUCCESS"]);
+  });
+
+  it("the step limit ends exploration: later scenarios are not explored", async () => {
+    const session = new FakeSession();
+    const { outcome, resets } = run(twoScenarioPlan([step("navigate", "Open the home page"), step("click", "A"), step("click", "B")], [step("navigate", "Open the home page")]), session, { max: 3 });
+    const result = await outcome;
+    expect(result).toMatchObject({ stopReason: "STEP_LIMIT_REACHED", scenarioStops: { "SC-1": "STEP_LIMIT_REACHED", "SC-2": "STEP_LIMIT_REACHED" } });
+    expect(resets).toEqual([]);
+    expect(result.steps.every((s) => s.scenarioId === "SC-1")).toBe(true);
+  });
+
+  it("a session that cannot be cleared is the browser's failure, never a guess", async () => {
+    const session = new FakeSession();
+    const { outcome } = run(twoScenarioPlan([step("navigate", "Open the home page")], [step("navigate", "Open the home page")]), session, {
+      resetSession: async () => {
+        throw new Error("CDP gone");
+      },
+    });
+    await expect(outcome).rejects.toBeInstanceOf(BrowserProviderError);
+  });
+
+  it("a one-scenario plan records no scenario ids or scenario stops (unchanged)", async () => {
+    const { ctx } = fakeCtx();
+    const result = await runExploration(ctx, { plan: planOf(step("navigate", "Open")), requirement: requirementWith([]), session: new FakeSession(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(result.steps[0]).not.toHaveProperty("scenarioId");
+    expect(result).not.toHaveProperty("scenarioStops");
+  });
+});

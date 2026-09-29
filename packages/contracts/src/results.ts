@@ -54,6 +54,8 @@ export const ExplorationOutcomeSchema = z.object({
   steps: z.array(ExplorationStepSchema),
   facts: z.array(ObservedFactSchema),
   stopReason: ExplorationStopReasonSchema,
+  /** Each scenario's own stop reason (V1.1 F9); absent on outcomes before V1.1 (one scenario: `stopReason`). */
+  scenarioStops: z.record(z.string(), ExplorationStopReasonSchema).optional(),
 });
 export type ExplorationOutcome = z.infer<typeof ExplorationOutcomeSchema>;
 

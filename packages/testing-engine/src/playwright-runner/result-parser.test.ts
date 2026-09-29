@@ -161,9 +161,41 @@ describe("parseRunResults: outcomes keyed on the [AC-n] step title", () => {
   it.each([
     ["not JSON", "{"],
     ["wrong shape", JSON.stringify({ suites: "x" })],
-    ["more than one test", results().replace('"tests":[{', '"tests":[{"results":[],"status":"skipped"},{')],
   ])("unparseable results (%s) → RunResultsError", (_label, raw) => {
     expect(() => parse(raw)).toThrow(RunResultsError);
+  });
+});
+
+describe("parseRunResults with one test per scenario (V1.1 F9)", () => {
+  /** Two tests (scenarios) in one file: the second with its own steps, status and errors. */
+  function twoTests(first: Parameters<typeof results>[0], second: { status: string; steps: StepDraft[]; errors?: string[] }) {
+    const report = JSON.parse(results(first)) as { suites: { specs: unknown[] }[] };
+    const other = JSON.parse(results({ status: second.status, steps: second.steps, ...(second.errors ? { errors: second.errors } : {}) })) as { suites: { specs: unknown[] }[] };
+    report.suites[0]!.specs.push(other.suites[0]!.specs[0]);
+    return JSON.stringify(report);
+  }
+
+  it("reads every test's steps: a failure in one scenario never hides another's criteria", () => {
+    const parsed = parse(
+      twoTests(
+        { status: "failed", steps: [step("AC-1", "expect(locator).toBeVisible() failed")], errors: ["expect(locator).toBeVisible() failed"] },
+        { status: "passed", steps: [step("AC-2"), step("AC-3")] },
+      ),
+    );
+    expect(parsed.testStatus).toBe("failed");
+    expect(parsed.perCriterion).toEqual({ "AC-1": "ASSERTION_FAILED", "AC-2": "PASSED", "AC-3": "PASSED" });
+  });
+
+  it("a criterion no test reached is NOT_REACHED with the first stopping error; the worst status wins", () => {
+    const parsed = parse(
+      twoTests(
+        { status: "passed", steps: [step("AC-1")] },
+        { status: "failed", steps: [], errors: ["locator.click: Timeout 10000ms exceeded"] },
+      ),
+    );
+    expect(parsed.perCriterion).toEqual({ "AC-1": "PASSED", "AC-2": "NOT_REACHED", "AC-3": "NOT_REACHED" });
+    expect(parsed.errorText["AC-2"]).toBe("Not reached: locator.click: Timeout 10000ms exceeded");
+    expect(parsed.testStatus).toBe("failed");
   });
 });
 

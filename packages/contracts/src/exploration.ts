@@ -52,8 +52,13 @@ export const ExplorationStepSchema = z.object({
   durationMs: z.number().int().min(0),
   artifactIds: z.array(z.string()),
   llm: LlmStepUsageSchema.nullable(),
+  /** The scenario the step ran in (V1.1 F9); absent on steps recorded before V1.1: SC-1. */
+  scenarioId: z.string().regex(/^SC-[1-5]$/).optional(),
 });
 export type ExplorationStep = z.infer<typeof ExplorationStepSchema>;
+
+/** A step's scenario (SC-1 for steps recorded before V1.1). */
+export const stepScenario = (step: Pick<ExplorationStep, "scenarioId">): string => step.scenarioId ?? "SC-1";
 
 export const FactValueSchema = z.union([z.boolean(), z.number(), z.string(), z.array(z.string()), z.null()]);
 export type FactValue = z.infer<typeof FactValueSchema>;

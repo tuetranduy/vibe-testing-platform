@@ -169,12 +169,13 @@ export async function runExecution(ctx: StageContext, ports: RunPorts, stages: E
   await started(ports, "PLANNING");
   const plan = await guard(ctx, stages.plan(ctx, requirement));
   await ports.savePlan(plan);
-  const scenario = plan.scenarios[0]!;
+  const stepCount = plan.scenarios.reduce((n, s) => n + s.steps.length, 0);
+  const scenarios = plan.scenarios.length;
   await ports.publish({
     type: "plan.created",
-    message: `Plan created with ${scenario.steps.length} steps`,
+    message: `Plan created with ${stepCount} steps${scenarios > 1 ? ` in ${scenarios} scenarios` : ""}`,
     payload: {
-      stepCount: scenario.steps.length,
+      stepCount,
       blockedCriteria: plan.blockedCriteria.map((b) => ({ criterionId: b.criterionId, reason: b.reason })),
     },
   });

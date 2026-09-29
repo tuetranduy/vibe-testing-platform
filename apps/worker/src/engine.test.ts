@@ -131,16 +131,21 @@ const planStep = (kind: string, description: string, extra: Record<string, unkno
   destructive: false,
   ...extra,
 });
+/** The planner's reply: one scenario (V1.1 F9 shape). */
 const planned = {
-  title: "Add a product to the cart",
-  steps: [
-    planStep("navigate", "Open the shop home page"),
-    planStep("search", "Search for the product", { inputRef: { source: "literal", key: "iPhone 17 Pro" } }),
-    planStep("capture_checkpoint", "Capture the cart badge before adding", { checkpoint: "before_add" }),
-    planStep("click", "Click Add to cart", { criterionIds: ["AC-1"] }),
-    planStep("capture_checkpoint", "Capture the cart badge after adding", { checkpoint: "after_add" }),
-    planStep("click", "Open the cart"),
-    planStep("capture_checkpoint", "Capture the cart contents", { checkpoint: "cart_page" }),
+  scenarios: [
+    {
+      title: "Add a product to the cart",
+      steps: [
+        planStep("navigate", "Open the shop home page"),
+        planStep("search", "Search for the product", { inputRef: { source: "literal", key: "iPhone 17 Pro" } }),
+        planStep("capture_checkpoint", "Capture the cart badge before adding", { checkpoint: "before_add" }),
+        planStep("click", "Click Add to cart", { criterionIds: ["AC-1"] }),
+        planStep("capture_checkpoint", "Capture the cart badge after adding", { checkpoint: "after_add" }),
+        planStep("click", "Open the cart"),
+        planStep("capture_checkpoint", "Capture the cart contents", { checkpoint: "cart_page" }),
+      ],
+    },
   ],
   stopConditions: [],
 };

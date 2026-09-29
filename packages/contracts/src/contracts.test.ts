@@ -13,6 +13,8 @@ import {
   TEST_EVENT_TYPES,
   TestEventSchema,
   TestPlanSchema,
+  scenarioOfCriterion,
+  stepScenario,
   TestReportSchema,
   TestRunSummarySchema,
   isTerminalEvent,
@@ -488,5 +490,37 @@ describe("destructiveActionsAllowed", () => {
     ["production", true, "SHOP.example.com", true],
   ] as const)("%s, allowDestructiveActions=%s, confirmProductionHost=%s → %s", (environment, allow, host, expected) => {
     expect(destructiveActionsAllowed(req(environment, allow, host))).toBe(expected);
+  });
+});
+
+describe("TestPlanSchema with several scenarios (V1.1 F9)", () => {
+  const stepOf = (id: string) => ({ id, kind: "navigate" as const, description: "Open the home page", criterionIds: [], destructive: false });
+  const plan = (scenarios: { id: string; criterionIds: string[]; steps: string[] }[]) => ({
+    runId: "run_1",
+    requirementRevision: 1,
+    scenarios: scenarios.map((s) => ({ id: s.id, title: s.id, criterionIds: s.criterionIds, steps: s.steps.map(stepOf) })),
+    blockedCriteria: [],
+    stopConditions: [],
+  });
+
+  it("accepts 1–5 scenarios numbered in order, with plan-unique step ids and one scenario per criterion", () => {
+    expect(TestPlanSchema.safeParse(plan([{ id: "SC-1", criterionIds: ["AC-1"], steps: ["PS-1"] }, { id: "SC-2", criterionIds: ["AC-2"], steps: ["PS-2"] }])).success).toBe(true);
+  });
+
+  it.each([
+    ["out-of-order ids", [{ id: "SC-2", criterionIds: ["AC-1"], steps: ["PS-1"] }]],
+    ["a duplicate step id", [{ id: "SC-1", criterionIds: ["AC-1"], steps: ["PS-1"] }, { id: "SC-2", criterionIds: ["AC-2"], steps: ["PS-1"] }]],
+    ["a criterion in two scenarios", [{ id: "SC-1", criterionIds: ["AC-1"], steps: ["PS-1"] }, { id: "SC-2", criterionIds: ["AC-1"], steps: ["PS-2"] }]],
+    ["six scenarios", Array.from({ length: 6 }, (_, i) => ({ id: `SC-${i + 1}`, criterionIds: [`AC-${i + 1}`], steps: [`PS-${i + 1}`] }))],
+  ])("rejects %s", (_label, scenarios) => {
+    expect(TestPlanSchema.safeParse(plan(scenarios)).success).toBe(false);
+  });
+
+  it("finds a criterion's scenario, and a step's (SC-1 for steps before V1.1)", () => {
+    const p = TestPlanSchema.parse(plan([{ id: "SC-1", criterionIds: ["AC-1"], steps: ["PS-1"] }, { id: "SC-2", criterionIds: ["AC-2"], steps: ["PS-2"] }]));
+    expect(scenarioOfCriterion(p, "AC-2").id).toBe("SC-2");
+    expect(scenarioOfCriterion(p, "AC-9").id).toBe("SC-1");
+    expect(stepScenario({})).toBe("SC-1");
+    expect(stepScenario({ scenarioId: "SC-3" })).toBe("SC-3");
   });
 });
