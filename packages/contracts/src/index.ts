@@ -3,6 +3,7 @@ export * from "./llm";
 export * from "./run";
 export * from "./requirement";
 export * from "./describe-outcome";
+export * from "./suggestions";
 export * from "./plan";
 export * from "./exploration";
 export * from "./results";

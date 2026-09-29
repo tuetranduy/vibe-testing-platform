@@ -10,6 +10,7 @@ import {
   RunVerdictSchema,
 } from "./run";
 import { ExplorationStepSchema } from "./exploration";
+import { SuggestionIdSchema } from "./suggestions";
 
 const envelope = {
   id: z.string(),
@@ -27,6 +28,24 @@ const StagePayload = z.object({ stage: RunLifecycleSchema });
 
 export const TestEventSchema = z.discriminatedUnion("type", [
   ev("run.created", z.object({ targetHost: z.string() })),
+  // The survey (a blank requirement). Host + path only: a query string can carry personal data.
+  ev(
+    "page.surveyed",
+    z.object({
+      path: z.string().max(300).refine((p) => !/[?#]/.test(p), "A surveyed page's path never carries a query string or a fragment"),
+      title: z.string().max(200),
+      status: z.enum(["READ", "SKIPPED"]),
+    }),
+  ),
+  // Ids and titles only: no suggestion text in events.
+  ev(
+    "suggestions.proposed",
+    z.object({
+      count: z.number().int().min(1).max(8),
+      suggestions: z.array(z.object({ id: SuggestionIdSchema, title: z.string().max(80) })).max(8),
+    }),
+  ),
+  ev("suggestion.selected", z.object({ suggestionId: SuggestionIdSchema, edited: z.boolean() })),
   ev("stage.started", StagePayload),
   ev("stage.completed", StagePayload),
   ev("stage.skipped", StagePayload),
