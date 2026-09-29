@@ -101,6 +101,8 @@ export async function createRunContext(
     },
     budgetSignal: (ms) => AbortSignal.any([controller.signal, AbortSignal.timeout(Math.max(0, ms))]),
     now,
+    // The real engine's stages get the worker's start-up client (engine.ts) until clients are built per run.
+    llm: null,
   };
 
   const ports: RunPorts = {

@@ -308,7 +308,7 @@ describe("report stage: diagnostics (Ruling R37)", () => {
     const off = await createReportStage({ store: fakeStore().store })(ctx, semanticInput());
     // The model even tries to smuggle a status in: it has nowhere to go.
     const smuggle = { ...reply, findings: reply.findings.map((f) => ({ ...f, status: "PASS" })) };
-    const on = await createReportStage({ store: fakeStore().store, diagnostics: createDiagnostics(fakeLlm(smuggle).llm) })(ctx, semanticInput());
+    const on = await createReportStage({ store: fakeStore().store, diagnostics: () => createDiagnostics(fakeLlm(smuggle).llm) })(ctx, semanticInput());
     expect(statusesOf(on.criteria)).toEqual(statusesOf(off.criteria));
     expect(on.criteria.map((c) => c.provisional)).toEqual(off.criteria.map((c) => c.provisional));
     expect(on.summary).toEqual(off.summary);
@@ -319,7 +319,7 @@ describe("report stage: diagnostics (Ruling R37)", () => {
 
   it("findings are persisted through the store; with diagnostics off nothing is saved", async () => {
     const on = fakeStore();
-    await createReportStage({ store: on.store, diagnostics: createDiagnostics(fakeLlm(reply).llm) })(ctx, semanticInput());
+    await createReportStage({ store: on.store, diagnostics: () => createDiagnostics(fakeLlm(reply).llm) })(ctx, semanticInput());
     expect(on.saved).toEqual([reply.findings]);
     const off = fakeStore();
     await createReportStage({ store: off.store })(ctx, semanticInput());
@@ -328,7 +328,7 @@ describe("report stage: diagnostics (Ruling R37)", () => {
 
   it("the model receives only redacted, template-built summaries — computed after summary and verdict", async () => {
     const { llm, calls } = fakeLlm(reply);
-    await createReportStage({ store: fakeStore().store, diagnostics: createDiagnostics(llm) })(ctx, semanticInput());
+    await createReportStage({ store: fakeStore().store, diagnostics: () => createDiagnostics(llm) })(ctx, semanticInput());
     expect(calls).toHaveLength(1);
     const req = calls[0]!;
     expect(req).toMatchObject({ stage: "GENERATING_REPORT", runId: "run_1", schemaName: "report_diagnostics", schema: DiagnosticsOutputSchema });
@@ -353,13 +353,13 @@ describe("report stage: diagnostics (Ruling R37)", () => {
   it("recorded values are clipped in the prompt", async () => {
     const { llm, calls } = fakeLlm(reply);
     const facts = [...FACTS.filter((f) => f.key !== "pageTitle"), fact(title, "x".repeat(5000), "st_3")];
-    await createReportStage({ store: fakeStore().store, diagnostics: createDiagnostics(llm) })(ctx, { ...semanticInput(), exploration: { steps: STEPS, facts, stopReason: "COMPLETED" } });
+    await createReportStage({ store: fakeStore().store, diagnostics: () => createDiagnostics(llm) })(ctx, { ...semanticInput(), exploration: { steps: STEPS, facts, stopReason: "COMPLETED" } });
     const line = (calls[0]!.messages[0]!.content as string).split("\n").find((l) => l.startsWith("- pageTitle@after_add"))!;
     expect(line.length).toBeLessThan(260);
   });
 
   it("a semantic criterion's note is stored as aiNote; its status stays INCONCLUSIVE / AI_JUDGED_ONLY", async () => {
-    const report = await createReportStage({ store: fakeStore().store, diagnostics: createDiagnostics(fakeLlm(reply).llm) })(ctx, semanticInput());
+    const report = await createReportStage({ store: fakeStore().store, diagnostics: () => createDiagnostics(fakeLlm(reply).llm) })(ctx, semanticInput());
     const semantic = report.criteria.find((c) => c.criterionId === "AC-5")!;
     expect(semantic).toMatchObject({ status: "INCONCLUSIVE", reason: "AI_JUDGED_ONLY", verdictSource: null, aiNote: "The recorded cart contents suggest a tidy page." });
     expect(report.criteria.filter((c) => c.criterionId !== "AC-5").every((c) => c.aiNote === null)).toBe(true);
@@ -367,7 +367,7 @@ describe("report stage: diagnostics (Ruling R37)", () => {
 
   it("the model may not name unknown criteria or note a criterion that is not semantic (checked → one correction round)", async () => {
     const { llm, calls } = fakeLlm(reply);
-    await createReportStage({ store: fakeStore().store, diagnostics: createDiagnostics(llm) })(ctx, semanticInput());
+    await createReportStage({ store: fakeStore().store, diagnostics: () => createDiagnostics(llm) })(ctx, semanticInput());
     const issues = calls[0]!.check!({ findings: [{ criterionId: "AC-9", summary: "x" }], notes: [{ criterionId: "AC-1", note: "y" }] });
     expect(issues).toEqual(["findings[0].criterionId AC-9 is not a criterion of this run", "notes[0].criterionId AC-1 is not a semantic criterion"]);
   });
@@ -381,7 +381,7 @@ describe("report stage: diagnostics (Ruling R37)", () => {
     );
     const off = await createReportStage({ store: fakeStore().store })(ctx, semanticInput());
     const saved = fakeStore();
-    const report = await createReportStage({ store: saved.store, diagnostics: failing, logger: { warn } })(ctx, semanticInput());
+    const report = await createReportStage({ store: saved.store, diagnostics: () => failing, logger: { warn } })(ctx, semanticInput());
     expect(statusesOf(report.criteria)).toEqual(statusesOf(off.criteria));
     expect(report.diagnostics).toEqual([]);
     expect(report.criteria.every((c) => c.aiNote === null)).toBe(true);
@@ -396,7 +396,7 @@ describe("report stage: diagnostics (Ruling R37)", () => {
       controller.abort(reason);
       throw new Error("aborted");
     };
-    const stage = createReportStage({ store: fakeStore().store, diagnostics });
+    const stage = createReportStage({ store: fakeStore().store, diagnostics: () => diagnostics });
     await expect(stage({ ...ctx, signal: controller.signal }, input())).rejects.toBe(reason);
   });
 
@@ -405,7 +405,7 @@ describe("report stage: diagnostics (Ruling R37)", () => {
     const hanging: Diagnostics = () => new Promise(() => {}); // ignores its signal, never settles
     const off = await createReportStage({ store: fakeStore().store })(ctx, semanticInput());
     const saved = fakeStore();
-    const report = await createReportStage({ store: saved.store, diagnostics: hanging, diagnosticsTimeoutMs: 20, logger: { warn } })(ctx, semanticInput());
+    const report = await createReportStage({ store: saved.store, diagnostics: () => hanging, diagnosticsTimeoutMs: 20, logger: { warn } })(ctx, semanticInput());
     expect(statusesOf(report.criteria)).toEqual(statusesOf(off.criteria));
     expect(report.summary).toEqual(off.summary);
     expect(report.verdict).toBe(off.verdict);
@@ -421,19 +421,19 @@ describe("report stage: diagnostics (Ruling R37)", () => {
       return { findings: [], notes: [] };
     };
     // At most half the time left: the other half remains to persist and publish the report.
-    await createReportStage({ store: fakeStore().store, diagnostics })({ ...ctx, deadlineAt: new Date(NOW + 80) }, semanticInput());
+    await createReportStage({ store: fakeStore().store, diagnostics: () => diagnostics })({ ...ctx, deadlineAt: new Date(NOW + 80) }, semanticInput());
     expect(seen).toHaveLength(1);
     expect(seen[0]!.deadlineAt).toEqual(new Date(NOW + 40));
     expect(seen[0]!.signal).not.toBe(ctx.signal);
     // Without a hard deadline the time-box is the diagnostics timeout.
-    await createReportStage({ store: fakeStore().store, diagnostics, diagnosticsTimeoutMs: 5_000 })(ctx, semanticInput());
+    await createReportStage({ store: fakeStore().store, diagnostics: () => diagnostics, diagnosticsTimeoutMs: 5_000 })(ctx, semanticInput());
     expect(seen[1]!.deadlineAt).toEqual(new Date(NOW + 5_000));
   });
 
   it("no time left before the hard deadline → no diagnostics call, the report goes on", async () => {
     const warn = vi.fn();
     const diagnostics = vi.fn<Diagnostics>();
-    const report = await createReportStage({ store: fakeStore().store, diagnostics, logger: { warn } })({ ...ctx, deadlineAt: new Date(NOW) }, semanticInput());
+    const report = await createReportStage({ store: fakeStore().store, diagnostics: () => diagnostics, logger: { warn } })({ ...ctx, deadlineAt: new Date(NOW) }, semanticInput());
     expect(diagnostics).not.toHaveBeenCalled();
     expect(report.verdict).toBe("FAILED");
     expect(warn).toHaveBeenCalledWith(expect.objectContaining({ runId: "run_1" }), "no time left for report diagnostics; reporting without them");
@@ -442,7 +442,7 @@ describe("report stage: diagnostics (Ruling R37)", () => {
   it("nothing to diagnose (every criterion PASS, none semantic) → no model call", async () => {
     const { llm, calls } = fakeLlm(reply);
     const all = input({ requirement: requirementOf(FOUR.criteria.slice(0, 3)), provisional: PROVISIONAL.slice(0, 3) });
-    const report = await createReportStage({ store: fakeStore().store, diagnostics: createDiagnostics(llm) })(ctx, all);
+    const report = await createReportStage({ store: fakeStore().store, diagnostics: () => createDiagnostics(llm) })(ctx, all);
     expect(report.verdict).toBe("PASSED");
     expect(calls).toHaveLength(0);
   });
@@ -478,9 +478,10 @@ describe("@platform/testing-engine/reporting entry point (Ruling R36)", () => {
     const visit = (file: string) => {
       if (seen.has(file)) return;
       seen.add(file);
-      for (const [, spec] of readFileSync(file, "utf8").matchAll(/(?:import|export)[^;]*?from\s+"([^"]+)"/g)) {
+      for (const [statement, spec] of readFileSync(file, "utf8").matchAll(/(?:import|export)[^;]*?from\s+"([^"]+)"/g)) {
         if (spec!.startsWith(".")) visit(path.resolve(path.dirname(file), `${spec}.ts`));
-        else external.add(spec!);
+        // A type-only import is erased at runtime: StageContext's `llm` names @platform/llm's LlmClient type.
+        else if (!/^(?:import|export)\s+type\s/.test(statement)) external.add(spec!);
       }
     };
     visit(fileURLToPath(new URL("./index.ts", import.meta.url)));

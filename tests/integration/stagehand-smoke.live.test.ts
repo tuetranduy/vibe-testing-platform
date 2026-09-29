@@ -68,6 +68,16 @@ describe("@live Stagehand smoke against the demo shop", () => {
         additionalAllowedHosts: [],
       },
     };
+    const records: LlmCallRecord[] = [];
+    const env = LLM!;
+    const choice = resolveEnvLlmChoice(env);
+    const llm = new LlmClient({
+      transport: createTransport({ provider: choice.provider, apiKey: env.LLM_PROVIDER === "gemini" ? env.GEMINI_API_KEY : env.ANTHROPIC_API_KEY }),
+      model: choice.model,
+      reasoning: choice.reasoning,
+      logger: silent,
+      recordCall: (c) => void records.push(c),
+    });
     const controller = new AbortController();
     const redact = createRunRedactor([]);
     const events: EventDraft[] = [];
@@ -87,18 +97,9 @@ describe("@live Stagehand smoke against the demo shop", () => {
       },
       budgetSignal: (ms) => AbortSignal.any([controller.signal, AbortSignal.timeout(ms)]),
       now: () => new Date(),
+      llm,
     };
 
-    const records: LlmCallRecord[] = [];
-    const env = LLM!;
-    const choice = resolveEnvLlmChoice(env);
-    const llm = new LlmClient({
-      transport: createTransport({ provider: choice.provider, apiKey: env.LLM_PROVIDER === "gemini" ? env.GEMINI_API_KEY : env.ANTHROPIC_API_KEY }),
-      model: choice.model,
-      reasoning: choice.reasoning,
-      logger: silent,
-      recordCall: (c) => void records.push(c),
-    });
     const dir = resolveStagehandExtensionDir();
     const extension = { dir, id: computeExtensionId(dir) };
     const steps: ExplorationStep[] = [];
@@ -119,7 +120,7 @@ describe("@live Stagehand smoke against the demo shop", () => {
           logger: silent,
           extensions: [extension],
         }),
-      explorer: new StagehandExplorer({ llm, extensionId: extension.id, connectTimeoutMs: 90_000 }),
+      explorer: new StagehandExplorer({ extensionId: extension.id, connectTimeoutMs: 90_000 }),
       store: () => store,
     });
 

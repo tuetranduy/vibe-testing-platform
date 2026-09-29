@@ -1,4 +1,5 @@
-import { BrowserProviderError, StorageError, type NormalizedRequirement, type TestPlan } from "@platform/contracts";
+import { BrowserProviderError, ContractError, StorageError, type NormalizedRequirement, type TestPlan } from "@platform/contracts";
+import { FakeTransport, LlmClient } from "@platform/llm";
 import type { ExplorerSession, ExplorerStartInput } from "@platform/stagehand-adapter/browser-explorer";
 import type { Page } from "playwright-core";
 import { describe, expect, it } from "vitest";
@@ -22,6 +23,7 @@ function harness(opts: { startDelayMs?: number; openError?: unknown; startError?
   const log: string[] = [];
   const logged: { obj: object; msg?: string }[] = [];
   const redact = (v: unknown) => v;
+  const llm = new LlmClient({ transport: new FakeTransport(), model: "claude-sonnet-5", logger: { warn() {} } });
   const ctx = {
     runId: "run_stage",
     request: { targetUrl: "https://shop.test/", environment: "staging", testData: {}, secretNames: [], options: { maxExplorationSteps: 10, allowDestructiveActions: opts.allowDestructiveActions ?? false } },
@@ -35,6 +37,7 @@ function harness(opts: { startDelayMs?: number; openError?: unknown; startError?
     boundary: async () => {},
     budgetSignal: () => budget.signal,
     now: () => new Date(),
+    llm,
   } as unknown as StageContext;
   const sandbox = { cdpUrl: "http://127.0.0.1:1", extensionIds: ["x"], page: {} as Page, close: async () => void log.push("sandbox.close") } as ExplorationSandbox;
   let started: ExplorerStartInput | undefined;
@@ -67,7 +70,7 @@ function harness(opts: { startDelayMs?: number; openError?: unknown; startError?
     logger: { error: (obj, msg) => void logged.push({ obj, msg }) },
     store: () => ({ saveStep: async () => {}, saveFact: async () => {}, saveScreenshot: async () => ({ artifactId: "a" }) }),
   });
-  return { ctx, run, budget, cleanups, log, logged, stage, started: () => started, redact };
+  return { ctx, run, budget, cleanups, log, logged, stage, started: () => started, redact, llm };
 }
 
 describe("createExploreStage", () => {
@@ -77,8 +80,15 @@ describe("createExploreStage", () => {
     expect(outcome.stopReason).toBe("COMPLETED");
     expect(outcome.steps.map((s) => s.kind)).toEqual(["navigate"]);
     expect(h.started()).toMatchObject({ page: expect.objectContaining({ cdpUrl: "http://127.0.0.1:1" }), runId: "run_stage", signal: h.budget.signal, redact: h.redact, allowDestructive: false });
+    expect(h.started()!.llm).toBe(h.llm); // the run's own model client drives Stagehand
     expect(h.log).toEqual(["sandbox.open", "navigate https://shop.test/", "session.close", "session.close", "sandbox.close"]);
     expect(h.cleanups).toHaveLength(2); // sandbox + session, for abandoned stages
+  });
+
+  it("a run without a model client fails with ContractError before any sandbox opens", async () => {
+    const h = harness();
+    await expect(h.stage({ ...h.ctx, llm: null }, plan, requirement)).rejects.toBeInstanceOf(ContractError);
+    expect(h.log).toEqual([]);
   });
 
   it("tells the explorer the run allows destructive actions when it does", async () => {

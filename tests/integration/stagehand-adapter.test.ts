@@ -173,9 +173,10 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
   }
 
   async function startSession(sandbox: RunSandbox, llm: LlmClient): Promise<ExplorerSession> {
-    const session = await new StagehandExplorer({ llm, connectTimeoutMs: 90_000 }).start({
+    const session = await new StagehandExplorer({ connectTimeoutMs: 90_000 }).start({
       page: sandbox,
       runId: RUN_ID,
+      llm,
       signal: new AbortController().signal,
       redact,
       allowDestructive: false,
@@ -394,7 +395,7 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
       cleanups.push(() => browser.close());
 
       const { llm } = llmClient();
-      const session = await new StagehandExplorer({ llm, connectTimeoutMs: 90_000 }).start({ page: browser, runId: RUN_ID, signal: new AbortController().signal, redact, allowDestructive: false });
+      const session = await new StagehandExplorer({ connectTimeoutMs: 90_000 }).start({ page: browser, runId: RUN_ID, llm, signal: new AbortController().signal, redact, allowDestructive: false });
       await session.navigate(`${target}products/1`);
       await session.observe("find the add to cart button");
       await session.close(); // flushes the trace exporter
@@ -435,9 +436,10 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
       };
       const llm = new LlmClient({ transport, model: MODEL, logger: silent, retry: { maxRetries: 0 } });
       const { sandbox } = await openSandbox();
-      const session = await new StagehandExplorer({ llm, connectTimeoutMs: 90_000, operationTimeoutMs: 2_000 }).start({
+      const session = await new StagehandExplorer({ connectTimeoutMs: 90_000, operationTimeoutMs: 2_000 }).start({
         page: sandbox,
         runId: RUN_ID,
+        llm,
         signal: new AbortController().signal,
         redact,
         allowDestructive: false,

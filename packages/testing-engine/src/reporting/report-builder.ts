@@ -305,8 +305,11 @@ export interface ReportStore {
 
 export interface ReportStageDeps {
   store(ctx: StageContext): ReportStore;
-  /** Ruling R37: on when the real engine has an LLM; tests toggle it by passing / omitting it. */
-  diagnostics?: Diagnostics;
+  /**
+   * Ruling R37: on for the real engine, built per run over the run's model client (the worker:
+   * `(ctx) => createDiagnostics(requireLlm(ctx))`); tests toggle it by passing / omitting it.
+   */
+  diagnostics?: (ctx: StageContext) => Diagnostics;
   logger?: { warn(obj: object, msg?: string): void };
   /** Upper bound for the diagnostics call (default 60 s). */
   diagnosticsTimeoutMs?: number;
@@ -378,7 +381,7 @@ export function createReportStage(deps: ReportStageDeps): EngineStages["report"]
     const playwright = input.rerun && { status: input.rerun.status, durationMs: input.rerun.durationMs };
 
     let diagnosed: DiagnosticsResult = { findings: [], notes: [] };
-    const diagnose = deps.diagnostics && needsDiagnostics(input.requirement, decided) ? deps.diagnostics : null;
+    const diagnose = deps.diagnostics && needsDiagnostics(input.requirement, decided) ? deps.diagnostics(ctx) : null;
     const budgetMs = diagnose ? diagnosticsBudgetMs(ctx, deps) : 0;
     if (diagnose && budgetMs <= 0) {
       deps.logger?.warn({ runId: ctx.runId }, "no time left for report diagnostics; reporting without them");

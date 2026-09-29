@@ -1,5 +1,4 @@
 import { ExplorationStepRepository, ObservedFactRepository, type Database } from "@platform/db";
-import type { StructuredLlm } from "@platform/stagehand-adapter";
 import { StagehandExplorer, resolveStagehandExtensionDir } from "@platform/stagehand-adapter";
 import type { ArtifactStorage } from "@platform/storage";
 import type { ExplorationStore, ExploreStageDeps, StageContext } from "@platform/testing-engine";
@@ -49,8 +48,6 @@ export interface ExplorationDepsInput {
   db: Database;
   storage: ArtifactStorage;
   logger: WorkerLogger;
-  /** The LlmClient (the explorer's ClientLLM bridge records its calls as EXPLORING). */
-  llm: StructuredLlm;
   config: ExplorationConfig;
   metrics?: WorkerMetrics;
   /** Test seams: replace the sandbox, the explorer or the recorder. */
@@ -102,8 +99,9 @@ export function createExplorationDeps(input: ExplorationDepsInput): ExploreStage
     explorer:
       overrides.explorer ??
       {
-        // Built on first use so the extension id is resolved once, from the loaded extension.
-        start: (startInput) => new StagehandExplorer({ llm: input.llm, extensionId: stagehandExtension().id, logger }).start(startInput),
+        // Built on first use so the extension id is resolved once, from the loaded extension. The run's model
+        // client comes with each start (the ClientLLM bridge records its calls as EXPLORING).
+        start: (startInput) => new StagehandExplorer({ extensionId: stagehandExtension().id, logger }).start(startInput),
       },
     store: overrides.store ?? ((ctx) => createExplorationStore({ db, storage, config, metrics: input.metrics }, ctx)),
     // Start-up failures (e.g. Chromium's stderr tail) are logged here; the run records a template message.

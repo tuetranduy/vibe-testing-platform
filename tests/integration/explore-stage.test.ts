@@ -145,6 +145,9 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
     const events: EventDraft[] = [];
     const controller = new AbortController();
     const redact = createRunRedactor(Object.values(secrets));
+    const transport = new ScriptedTransport(TARGETS);
+    const records: LlmCallRecord[] = [];
+    const llm = new LlmClient({ transport, model: MODEL, recordCall: (c) => void records.push(c), logger: silent, retry: { maxRetries: 0 } });
     const ctx: StageContext = {
       runId: run.id,
       tenantId: TEST_TENANT_ID,
@@ -161,11 +164,9 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
       },
       budgetSignal: (ms) => AbortSignal.any([controller.signal, AbortSignal.timeout(ms)]),
       now: () => new Date(),
+      llm,
     };
 
-    const transport = new ScriptedTransport(TARGETS);
-    const records: LlmCallRecord[] = [];
-    const llm = new LlmClient({ transport, model: MODEL, recordCall: (c) => void records.push(c), logger: silent, retry: { maxRetries: 0 } });
     const storage = createLocalStorage({ rootDir: artifactDir });
     const resolver = async (host: string) => {
       if (host === "shop.test") return ["127.0.0.1"];
@@ -173,7 +174,7 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
     };
     const explore = createExploreStage({
       openSandbox: (c) => openRunSandbox(c, { resolve: resolver, privateAllowlist: [`shop.test:${shop.port}`], logger: silent, extensions: [extension] }),
-      explorer: new StagehandExplorer({ llm, connectTimeoutMs: 90_000, extensionId: extension.id }),
+      explorer: new StagehandExplorer({ connectTimeoutMs: 90_000, extensionId: extension.id }),
       store: (c) => createExplorationStore({ db: tdb.db, storage, config: { artifactRetentionDays: 30, secretArtifactRetentionDays: 7 } }, c),
     });
     return { run, ctx, events, transport, records, explore, target };

@@ -21,11 +21,12 @@ describe("StagehandExplorer.start guardrail", () => {
   beforeEach(() => void created.splice(0));
 
   it.each([false, true])("gives Stagehand the guardrail for allowDestructive=%s", async (allowDestructive) => {
-    const explorer = new StagehandExplorer({ llm, extensionId: "a".repeat(32) });
+    const explorer = new StagehandExplorer({ extensionId: "a".repeat(32) });
     await expect(
       explorer.start({
         page: { cdpUrl: "http://127.0.0.1:1", extensionIds: ["a".repeat(32)], page: {} as Page },
         runId: "r",
+        llm,
         signal: new AbortController().signal,
         redact: (v) => v,
         allowDestructive,

@@ -1,6 +1,6 @@
 import { ContractError, TestPlanSchema, type NormalizedRequirement, type TestPlan } from "@platform/contracts";
 import type { ActionPolicy } from "@platform/security";
-import type { StageContext } from "../orchestrator/stages";
+import { requireLlm, type StageContext } from "../orchestrator/stages";
 import type { RequirementLlm } from "../requirement/compiler";
 import { applyBlocking } from "./blocking";
 import { PlannerOutputSchema } from "./model-output";
@@ -83,10 +83,10 @@ export async function planTest(llm: RequirementLlm, input: PlanTestInput): Promi
   return parsed.data;
 }
 
-/** The real `plan` stage: plans with the run's names, action policy, redactor and deadline. */
-export function createPlanStage(llm: RequirementLlm): (ctx: StageContext, requirement: NormalizedRequirement) => Promise<TestPlan> {
-  return (ctx, requirement) =>
-    planTest(llm, {
+/** The real `plan` stage: plans with the run's model client, names, action policy, redactor and deadline. */
+export function createPlanStage(): (ctx: StageContext, requirement: NormalizedRequirement) => Promise<TestPlan> {
+  return async (ctx, requirement) =>
+    planTest(requireLlm(ctx), {
       runId: ctx.runId,
       requirement,
       targetUrl: ctx.request.targetUrl,

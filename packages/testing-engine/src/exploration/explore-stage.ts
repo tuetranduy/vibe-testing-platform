@@ -1,6 +1,6 @@
 import { BrowserProviderError, CancelledError, EngineError, type ExplorationOutcome } from "@platform/contracts";
 import type { BrowserExplorer, ExplorerSession, SandboxedPage } from "@platform/stagehand-adapter/browser-explorer";
-import type { EngineStages, StageContext } from "../orchestrator/stages";
+import { requireLlm, type EngineStages, type StageContext } from "../orchestrator/stages";
 import { actionPolicyFor } from "../shared/action-policy";
 import { runExploration, type ExplorationStore, type RecorderPort } from "./executor";
 
@@ -38,6 +38,8 @@ const START_FAILURES = {
  */
 export function createExploreStage(deps: ExploreStageDeps): EngineStages["explore"] {
   return async (ctx, plan, requirement): Promise<ExplorationOutcome> => {
+    // Stagehand's model calls go through the run's client (before any browser starts: a run without one fails here).
+    const llm = requireLlm(ctx);
     const budget = ctx.budgetSignal(ctx.budgets.explorationMs);
     let sandbox: ExplorationSandbox | undefined;
     let session: ExplorerSession | undefined;
@@ -50,6 +52,7 @@ export function createExploreStage(deps: ExploreStageDeps): EngineStages["explor
       session = await deps.explorer.start({
         page: sandbox,
         runId: ctx.runId,
+        llm,
         // Operations in flight stop when the budget runs out (or the run is cancelled / times out).
         signal: budget,
         redact: ctx.redact,

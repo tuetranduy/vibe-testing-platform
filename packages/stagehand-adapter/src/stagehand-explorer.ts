@@ -19,7 +19,7 @@ import {
   type ObservedElement,
   type ObserveResult,
 } from "./browser-explorer";
-import { createClientLlmBridge, type ClientLlmBridge, type StructuredLlm } from "./client-llm";
+import { createClientLlmBridge, type ClientLlmBridge } from "./client-llm";
 import { guardrailSystemPrompt } from "./guardrails";
 import { DEFAULT_TELEMETRY_ENDPOINT } from "./telemetry";
 
@@ -64,8 +64,8 @@ export interface StagehandCacheOption {
   threshold?: number;
 }
 
+/** Per explorer; the model client comes with each run (`ExplorerStartInput.llm`). */
 export interface StagehandExplorerOptions {
-  llm: StructuredLlm;
   /** OTLP endpoint for Stagehand's in-browser traces; must end with /v1/traces. */
   telemetryEndpoint?: string;
   /** Stagehand's server-side cache (Browserbase only; always DISABLED locally, Ruling R21). */
@@ -430,7 +430,7 @@ export class StagehandExplorer implements BrowserExplorer {
     }
 
     const bridge = createClientLlmBridge({
-      llm: this.opts.llm,
+      llm: input.llm,
       runId: input.runId,
       signal,
       redact: input.redact,

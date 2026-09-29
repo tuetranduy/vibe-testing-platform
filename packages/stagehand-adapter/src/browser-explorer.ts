@@ -1,3 +1,4 @@
+import type { LlmClient } from "@platform/llm";
 import type { Page } from "playwright-core";
 import type { ZodType } from "zod";
 
@@ -119,6 +120,11 @@ export interface ExplorerSession {
 export interface ExplorerStartInput {
   page: SandboxedPage;
   runId: string;
+  /**
+   * The run's model client: Stagehand's calls go through it (redaction, retries, LlmCall records), always at
+   * the model's default reasoning level (see client-llm.ts).
+   */
+  llm: Pick<LlmClient, "model" | "generateJson">;
   signal: AbortSignal;
   /** The run redactor (by key and value) applied to every model request and forwarded log. Required: no fail-open default. */
   redact: (value: unknown) => unknown;

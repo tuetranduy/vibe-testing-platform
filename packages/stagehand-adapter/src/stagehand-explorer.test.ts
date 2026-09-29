@@ -74,8 +74,8 @@ describe("StagehandExplorer.start preconditions and failures", () => {
   const redact = (v: unknown) => v;
 
   it("requires the Stagehand extension to be loaded (BROWSER_PROVIDER)", async () => {
-    const explorer = new StagehandExplorer({ llm });
-    const input = { page: { cdpUrl: "http://127.0.0.1:1", extensionIds: [], page }, runId: "r", signal: new AbortController().signal, redact, allowDestructive: false };
+    const explorer = new StagehandExplorer({});
+    const input = { page: { cdpUrl: "http://127.0.0.1:1", extensionIds: [], page }, runId: "r", llm, signal: new AbortController().signal, redact, allowDestructive: false };
     await expect(explorer.start(input)).rejects.toSatisfy((e) => e instanceof BrowserProviderError && /Stagehand extension/.test(e.message));
     await expect(
       explorer.start({ ...input, page: { ...input.page, extensionIds: ["a".repeat(32), "b".repeat(32)] } }),
@@ -86,9 +86,9 @@ describe("StagehandExplorer.start preconditions and failures", () => {
     const ac = new AbortController();
     const reason = new CancelledError();
     ac.abort(reason);
-    const explorer = new StagehandExplorer({ llm });
+    const explorer = new StagehandExplorer({});
     await expect(
-      explorer.start({ page: { cdpUrl: "http://127.0.0.1:1", extensionIds: ["a".repeat(32)], page }, runId: "r", signal: ac.signal, redact, allowDestructive: false }),
+      explorer.start({ page: { cdpUrl: "http://127.0.0.1:1", extensionIds: ["a".repeat(32)], page }, runId: "r", llm, signal: ac.signal, redact, allowDestructive: false }),
     ).rejects.toBe(reason);
   });
 
@@ -100,9 +100,9 @@ describe("StagehandExplorer.start preconditions and failures", () => {
         srv.close(() => resolve(p));
       });
     });
-    const explorer = new StagehandExplorer({ llm, connectTimeoutMs: 2_000 });
+    const explorer = new StagehandExplorer({ connectTimeoutMs: 2_000 });
     const err = await explorer
-      .start({ page: { cdpUrl: `http://127.0.0.1:${port}`, extensionIds: ["a".repeat(32)], page }, runId: "r", signal: new AbortController().signal, redact, allowDestructive: false })
+      .start({ page: { cdpUrl: `http://127.0.0.1:${port}`, extensionIds: ["a".repeat(32)], page }, runId: "r", llm, signal: new AbortController().signal, redact, allowDestructive: false })
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(BrowserProviderError);
     expect((err as BrowserProviderError).category).toBe("BROWSER_PROVIDER");
