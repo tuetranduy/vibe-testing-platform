@@ -24,6 +24,11 @@ export interface LlmTransportResponse {
    */
   model: string;
   usage: { inputTokens: number; outputTokens: number };
+  /**
+   * Set only when a server-side refusal fallback answered (Anthropic `fallbacks`): the model that served the
+   * request. LlmClient then prices and records the call under it instead of the requested model.
+   */
+  fallbackModel?: string;
 }
 
 /** A provider adapter: one request, no retries (the client owns retry, abort and deadline policy). */

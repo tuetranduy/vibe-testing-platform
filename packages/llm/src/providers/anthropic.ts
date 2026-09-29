@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ReasoningLevel } from "@platform/contracts";
+import { catalogModel } from "../catalog";
 import { LlmTransportError, type LlmTransport, type LlmTransportRequest, type LlmTransportResponse } from "../transport";
 import type { LlmMessage } from "../types";
 import { retryAfterMs } from "./retry-after";
@@ -16,6 +17,9 @@ export interface AnthropicTransportOptions {
 
 type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 
+/** The beta that lets the API retry a refused request on the model Anthropic recommends (`fallbacks: "default"`). */
+export const SERVER_SIDE_FALLBACK_BETA = "server-side-fallback-2026-07-01";
+
 /** A run's reasoning level as Claude's `output_config.effort`; "default" sends none (the model's own). */
 function effortOf(reasoning: ReasoningLevel): { effort: "low" | "medium" | "high" } | Record<string, never> {
   switch (reasoning) {
@@ -30,9 +34,32 @@ function effortOf(reasoning: ReasoningLevel): { effort: "low" | "medium" | "high
   }
 }
 
+/** What this adapter reads from a Messages (or beta Messages) response. */
+interface MessageLike {
+  content: readonly { type: string }[];
+  stop_reason: string | null;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number | null;
+    cache_read_input_tokens?: number | null;
+    iterations?: readonly { type: string; model?: string | null }[] | null;
+  };
+  model: string;
+}
+
+type TextBlock = { type: "text"; text: string };
+type FallbackBlock = { type: "fallback"; to: { model: string } };
+const isText = (b: { type: string }): b is TextBlock => b.type === "text";
+const isFallback = (b: { type: string }): b is FallbackBlock => b.type === "fallback";
+
 /**
  * Anthropic Messages API adapter. Structured output uses `output_config.format` with the JSON
- * Schema rewritten to the supported strict subset, and the run's reasoning level as `output_config.effort`. SDK retries are disabled: LlmClient owns retry policy.
+ * Schema rewritten to the supported strict subset, and the run's reasoning level as
+ * `output_config.effort`. Catalog models marked `refusalFallback` go through the beta Messages API
+ * with `fallbacks: "default"`: a request the model's safety classifiers decline is retried by the API
+ * on the model Anthropic recommends, and the response names that model (`fallbackModel`). SDK retries
+ * are disabled: LlmClient owns retry policy.
  */
 export class AnthropicTransport implements LlmTransport {
   readonly provider = "anthropic";
@@ -56,30 +83,34 @@ export class AnthropicTransport implements LlmTransport {
     } catch (err) {
       throw new LlmTransportError(`Unsupported JSON schema: ${(err as Error).message}`, { retryable: false, cause: err });
     }
-    const effort = effortOf(req.reasoning); // before the request: a level Claude lacks never reaches the API
-    let message: Anthropic.Message;
+    const params = {
+      model: req.model,
+      max_tokens: req.maxTokens,
+      ...(req.system ? { system: req.system } : {}),
+      messages: req.messages.map(toMessageParam),
+      output_config: { format: { type: "json_schema" as const, schema }, ...effortOf(req.reasoning) },
+    };
+    const options = { signal: req.signal, timeout: this.timeoutMs, maxRetries: 0 };
+    let message: MessageLike;
     try {
-      message = await this.client.messages.create(
-        {
-          model: req.model,
-          max_tokens: req.maxTokens,
-          ...(req.system ? { system: req.system } : {}),
-          messages: req.messages.map(toMessageParam),
-          output_config: { format: { type: "json_schema", schema }, ...effort },
-        },
-        { signal: req.signal, timeout: this.timeoutMs, maxRetries: 0 },
-      );
+      message = catalogModel(req.model)?.refusalFallback
+        ? await this.client.beta.messages.create({ ...params, fallbacks: "default", betas: [SERVER_SIDE_FALLBACK_BETA] }, options)
+        : await this.client.messages.create(params, options);
     } catch (err) {
       throw toTransportError(err);
     }
     if (message.stop_reason === "refusal") {
       throw new LlmTransportError("The model declined the request", { retryable: false });
     }
+    // After a fallback, only the serving model's output counts: the text after the last `fallback` block.
+    const lastFallback = message.content.findLastIndex(isFallback);
     const text = message.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .slice(lastFallback + 1)
+      .filter(isText)
       .map((b) => b.text)
       .join("");
     const u = message.usage;
+    const fallbackModel = servingFallbackModel(message);
     return {
       text,
       model: message.model,
@@ -87,8 +118,19 @@ export class AnthropicTransport implements LlmTransport {
         inputTokens: u.input_tokens + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
         outputTokens: u.output_tokens,
       },
+      ...(fallbackModel ? { fallbackModel } : {}),
     };
   }
+}
+
+/**
+ * The model that served a fallback-answered response: the `fallback_message` usage iteration (the API's
+ * signal that a fallback served it), else the last `fallback` content block's target. Undefined otherwise.
+ */
+function servingFallbackModel(message: MessageLike): string | undefined {
+  const served = message.usage.iterations?.find((i) => i.type === "fallback_message")?.model;
+  if (served) return served;
+  return message.content.filter(isFallback).at(-1)?.to.model;
 }
 
 function toMessageParam(m: LlmMessage): Anthropic.MessageParam {

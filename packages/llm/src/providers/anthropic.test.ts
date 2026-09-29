@@ -136,3 +136,65 @@ describe("AnthropicTransport", () => {
     expect(seen).toHaveLength(0);
   });
 });
+
+describe("AnthropicTransport refusal fallback (catalog models marked refusalFallback)", () => {
+  /** A fallback-served answer: Fable declined, Opus answered after the `fallback` block. */
+  const fallbackAnswer = (usage: Record<string, unknown> = {}) =>
+    okMessage("", {
+      model: "claude-fable-5-1",
+      content: [
+        { type: "text", text: '{"par' },
+        { type: "fallback", from: { model: "claude-fable-5-1" }, to: { model: "claude-opus-5-5" }, trigger: { type: "refusal", category: "cyber" } },
+        { type: "text", text: '{"name":"x"}' },
+      ],
+      usage: { input_tokens: 120, output_tokens: 40, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, ...usage },
+    });
+
+  it.each(["claude-fable-5-1", "claude-opus-5-5"])("%s goes through the beta Messages API with fallbacks: default", async (model) => {
+    const { fn, seen } = fakeFetch(() => json(200, okMessage('{"name":"x"}', { model })));
+    await new AnthropicTransport({ apiKey: "sk-test", fetch: fn }).complete(request({ model, reasoning: "high" }));
+    expect(seen[0]!.url).toBe("https://api.anthropic.com/v1/messages?beta=true");
+    expect(seen[0]!.headers.get("anthropic-beta")).toBe("server-side-fallback-2026-07-01");
+    expect(seen[0]!.body).toMatchObject({ model, fallbacks: "default", output_config: { effort: "high", format: { type: "json_schema" } } });
+    expect(seen[0]!.body).not.toHaveProperty("betas");
+  });
+
+  it.each(["claude-sonnet-5", "claude-haiku-4-5", "claude-opus-5"])("%s uses the Messages API, without fallbacks", async (model) => {
+    const { fn, seen } = fakeFetch(() => json(200, okMessage("{}", { model })));
+    await new AnthropicTransport({ apiKey: "sk-test", fetch: fn }).complete(request({ model }));
+    expect(seen[0]!.url).toBe("https://api.anthropic.com/v1/messages");
+    expect(seen[0]!.headers.get("anthropic-beta")).toBeNull();
+    expect(seen[0]!.body).not.toHaveProperty("fallbacks");
+  });
+
+  it("reports the model that served the fallback (its usage iteration), and returns only that model's text", async () => {
+    const iterations = [
+      { type: "message", model: "claude-fable-5-1", input_tokens: 60, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, cache_creation: null },
+      { type: "fallback_message", model: "claude-opus-5-5", input_tokens: 60, output_tokens: 35, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, cache_creation: null },
+    ];
+    const { fn } = fakeFetch(() => json(200, fallbackAnswer({ iterations })));
+    const res = await new AnthropicTransport({ apiKey: "sk-test", fetch: fn }).complete(request({ model: "claude-fable-5-1" }));
+    expect(res).toEqual({ text: '{"name":"x"}', model: "claude-fable-5-1", usage: { inputTokens: 120, outputTokens: 40 }, fallbackModel: "claude-opus-5-5" });
+  });
+
+  it("without usage iterations, takes the serving model from the last fallback block", async () => {
+    const { fn } = fakeFetch(() => json(200, fallbackAnswer({ iterations: null })));
+    const res = await new AnthropicTransport({ apiKey: "sk-test", fetch: fn }).complete(request({ model: "claude-fable-5-1" }));
+    expect(res.fallbackModel).toBe("claude-opus-5-5");
+    expect(res.text).toBe('{"name":"x"}');
+  });
+
+  it("an answer from the requested model has no fallbackModel", async () => {
+    const { fn } = fakeFetch(() => json(200, okMessage('{"name":"x"}', { model: "claude-opus-5-5" })));
+    const res = await new AnthropicTransport({ apiKey: "sk-test", fetch: fn }).complete(request({ model: "claude-opus-5-5" }));
+    expect(res).not.toHaveProperty("fallbackModel");
+  });
+
+  it("a refusal no fallback rescued stays a non-retryable provider error", async () => {
+    const { fn } = fakeFetch(() => json(200, okMessage("", { model: "claude-fable-5-1", stop_reason: "refusal" })));
+    const err = await new AnthropicTransport({ apiKey: "sk-test", fetch: fn }).complete(request({ model: "claude-fable-5-1" })).catch((e) => e);
+    expect(err).toBeInstanceOf(LlmTransportError);
+    expect(err).toMatchObject({ retryable: false });
+    expect(err.message).toMatch(/declined/);
+  });
+});
