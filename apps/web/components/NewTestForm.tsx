@@ -49,6 +49,7 @@ interface Options {
   allowDestructiveActions: boolean;
   confirmProductionHost: string;
   additionalAllowedHosts: string;
+  useExplorationCache: boolean;
 }
 type Errors = Record<string, string>;
 interface Banner {
@@ -68,6 +69,7 @@ const DEFAULT_OPTIONS: Options = {
   allowDestructiveActions: false,
   confirmProductionHost: "",
   additionalAllowedHosts: "",
+  useExplorationCache: true,
 };
 
 const MSG = {
@@ -166,6 +168,8 @@ function build(
       generatePlaywright: options.generatePlaywright,
       rerunGeneratedTest: options.generatePlaywright && options.rerunGeneratedTest,
       autoConfirmCriteria: options.autoConfirmCriteria,
+      // Sent only when turned off: absent means on (V1.1).
+      ...(options.useExplorationCache ? {} : { useExplorationCache: false }),
       allowDestructiveActions: options.allowDestructiveActions,
       // Only sent when there is a non-empty value to confirm: a valid URL with an empty value is
       // already refused above, and an empty string here would otherwise surface the contract's raw
@@ -841,6 +845,14 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
           <label className="choice">
             <input
               type="checkbox"
+              checked={options.useExplorationCache}
+              onChange={(e) => setOption("useExplorationCache", e.target.checked)}
+            />
+            Reuse element lookups from earlier runs (faster and cheaper; each is checked against the page first)
+          </label>
+          <label className="choice">
+            <input
+              type="checkbox"
               checked={options.autoConfirmCriteria}
               onChange={(e) => setOption("autoConfirmCriteria", e.target.checked)}
             />
@@ -975,6 +987,7 @@ function optionsSummary(o: Options): string {
     !o.generatePlaywright ? "no Playwright test" : o.rerunGeneratedTest ? "rerun on" : "no rerun",
     o.autoConfirmCriteria ? "auto-confirm" : null,
     o.allowDestructiveActions ? "destructive allowed" : null,
+    o.useExplorationCache ? null : "no cache",
   ];
   return parts.filter(Boolean).join(" · ");
 }

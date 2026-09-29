@@ -13,7 +13,7 @@ import type { WorkerDeps } from "./deps";
 import { analyzeRunJob } from "./jobs/analyze-run";
 import { executeRunJob } from "./jobs/execute-run";
 import { rerunRunJob } from "./jobs/rerun-run";
-import { retentionJob } from "./jobs/retention";
+import { pruneExplorationCache, retentionJob } from "./jobs/retention";
 
 export interface RunningWorkers {
   close(): Promise<void>;
@@ -59,6 +59,11 @@ export async function startWorkers(
       async () => {
         const r = await retentionJob({ db: deps.db, storage, logger: deps.logger, ...(deps.now ? { now: deps.now } : {}) });
         if (r.deleted > 0 || r.failed > 0) deps.logger.info(r, "retention acted");
+        const pruned = await pruneExplorationCache({ db: deps.db, ...(deps.now ? { now: deps.now } : {}) }).catch((err: unknown) => {
+          deps.logger.warn({ err }, "exploration cache could not be pruned; retrying next pass");
+          return 0;
+        });
+        if (pruned > 0) deps.logger.info({ pruned }, "unused exploration cache entries deleted");
       },
       { connection: opts.connection, concurrency: 1, maxStalledCount: 0 },
     );

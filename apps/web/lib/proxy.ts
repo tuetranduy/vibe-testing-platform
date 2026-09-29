@@ -59,6 +59,8 @@ const ENDPOINTS: { method: Method; pattern: RegExp; query: readonly string[] }[]
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/report\\.md$`), query: [] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/artifacts/${ID}/url$`), query: ["reveal"] },
   { method: "GET", pattern: /^\/v1\/usage$/, query: ["from", "to", "owner"] },
+  { method: "GET", pattern: /^\/v1\/exploration-cache$/, query: [] },
+  { method: "DELETE", pattern: /^\/v1\/exploration-cache$/, query: [] },
   { method: "GET", pattern: /^\/v1\/settings\/llm$/, query: [] },
   { method: "PUT", pattern: /^\/v1\/settings\/llm$/, query: [] },
   // Keys are write-only: no GET on .../keys/... is allowed through.

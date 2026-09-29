@@ -102,3 +102,19 @@ describe("V1.1 F5 — manual rerun", () => {
     expect(await store.secretsActive(res.json.runId)).toEqual([]);
   });
 });
+
+describe("V1.1 F8 — exploration cache", () => {
+  it("a second run of the same test reuses the first run's verified lookups and still passes", async () => {
+    const body = { targetUrl: `${stack.targetUrl}/`, requirement: REQUIREMENTS.cart, options: { autoConfirmCriteria: true } };
+    const first = await service.create(body);
+    expect(await service.finished(first)).toMatchObject({ lifecycle: "COMPLETED", verdict: "PASSED" });
+    const second = await service.create(body);
+    expect(await service.finished(second)).toMatchObject({ lifecycle: "COMPLETED", verdict: "PASSED" });
+    expect(await store.rowsOf(second)).toMatch(/"cacheHit": ?true/);
+
+    // Turned off for a run: every lookup asks the explorer again.
+    const off = await service.create({ ...body, options: { ...body.options, useExplorationCache: false } });
+    expect(await service.finished(off)).toMatchObject({ lifecycle: "COMPLETED", verdict: "PASSED" });
+    expect(await store.rowsOf(off)).not.toMatch(/"cacheHit": ?true/);
+  });
+});

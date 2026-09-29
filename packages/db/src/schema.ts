@@ -154,6 +154,28 @@ export const credentialProfileSecrets = pgTable(
   (t) => [primaryKey({ columns: [t.profileId, t.name] })],
 );
 
+/**
+ * Element lookups verified on earlier runs (V1.1 F8), per tenant: `key` is the SHA-256 of the page's origin +
+ * path and the (redacted) instruction. Written only after the step that used the element succeeded.
+ */
+export const explorationCache = pgTable(
+  "exploration_cache",
+  {
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    key: text("key").notNull(),
+    origin: text("origin").notNull(),
+    path: text("path").notNull(),
+    /** CachedElement: the selector, its description and the ElementRef recorded for it. */
+    entry: jsonb("entry").notNull(),
+    hits: integer("hits").notNull().default(0),
+    createdAt: createdAt(),
+    lastUsedAt: ts("last_used_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.key] }), index("exploration_cache_last_used").on(t.lastUsedAt)],
+);
+
 export const testRuns = pgTable(
   "test_runs",
   {

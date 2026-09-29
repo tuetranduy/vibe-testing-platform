@@ -227,6 +227,17 @@ export const getUsage = (range: { from?: string; to?: string; owner?: "me" | "al
   return request(UsageReportSchema, `/api/v1/usage${q.size > 0 ? `?${q}` : ""}`);
 };
 
+const ExplorationCacheStatsSchema = z.object({ entries: z.number(), hits: z.number(), lastUsedAt: z.string().nullable() });
+export type ExplorationCacheStats = z.infer<typeof ExplorationCacheStatsSchema>;
+const CACHE = "/api/v1/exploration-cache";
+
+/** The tenant's exploration cache (V1.1): entries and reuse. */
+export const getExplorationCache = (): Promise<ExplorationCacheStats> => request(ExplorationCacheStatsSchema, CACHE);
+
+/** Admin: empties the tenant's exploration cache. */
+export const clearExplorationCache = (): Promise<{ deleted: number }> =>
+  request(z.object({ deleted: z.number() }), CACHE, { method: "DELETE" });
+
 const SETTINGS = "/api/v1/settings/llm";
 
 /** Settings → AI providers and defaults: key statuses (never a key), the defaults, and the offered models. */

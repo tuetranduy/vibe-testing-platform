@@ -57,6 +57,13 @@
       "when": 1790680446626,
       "tag": "0007_llm_calls_created_index",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790694134829,
+      "tag": "0008_exploration_cache",
+      "breakpoints": true
     }
   ]
 }

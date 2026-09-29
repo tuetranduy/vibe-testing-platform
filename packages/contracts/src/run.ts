@@ -114,6 +114,12 @@ export const RunOptionsSchema = z
     /** Production only: the target URL's host, typed as the confirmation that destructive actions may run there. */
     confirmProductionHost: z.string().trim().min(1).max(255).optional(),
     additionalAllowedHosts: z.array(HostnameSchema).max(10).default([]),
+    /**
+     * Reuse element lookups verified on earlier runs of the same page (V1.1 F8): a lookup that still matches
+     * exactly the element it found before skips the model. Absent (the default, and every run created before
+     * V1.1): on — read it with `explorationCacheOn`.
+     */
+    useExplorationCache: z.boolean().optional(),
   })
   .transform(({ rerunGeneratedTest, ...options }) => ({
     ...options,
@@ -198,6 +204,10 @@ export function destructiveActionsAllowed(request: Pick<StoredTestRunRequest, "t
   if (!request.options.allowDestructiveActions) return false;
   return request.environment !== "production" || hostConfirmed(request.targetUrl, request.options.confirmProductionHost);
 }
+
+/** Whether a run reuses cached element lookups (V1.1 F8): on unless it says `useExplorationCache: false`. */
+export const explorationCacheOn = (request: Pick<StoredTestRunRequest, "options">): boolean =>
+  request.options.useExplorationCache !== false;
 
 /** The URL's host as the confirmation names it (lowercase, a non-default port included), or null if it doesn't parse. */
 function hostOf(url: string): string | null {
