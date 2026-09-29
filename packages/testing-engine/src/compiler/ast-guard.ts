@@ -52,6 +52,8 @@ const NUMBERED_IDENTIFIER = /^(?:fact|loc|input|url)[1-9]\d{0,3}$/;
 const SECRET_ENV_NAME = /^SECRET_[A-Z][A-Z0-9_]{0,31}$/;
 const CRITERION_ID = /^AC-\d{1,3}$/;
 const CRITERION_PREFIX = /^\[AC-\d{1,3}\] $/;
+/** A multi-scenario test's title (V1.1 F9): fixed text and a schema-checked scenario id. */
+const SCENARIO_TITLE = /^scenario SC-[1-5]$/;
 
 const ALLOWED_STRINGS: ReadonlySet<string> = new Set([
   ...ALLOWED_IMPORTS,
@@ -167,7 +169,9 @@ export function checkGeneratedSource(source: string): string[] {
       at(node, "regular expression literals are not allowed");
     } else if (ts.isStringLiteral(node)) {
       const s = node.text;
-      if (!ALLOWED_STRINGS.has(s) && !CRITERION_PREFIX.test(s) && !CRITERION_ID.test(s)) at(node, `string literal ${JSON.stringify(s)} is not allowed`);
+      if (!ALLOWED_STRINGS.has(s) && !CRITERION_PREFIX.test(s) && !CRITERION_ID.test(s) && !SCENARIO_TITLE.test(s)) {
+        at(node, `string literal ${JSON.stringify(s)} is not allowed`);
+      }
     } else if (ts.isElementAccessExpression(node)) {
       const target = node.expression;
       const key = node.argumentExpression;

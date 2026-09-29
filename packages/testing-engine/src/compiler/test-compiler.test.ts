@@ -781,3 +781,51 @@ describe("createGenerateTestStage", () => {
     await expect(stage(ctx, stageInput())).rejects.toBe(reason);
   });
 });
+
+describe("compilePlaywrightTest: several scenarios (V1.1 F9)", () => {
+  const ORDERS = "st_cp_12";
+  const twoScenarios = () => {
+    const first = shopFlow().map((s) => ({ ...s, scenarioId: "SC-1" }));
+    const second = flow(
+      { kind: "navigate", plannedStepId: "PS-8", instruction: `Navigate to ${TARGET}` },
+      { kind: "act", plannedStepId: "PS-9", element: byRole("link", "Sign in") },
+      { kind: "act", plannedStepId: "PS-10", element: byRole("link", "My orders") },
+      { kind: "checkpoint", plannedStepId: "PS-11" },
+    ).map((s, i) => ({ ...s, index: 9 + i, id: s.kind === "checkpoint" ? ORDERS : `st_${9 + i}`, scenarioId: "SC-2" }));
+    return [...first, ...second];
+  };
+  const plan2: TestPlan = {
+    ...plan,
+    scenarios: [
+      plan.scenarios[0]!,
+      {
+        id: "SC-2",
+        title: "Orders",
+        criterionIds: ["AC-9"],
+        steps: [planned("PS-8", "navigate"), planned("PS-9", "click"), planned("PS-10", "click"), planned("PS-11", "capture_checkpoint", { checkpoint: "orders" })],
+      },
+    ],
+  };
+  const ordersFact: ObservedFact = { key: "orders", checkpoint: "orders", value: true, provenance: "DOM_VERIFIED", read: { element: byTestId("orders"), mode: "visible" }, stepId: ORDERS };
+  const criteria = [shopCriteria()[1]!, criterion("AC-9", { kind: "visible", fact: { key: "orders", checkpoint: "orders" }, expected: true })];
+
+  it("emits one test per scenario, each opening the target and replaying only its own steps", () => {
+    const out = compile({ plan: plan2, steps: twoScenarios(), facts: [...shopFacts(), ordersFact], requirement: requirementOf(criteria) });
+    expect(out.compiledCriteria).toEqual(["AC-2", "AC-9"]);
+    const tests = out.source.split(/\n(?=test\()/).filter((b) => b.startsWith("test("));
+    expect(tests.map((t) => t.split("\n")[0])).toEqual(['test("scenario SC-1", async ({ page }) => {', 'test("scenario SC-2", async ({ page }) => {']);
+    expect(tests[0]).toContain("[AC-2]");
+    expect(tests[0]).not.toContain("[AC-9]");
+    expect(tests[1]).toContain("[AC-9]");
+    for (const t of tests) expect(t).toContain("await page.goto(data.targetUrl);");
+    // The second scenario replays its own clicks only (Sign in, My orders), not the cart flow.
+    expect([...tests[1]!.matchAll(/\.click\(\)/g)]).toHaveLength(2);
+  });
+
+  it("does not compile a criterion whose facts were captured in different scenarios", () => {
+    const mixed = criterion("AC-7", { kind: "numeric_compare", left: { key: "orders", checkpoint: "orders" }, operator: "gt", right: after });
+    const ordersCount: ObservedFact = { ...ordersFact, value: 3, read: { element: byTestId("orders"), mode: "number" } };
+    const out = compile({ plan: plan2, steps: twoScenarios(), facts: [...shopFacts(), ordersCount], requirement: requirementOf([mixed]) });
+    expect(out.notCompiled).toEqual([{ criterionId: "AC-7", reason: "Its facts were captured in different scenarios" }]);
+  });
+});

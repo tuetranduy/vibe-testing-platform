@@ -26,9 +26,10 @@ export interface PlanTestInput {
 }
 
 /**
- * Confirmed requirement → one-scenario TestPlan. The model proposes the steps; our code assigns ids,
- * checks the contract (one correction round, then ContractError) and decides blocking and truncation
- * deterministically (blocking.ts). The orchestrator persists the plan and publishes `plan.created`.
+ * Confirmed requirement → TestPlan of 1–5 scenarios (V1.1 F9). The model proposes the scenarios and their
+ * steps; our code assigns ids and criteria, checks the contract (one correction round, then ContractError)
+ * and decides blocking and truncation deterministically, per scenario (blocking.ts). The orchestrator
+ * persists the plan and publishes `plan.created`.
  */
 export async function planTest(llm: RequirementLlm, input: PlanTestInput): Promise<TestPlan> {
   const { requirement } = input;
@@ -61,18 +62,27 @@ export async function planTest(llm: RequirementLlm, input: PlanTestInput): Promi
   // Unreachable in practice (`check` already passed), but never hand an invalid plan on.
   if (!validated.ok) throw new ContractError(`Planned scenario is invalid: ${validated.issues.join("; ")}`);
 
-  const { steps, blockedCriteria } = applyBlocking({
-    criteria: requirement.criteria,
-    steps: validated.steps,
-    targetUrl: input.targetUrl,
-    testDataKeys: input.testDataKeys,
-    secretNames: input.secretNames,
-    policy: input.policy,
+  // Blocking and truncation are per scenario: each starts from a clean session, so a step in one never
+  // blocks a criterion of another. A fallback step (a scenario cut entirely) gets a plan-unique id.
+  let fallback = validated.scenarios.reduce((n, s) => n + s.steps.length, 0);
+  const blockedCriteria: TestPlan["blockedCriteria"] = [];
+  const scenarios = validated.scenarios.map((s, i) => {
+    const blocking = applyBlocking({
+      criteria: requirement.criteria.filter((c) => s.criterionIds.includes(c.id)),
+      steps: s.steps,
+      targetUrl: input.targetUrl,
+      testDataKeys: input.testDataKeys,
+      secretNames: input.secretNames,
+      policy: input.policy,
+      fallbackStepId: validated.scenarios.length === 1 ? "PS-1" : `PS-${++fallback}`,
+    });
+    blockedCriteria.push(...blocking.blockedCriteria);
+    return { id: `SC-${i + 1}`, title: s.title, criterionIds: s.criterionIds, steps: blocking.steps };
   });
   const plan: TestPlan = {
     runId: input.runId,
     requirementRevision: requirement.revision,
-    scenarios: [{ id: "SC-1", title: data.title, criterionIds: requirement.criteria.map((c) => c.id), steps }],
+    scenarios,
     blockedCriteria,
     stopConditions: data.stopConditions,
   };

@@ -37,8 +37,9 @@ import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-c
 import { describeElement, fillElement, recordElement, selectElementOption } from "./recorder";
 
 /**
- * Exploration executor (Task 14): runs the confirmed plan's single scenario (D12) through an
- * `ExplorerSession` and records replayable `ExplorationStep`s and `ObservedFact`s.
+ * Exploration executor (Task 14): runs the confirmed plan's scenarios (V1.1 F9: in order, each from a clean
+ * session; see `execute`) through an `ExplorerSession` and records replayable `ExplorationStep`s and
+ * `ObservedFact`s.
  *
  * Planned step kind → what runs (and what is recorded):
  *
@@ -143,6 +144,26 @@ export interface ExplorationDeps {
   pollIntervalMs?: number;
   /** Cached element lookups from earlier runs (V1.1 F8); absent: every lookup asks the explorer. */
   cache?: ObserveCache;
+  /**
+   * Starts the next scenario from a clean session (V1.1 F9): cookies and the target origin's storage
+   * cleared. Default: the Playwright/CDP implementation (clearBrowserState).
+   */
+  resetSession?: (page: Page, targetUrl: string) => Promise<void>;
+}
+
+/**
+ * The default session reset between scenarios: every cookie, and the target origin's storage (local and
+ * session storage, IndexedDB, cache storage, service workers) through CDP. The next scenario's first step
+ * then loads the target in a fresh document.
+ */
+export async function clearBrowserState(page: Page, targetUrl: string): Promise<void> {
+  await page.context().clearCookies();
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send("Storage.clearDataForOrigin", { origin: new URL(targetUrl).origin, storageTypes: "all" });
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
 }
 
 const MAX_ATTEMPTS = 2; // one retry per planned step
@@ -262,6 +283,9 @@ class ExplorationRun {
   private readonly facts: ObservedFact[] = [];
   /** Steps of an execution in progress whose golden flag depends on its outcome (see `asOneExecution`). */
   private held: ExplorationStep[] | null = null;
+  /** The scenario being explored (V1.1 F9); recorded on each step when the plan has several. */
+  private scenarioId = "SC-1";
+  private readonly multiScenario: boolean;
   /** New lookups of the planned step in progress, written to the cache only if it succeeds. */
   private cacheWrites: { key: string; where: CacheWhere; entry: CachedElement }[] = [];
   private readonly session: ExplorerSession;
@@ -282,6 +306,7 @@ class ExplorationRun {
     this.policy = actionPolicyFor(request);
     this.sensitivity = ctx.secrets.names.length > 0 || request.secretNames.length > 0 ? "SECRET_BEARING" : "STANDARD";
     this.max = request.options.maxExplorationSteps;
+    this.multiScenario = input.plan.scenarios.length > 1;
     this.visibleFacts = new Set(
       input.requirement.criteria.flatMap((c) =>
         c.expectedOutcome.kind === "visible" ? [`${c.expectedOutcome.fact.key}@${c.expectedOutcome.fact.checkpoint}`] : [],
@@ -301,27 +326,63 @@ class ExplorationRun {
     }
   }
 
+  /**
+   * The plan's scenarios in order (V1.1 F9). A failed or blocked step ends its own scenario; the step
+   * limit and the budget end exploration (later scenarios get the same stop reason, unexplored). Every
+   * scenario after the first starts from a clean session. `stopReason` is the first scenario's that did not
+   * complete (COMPLETED when all did); `scenarioStops` gives each one's, when there are several.
+   */
   async execute(): Promise<ExplorationOutcome> {
-    let stopReason: ExplorationStopReason = "COMPLETED";
-    try {
-      const planned = this.input.plan.scenarios[0]?.steps ?? [];
-      const targetUrl = this.ctx.request.targetUrl;
-      const first = planned[0];
-      const firstUrl = first?.kind === "navigate" ? urlInDescription(first.description, targetUrl) : null;
-      const opensTarget = first?.kind === "navigate" && (firstUrl === null || sameUrl(firstUrl, targetUrl));
-
-      await this.ctx.boundary();
-      await this.withRetry(() => this.navigate(targetUrl, opensTarget ? first : null));
-      for (const step of planned.slice(opensTarget ? 1 : 0)) {
-        await this.ctx.boundary();
-        await this.executePlanned(step);
+    const scenarios = this.input.plan.scenarios;
+    const stops: Record<string, ExplorationStopReason> = {};
+    let exhausted: ExplorationStopReason | null = null;
+    for (const [i, scenario] of scenarios.entries()) {
+      this.scenarioId = scenario.id;
+      if (exhausted) {
+        stops[scenario.id] = exhausted;
+        continue;
       }
-    } catch (err) {
-      if (err instanceof Stop) stopReason = err.reason;
-      else if (this.ctx.signal.aborted) throw this.ctx.signal.reason;
-      else throw err;
+      try {
+        if (i > 0) await this.resetSession();
+        await this.exploreScenario(scenario.steps);
+        stops[scenario.id] = "COMPLETED";
+      } catch (err) {
+        if (!(err instanceof Stop)) {
+          if (this.ctx.signal.aborted) throw this.ctx.signal.reason;
+          throw err;
+        }
+        stops[scenario.id] = err.reason;
+        if (err.reason === "STEP_LIMIT_REACHED" || err.reason === "EXPLORATION_BUDGET_EXHAUSTED") exhausted = err.reason;
+      }
     }
-    return { steps: [...this.steps], facts: [...this.facts], stopReason };
+    const stopReason = scenarios.map((s) => stops[s.id]!).find((r) => r !== "COMPLETED") ?? "COMPLETED";
+    return { steps: [...this.steps], facts: [...this.facts], stopReason, ...(this.multiScenario ? { scenarioStops: stops } : {}) };
+  }
+
+  /** One scenario: its first action opens the target URL (see the header), then its planned steps. */
+  private async exploreScenario(planned: readonly PlannedStep[]): Promise<void> {
+    const targetUrl = this.ctx.request.targetUrl;
+    const first = planned[0];
+    const firstUrl = first?.kind === "navigate" ? urlInDescription(first.description, targetUrl) : null;
+    const opensTarget = first?.kind === "navigate" && (firstUrl === null || sameUrl(firstUrl, targetUrl));
+
+    await this.ctx.boundary();
+    await this.withRetry(() => this.navigate(targetUrl, opensTarget ? first : null));
+    for (const step of planned.slice(opensTarget ? 1 : 0)) {
+      await this.ctx.boundary();
+      await this.executePlanned(step);
+    }
+  }
+
+  /** Clears the browser session before a scenario; a failure is the browser's (the run errs, never guesses). */
+  private async resetSession(): Promise<void> {
+    await this.ctx.boundary();
+    try {
+      await (this.deps.resetSession ?? clearBrowserState)(this.page, this.ctx.request.targetUrl);
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      throw new BrowserProviderError("The browser session could not be cleared between scenarios", { cause: err });
+    }
   }
 
   // -------------------------------------------------------------------------------------------
@@ -859,6 +920,7 @@ class ExplorationRun {
       durationMs: Math.max(0, finishedAt.getTime() - draft.startedAt.getTime()),
       artifactIds: draft.artifactIds ?? [],
       llm: draft.llm ?? null,
+      ...(this.multiScenario ? { scenarioId: this.scenarioId } : {}),
     }) as ExplorationStep;
     return ExplorationStepSchema.parse({
       ...redacted,
