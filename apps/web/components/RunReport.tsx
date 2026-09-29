@@ -2,7 +2,7 @@
 
 import type { CancelReason, TestReport, TestRunSummary } from "@platform/contracts";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { getReport } from "../lib/api";
+import { getReport, reportMarkdownPath } from "../lib/api";
 import type { ArtifactInfo, StepInfo } from "../lib/progress-reducer";
 import { ArtifactList } from "./ArtifactList";
 import { CriteriaResults } from "./CriteriaResults";
@@ -86,6 +86,16 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
   return (
     <>
       <ReportSummary report={report} cancelReason={cancelReason} llm={llm} />
+      <div className="actions report-actions">
+        <a className="button button-secondary" href={reportMarkdownPath(runId)} download>
+          <Icon name="download" />
+          Download Markdown
+        </a>
+        <a className="button button-secondary" href={`/runs/${encodeURIComponent(runId)}/print`} target="_blank" rel="noopener">
+          <Icon name="print" />
+          Print or save as PDF
+        </a>
+      </div>
       <CriteriaResults
         runId={runId}
         criteria={report.criteria}

@@ -3785,3 +3785,96 @@ fieldset.stack-tight {
   align-items: center;
   gap: 8px;
 }
+
+/* V1.1: report export */
+.report-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.print-report {
+  display: grid;
+  gap: 24px;
+  max-width: 820px;
+}
+.print-report h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 1.75rem;
+}
+.print-report h2 {
+  margin: 0 0 8px;
+  font-size: 1.125rem;
+}
+.print-report h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+.print-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.print-facts {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 4px 16px;
+  margin: 8px 0 0;
+}
+.print-facts > div {
+  display: contents;
+}
+.print-facts dt {
+  color: var(--text-muted);
+}
+.print-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.print-quote {
+  margin: 0;
+  padding: 8px 16px;
+  border-left: 3px solid var(--border-strong);
+  white-space: pre-wrap;
+}
+.print-criterion {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  break-inside: avoid;
+}
+.print-code pre {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media print {
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --text: #000000;
+    --text-muted: #333333;
+    --border: #cccccc;
+    --border-strong: #999999;
+  }
+  body {
+    background: #ffffff;
+    color: #000000;
+  }
+  .app-header,
+  .skip-link,
+  .no-print {
+    display: none !important;
+  }
+  .page {
+    max-width: none;
+    padding: 0;
+  }
+  .print-report {
+    max-width: none;
+  }
+}

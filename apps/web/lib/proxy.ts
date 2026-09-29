@@ -56,6 +56,7 @@ const ENDPOINTS: { method: Method; pattern: RegExp; query: readonly string[] }[]
   { method: "POST", pattern: new RegExp(`^/v1/test-runs/${ID}/cancel$`), query: [] },
   { method: "POST", pattern: new RegExp(`^/v1/test-runs/${ID}/rerun$`), query: [] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/report$`), query: [] },
+  { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/report\\.md$`), query: [] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/artifacts/${ID}/url$`), query: ["reveal"] },
   { method: "GET", pattern: /^\/v1\/settings\/llm$/, query: [] },
   { method: "PUT", pattern: /^\/v1\/settings\/llm$/, query: [] },
@@ -64,7 +65,7 @@ const ENDPOINTS: { method: Method; pattern: RegExp; query: readonly string[] }[]
 ];
 
 const FORWARDED_REQUEST_HEADERS = ["content-type", "accept", "idempotency-key", "last-event-id"] as const;
-const FORWARDED_RESPONSE_HEADERS = ["content-type", "retry-after"] as const;
+const FORWARDED_RESPONSE_HEADERS = ["content-type", "retry-after", "content-disposition"] as const;
 const MAX_BODY_BYTES = 1_000_000;
 const PREFIX = "/api";
 export const SESSION_COOKIE = "platform_session";

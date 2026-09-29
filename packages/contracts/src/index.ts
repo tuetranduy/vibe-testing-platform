@@ -11,4 +11,5 @@ export * from "./exploration";
 export * from "./results";
 export * from "./events";
 export * from "./report";
+export * from "./report-text";
 export * from "./engine-errors";
