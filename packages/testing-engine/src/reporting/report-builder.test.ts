@@ -275,7 +275,7 @@ function fakeLlm(reply: unknown | (() => never)) {
     generateStructured: (async (req: Parameters<DiagnosticsLlm["generateStructured"]>[0]) => {
       calls.push(req);
       const data = typeof reply === "function" ? (reply as () => never)() : reply;
-      const issues = req.check?.(data as never) ?? [];
+      const issues = req.check?.(data as never, { corrected: false }) ?? [];
       if (issues.length > 0) throw new Error(`invalid output: ${issues.join("; ")}`);
       return { data, usage: { inputTokens: 1, outputTokens: 1, estimatedCostUsd: 0 } };
     }) as DiagnosticsLlm["generateStructured"],
@@ -368,7 +368,7 @@ describe("report stage: diagnostics (Ruling R37)", () => {
   it("the model may not name unknown criteria or note a criterion that is not semantic (checked → one correction round)", async () => {
     const { llm, calls } = fakeLlm(reply);
     await createReportStage({ store: fakeStore().store, diagnostics: () => createDiagnostics(llm) })(ctx, semanticInput());
-    const issues = calls[0]!.check!({ findings: [{ criterionId: "AC-9", summary: "x" }], notes: [{ criterionId: "AC-1", note: "y" }] });
+    const issues = calls[0]!.check!({ findings: [{ criterionId: "AC-9", summary: "x" }], notes: [{ criterionId: "AC-1", note: "y" }] }, { corrected: false });
     expect(issues).toEqual(["findings[0].criterionId AC-9 is not a criterion of this run", "notes[0].criterionId AC-1 is not a semantic criterion"]);
   });
 

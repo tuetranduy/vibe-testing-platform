@@ -43,6 +43,22 @@ const base = (signal = new AbortController().signal) => ({
 });
 
 describe("LlmClient.generateStructured", () => {
+  it("tells `check` whether it judges the answer to the correction round", async () => {
+    const { client, transport } = setup();
+    transport.enqueue({ json: { answer: "first", count: 1 } }, { json: { answer: "second", count: 1 } });
+    const seen: [string, boolean][] = [];
+    const check = (d: { answer: string }, context: { corrected: boolean }) => {
+      seen.push([d.answer, context.corrected]);
+      return context.corrected ? [] : ["answer: try again"];
+    };
+    const res = await client.generateStructured({ ...base(), schema: Answer, check });
+    expect(res.data.answer).toBe("second");
+    expect(seen).toEqual([
+      ["first", false],
+      ["second", true],
+    ]);
+  });
+
   it("prices a call at the price in force on the client's clock, so an announced price change applies from its date", async () => {
     const { client, transport, calls } = setup({ model: "gemini-3.8-flash", now: () => Date.parse("2027-01-02T00:00:00Z") });
     transport.enqueue({ json: { answer: "42", count: 2 }, usage: { inputTokens: 1000, outputTokens: 500 } });
