@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ev } from "../test/events";
-import { json, reportFixture, requirementFixture, summaryFixture } from "../test/fixtures";
+import { json, reportFixture, requirementFixture, suggestionsFixture, summaryFixture } from "../test/fixtures";
 import type { RunEventsOptions } from "../lib/run-events";
 import { RunView } from "./RunView";
 
@@ -96,6 +96,58 @@ describe("RunView", () => {
     expect(within(timeline).getByText("Loaded / — Home · Demo Shop")).toBeInTheDocument();
     expect(within(timeline).getByText("Skipped /account — blocked by policy")).toBeInTheDocument();
     expect(await screen.findByRole("img", { name: /screenshot saved for \//i })).toHaveAttribute("src", "https://s3.test/home.png");
+  });
+
+  it("moves from exploring to 'Choose what to test' only once the run awaits a choice — never asking for suggestions before", async () => {
+    const fetch = routeFetch({
+      [`GET ${RUN}`]: summaries(surveyRun(), surveyRun(), surveyRun("AWAITING_SELECTION")),
+      [`GET ${RUN}/suggestions`]: () => json(200, suggestionsFixture()),
+    });
+    render(<RunView runId="run_1" />);
+    await screen.findByRole("heading", { name: /exploring the website for test ideas/i });
+    await emit(
+      ev(1, "stage.started", { stage: "SURVEYING" }),
+      ev(2, "suggestions.proposed", { count: 4, suggestions: [{ id: "S-1", title: "Add a product to the cart" }] }, { stage: "SURVEYING" }),
+      ev(3, "stage.completed", { stage: "SURVEYING" }),
+    );
+    expect(await screen.findByRole("heading", { name: "Choose what to test" }, { timeout: 5_000 })).toBeInTheDocument();
+    const urls = fetch.mock.calls.map(([u]) => String(u));
+    const firstSuggestions = urls.indexOf(`${RUN}/suggestions`);
+    // Loaded, then polled while still SURVEYING, then AWAITING_SELECTION — and only then the suggestions.
+    expect(urls.slice(0, firstSuggestions).filter((u) => u === RUN)).toHaveLength(3);
+    expect(screen.getAllByRole("article")).toHaveLength(4);
+  });
+
+  it("choosing a test moves the page on to analysing it", async () => {
+    const user = userEvent.setup();
+    routeFetch({
+      [`GET ${RUN}`]: summaries(surveyRun("AWAITING_SELECTION")),
+      [`GET ${RUN}/suggestions`]: () => json(200, suggestionsFixture()),
+      [`POST ${RUN}/suggestions/select`]: () =>
+        json(202, summaryFixture({ lifecycle: "ANALYZING_REQUIREMENT", requirementPreview: suggestionsFixture().suggestions[0]!.requirement })),
+    });
+    render(<RunView runId="run_1" />);
+    const card = await screen.findByRole("article", { name: "Add a product to the cart" });
+    await user.click(within(card).getByRole("button", { name: /test this/i }));
+    await user.click(within(card).getByRole("button", { name: /continue with this test/i }));
+    expect(await screen.findByRole("heading", { name: /analyzing your requirement/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(suggestionsFixture().suggestions[0]!.requirement);
+  });
+
+  it("'None of these — cancel run' uses the run's cancel confirmation", async () => {
+    const user = userEvent.setup();
+    const fetch = routeFetch({
+      [`GET ${RUN}`]: summaries(surveyRun("AWAITING_SELECTION")),
+      [`GET ${RUN}/suggestions`]: () => json(200, suggestionsFixture()),
+      [`POST ${RUN}/cancel`]: () => json(202, summaryFixture({ lifecycle: "CANCELLED", cancelReason: "USER_REQUESTED", requirementPreview: "" })),
+      [`GET ${RUN}/report`]: () => json(200, partialReport("CANCELLED")),
+    });
+    render(<RunView runId="run_1" />);
+    await user.click(await screen.findByRole("button", { name: "None of these — cancel run" }));
+    const dialog = screen.getByRole("group", { name: /cancel this run/i });
+    await user.click(within(dialog).getByRole("button", { name: /yes, cancel/i }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(`${RUN}/cancel`, expect.objectContaining({ method: "POST" })));
+    expect(await screen.findByRole("heading", { name: /run cancelled/i })).toBeInTheDocument();
   });
 
   it("a QUEUED blank-requirement run already lists the survey stage", async () => {

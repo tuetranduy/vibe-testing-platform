@@ -3484,3 +3484,75 @@ a.running-card:hover {
   font-family: var(--mono);
   font-size: 0.8125rem;
 }
+
+/* ---------- Choose what to test (suggested tests) ---------- */
+
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.suggestion {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 24px;
+}
+.suggestion-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.suggestion-title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+.suggestion-text {
+  margin: 0;
+}
+.needs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+}
+.needs-label {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.needs ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.need {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--info-bg);
+  color: var(--info);
+}
+.need-missing {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.suggestion .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
