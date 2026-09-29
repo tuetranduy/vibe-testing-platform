@@ -230,6 +230,20 @@ export class RunRepository {
     throw new StaleTransitionError(runId, from, current.lifecycle);
   }
 
+  /**
+   * Replaces the stored request's requirement and nothing else: a selected suggestion's text, or its
+   * value-redacted form (the worker, before the model sees it). Everything else reads it from there.
+   */
+  async setRequirement(runId: string, requirement: string): Promise<void> {
+    await this.db
+      .update(testRuns)
+      .set({
+        requestJson: sql`jsonb_set(${testRuns.requestJson}, '{requirement}', to_jsonb(${requirement}::text))`,
+        updatedAt: new Date(),
+      })
+      .where(eq(testRuns.id, runId));
+  }
+
   /** Marks a cancel request on a non-terminal run. Returns null if the run is already terminal. */
   async requestCancel(runId: string, reason: CancelReason): Promise<TestRun | null> {
     const now = new Date();

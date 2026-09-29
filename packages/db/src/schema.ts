@@ -123,6 +123,17 @@ export const testPlans = pgTable("test_plans", {
   createdAt: createdAt(),
 });
 
+/** A blank-requirement run's suggested tests (spec 2026-09-28-suggest-tests): one set per run. */
+export const runSuggestions = pgTable("run_suggestions", {
+  runId: text("run_id")
+    .primaryKey()
+    .references(() => testRuns.id, { onDelete: "cascade" }),
+  /** SuggestionSet, validated by SuggestionSetSchema on every write and read. */
+  json: jsonb("json").notNull(),
+  createdAt: createdAt(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
 export const explorationSteps = pgTable(
   "exploration_steps",
   {

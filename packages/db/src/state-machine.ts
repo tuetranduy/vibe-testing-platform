@@ -3,6 +3,11 @@ import { IllegalRunTransitionError } from "./errors";
 
 /** Section 2.1 — explicit edges. CANCELLED / ERRORED from any non-terminal state are added below. */
 const EDGES: ReadonlyArray<readonly [RunLifecycle, RunLifecycle]> = [
+  // A blank requirement: survey the website, wait for the user's choice, then analyse it
+  // (spec 2026-09-28-suggest-tests).
+  ["QUEUED", "SURVEYING"],
+  ["SURVEYING", "AWAITING_SELECTION"],
+  ["AWAITING_SELECTION", "ANALYZING_REQUIREMENT"],
   ["QUEUED", "ANALYZING_REQUIREMENT"],
   ["ANALYZING_REQUIREMENT", "AWAITING_CONFIRMATION"],
   ["ANALYZING_REQUIREMENT", "PLANNING"],
@@ -32,6 +37,7 @@ export function assertTransition(from: RunLifecycle, to: RunLifecycle): void {
 
 /** Lifecycles in which a worker is (or should be) actively processing the run. */
 export const ACTIVE_LIFECYCLES: readonly RunLifecycle[] = [
+  "SURVEYING",
   "ANALYZING_REQUIREMENT",
   "PLANNING",
   "EXPLORING",
@@ -41,8 +47,10 @@ export const ACTIVE_LIFECYCLES: readonly RunLifecycle[] = [
   "GENERATING_REPORT",
 ];
 
+/** Non-terminal; the waiting ones (QUEUED, AWAITING_*) are held by no worker. */
 export const NON_TERMINAL_LIFECYCLES: readonly RunLifecycle[] = [
   "QUEUED",
+  "AWAITING_SELECTION",
   "AWAITING_CONFIRMATION",
   ...ACTIVE_LIFECYCLES,
 ];
