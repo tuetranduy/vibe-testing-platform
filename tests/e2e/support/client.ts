@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { TestEvent, TestReport, TestRunSummary } from "@platform/contracts";
-import { ArtifactRepository, EventRepository, GeneratedTestRepository, SecretRepository, createDb } from "@platform/db";
+import { ArtifactRepository, EventRepository, GeneratedTestRepository, LlmCallRepository, SecretRepository, createDb } from "@platform/db";
 import { sql } from "drizzle-orm";
 import type { E2EStack } from "./stack";
 
@@ -17,7 +17,7 @@ export function api(stack: E2EStack) {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text();
-    return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
+    return { status: res.status, json: text ? (JSON.parse(text) as any) : null, text };
   };
   const self = {
     call,
@@ -47,6 +47,8 @@ export function api(stack: E2EStack) {
     cancel: (runId: string) => call("POST", `/v1/test-runs/${runId}/cancel`),
     artifactUrl: async (runId: string, artifactId: string, reveal = false): Promise<{ url: string }> =>
       (await call("GET", `/v1/test-runs/${runId}/artifacts/${artifactId}/url${reveal ? "?reveal=true" : ""}`)).json,
+    llmSettings: () => call("GET", "/v1/settings/llm"),
+    putProviderKey: (provider: "anthropic" | "gemini", apiKey: string | null) => call("PUT", `/v1/settings/llm/keys/${provider}`, { apiKey }),
   };
   return self;
 }
@@ -60,6 +62,14 @@ export function db(stack: E2EStack) {
     artifacts: (runId: string) => new ArtifactRepository(handle.db).listByRun(runId),
     generatedTest: (runId: string) => new GeneratedTestRepository(handle.db).findByRun(runId),
     secretsActive: (runId: string) => new SecretRepository(handle.db).listActive(runId),
+    llmCalls: (runId: string) => new LlmCallRepository(handle.db).listByRun(runId),
+    /** The Settings tables' rows (saved defaults, encrypted provider keys), as JSON text. */
+    async settingsRows(): Promise<string> {
+      const rows = await handle.db.execute<{ j: string }>(
+        sql`SELECT row_to_json(s)::text AS j FROM llm_settings s UNION ALL SELECT row_to_json(k)::text AS j FROM llm_provider_keys k`,
+      );
+      return rows.rows.map((r) => r.j).join("\n");
+    },
     /** Every table's rows that belong to the run (a run_id column, or the run row itself), as JSON text. */
     async rowsOf(runId: string): Promise<string> {
       const tables = await handle.db.execute<{ table_name: string }>(
