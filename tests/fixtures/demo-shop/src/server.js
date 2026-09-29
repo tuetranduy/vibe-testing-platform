@@ -21,6 +21,7 @@ export const CATALOG = Object.freeze([
 
 const MAX_SESSIONS = 10_000;
 const MAX_BODY_BYTES = 16 * 1024;
+const MAX_LOGGED_REQUESTS = 5_000;
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -231,11 +232,13 @@ function layout(ctx, { title, body, status = 200 }) {
  */
 export function createDemoShopServer(options = {}) {
   const testEndpoints = options.testEndpoints ?? testEndpointsEnabledFromEnv();
-  const state = { sessions: new Map(), deleteClicks: 0 };
+  const state = { sessions: new Map(), deleteClicks: 0, requests: [], requestSeq: 0 };
 
   function reset() {
     state.sessions.clear();
     state.deleteClicks = 0;
+    // The log empties; `seq` keeps counting, so a reader's "after seq N" stays meaningful.
+    state.requests.length = 0;
   }
 
   function getSession(req, res, cookies) {
@@ -474,6 +477,24 @@ export function createDemoShopServer(options = {}) {
     });
   }
 
+  // A survey fixture (nothing links here): same-site pages, links a survey must never follow
+  // (destructive, sign-out, a download, another site) and a same-site link that redirects off-host.
+  function sitemap(res, ctx) {
+    page(res, ctx, {
+      title: "Site map",
+      body: `<h1>Site map</h1>
+    <ul aria-label="Site map">
+      <li><a href="/products">All products</a></li>
+      <li><a href="/account/delete">Delete my account</a></li>
+      <li><a href="/logout">Sign out</a></li>
+      <li><a href="/catalog.pdf">Download the catalog (PDF)</a></li>
+      <li><a href="/redirect?to=https://example.org/">Partner offers</a></li>
+      <li><a href="https://example.org/">Visit example.org</a></li>
+      <li><a href="/products/2">Pixel 11</a></li>
+    </ul>`,
+    });
+  }
+
   // --- dispatcher ------------------------------------------------------------
 
   async function handle(req, res) {
@@ -491,6 +512,8 @@ export function createDemoShopServer(options = {}) {
         send(res, 404, "Not found", "text/plain; charset=utf-8");
       } else if (path === "/__test/stats" && method === "GET") {
         send(res, 200, JSON.stringify({ deleteClicks: state.deleteClicks }), "application/json; charset=utf-8");
+      } else if (path === "/__test/requests" && method === "GET") {
+        send(res, 200, JSON.stringify({ requests: state.requests }), "application/json; charset=utf-8");
       } else if (path === "/__test/reset" && method === "POST") {
         await readBody(req);
         reset();
@@ -501,6 +524,11 @@ export function createDemoShopServer(options = {}) {
       }
       return;
     }
+
+    // Every page request, in order (method + path — never the query): tests assert what a run loaded.
+    state.requestSeq += 1;
+    state.requests.push({ seq: state.requestSeq, method: req.method ?? "GET", path: url.pathname });
+    if (state.requests.length > MAX_LOGGED_REQUESTS) state.requests.shift();
 
     const cookies = parseCookies(req.headers.cookie);
     const cookieFlags = parseFlagsCookie(cookies.flags);
@@ -546,6 +574,7 @@ export function createDemoShopServer(options = {}) {
       }
       if (path === "/external") return external(res, ctx);
       if (path === "/egress-probe") return egressProbe(res, ctx);
+      if (path === "/sitemap") return sitemap(res, ctx);
       return notFound(res, ctx);
     }
 
@@ -576,6 +605,10 @@ export function createDemoShopServer(options = {}) {
     reset,
     get deleteClicks() {
       return state.deleteClicks;
+    },
+    /** Requests so far (method + path, never the query), oldest first. */
+    get requests() {
+      return state.requests.map((r) => ({ ...r }));
     },
   };
   return server;

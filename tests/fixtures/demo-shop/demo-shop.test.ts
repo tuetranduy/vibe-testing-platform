@@ -232,3 +232,43 @@ test.describe("in-process API", () => {
     }
   });
 });
+
+test.describe("survey fixtures", () => {
+  test("/sitemap links same-site pages, a destructive and a sign-out link, a download, an off-host redirect and another site", async ({ page }) => {
+    await page.goto("/sitemap");
+    await expect(page.getByRole("heading", { level: 1, name: "Site map" })).toBeVisible();
+    const hrefs = await page
+      .getByRole("list", { name: "Site map" })
+      .getByRole("link")
+      .evaluateAll((links) => links.map((a) => a.getAttribute("href")));
+    expect(hrefs).toEqual([
+      "/products",
+      "/account/delete",
+      "/logout",
+      "/catalog.pdf",
+      "/redirect?to=https://example.org/",
+      "https://example.org/",
+      "/products/2",
+    ]);
+  });
+
+  test("/__test/requests logs each request's method and path (never the query); reset clears it; /__test/stats keeps its shape", async ({ request }) => {
+    const shop = await startDemoShop({ port: 0, testEndpoints: true });
+    try {
+      await request.get(`${shop.url}/cart?secret=1`);
+      await request.post(`${shop.url}/cart/clear`, { maxRedirects: 0 });
+      const log = (await (await request.get(`${shop.url}/__test/requests`)).json()) as { requests: { seq: number; method: string; path: string }[] };
+      expect(log.requests.map((r) => [r.method, r.path])).toEqual([
+        ["GET", "/cart"],
+        ["POST", "/cart/clear"],
+      ]);
+      expect(log.requests[1]!.seq).toBeGreaterThan(log.requests[0]!.seq);
+      expect(shop.server.demoShop.requests.map((r) => r.path)).toEqual(["/cart", "/cart/clear"]);
+      expect(await (await request.get(`${shop.url}/__test/stats`)).json()).toEqual({ deleteClicks: 0 });
+      expect((await request.post(`${shop.url}/__test/reset`)).status()).toBe(204);
+      expect(((await (await request.get(`${shop.url}/__test/requests`)).json()) as { requests: unknown[] }).requests).toEqual([]);
+    } finally {
+      await shop.close();
+    }
+  });
+});

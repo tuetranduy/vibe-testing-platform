@@ -12,8 +12,16 @@ export declare const CATALOG: ReadonlyArray<{
   readonly description: string;
 }>;
 
+export interface DemoShopRequest {
+  /** Counts every request since the server started (a reset keeps counting). */
+  seq: number;
+  method: string;
+  /** The path only, never the query. */
+  path: string;
+}
+
 export interface DemoShopServer extends Server {
-  demoShop: { reset(): void; readonly deleteClicks: number };
+  demoShop: { reset(): void; readonly deleteClicks: number; readonly requests: DemoShopRequest[] };
 }
 
 export interface DemoShopOptions {
