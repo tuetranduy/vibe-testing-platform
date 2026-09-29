@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DataKeySchema, HostnameSchema, HttpUrlSchema, IsoDateTime, SecretNameSchema } from "./common";
 import { LlmOverrideSchema, LlmProviderSchema, ReasoningLevelSchema, type LlmChoice } from "./llm";
+import { RunOwnerSchema } from "./users";
 
 export const RunLifecycleSchema = z.enum([
   "QUEUED",
@@ -193,6 +194,8 @@ export const TestRunSummarySchema = z.object({
   llm: z
     .object({ provider: LlmProviderSchema, model: z.string(), label: z.string(), reasoning: ReasoningLevelSchema })
     .nullable(),
+  /** Who created the run (V1.1); null: the service token, or created before users existed. */
+  owner: RunOwnerSchema.nullable(),
 });
 export type TestRunSummary = z.infer<typeof TestRunSummarySchema>;
 

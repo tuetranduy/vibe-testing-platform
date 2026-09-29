@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { runScope } from "../auth/principal";
 import type { ApiDeps } from "../deps";
 import { ReportService } from "../services/report-service";
 import { parseOr400 } from "./test-runs";
@@ -11,6 +12,6 @@ export async function testRunReportRoutes(app: FastifyInstance, deps: ApiDeps): 
 
   app.get("/v1/test-runs/:runId/report", async (req) => {
     const { runId } = parseOr400(RunParams, req.params);
-    return service.get(runId);
+    return service.get(runScope(req.principal), runId);
   });
 }

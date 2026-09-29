@@ -6,6 +6,7 @@ import type { ArtifactStorage } from "@platform/storage";
 import type { Redis } from "ioredis";
 import type { ApiMetrics } from "./metrics";
 import type { CancelSignal } from "./services/cancel-signal";
+import type { LoginThrottle } from "./services/user-service";
 
 export interface ApiConfig {
   apiToken: string;
@@ -18,6 +19,15 @@ export interface ApiConfig {
   sseHeartbeatMs: number;
   /** The LLM_* environment, which the API shares with the worker (compose's x-app-env). */
   llm: ApiLlmConfig;
+  /** Users and sessions (V1.1 F1). */
+  auth: ApiAuthConfig;
+}
+
+export interface ApiAuthConfig {
+  /** SESSION_TTL_HOURS: a session's fixed lifetime. */
+  sessionTtlHours: number;
+  /** scrypt cost for new password hashes; unset: the default (2^15). Tests lower it. */
+  passwordHashN?: number;
 }
 
 export interface ApiLlmConfig {
@@ -36,6 +46,9 @@ export interface ApiDeps {
   storage: ArtifactStorage;
   cancelSignal: CancelSignal;
   resolve: Resolver;
+  /** Receives every audit entry after it is logged and stored (tests; an external sink). */
   audit?: (entry: Record<string, unknown>) => void;
+  /** Failed-login counter; unset: a process-local one. */
+  loginThrottle?: LoginThrottle;
   metrics?: ApiMetrics;
 }

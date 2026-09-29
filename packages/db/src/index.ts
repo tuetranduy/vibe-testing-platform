@@ -3,6 +3,7 @@ export * from "./errors";
 export * from "./ids";
 export * from "./state-machine";
 export * from "./run-repository";
+export * from "./user-repository";
 export * from "./event-repository";
 export * from "./requirement-repository";
 export * from "./suggestion-repository";

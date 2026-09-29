@@ -2,7 +2,9 @@ import { ArtifactRepository, RunRepository } from "@platform/db";
 import { MAX_SIGNED_URL_TTL_SECONDS } from "@platform/storage";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { runScope } from "../auth/principal";
 import type { ApiDeps } from "../deps";
+import { audit } from "../services/audit";
 import { HttpError } from "../errors";
 import { parseOr400 } from "./test-runs";
 
@@ -13,17 +15,17 @@ export async function artifactRoutes(app: FastifyInstance, deps: ApiDeps): Promi
   app.get("/v1/test-runs/:runId/artifacts/:artifactId/url", async (req) => {
     const { runId, artifactId } = parseOr400(Params, req.params);
     const { reveal } = parseOr400(Query, req.query);
-    const tenantId = deps.config.defaultTenantId;
-    await new RunRepository(deps.db).getRequired(tenantId, runId);
+    const scope = runScope(req.principal);
+    const tenantId = scope.tenantId;
+    await new RunRepository(deps.db).getRequired(scope, runId);
     const artifact = await new ArtifactRepository(deps.db).getRequired(tenantId, runId, artifactId);
 
     if (artifact.sensitivity === "SECRET_BEARING") {
       if (reveal !== "true") {
         throw new HttpError(403, "REVEAL_REQUIRED", "This artifact may contain entered credentials; pass reveal=true");
       }
-      const entry = { action: "artifact.reveal", tenantId, runId, artifactId, type: artifact.type, at: new Date().toISOString() };
-      req.log.warn(entry, "secret-bearing artifact revealed");
-      deps.audit?.(entry);
+      // Durable since V1.1 (KI-028): an audit_events row naming who revealed what.
+      await audit(deps, req, { action: "artifact.reveal", runId, detail: { artifactId, type: artifact.type } });
     }
 
     const ttl = Math.min(deps.config.artifactUrlTtlSeconds, MAX_SIGNED_URL_TTL_SECONDS);

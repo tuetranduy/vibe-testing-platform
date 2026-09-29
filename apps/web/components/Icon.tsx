@@ -33,7 +33,12 @@ export type IconName =
   | "restart"
   | "copy"
   | "data"
-  | "sliders";
+  | "sliders"
+  | "user"
+  | "key"
+  | "chart"
+  | "print"
+  | "layers";
 
 const PATHS: Record<IconName, ReactNode> = {
   check: <path d="M4 10.5l4 4 8-9" />,
@@ -166,6 +171,26 @@ const PATHS: Record<IconName, ReactNode> = {
       <circle cx="8" cy="14" r="1.8" />
     </>
   ),
+  user: (
+    <>
+      <circle cx="10" cy="7" r="3.2" />
+      <path d="M3.8 16.5c.9-3 3.3-4.6 6.2-4.6s5.3 1.6 6.2 4.6" />
+    </>
+  ),
+  key: (
+    <>
+      <circle cx="6.5" cy="13.5" r="3" />
+      <path d="M8.7 11.3L16 4M13.5 6.5l2 2M11.5 8.5l1.5 1.5" />
+    </>
+  ),
+  chart: <path d="M3.5 16.5h13M5.5 13.5v-4M9 13.5V6M12.5 13.5v-6M16 13.5V4" />,
+  print: (
+    <>
+      <path d="M6 7.5V3.5h8v4M6 13.5H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-2" />
+      <rect x="6" y="11" width="8" height="5.5" rx="0.5" />
+    </>
+  ),
+  layers: <path d="M10 3l7 3.5-7 3.5-7-3.5zM3 10l7 3.5 7-3.5M3 13.5L10 17l7-3.5" />,
 };
 
 export function Icon({ name, className }: { name: IconName; className?: string }) {

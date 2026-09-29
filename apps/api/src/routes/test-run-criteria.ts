@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { runScope } from "../auth/principal";
 import type { ApiDeps } from "../deps";
 import { CriteriaService } from "../services/criteria-service";
 import { parseOr400 } from "./test-runs";
@@ -11,16 +12,16 @@ export async function testRunCriteriaRoutes(app: FastifyInstance, deps: ApiDeps)
 
   app.get("/v1/test-runs/:runId/criteria", async (req) => {
     const { runId } = parseOr400(RunParams, req.params);
-    return service.get(runId);
+    return service.get(runScope(req.principal), runId);
   });
 
   app.put("/v1/test-runs/:runId/criteria", async (req) => {
     const { runId } = parseOr400(RunParams, req.params);
-    return service.update(runId, req.body);
+    return service.update(runScope(req.principal), runId, req.body);
   });
 
   app.post("/v1/test-runs/:runId/criteria/confirm", async (req, reply) => {
     const { runId } = parseOr400(RunParams, req.params);
-    return reply.status(202).send(await service.confirm(runId));
+    return reply.status(202).send(await service.confirm(runScope(req.principal), runId));
   });
 }

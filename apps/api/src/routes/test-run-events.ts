@@ -2,6 +2,7 @@ import { isTerminalEvent, isTerminalLifecycle, type TestEvent } from "@platform/
 import { EventRepository, RunRepository } from "@platform/db";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { runScope } from "../auth/principal";
 import type { ApiDeps } from "../deps";
 import { parseOr400 } from "./test-runs";
 
@@ -34,7 +35,7 @@ export async function testRunEventRoutes(app: FastifyInstance, deps: ApiDeps): P
     const fromHeader = typeof lastEventIdHeader === "string" && /^\d+$/.test(lastEventIdHeader) ? Number(lastEventIdHeader) : 0;
     let lastSent = Math.max(afterSequence ?? 0, fromHeader);
 
-    const run = await new RunRepository(deps.db).getRequired(deps.config.defaultTenantId, runId);
+    const run = await new RunRepository(deps.db).getRequired(runScope(req.principal), runId);
     const events = new EventRepository(deps.db);
 
     reply.hijack();

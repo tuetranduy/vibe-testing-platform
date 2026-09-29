@@ -106,6 +106,7 @@ export async function createTestApi(
       artifactUrlTtlSeconds: 300,
       sseHeartbeatMs: 20_000,
       llm: FAKE_LLM,
+      auth: { sessionTtlHours: 12, passwordHashN: 1024 },
       ...overrides,
     },
     db: tdb.db,
