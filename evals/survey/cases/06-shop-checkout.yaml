@@ -1,0 +1,32 @@
+id: shop-checkout
+tags: [synthetic, shop, destructive]
+startUrl: https://store.example.com/cart
+pages:
+  - url: https://store.example.com/cart
+    inventory:
+      title: Your cart · Example Store
+      description: ""
+      headings: [{ level: 1, text: Your cart }, { level: 2, text: Order summary }]
+      links:
+        - { text: Continue shopping, url: "https://store.example.com/", area: main }
+        - { text: Proceed to checkout, url: "https://store.example.com/checkout", area: main }
+      forms:
+        - { name: Promo code, fields: [{ label: Promo code, type: text, placeholder: "" }], submit: Apply }
+      buttons: [Remove, Remove]
+  - url: https://store.example.com/checkout
+    inventory:
+      title: Checkout · Example Store
+      description: ""
+      headings: [{ level: 1, text: Checkout }, { level: 2, text: Shipping }, { level: 2, text: Payment }]
+      links: [{ text: Back to cart, url: "https://store.example.com/cart", area: main }]
+      forms:
+        - name: Checkout
+          fields:
+            - { label: Full name, type: text, placeholder: "" }
+            - { label: Address, type: text, placeholder: "" }
+            - { label: Card number, type: text, placeholder: "" }
+          submit: Place order
+      buttons: []
+expect:
+  themes: [[cart], [checkout, order, pay]]
+  destructiveWords: [place order, place an order, pay, purchase, buy]

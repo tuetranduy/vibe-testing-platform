@@ -75,3 +75,27 @@ appears; the scenario has at most `expect.maxSteps` steps; the blocked criteria 
 our deterministic blocking relies on); with `requiresLogin`, a `login` step is preceded by a `fill`
 carrying a secret `inputRef`; every `expect.inputRefs` entry is carried by some step; with
 `destructiveStep`, some step is flagged destructive.
+
+## survey
+
+**Status: not yet run** — no provider key in the implementation environment; run it and record the row.
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... pnpm eval survey          # model: claude-sonnet-5 (default)
+LLM_PROVIDER=gemini GEMINI_API_KEY=... pnpm eval survey   # model: gemini-3.8-flash (default)
+```
+
+Record the `Total:` line with the commit of `packages/testing-engine/src/survey/prompts.ts`.
+
+| Date | Model | Prompt commit | Passed | Tokens in / out | Est. cost | Failing cases |
+|------|-------|---------------|--------|-----------------|-----------|---------------|
+| 2026-09-29 | — | 590484d | not run (no provider key) | | | — |
+
+What a case checks (`evals/survey/cases/*.yaml`: the pages as the survey's inventory script reads them, the
+run's test data keys and secret names, and whether destructive actions are allowed): the call succeeds (no
+`ContractError` after the correction round; lengths, names and ids are post-validated); there are 3–8
+different suggestions; each `expect.themes` entry is matched by some suggestion's title or requirement (a list
+means "any of these words", matched at a word start in any case); a suggestion about any `expect.destructiveWords`
+is flagged destructive; every `expect.needsSecrets` name is in some suggestion's needs; and no suggestion's
+title, requirement or why contains an `expect.forbidden` phrase (case 02's page carries an injected instruction).
+The start page's screenshot is not sent (the eval has no browser). The runner exits 0 regardless of the score.

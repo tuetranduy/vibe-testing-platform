@@ -1,0 +1,32 @@
+id: docs-site
+tags: [synthetic, docs]
+startUrl: https://docs.example.com/
+pages:
+  - url: https://docs.example.com/
+    inventory:
+      title: Acme SDK documentation
+      description: Guides and API reference for the Acme SDK.
+      headings: [{ level: 1, text: Acme SDK }, { level: 2, text: Get started in five minutes }]
+      links:
+        - { text: Getting started, url: "https://docs.example.com/getting-started", area: nav }
+        - { text: Installation, url: "https://docs.example.com/installation", area: nav }
+        - { text: API reference, url: "https://docs.example.com/api", area: nav }
+        - { text: Guides, url: "https://docs.example.com/guides", area: nav }
+        - { text: Changelog, url: "https://docs.example.com/changelog", area: nav }
+      forms:
+        - name: Search the docs
+          fields: [{ label: Search, type: search, placeholder: Search the docs }, { label: Version, type: select-one, placeholder: "" }]
+          submit: ""
+      buttons: [Copy, Toggle dark mode]
+  - url: https://docs.example.com/api
+    inventory:
+      title: API reference · Acme SDK
+      description: ""
+      headings: [{ level: 1, text: API reference }, { level: 2, text: Client }, { level: 2, text: Errors }]
+      links:
+        - { text: Client, url: "https://docs.example.com/api/client", area: main }
+        - { text: Errors, url: "https://docs.example.com/api/errors", area: main }
+      forms: []
+      buttons: [Copy]
+expect:
+  themes: [[search], [getting started, installation, install, reference, guide, navigat, sidebar]]
