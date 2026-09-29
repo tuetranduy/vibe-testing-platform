@@ -31,6 +31,27 @@ function listFetch(pages: Record<string, () => Response>) {
 const FIRST = "/api/v1/test-runs?limit=50";
 
 describe("RunHistory", () => {
+  it("titles a run exploring for test ideas by its website, in the list and in 'Running now'", async () => {
+    listFetch({
+      [FIRST]: () =>
+        json(200, {
+          items: [
+            run(6, { lifecycle: "AWAITING_SELECTION", verdict: null, requirementPreview: "", startedAt: null, finishedAt: null }),
+            run(5, { lifecycle: "SURVEYING", verdict: null, requirementPreview: "", startedAt: null, finishedAt: null }),
+          ],
+          nextCursor: null,
+        }),
+    });
+    render(<RunHistory />);
+    const table = await screen.findByRole("table", { name: /test runs/i });
+    expect(within(table).getByRole("link", { name: "Exploring shop6.example.com for test ideas" })).toHaveAttribute("href", "/runs/run_6");
+    expect(within(table).getByText("Awaiting your choice")).toBeInTheDocument();
+    expect(within(table).getByText("Exploring for test ideas")).toBeInTheDocument();
+    const waiting = screen.getByRole("link", { name: /waiting for you/i });
+    expect(waiting).toHaveTextContent("Exploring shop6.example.com for test ideas");
+    expect(waiting).toHaveTextContent("Choose what to test");
+  });
+
   it("lists runs with result, requirement preview, target host, created time and duration", async () => {
     listFetch({
       [FIRST]: () =>

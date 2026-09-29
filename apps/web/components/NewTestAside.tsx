@@ -4,7 +4,7 @@ import type { TestRunSummary } from "@platform/contracts";
 import { useEffect, useId, useState } from "react";
 import { listRuns } from "../lib/api";
 import { LIFECYCLE_LABEL, VERDICT_LABEL } from "./format";
-import { hostOf } from "./report-format";
+import { hostOf, runTitle } from "./report-format";
 
 const STEPS = [
   { title: "Describe", text: "Your requirement becomes acceptance criteria: what the run will check." },
@@ -66,7 +66,7 @@ export function RecentRuns() {
           <li key={r.runId}>
             <a className="recent-link" href={`/runs/new?from=${encodeURIComponent(r.runId)}`}>
               <span className="visually-hidden">Start a new test from: </span>
-              <span className="recent-requirement">{r.requirementPreview}</span>
+              <span className="recent-requirement">{runTitle(r)}</span>
               <span className="recent-meta">
                 {hostOf(r.targetUrl)} · {resultOf(r)}
               </span>

@@ -71,6 +71,58 @@ const toExploring = [
 ];
 
 describe("RunView", () => {
+  const surveyRun = (lifecycle: "QUEUED" | "SURVEYING" | "AWAITING_SELECTION" = "SURVEYING") => summaryFixture({ lifecycle, requirementPreview: "" });
+
+  it("a blank-requirement run exploring the website: its title, the survey stage first, pages in the timeline, the screenshot live", async () => {
+    routeFetch({
+      [`GET ${RUN}`]: summaries(surveyRun()),
+      [`GET ${RUN}/artifacts/art_s1/url`]: () => json(200, { url: "https://s3.test/home.png", expiresAt: "2026-09-28T10:05:00.000Z" }),
+    });
+    render(<RunView runId="run_1" />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Exploring shop.example.com for test ideas" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /exploring the website for test ideas/i })).toBeInTheDocument();
+    await emit(
+      ev(1, "run.created", { targetHost: "shop.example.com" }, { stage: "QUEUED", message: "Test run created for shop.example.com" }),
+      ev(2, "stage.started", { stage: "SURVEYING" }, { message: "Exploring for test ideas started" }),
+      ev(3, "artifact.created", { artifactId: "art_s1", type: "SCREENSHOT", sensitivity: "STANDARD" }, { stage: "SURVEYING", message: "Screenshot saved for /" }),
+      ev(4, "page.surveyed", { path: "/", title: "Home · Demo Shop", status: "READ" }, { stage: "SURVEYING", message: "Loaded / — Home · Demo Shop" }),
+      ev(5, "page.surveyed", { path: "/account", title: "", status: "SKIPPED" }, { stage: "SURVEYING", message: "Skipped /account — blocked by policy" }),
+    );
+
+    const stages = within(screen.getByRole("list", { name: /stages/i })).getAllByRole("listitem");
+    expect(stages[0]).toHaveTextContent(/exploring for test ideas/i);
+    expect(stages[0]).toHaveTextContent(/in progress/i);
+    const timeline = screen.getByRole("list", { name: /timeline/i });
+    expect(within(timeline).getByText("Loaded / — Home · Demo Shop")).toBeInTheDocument();
+    expect(within(timeline).getByText("Skipped /account — blocked by policy")).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /screenshot saved for \//i })).toHaveAttribute("src", "https://s3.test/home.png");
+  });
+
+  it("a QUEUED blank-requirement run already lists the survey stage", async () => {
+    routeFetch({ [`GET ${RUN}`]: summaries(surveyRun("QUEUED")) });
+    render(<RunView runId="run_1" />);
+    const stages = await screen.findByRole("list", { name: /stages/i });
+    expect(within(stages).getAllByRole("listitem")[0]).toHaveTextContent(/exploring for test ideas/i);
+    expect(screen.queryByRole("heading", { name: /analyzing your requirement/i })).not.toBeInTheDocument();
+  });
+
+  it("a run created with a requirement shows no survey stage", async () => {
+    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "PLANNING" })) });
+    render(<RunView runId="run_1" />);
+    const stages = await screen.findByRole("list", { name: /stages/i });
+    expect(within(stages).queryByText(/exploring for test ideas/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a run cancelled because no suggested test was chosen in time", async () => {
+    routeFetch({
+      [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "CANCELLED", cancelReason: "SELECTION_EXPIRED", requirementPreview: "" })),
+      [`GET ${RUN}/report`]: () => json(200, partialReport("CANCELLED")),
+    });
+    render(<RunView runId="run_1" />);
+    expect(await screen.findByRole("heading", { name: /run cancelled/i })).toBeInTheDocument();
+    expect(screen.getByText(/no suggested test was chosen in time/i)).toBeInTheDocument();
+  });
+
   it("shows the analyzing state while the requirement is analyzed", async () => {
     routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "ANALYZING_REQUIREMENT" })) });
     render(<RunView runId="run_1" />);

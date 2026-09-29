@@ -1,5 +1,5 @@
 import type { RunLifecycle } from "@platform/contracts";
-import { PROGRESS_STAGES, STAGE_LABELS, stagesFor, type ProgressState, type StageState } from "../lib/progress-reducer";
+import { STAGE_LABELS, runStages, stagesFor, type ProgressState, type StageState } from "../lib/progress-reducer";
 import { Icon, type IconName } from "./Icon";
 
 /** Each state has its own marker shape (filled check, ring, hollow, dashed, cross), so it never rests on color. */
@@ -13,13 +13,18 @@ const STATE: Record<StageState, { icon: IconName | null; label: string }> = {
 
 interface Props {
   progress: ProgressState;
-  /** The run's lifecycle, for a stage that has no event of its own (awaiting confirmation). */
+  /** The run's lifecycle, for a stage that has no event of its own (awaiting a selection or confirmation). */
   lifecycle?: RunLifecycle;
+  /** The run has a blank requirement: it explores for test ideas first, before any event says so. */
+  survey?: boolean;
 }
 
-/** The current stage, an overall progress bar, and the eight stages (done / current / skipped / stopped). */
-export function RunProgress({ progress, lifecycle }: Props) {
-  const { stages, currentStage } = lifecycle ? stagesFor(progress, lifecycle) : progress;
+/** The current stage, an overall progress bar, and the run's stages (done / current / skipped / stopped). */
+export function RunProgress({ progress, lifecycle, survey = false }: Props) {
+  const shown = lifecycle
+    ? stagesFor(progress, lifecycle, survey)
+    : { stages: progress.stages, currentStage: progress.currentStage, survey: progress.survey || survey };
+  const { stages, currentStage } = shown;
   const { percent, outcome } = progress;
   const now = outcome ? null : currentStage ? STAGE_LABELS[currentStage] : null;
   return (
@@ -58,7 +63,7 @@ export function RunProgress({ progress, lifecycle }: Props) {
         </div>
       </div>
       <ol className="stages" aria-label="Stages">
-        {PROGRESS_STAGES.map((stage) => {
+        {runStages(shown.survey).map((stage) => {
           const state = stages[stage];
           const s = STATE[state];
           return (

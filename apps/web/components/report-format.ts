@@ -4,6 +4,7 @@ import type {
   RerunOutcome,
   RunVerdict,
   StatusReason,
+  TestRunSummary,
 } from "@platform/contracts";
 import type { IconName } from "./Icon";
 
@@ -137,6 +138,10 @@ export function hostOf(url: string): string {
 
 /** A target URL as people read it: no scheme, no bare trailing slash ("shop.example.com/cart?x=1"). */
 export const displayUrl = (url: string): string => url.replace(/^https?:\/\//i, "").replace(/^([^/?#]+)\/$/, "$1");
+
+/** A run's title: its requirement, or — while it explores for test ideas, before one is chosen — what it does. */
+export const runTitle = (run: Pick<TestRunSummary, "requirementPreview" | "targetUrl">): string =>
+  run.requirementPreview || `Exploring ${hostOf(run.targetUrl)} for test ideas`;
 
 const DAY_MS = 86_400_000;
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();

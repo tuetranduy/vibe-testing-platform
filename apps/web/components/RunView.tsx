@@ -15,7 +15,7 @@ import { RunReport } from "./RunReport";
 import { RunTimeline } from "./RunTimeline";
 import { CANCEL_REASON_TEXT, ERROR_CATEGORY_LABEL, LIFECYCLE_LABEL, VERDICT_LABEL } from "./format";
 import { llmChoiceText } from "./llm-format";
-import { displayUrl, formatWhen } from "./report-format";
+import { displayUrl, formatWhen, runTitle } from "./report-format";
 
 /** After analysis completes, how long to poll the run summary for AWAITING_CONFIRMATION. */
 const SETTLE_POLL_MS = 750;
@@ -34,12 +34,21 @@ function viewLifecycle(summary: TestRunSummary, progress: ProgressState): RunLif
   if (progress.latestStage && !isTerminalLifecycle(progress.latestStage) && lifecycleRank(progress.latestStage) > lifecycleRank(l)) {
     l = progress.latestStage;
   }
+  if (progress.suggestionSelected && lifecycleRank(l) < lifecycleRank("ANALYZING_REQUIREMENT")) l = "ANALYZING_REQUIREMENT";
   if (progress.criteriaConfirmed && lifecycleRank(l) < lifecycleRank("PLANNING")) l = "PLANNING";
   return l;
 }
 
 const STATUS_ICON = (l: RunLifecycle): IconName =>
-  l === "COMPLETED" ? "check" : l === "ERRORED" ? "error" : l === "CANCELLED" ? "stop" : l === "AWAITING_CONFIRMATION" ? "info" : "current";
+  l === "COMPLETED"
+    ? "check"
+    : l === "ERRORED"
+      ? "error"
+      : l === "CANCELLED"
+        ? "stop"
+        : l === "AWAITING_CONFIRMATION" || l === "AWAITING_SELECTION"
+          ? "info"
+          : "current";
 
 type CancelState = "idle" | "confirming" | "pending" | "requested";
 
@@ -94,13 +103,19 @@ export function RunView({ runId }: { runId: string }) {
     return () => conn.close();
   }, [runId, loaded, refresh]);
 
-  // 3. Analysis finished without auto-confirmation: the move to AWAITING_CONFIRMATION has no event
-  //    of its own, so poll the summary briefly until it lands.
-  const analysisDone = progress.stages.ANALYZING_REQUIREMENT === "done";
+  // 3. A stage finished whose next lifecycle has no event of its own — AWAITING_CONFIRMATION after the
+  //    analysis, AWAITING_SELECTION after the survey: poll the summary briefly until it lands.
+  const analysisDone = progress.stages.ANALYZING_REQUIREMENT === "done" && !progress.criteriaConfirmed;
+  const surveyDone = progress.stages.SURVEYING === "done" && !progress.suggestionSelected;
   const summaryLifecycle = summary?.lifecycle;
   useEffect(() => {
-    if (!analysisDone || progress.criteriaConfirmed || progress.outcome) return;
-    if (summaryLifecycle !== "QUEUED" && summaryLifecycle !== "ANALYZING_REQUIREMENT") return;
+    if (progress.outcome || !summaryLifecycle) return;
+    const before: RunLifecycle[] | null = analysisDone
+      ? ["QUEUED", "ANALYZING_REQUIREMENT"]
+      : surveyDone
+        ? ["QUEUED", "SURVEYING"]
+        : null;
+    if (!before || !before.includes(summaryLifecycle)) return;
     let tries = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let live = true;
@@ -110,7 +125,7 @@ export function RunView({ runId }: { runId: string }) {
         const s = await getRun(runId);
         if (!live) return;
         setSummary(s);
-        if (s.lifecycle !== "QUEUED" && s.lifecycle !== "ANALYZING_REQUIREMENT") return;
+        if (!before.includes(s.lifecycle)) return;
       } catch {
         /* retry below */
       }
@@ -121,7 +136,7 @@ export function RunView({ runId }: { runId: string }) {
       live = false;
       clearTimeout(timer);
     };
-  }, [analysisDone, progress.criteriaConfirmed, progress.outcome, summaryLifecycle, runId]);
+  }, [analysisDone, surveyDone, progress.outcome, summaryLifecycle, runId]);
 
   // 4. The run ended: pick up its final summary (verdict, finish time).
   const ended = progress.outcome !== null;
@@ -199,7 +214,10 @@ export function RunView({ runId }: { runId: string }) {
 
   const lifecycle = viewLifecycle(summary, progress);
   const terminal = isTerminalLifecycle(lifecycle);
-  const analyzing = lifecycle === "QUEUED" || lifecycle === "ANALYZING_REQUIREMENT";
+  // A blank requirement: the run explores the website for test ideas first (QUEUED until a worker starts).
+  const blank = summary.requirementPreview === "";
+  const surveying = lifecycle === "SURVEYING" || (lifecycle === "QUEUED" && blank);
+  const analyzing = !surveying && (lifecycle === "QUEUED" || lifecycle === "ANALYZING_REQUIREMENT");
 
   return (
     <div className="stack-lg">
@@ -217,7 +235,7 @@ export function RunView({ runId }: { runId: string }) {
         </nav>
         <div className="run-header-row">
           <div className="run-header-main">
-            <h1 className="run-title">{summary.requirementPreview}</h1>
+            <h1 className="run-title">{runTitle(summary)}</h1>
             <div className="run-meta">
               <span className={`status status-${lifecycle.toLowerCase()}`}>
                 <Icon name={STATUS_ICON(lifecycle)} /> {LIFECYCLE_LABEL[lifecycle]}
@@ -320,7 +338,7 @@ export function RunView({ runId }: { runId: string }) {
         </div>
       )}
 
-      {!terminal && <RunProgress progress={progress} lifecycle={lifecycle} />}
+      {!terminal && <RunProgress progress={progress} lifecycle={lifecycle} survey={blank} />}
 
       {analyzing ? (
         <section className="card analyzing" aria-labelledby="analyzing-title">
@@ -332,6 +350,25 @@ export function RunView({ runId }: { runId: string }) {
             </p>
           </div>
         </section>
+      ) : surveying ? (
+        <>
+          <section className="card analyzing" aria-labelledby="surveying-title">
+            <span className="spinner" aria-hidden="true" />
+            <div>
+              <h2 id="surveying-title">Exploring the website for test ideas</h2>
+              <p className="muted">
+                The agent reads the start page and up to 5 pages it links to — it never clicks, types or submits anything — then
+                suggests tests for you to choose from.
+              </p>
+            </div>
+          </section>
+          <div className="live-grid">
+            <LiveEvidence runId={runId} screenshot={progress.latestScreenshot} />
+            <div className="live-side">
+              <RunTimeline items={progress.timeline} />
+            </div>
+          </div>
+        </>
       ) : lifecycle === "AWAITING_CONFIRMATION" ? (
         <CriteriaReview runId={runId} onConfirmed={onConfirmed} />
       ) : terminal ? (

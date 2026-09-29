@@ -1,9 +1,16 @@
 // @vitest-environment node
 import { BlockReasonSchema, CriterionStatusSchema, InconclusiveReasonSchema, RunVerdictSchema } from "@platform/contracts";
 import { describe, expect, it } from "vitest";
-import { CRITERION_STATUS_UI, STATUS_REASON_TEXT, VERDICT_UI, displayUrl, formatDuration, formatUsd, formatWhen, hostOf, reasonText } from "./report-format";
+import { CRITERION_STATUS_UI, STATUS_REASON_TEXT, VERDICT_UI, displayUrl, formatDuration, formatUsd, formatWhen, hostOf, reasonText, runTitle } from "./report-format";
 
 describe("report formatting", () => {
+  it("titles a run by its requirement, or by what it does while it explores for test ideas", () => {
+    expect(runTitle({ requirementPreview: "A user can add a product to the cart.", targetUrl: "https://shop.example.com/" })).toBe(
+      "A user can add a product to the cart.",
+    );
+    expect(runTitle({ requirementPreview: "", targetUrl: "https://shop.example.com:8443/start" })).toBe("Exploring shop.example.com:8443 for test ideas");
+  });
+
   it("maps every BLOCKED and INCONCLUSIVE reason in the contracts to plain language", () => {
     const reasons = [...BlockReasonSchema.options, ...InconclusiveReasonSchema.options];
     for (const r of reasons) {

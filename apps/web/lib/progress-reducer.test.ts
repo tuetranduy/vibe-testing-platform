@@ -2,7 +2,15 @@
 import type { TestEvent } from "@platform/contracts";
 import { describe, expect, it } from "vitest";
 import { ev } from "../test/events";
-import { STAGE_WEIGHTS, initialProgress, progressReducer, stagesFor, type ProgressState } from "./progress-reducer";
+import {
+  PROGRESS_STAGES,
+  STAGE_WEIGHTS,
+  initialProgress,
+  progressReducer,
+  runStages,
+  stagesFor,
+  type ProgressState,
+} from "./progress-reducer";
 
 const reduce = (events: TestEvent[], from: ProgressState = initialProgress()) => events.reduce(progressReducer, from);
 
@@ -14,8 +22,8 @@ const upToExploring = [
 ];
 
 describe("progressReducer", () => {
-  it("stage weights add up to 100", () => {
-    expect(Object.values(STAGE_WEIGHTS).reduce((a, b) => a + b, 0)).toBe(100);
+  it("the test's stage weights add up to 100", () => {
+    expect(PROGRESS_STAGES.reduce((sum, s) => sum + STAGE_WEIGHTS[s], 0)).toBe(100);
   });
 
   it("tracks the current stage and marks prior stages done", () => {
@@ -198,9 +206,66 @@ describe("stagesFor", () => {
 
   it("keeps the events' view when a stage is current, the run ended, or the lifecycle is not a stage", () => {
     const exploring = reduce(upToExploring);
-    expect(stagesFor(exploring, "PLANNING")).toEqual({ stages: exploring.stages, currentStage: "EXPLORING" });
+    expect(stagesFor(exploring, "PLANNING")).toEqual({ stages: exploring.stages, currentStage: "EXPLORING", survey: false });
     const ended = reduce([...upToExploring, ev(5, "run.cancelled", { reason: "USER_REQUESTED" }, { stage: "CANCELLED" })]);
     expect(stagesFor(ended, "CANCELLED").currentStage).toBeNull();
     expect(stagesFor(initialProgress(), "QUEUED").currentStage).toBeNull();
+  });
+});
+
+describe("a run that explores for test ideas (a blank requirement)", () => {
+  const surveyed = [
+    ev(1, "stage.started", { stage: "SURVEYING" }),
+    ev(2, "page.surveyed", { path: "/", title: "Home", status: "READ" }, { stage: "SURVEYING", message: "Loaded / — Home" }),
+    ev(3, "page.surveyed", { path: "/account", title: "", status: "SKIPPED" }, { stage: "SURVEYING", message: "Skipped /account — blocked by policy" }),
+    ev(4, "suggestions.proposed", { count: 1, suggestions: [{ id: "S-1", title: "Add to cart" }] }, { stage: "SURVEYING", message: "1 test suggested" }),
+    ev(5, "stage.completed", { stage: "SURVEYING" }),
+  ];
+
+  it("shows the survey's stages first, and only for such a run", () => {
+    const s = reduce(surveyed);
+    expect(s.survey).toBe(true);
+    expect(s.stages.SURVEYING).toBe("done");
+    expect(runStages(true).slice(0, 3)).toEqual(["SURVEYING", "AWAITING_SELECTION", "ANALYZING_REQUIREMENT"]);
+    expect(reduce(upToExploring).survey).toBe(false);
+    expect(runStages(false)).toEqual(PROGRESS_STAGES);
+  });
+
+  it("puts the pages in the timeline: read ones as success, skipped ones as warnings", () => {
+    const s = reduce(surveyed);
+    expect(s.timeline.filter((t) => t.type === "page.surveyed").map((t) => [t.message, t.tone])).toEqual([
+      ["Loaded / — Home", "success"],
+      ["Skipped /account — blocked by policy", "warning"],
+    ]);
+  });
+
+  it("a selection settles the survey's stages and remembers a test was chosen", () => {
+    const s = reduce([
+      ...surveyed,
+      ev(6, "suggestion.selected", { suggestionId: "S-1", edited: false }, { stage: "AWAITING_SELECTION" }),
+      ev(7, "stage.started", { stage: "ANALYZING_REQUIREMENT" }),
+    ]);
+    expect(s.suggestionSelected).toBe(true);
+    expect(s.stages.AWAITING_SELECTION).toBe("done");
+    expect(s.currentStage).toBe("ANALYZING_REQUIREMENT");
+  });
+
+  it("counts the survey in the progress bar only for such a run", () => {
+    expect(reduce(surveyed).percent).toBe(Math.round((STAGE_WEIGHTS.SURVEYING / (100 + STAGE_WEIGHTS.SURVEYING)) * 100));
+    const plain = reduce(upToExploring);
+    expect(plain.percent).toBe(STAGE_WEIGHTS.ANALYZING_REQUIREMENT + STAGE_WEIGHTS.AWAITING_CONFIRMATION + STAGE_WEIGHTS.PLANNING);
+    expect(plain.stages.SURVEYING).toBe("pending"); // never settled for a run with a requirement
+  });
+
+  it("stagesFor: AWAITING_SELECTION is current once the survey completed (it has no event of its own)", () => {
+    const shown = stagesFor(reduce(surveyed), "AWAITING_SELECTION");
+    expect(shown.survey).toBe(true);
+    expect(shown.currentStage).toBe("AWAITING_SELECTION");
+    expect(shown.stages.SURVEYING).toBe("done");
+  });
+
+  it("stagesFor: a QUEUED blank-requirement run surveys before any event says so", () => {
+    expect(stagesFor(initialProgress(), "QUEUED", true).survey).toBe(true);
+    expect(stagesFor(initialProgress(), "QUEUED").survey).toBe(false);
   });
 });
