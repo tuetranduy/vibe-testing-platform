@@ -81,6 +81,81 @@ describe("assertActionAllowed — default policy denies destructive actions", ()
   });
 });
 
+describe("assertActionAllowed — audit 2026-09-29: destructive buttons the plan's list missed", () => {
+  it.each([
+    // committing money or bookings (commit verb + noun)
+    ["Confirm payment", "confirm payment"],
+    ["Submit payment", "submit payment"],
+    ["Submit order", "submit order"],
+    ["Confirm order", "confirm order"],
+    ["Complete your order", "complete order"],
+    ["Make a payment", "make payment"],
+    ["Complete booking", "complete booking"],
+    ["Authorize the transaction", "authorize transaction"],
+    ["Order now", "order now"],
+    ["Book now", "book now"],
+    ["Reserve now", "reserve now"],
+    ["Donate", "donate"],
+    ["Cancel booking", "cancel booking"],
+    // erasing data, closing accounts, revoking access
+    ["Terminate account", "terminate"],
+    ["Erase all data", "erase"],
+    ["Wipe account", "wipe"],
+    ["Destroy project", "destroy"],
+    ["Revoke access", "revoke"],
+    ["Reset account", "reset account"],
+    ["Remove user", "remove user"],
+    ["Empty trash", "empty trash"],
+    ["\u{1F5D1}", "\u{1F5D1}"],
+    ["\u{1F5D1}\u{FE0F}", "\u{1F5D1}"],
+    // other languages, with and without diacritics
+    ["Konto löschen", "loschen"],
+    ["LÖSCHEN", "loschen"],
+    ["Konto schließen", "konto schliessen"],
+    ["Jetzt kaufen", "jetzt kaufen"],
+    ["Zahlungspflichtig bestellen", "zahlungspflichtig bestellen"],
+    ["Supprimer le compte", "supprimer"],
+    ["Désactiver mon compte", "desactiver"],
+    ["Valider la commande", "valider la commande"],
+    ["Eliminar cuenta", "eliminar"],
+    ["Finalizar compra", "finalizar compra"],
+    ["Darse de baja", "darse de baja"],
+    ["Elimina account", "elimina"],
+    ["Excluir conta", "excluir"],
+    ["Account verwijderen", "verwijderen"],
+  ])("%j → %s", (label, matched) => {
+    expect(assertActionAllowed({ instruction: "Click the button", elementRole: "button", elementName: label }, deny)).toEqual({
+      allowed: false,
+      reason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED",
+      matched,
+    });
+  });
+
+  it.each([
+    // the commit rule leaves things to look at alone
+    "Confirm the order confirmation page is shown",
+    "Complete the order form",
+    "Open the order history",
+    "Check the order total",
+    "Capture the order number",
+    "Display payment options",
+    "View payment details",
+    "Go to the booking page",
+    // navigation and ordinary actions in other languages
+    "In den Warenkorb",
+    "Ajouter au panier",
+    "Añadir al carrito",
+    "Iniciar sesión",
+    "Anmelden",
+    // words that merely contain a term
+    "Open the Payment methods page",
+    "Paganini concert tickets",
+    "Commanders list",
+  ])("allows %j", (instruction) => {
+    expect(assertActionAllowed({ instruction }, deny)).toEqual({ allowed: true });
+  });
+});
+
 describe("assertActionAllowed — default policy allows benign actions", () => {
   it.each([
     "add to cart",
@@ -127,8 +202,8 @@ describe("assertActionAllowed — allowDestructive = true", () => {
 
 describe("DESTRUCTIVE_TERMS", () => {
   it("contains every term from the plan", () => {
-    expect([...DESTRUCTIVE_TERMS].sort()).toEqual(
-      [
+    expect([...DESTRUCTIVE_TERMS]).toEqual(
+      expect.arrayContaining([
         "delete",
         "remove account",
         "close account",
@@ -161,7 +236,7 @@ describe("DESTRUCTIVE_TERMS", () => {
         "unsubscribing",
         "cancel order",
         "cancel my order",
-      ].sort(),
+      ]),
     );
   });
 
