@@ -272,6 +272,7 @@ function RunTable({ runs }: { runs: TestRunSummary[] }) {
               </a>
               <span className="history-host">{hostOf(r.targetUrl)}</span>
               {r.environment === "production" && r.allowDestructiveActions && <span className="history-tag">Production · destructive</span>}
+              {r.kind === "rerun" && <span className="history-kind">Rerun</span>}
               {r.owner && <span className="history-owner">by {r.owner.name}</span>}
             </td>
             <td role="cell" className="history-created">

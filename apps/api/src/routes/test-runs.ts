@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 import { audit } from "../services/audit";
+import { RerunService } from "../services/rerun-service";
 import { TestRunService } from "../services/test-run-service";
 
 const RunParams = z.object({ runId: z.string().min(1).max(100) });
@@ -41,6 +42,19 @@ export async function testRunRoutes(app: FastifyInstance, deps: ApiDeps): Promis
   app.get("/v1/test-runs/:runId", async (req) => {
     const { runId } = parseOr400(RunParams, req.params);
     return service.get(req.principal, runId);
+  });
+
+  // A manual rerun of a finished run's saved Playwright test (V1.1 F5): a new run, no model call.
+  const reruns = new RerunService(deps);
+  app.post("/v1/test-runs/:runId/rerun", async (req, reply) => {
+    const { runId } = parseOr400(RunParams, req.params);
+    const key = req.headers["idempotency-key"];
+    const result = await reruns.rerun(req.principal, runId, req.body, typeof key === "string" && key.length > 0 ? key : undefined);
+    await audit(deps, req, { action: "run.rerun_requested", runId: result.body.runId, detail: { sourceRunId: runId } });
+    if (result.credentialProfileId) {
+      await audit(deps, req, { action: "credential_profile.used", runId: result.body.runId, detail: { profileId: result.credentialProfileId } });
+    }
+    return reply.status(result.status).send(result.body);
   });
 
   app.post("/v1/test-runs/:runId/cancel", async (req, reply) => {

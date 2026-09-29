@@ -31,6 +31,15 @@ export class FakeQueue implements RunQueue {
   async enqueueAnalyze(runId: string) {
     this.analyze.push(runId);
   }
+  rerun: string[] = [];
+  rerunPending = new Set<string>();
+  async enqueueRerun(runId: string) {
+    if ((this as { fail?: boolean }).fail) throw new Error("queue down");
+    this.rerun.push(runId);
+  }
+  async isRerunPending(runId: string) {
+    return this.rerunPending.has(runId);
+  }
   async enqueueExecute(runId: string) {
     this.execute.push(runId);
   }
@@ -58,7 +67,7 @@ export function onlyEngine(stages: EngineStages): Engines {
 
 /** The fake engine's choice, with no model client, for every run. */
 export const FAKE_CHOICE: LlmChoice = { provider: "fake", model: "fake", reasoning: "default" };
-export const noRunLlm: RunLlmFactory = { forRun: async () => ({ choice: FAKE_CHOICE, llm: null }) };
+export const noRunLlm: RunLlmFactory = { forRun: async () => ({ choice: FAKE_CHOICE, llm: null }), choiceOf: () => FAKE_CHOICE };
 
 export interface WorkerHarness {
   tdb: TestDatabase;

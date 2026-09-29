@@ -3767,3 +3767,21 @@ fieldset.stack-tight {
   gap: 4px;
   margin-bottom: 8px;
 }
+
+/* V1.1: manual rerun */
+.history-kind {
+  display: inline-block;
+  margin-top: 4px;
+  margin-left: 8px;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 560;
+}
+.rerun-panel .card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}

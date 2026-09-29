@@ -42,6 +42,7 @@ export async function loadReportSources(db: Database, runId: string): Promise<Pe
       targetUrl: run.targetUrl,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
+      rerunOf: run.request.rerunOf ?? null,
     },
     requirement,
     plan,

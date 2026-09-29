@@ -17,6 +17,7 @@ import {
   type ApiError,
   type CreateTestRunRequestInput,
   type CreateTestRunResponse,
+  type RerunRequestInput,
   type CreateUserRequestInput,
   type SessionView,
   type CreateCredentialProfileRequestInput,
@@ -131,6 +132,10 @@ export const listRuns = (cursor: string | null = null, limit = 50, owner?: "me" 
 export const getReport = (runId: string): Promise<TestReport> => request(TestReportSchema, `${runPath(runId)}/report`);
 
 export const getRun = (runId: string): Promise<TestRunSummary> => request(TestRunSummarySchema, runPath(runId));
+
+/** A manual rerun of a finished run's saved Playwright test (V1.1): a new run, no model call. */
+export const rerunRun = (runId: string, body: RerunRequestInput, idempotencyKey: string): Promise<CreateTestRunResponse> =>
+  request(CreateTestRunResponseSchema, `${runPath(runId)}/rerun`, { method: "POST", body, headers: { "idempotency-key": idempotencyKey } });
 
 export const cancelRun = (runId: string): Promise<TestRunSummary> =>
   request(TestRunSummarySchema, `${runPath(runId)}/cancel`, { method: "POST" });

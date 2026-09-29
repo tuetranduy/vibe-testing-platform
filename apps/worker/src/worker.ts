@@ -1,6 +1,7 @@
 import {
   JOB_ANALYZE_RUN,
   JOB_EXECUTE_RUN,
+  JOB_RERUN_RUN,
   JOB_RETENTION,
   RETENTION_QUEUE,
   RUNS_QUEUE,
@@ -11,6 +12,7 @@ import { Queue, Worker, type ConnectionOptions, type Job } from "bullmq";
 import type { WorkerDeps } from "./deps";
 import { analyzeRunJob } from "./jobs/analyze-run";
 import { executeRunJob } from "./jobs/execute-run";
+import { rerunRunJob } from "./jobs/rerun-run";
 import { retentionJob } from "./jobs/retention";
 
 export interface RunningWorkers {
@@ -32,6 +34,7 @@ export async function startWorkers(
       const { runId } = job.data;
       if (job.name === JOB_ANALYZE_RUN) return analyzeRunJob(deps, runId);
       if (job.name === JOB_EXECUTE_RUN) return executeRunJob(deps, runId);
+      if (job.name === JOB_RERUN_RUN) return rerunRunJob(deps, runId);
       deps.logger.warn({ job: job.name }, "unknown job");
     },
     { connection: opts.connection, concurrency: opts.concurrency, maxStalledCount: 0, lockDuration: 30_000 },

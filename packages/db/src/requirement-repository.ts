@@ -62,6 +62,20 @@ export class RequirementRepository {
     });
   }
 
+  /**
+   * A manual rerun (V1.1 F5): the source run's confirmed requirement becomes this new run's revision 1,
+   * already confirmed (the criteria were frozen when the source run confirmed them). Only for a run with no
+   * revision yet.
+   */
+  async copyConfirmed(runId: string, source: NormalizedRequirement): Promise<NormalizedRequirement> {
+    const parsed = NormalizedRequirementSchema.parse({ ...source, runId, revision: 1, confirmedAt: source.confirmedAt ?? new Date().toISOString() });
+    const [row] = await this.db
+      .insert(requirementRevisions)
+      .values({ id: newId("req"), runId, revision: 1, json: parsed, confirmedAt: new Date(parsed.confirmedAt!) })
+      .returning();
+    return toRequirement(row!);
+  }
+
   /** Freezes the given revision; it must be the latest and not yet confirmed. */
   async confirm(runId: string, revision: number): Promise<NormalizedRequirement> {
     return this.db.transaction(async (tx) => {

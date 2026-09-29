@@ -52,7 +52,7 @@ export interface ReaperDeps {
   config: ReaperConfig;
   db: Database;
   redis: Pick<Redis, "publish">;
-  queue: Pick<RunQueue, "isExecuteWaiting" | "isAnalyzeAfterSelectionWaiting" | "isAnalyzePending">;
+  queue: Pick<RunQueue, "isExecuteWaiting" | "isAnalyzeAfterSelectionWaiting" | "isAnalyzePending" | "isRerunPending">;
   logger: ReaperLogger;
   metrics?: ReaperMetrics;
   now?: () => Date;
@@ -140,7 +140,8 @@ export async function reapRuns(deps: ReaperDeps): Promise<ReapResult> {
 
   // QUEUED runs whose analyze job is gone (worker died before picking it up, enqueue lost, ...).
   for (const run of await runs.findQueuedSince(new Date(now.getTime() - deps.config.queuedStaleAfterMs))) {
-    if (await deps.queue.isAnalyzePending(run.id)) continue;
+    // A manual rerun (V1.1 F5) waits for its rerun-run job, not an analyze-run.
+    if (run.request.rerunOf ? await deps.queue.isRerunPending(run.id) : await deps.queue.isAnalyzePending(run.id)) continue;
     await safely(run, async () => {
       await errorRun(run, "INTERNAL", "Run was never picked up by a worker");
       result.neverStarted.push(run.id);
