@@ -124,11 +124,11 @@ export class AnthropicTransport implements LlmTransport {
 }
 
 /**
- * The model that served a fallback-answered response: the `fallback_message` usage iteration (the API's
+ * The model that served a fallback-answered response: the last `fallback_message` usage iteration (the API's
  * signal that a fallback served it), else the last `fallback` content block's target. Undefined otherwise.
  */
 function servingFallbackModel(message: MessageLike): string | undefined {
-  const served = message.usage.iterations?.find((i) => i.type === "fallback_message")?.model;
+  const served = message.usage.iterations?.filter((i) => i.type === "fallback_message").at(-1)?.model;
   if (served) return served;
   return message.content.filter(isFallback).at(-1)?.to.model;
 }

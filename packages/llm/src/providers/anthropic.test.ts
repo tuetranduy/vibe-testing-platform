@@ -177,6 +177,32 @@ describe("AnthropicTransport refusal fallback (catalog models marked refusalFall
     expect(res).toEqual({ text: '{"name":"x"}', model: "claude-fable-5-1", usage: { inputTokens: 120, outputTokens: 40 }, fallbackModel: "claude-opus-5-5" });
   });
 
+  it("attributes a multi-hop fallback to the model that produced the final text", async () => {
+    const { fn } = fakeFetch(() => json(200, okMessage("", {
+      model: "claude-fable-5-1",
+      content: [
+        { type: "text", text: "declined by Fable" },
+        { type: "fallback", from: { model: "claude-fable-5-1" }, to: { model: "claude-sonnet-5" }, trigger: { type: "refusal", category: "cyber" } },
+        { type: "text", text: "declined by Sonnet" },
+        { type: "fallback", from: { model: "claude-sonnet-5" }, to: { model: "claude-opus-5-5" }, trigger: { type: "refusal", category: "cyber" } },
+        { type: "text", text: '{"name":"x"}' },
+      ],
+      usage: {
+        input_tokens: 180, output_tokens: 45,
+        iterations: [
+          { type: "message", model: "claude-fable-5-1" },
+          { type: "fallback_message", model: "claude-sonnet-5" },
+          { type: "fallback_message", model: "claude-opus-5-5" },
+        ],
+      },
+    })));
+    const res = await new AnthropicTransport({ apiKey: "sk-test", fetch: fn }).complete(request({ model: "claude-fable-5-1" }));
+    expect(res).toEqual({
+      text: '{"name":"x"}', model: "claude-fable-5-1",
+      usage: { inputTokens: 180, outputTokens: 45 }, fallbackModel: "claude-opus-5-5",
+    });
+  });
+
   it("without usage iterations, takes the serving model from the last fallback block", async () => {
     const { fn } = fakeFetch(() => json(200, fallbackAnswer({ iterations: null })));
     const res = await new AnthropicTransport({ apiKey: "sk-test", fetch: fn }).complete(request({ model: "claude-fable-5-1" }));
