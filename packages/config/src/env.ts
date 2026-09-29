@@ -141,6 +141,16 @@ const EnvSchema = z
         message: "must be base64 that decodes to exactly 32 bytes",
       });
     }
+    if (env.NODE_ENV === "production" && key && isWeakKey(key)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["SECRETS_ENCRYPTION_KEY"],
+        message: "looks like a placeholder (e.g. the all-zero example key); generate 32 random bytes for production",
+      });
+    }
+    if (env.NODE_ENV === "production" && KNOWN_DEV_API_TOKENS.includes(env.API_TOKEN)) {
+      ctx.addIssue({ code: "custom", path: ["API_TOKEN"], message: "is the development default; set a random token for production" });
+    }
     if (env.NODE_ENV === "production" && env.TARGET_PRIVATE_ALLOWLIST.length > 0) {
       ctx.addIssue({
         code: "custom",
@@ -165,6 +175,17 @@ export type Env = z.output<typeof EnvSchema>;
 const LlmEnvSchema = LlmFields.superRefine(checkLlmSettings).transform(withDefaultModel);
 
 export type LiveLlmEnv = Omit<z.output<typeof LlmEnvSchema>, "LLM_PROVIDER"> & { LLM_PROVIDER: "anthropic" | "gemini" };
+
+/** API tokens shipped in `.env.example` and the compose file: never valid in production. */
+export const KNOWN_DEV_API_TOKENS: readonly string[] = ["dev-api-token-change-me-please"];
+
+/**
+ * A key that is not 32 random bytes: the all-zero example key, any repeated byte, or anything with
+ * fewer than 16 distinct byte values (a random key has about 30; fewer than 16 has odds below 1e-15).
+ */
+function isWeakKey(key: Buffer): boolean {
+  return new Set(key).size < 16;
+}
 
 function decodeKey(value: string): Buffer | null {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return null;

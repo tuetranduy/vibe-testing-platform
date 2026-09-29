@@ -44,6 +44,16 @@ describe("loadEnv", () => {
     expect(() => loadEnv({ ...validEnv, DATABASE_URL: undefined, REDIS_URL: undefined })).toThrow(/DATABASE_URL[\s\S]*REDIS_URL|REDIS_URL[\s\S]*DATABASE_URL/);
   });
 
+  it("rejects the example SECRETS_ENCRYPTION_KEY and API_TOKEN in production, but not in development", () => {
+    const strongKey = Buffer.from(Array.from({ length: 32 }, (_, i) => (i * 37 + 11) % 256)).toString("base64");
+    const prod = { ...validEnv, NODE_ENV: "production", LLM_PROVIDER: "gemini", GEMINI_API_KEY: "k", SECRETS_ENCRYPTION_KEY: strongKey };
+    expect(() => loadEnv(prod)).not.toThrow();
+    const allZero = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    expect(() => loadEnv({ ...prod, SECRETS_ENCRYPTION_KEY: allZero })).toThrow(/SECRETS_ENCRYPTION_KEY: looks like a placeholder/);
+    expect(() => loadEnv({ ...prod, API_TOKEN: "dev-api-token-change-me-please" })).toThrow(/API_TOKEN: is the development default/);
+    expect(() => loadEnv({ ...validEnv, SECRETS_ENCRYPTION_KEY: allZero, API_TOKEN: "dev-api-token-change-me-please" })).not.toThrow();
+  });
+
   it("rejects TARGET_PRIVATE_ALLOWLIST in production", () => {
     expect(() =>
       loadEnv({ ...validEnv, NODE_ENV: "production", TARGET_PRIVATE_ALLOWLIST: "demo-shop:4000" }),
