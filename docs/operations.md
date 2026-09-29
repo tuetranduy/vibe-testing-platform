@@ -20,6 +20,11 @@ Scale by adding workers: each takes `WORKER_CONCURRENCY` runs at a time. The mai
 60 s, retention daily) are BullMQ job schedulers, so exactly one worker runs each tick however many are deployed.
 Retention has its own queue, so a slow artifact store never delays the reaper.
 
+The reaper also ends the two waiting states when nobody acts: a run awaiting criteria confirmation, or awaiting the
+choice of a suggested test ("Choose what to test", `AWAITING_SELECTION`), for longer than `CONFIRMATION_TTL_HOURS`
+is cancelled (`CONFIRMATION_EXPIRED` / `SELECTION_EXPIRED`) and its secrets are purged. A `SURVEYING` run whose
+worker stops heartbeating ends `ERRORED / WORKER_LOST` like any active run.
+
 The API and the worker port 9464 must stay on a private network. `/metrics` and `/healthz` are unauthenticated,
 and the web app's proxy never forwards either.
 
@@ -92,7 +97,7 @@ Settings to fall back to the environment's.
 | Metric | Labels | Exported by | Counts |
 |---|---|---|---|
 | `test_runs_total` | `lifecycle`, `verdict` (`none` when absent) | worker, API | runs reaching COMPLETED / ERRORED / CANCELLED (the API counts runs it ends itself: cancel before a worker holds them, enqueue failures) |
-| `test_run_duration_seconds` | `stage` | worker, API | histogram of time spent in each lifecycle stage, observed when the run leaves it (from when it entered it, so `QUEUED` includes the queue wait) by whichever process moves it on: the API for `AWAITING_CONFIRMATION` → `PLANNING` and its cancels, the reaper for the runs it ends |
+| `test_run_duration_seconds` | `stage` | worker, API | histogram of time spent in each lifecycle stage, observed when the run leaves it (from when it entered it, so `QUEUED` includes the queue wait) by whichever process moves it on: the API for `AWAITING_CONFIRMATION` → `PLANNING`, `AWAITING_SELECTION` → `ANALYZING_REQUIREMENT` and its cancels, the reaper for the runs it ends. Runs created without a requirement add `SURVEYING` and `AWAITING_SELECTION` |
 | `queue_depth` | `queue` (`runs`) | API | jobs waiting to be picked up (absent for a scrape when Redis cannot answer) |
 | `active_worker_runs` | — | worker | analyze / execute jobs in progress |
 | `browser_sessions_active` | — | worker | open exploration sandboxes and running rerun processes |
@@ -102,7 +107,7 @@ Settings to fall back to the environment's.
 | `stagehand_cache_hits_total` | — | worker | exploration steps served from Stagehand's cache (always 0 today: caching is Browserbase-only) |
 | `egress_blocked_total` | `reason` | worker | connections the egress proxies denied (Chromium's own background services excluded) |
 | `reconciliation_disagreements_total` | — | worker | criteria whose discovery result and rerun disagreed (`DISCOVERY_RERUN_DISAGREE`) |
-| `runs_reaped_total` | `reason` (`WORKER_LOST`, `TIMEOUT`, `NEVER_STARTED`, `CONFIRMATION_EXPIRED`) | worker | runs the reaper ended |
+| `runs_reaped_total` | `reason` (`WORKER_LOST`, `TIMEOUT`, `NEVER_STARTED`, `CONFIRMATION_EXPIRED`, `SELECTION_EXPIRED`) | worker | runs the reaper ended |
 | `artifact_upload_failures_total` | — | worker | failed artifact uploads |
 
 Both processes also export Node.js default metrics (heap, event loop lag, GC).
