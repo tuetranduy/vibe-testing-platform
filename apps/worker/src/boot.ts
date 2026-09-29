@@ -1,20 +1,25 @@
-import { createLogger, createRunLogRegistry, loadEnvOrExit } from "@platform/config";
+import { createLogger, createRunLogRegistry, loadEnvOrExit, resolveEnvLlmChoice } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
 import { createRunQueue } from "@platform/event-bus";
+import type { LlmTransport } from "@platform/llm";
 import { createArtifactStorage } from "@platform/storage";
 import { writeFileSync } from "node:fs";
 import { Redis } from "ioredis";
 import { CancelWatcher } from "./cancel-watcher";
 import type { WorkerLogger } from "./deps";
-import { createEngine, rerunWorkspaceConfig, type EngineDeps } from "./engine";
+import { createEngines, rerunWorkspaceConfig, type EngineDeps } from "./engine";
 import { stagehandExtension } from "./exploration";
 import { createWorkerMetrics, startMetricsServer } from "./metrics";
+import { createRunLlmFactory } from "./run-llm";
 import { preflightBrowserSandbox, preflightRunner } from "./sandbox/preflight";
 import { startWorkers } from "./worker";
 
 export interface BootOptions {
-  /** Test seams (E2E): a scripted model transport and explorer instead of the provider and Stagehand. */
-  engine?: Pick<EngineDeps, "transport" | "exploration" | "rerun">;
+  /**
+   * Test seams (E2E): a scripted model transport (every run's client uses it, after the usual key checks) and
+   * explorer instead of the provider and Stagehand.
+   */
+  engine?: Pick<EngineDeps, "exploration" | "rerun"> & { transport?: LlmTransport };
 }
 
 /** The worker process: env, database, queues, engine, metrics, retention, signals. */
@@ -42,37 +47,36 @@ export async function bootWorker(opts: BootOptions = {}): Promise<void> {
   // Exploration screenshots (the real engine); the API signs read URLs for the same store.
   const storage = createArtifactStorage(env);
 
-  // Ruling R7: LLM_PROVIDER=fake → the deterministic fake engine; otherwise real stages as they land
-  // (analyze, plan, explore), with the fake engine standing in for the rest.
-  const engine = createEngine(env, {
+  // Each run's model comes from its recorded choice (Settings, the new-test form), or from LLM_* for runs
+  // without one. Throws here for LLM_PROVIDER=openai (not built in V1): the worker stops at start-up.
+  const { transport, ...seams } = opts.engine ?? {};
+  const runLlm = createRunLlmFactory({ db: handle.db, secretsKey: env.secretsKey, env, logger, metrics, ...(transport ? { transport } : {}) });
+  // Ruling R7, per run: both engines, built once; a run whose choice is the fake engine runs the fake stages.
+  const engines = createEngines(env, {
     db: handle.db,
     logger,
     storage,
     metrics,
     fake: { stepDelayMs: Number(process.env.FAKE_ENGINE_STEP_DELAY_MS ?? 500), explorationSteps: 4 },
-    ...opts.engine,
+    ...seams,
   });
-  if (engine.kind === "fake") logger.warn({ engine: "fake" }, "using the fake test engine (LLM_PROVIDER=fake)");
-  else {
-    logger.info({ engine: "real", provider: engine.llm?.provider, model: engine.llm?.model }, "using the real test engine");
-    for (let attempt = 1; ; attempt++) {
-      try {
-        await storage.ensureReady();
-        break;
-      } catch (err) {
-        if (attempt >= 10) throw err;
-        logger.warn({ err, attempt }, "artifact storage not ready; retrying");
-        await new Promise((r) => setTimeout(r, 1000 * attempt));
-      }
+  logger.info({ defaults: resolveEnvLlmChoice(env) }, "test engines ready");
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await storage.ensureReady();
+      break;
+    } catch (err) {
+      if (attempt >= 10) throw err;
+      logger.warn({ err, attempt }, "artifact storage not ready; retrying");
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
     }
-    // Launch + close the sandboxed Chromium once. A failure is logged (never fatal): analyze/plan keep
-    // working and exploring runs end ERRORED / BROWSER_PROVIDER.
-    await preflightBrowserSandbox({ logger, resolveExtension: stagehandExtension });
-    // The rerun's runner: @playwright/test resolves and the workspace dir is writable. Logged, never
-    // fatal: reruns end ERRORED and criteria fall back to their exploration evidence.
-    await preflightRunner({ logger, workspace: rerunWorkspaceConfig(env) });
   }
-  const stages = engine.stages;
+  // Launch + close the sandboxed Chromium once. A failure is logged (never fatal): analyze/plan keep
+  // working and exploring runs end ERRORED / BROWSER_PROVIDER.
+  await preflightBrowserSandbox({ logger, resolveExtension: stagehandExtension });
+  // The rerun's runner: @playwright/test resolves and the workspace dir is writable. Logged, never
+  // fatal: reruns end ERRORED and criteria fall back to their exploration evidence.
+  await preflightRunner({ logger, workspace: rerunWorkspaceConfig(env) });
 
   const workers = await startWorkers(
     {
@@ -90,7 +94,8 @@ export async function bootWorker(opts: BootOptions = {}): Promise<void> {
       redis: publisher,
       cancelWatcher,
       queue,
-      stages,
+      engines,
+      runLlm,
       logger,
       runLogs,
       metrics,

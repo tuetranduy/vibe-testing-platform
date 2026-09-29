@@ -1,8 +1,8 @@
 import os from "node:os";
 import path from "node:path";
-import { resolveEnvLlmChoice, type Env } from "@platform/config";
-import { LlmCallRepository, type Database } from "@platform/db";
-import { LlmClient, createTransport, type LlmTransport } from "@platform/llm";
+import type { Env } from "@platform/config";
+import type { LlmChoice } from "@platform/contracts";
+import type { Database } from "@platform/db";
 import type { ArtifactStorage } from "@platform/storage";
 import {
   createFakeStages,
@@ -16,25 +16,14 @@ import {
 import type { WorkerLogger } from "./deps";
 import { createExplorationDeps } from "./exploration";
 import { createGenerateTestDeps } from "./generated-test";
-import { recordLlmCall, type WorkerMetrics } from "./metrics";
+import type { WorkerMetrics } from "./metrics";
 import { createReportDeps } from "./report";
 import { createRunTestDeps } from "./rerun";
 
-export type EngineConfig = Pick<Env, "LLM_PROVIDER" | "LLM_MODEL"> &
-  Partial<
-    Pick<
-      Env,
-      | "ANTHROPIC_API_KEY"
-      | "GEMINI_API_KEY"
-      | "GEMINI_THINKING_LEVEL"
-      | "OPENAI_API_KEY"
-      | "TARGET_PRIVATE_ALLOWLIST"
-      | "ARTIFACT_RETENTION_DAYS"
-      | "SECRET_ARTIFACT_RETENTION_DAYS"
-      | "RUNNER_WORKSPACE_DIR"
-      | "RUNNER_NODE_MODULES_DIR"
-    >
-  >;
+/** What the engines read from the environment. The model is not here: it comes with each run (run-llm.ts). */
+export type EngineConfig = Partial<
+  Pick<Env, "TARGET_PRIVATE_ALLOWLIST" | "ARTIFACT_RETENTION_DAYS" | "SECRET_ARTIFACT_RETENTION_DAYS" | "RUNNER_WORKSPACE_DIR" | "RUNNER_NODE_MODULES_DIR">
+>;
 
 /** Where reruns get their workspaces (Ruling R32): RUNNER_WORKSPACE_DIR / RUNNER_NODE_MODULES_DIR, with defaults. */
 export function rerunWorkspaceConfig(config: Pick<EngineConfig, "RUNNER_WORKSPACE_DIR" | "RUNNER_NODE_MODULES_DIR">): WorkspaceConfig {
@@ -44,58 +33,36 @@ export function rerunWorkspaceConfig(config: Pick<EngineConfig, "RUNNER_WORKSPAC
   };
 }
 
-export interface EngineSelection {
-  kind: "fake" | "real";
-  stages: EngineStages;
-  llm: LlmClient | null;
+/** Both engines, built once at start-up; each run uses the one its model choice names. */
+export interface Engines {
+  fake: EngineStages;
+  real: EngineStages;
+  /** Ruling R7: the fake engine for the `fake` choice (no model, no key), the real one for any other. */
+  for(choice: LlmChoice): EngineStages;
 }
 
 export interface EngineDeps {
   db: Database;
   logger: WorkerLogger;
   fake?: FakeEngineOptions;
-  transport?: LlmTransport;
-  /** Artifact storage for exploration screenshots and rerun evidence. Required by the real engine. */
-  storage?: ArtifactStorage;
+  /** Artifact storage for exploration screenshots and rerun evidence. */
+  storage: ArtifactStorage;
   /** Test seams for the real explore stage (sandbox, explorer, recorder). */
   exploration?: Partial<ExploreStageDeps>;
   /** Test seams for the real rerun stage (proxy, runner child process, workspace, evidence store). */
   rerun?: Partial<RunTestStageDeps>;
-  /** Prometheus metrics (LLM calls, sandbox sessions, egress blocks, artifact uploads). */
+  /** Prometheus metrics (sandbox sessions, egress blocks, artifact uploads). */
   metrics?: WorkerMetrics;
 }
 
 /**
- * Ruling R7: LLM_PROVIDER=fake keeps the full fake engine (demo/compose work without a key);
- * otherwise every stage is real (analyze, plan, explore, verify, generate test, rerun, report — the
- * report with LLM diagnostics, Ruling R37).
- * Throws at startup for providers not implemented in V1.
+ * Ruling R7, per run: the fake engine (demo and compose work without a key) and the real one, where every
+ * stage is real (analyze, plan, explore, verify, generate test, rerun, report — with LLM diagnostics, Ruling
+ * R37) and makes its model calls through the run's own client (StageContext.llm, built by run-llm.ts).
  */
-export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSelection {
-  if (config.LLM_PROVIDER === "fake") {
-    // The fake test is persisted like the real one, so the report (read by the API) includes it.
-    const fake: FakeEngineOptions = { generatedTestStore: createGenerateTestDeps(deps.db).store, ...deps.fake };
-    return { kind: "fake", stages: createFakeStages(fake), llm: null };
-  }
-
-  // The environment's model choice; throws for LLM_PROVIDER=openai (not built in V1).
-  const choice = resolveEnvLlmChoice(config);
-  const transport =
-    deps.transport ??
-    createTransport({ provider: choice.provider, apiKey: choice.provider === "gemini" ? config.GEMINI_API_KEY : config.ANTHROPIC_API_KEY });
-  if (!deps.storage) throw new Error("The real test engine needs artifact storage (exploration screenshots)");
-  const calls = new LlmCallRepository(deps.db);
-  const llm = new LlmClient({
-    transport,
-    model: choice.model,
-    reasoning: choice.reasoning,
-    logger: deps.logger,
-    recordCall: async (call) => {
-      if (deps.metrics) recordLlmCall(deps.metrics, call);
-      await calls.create(call);
-    },
-    onRecordError: (err, call) => deps.logger.warn({ err, runId: call.runId }, "failed to record LLM call"),
-  });
+export function createEngines(config: EngineConfig, deps: EngineDeps): Engines {
+  // The fake test is persisted like the real one, so the report (read by the API) includes it.
+  const fake = createFakeStages({ generatedTestStore: createGenerateTestDeps(deps.db).store, ...deps.fake });
   const retention = {
     artifactRetentionDays: config.ARTIFACT_RETENTION_DAYS ?? 30,
     secretArtifactRetentionDays: config.SECRET_ARTIFACT_RETENTION_DAYS ?? 7,
@@ -124,22 +91,6 @@ export function createEngine(config: EngineConfig, deps: EngineDeps): EngineSele
     ...(deps.rerun ? { overrides: deps.rerun } : {}),
   });
   const report = createReportDeps({ db: deps.db, logger: deps.logger });
-  const stages = createRealStages({ exploration, generateTest: createGenerateTestDeps(deps.db, deps.logger), runTest, report });
-  return { kind: "real", stages: withClient(stages, llm), llm };
-}
-
-/**
- * Interim, until the worker builds a model client per run: every stage receives the start-up client as the
- * run's (`StageContext.llm`).
- */
-function withClient(stages: EngineStages, llm: LlmClient): EngineStages {
-  return {
-    analyze: (ctx) => stages.analyze({ ...ctx, llm }),
-    plan: (ctx, requirement) => stages.plan({ ...ctx, llm }, requirement),
-    explore: (ctx, plan, requirement) => stages.explore({ ...ctx, llm }, plan, requirement),
-    verify: (ctx, requirement, plan, exploration) => stages.verify({ ...ctx, llm }, requirement, plan, exploration),
-    generateTest: (ctx, input) => stages.generateTest({ ...ctx, llm }, input),
-    runTest: (ctx, test) => stages.runTest({ ...ctx, llm }, test),
-    report: (ctx, input) => stages.report({ ...ctx, llm }, input),
-  };
+  const real = createRealStages({ exploration, generateTest: createGenerateTestDeps(deps.db, deps.logger), runTest, report });
+  return { fake, real, for: (choice) => (choice.provider === "fake" ? fake : real) };
 }

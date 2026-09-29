@@ -130,17 +130,17 @@ cp .env.example .env            # allowlists localhost:4000 (the demo shop) for 
 ```
 
 ```bash
-# terminal 1
+# terminal 1 — the API picks each new test's model from the same LLM_* values as the worker
 set -a; . ./.env; set +a
 pnpm db:migrate
-pnpm --filter @platform/api dev
+LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... pnpm --filter @platform/api dev
 
 # terminal 2
 set -a; . ./.env; set +a
 LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... pnpm --filter @platform/worker dev
-# or, on Gemini (LLM_MODEL= drops .env's Claude model for gemini-3.8-flash):
-# LLM_PROVIDER=gemini GEMINI_API_KEY=... LLM_MODEL= pnpm --filter @platform/worker dev
-# expect "using the real test engine", "browser sandbox preflight passed" and "rerun runner preflight passed" in its log
+# or, on Gemini, in both terminals (LLM_MODEL= drops .env's Claude model for gemini-3.8-flash):
+# LLM_PROVIDER=gemini GEMINI_API_KEY=... LLM_MODEL= pnpm --filter @platform/api dev    (and @platform/worker)
+# expect "test engines ready", "browser sandbox preflight passed" and "rerun runner preflight passed" in the worker's log
 
 # terminal 3
 ./scripts/milestone-b-demo.sh   # targets http://localhost:4000/ by default

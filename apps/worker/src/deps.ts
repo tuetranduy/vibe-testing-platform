@@ -2,10 +2,11 @@ import type { RunLogRegistry } from "@platform/config";
 import type { Database } from "@platform/db";
 import type { RunQueue } from "@platform/event-bus";
 import type { ArtifactStorage } from "@platform/storage";
-import type { EngineStages } from "@platform/testing-engine";
 import type { Redis } from "ioredis";
 import type { CancelWatcher } from "./cancel-watcher";
+import type { Engines } from "./engine";
 import type { WorkerMetrics } from "./metrics";
+import type { RunLlmFactory } from "./run-llm";
 
 export interface WorkerLogger {
   info(obj: object, msg?: string): void;
@@ -34,7 +35,10 @@ export interface WorkerDeps {
   redis: Pick<Redis, "publish">;
   cancelWatcher: CancelWatcher;
   queue: RunQueue;
-  stages: EngineStages;
+  /** Both engines; each run uses the one its model choice names (`engines.for(choice)`). */
+  engines: Engines;
+  /** Builds each run's model client from its recorded choice (createRunContext). */
+  runLlm: RunLlmFactory;
   logger: WorkerLogger;
   /** Active runs' log scopes (tenant, stage, run redactor); see createLogger in @platform/config. */
   runLogs?: RunLogRegistry;

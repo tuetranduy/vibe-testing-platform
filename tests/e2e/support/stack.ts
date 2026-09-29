@@ -106,8 +106,9 @@ function liveLlmEnv(): Record<string, string> {
 export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<void> }> {
   const mode = process.env.E2E_MODE === "live" ? "live" : "ci";
   const platform = process.env.E2E_PLATFORM === "compose" ? "compose" : "local";
-  // CI: the scripted model stands in for the transport, so any real provider name and key will do.
-  const workerLlm = mode === "live" ? liveLlmEnv() : { LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-e2e-scripted-not-a-key" };
+  // CI: the scripted model stands in for the transport, so any real provider name and key will do. The API gets
+  // the same LLM_* variables (as compose's x-app-env gives both): it resolves each new run's model from them.
+  const llmEnv = mode === "live" ? liveLlmEnv() : { LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-e2e-scripted-not-a-key" };
   const work = realpathSync(mkdtempSync(path.join(os.tmpdir(), "platform-e2e-")));
   const logDir = path.join(work, "logs");
   mkdirSync(logDir);
@@ -195,13 +196,13 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
       return launched;
     };
 
-    const api = launch("api", { LLM_PROVIDER: "fake" }, { port: apiPort, target: 3001 });
+    const api = launch("api", llmEnv, { port: apiPort, target: 3001 });
     const apiUrl = `http://127.0.0.1:${apiPort}`;
     await until("API", async () => (await fetch(`${apiUrl}/healthz`)).ok, 120_000, api.child);
 
     const worker = launch(
       "worker",
-      { ...workerLlm, E2E_MODE: mode },
+      { ...llmEnv, E2E_MODE: mode },
       { port: metricsPort, target: 9464 },
     );
     const workerLog = path.join(logDir, "worker.log");

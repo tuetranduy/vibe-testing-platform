@@ -1,4 +1,4 @@
-import { isTerminalLifecycle } from "@platform/contracts";
+import { ModelProviderError, isTerminalLifecycle } from "@platform/contracts";
 import { EventRepository, RunRepository, SecretRepository, StaleTransitionError, type TestRun } from "@platform/db";
 import { createRunEventPublisher } from "@platform/event-bus";
 import { redactByKey } from "@platform/security";
@@ -47,12 +47,14 @@ export async function purgeSecretsIfTerminal(deps: WorkerDeps, runId: string): P
 }
 
 /**
- * The run context itself could not be built (e.g. secrets fail to decrypt, DB/Redis error).
- * End the run as ERRORED so it doesn't sit in QUEUED / PLANNING forever.
+ * The run context itself could not be built (e.g. the run's model has no usable key, secrets fail to
+ * decrypt, DB/Redis error). End the run as ERRORED so it doesn't sit in QUEUED / PLANNING forever.
  */
 export async function failBeforeContext(deps: WorkerDeps, run: TestRun, err: unknown): Promise<void> {
   const category = errorCategoryOf(err);
-  const message = "Run could not be started by the worker";
+  // The run's model client could not be built (run-llm.ts): its message is a template naming the fix. Anything
+  // else gets a fixed message; the details stay in the log.
+  const message = err instanceof ModelProviderError ? err.message : "Run could not be started by the worker";
   deps.logger.error({ runId: run.id, tenantId: run.tenantId, stage: run.lifecycle, category, err }, message);
   try {
     await new RunRepository(deps.db).transition(run.id, run.lifecycle, "ERRORED", { errorCategory: category, errorMessage: message });

@@ -63,7 +63,8 @@ describe("Task 21 step 8 — confirmation", () => {
         redis,
         cancelWatcher: watcher,
         queue,
-        stages: {} as WorkerDeps["stages"],
+        engines: {} as WorkerDeps["engines"],
+        runLlm: {} as WorkerDeps["runLlm"],
         logger: silentLogger,
         now: () => new Date(Date.now() + 25 * 3_600_000),
       };
