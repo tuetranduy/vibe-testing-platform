@@ -35,11 +35,14 @@ pnpm stack:up        # or: docker compose -f infra/compose/docker-compose.yml up
 pnpm stack:down
 ```
 
-The compose stack runs the **fake** engine (`LLM_PROVIDER=fake`). The `worker` image bundles Playwright's
+The compose stack's default model is the **fake** engine (`LLM_PROVIDER=fake`). The `worker` image bundles Playwright's
 Chromium (matching the workspace's `playwright-core` pin) and its OS dependencies under `/ms-playwright`, and the
 `worker` service runs with the seccomp profile that lets Chromium's sandbox start (`infra/seccomp/worker.json`)
-and an init process that reaps the browsers' helpers. For the real engine, set `LLM_PROVIDER=anthropic` and
-`ANTHROPIC_API_KEY`, or `LLM_PROVIDER=gemini` and `GEMINI_API_KEY`, in `infra/compose/.env`.
+and an init process that reaps the browsers' helpers. For the real engine, open **Settings**
+(http://localhost:3000/settings), save an Anthropic or Google Gemini API key and choose the default model (see
+[Settings](#settings-ai-providers-and-models)); or set `LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`, or
+`LLM_PROVIDER=gemini` and `GEMINI_API_KEY`, in `infra/compose/.env` — the `LLM_*` variables are the defaults while
+Settings hold none.
 
 | Service | URL |
 |---|---|
@@ -241,6 +244,8 @@ The live commands, the gate and the evals run on Gemini with `LLM_PROVIDER=gemin
 `LLM_PROVIDER` unset or `fake` (as in `.env`) they run on Anthropic with `ANTHROPIC_API_KEY`, as before. `LLM_MODEL`
 and `GEMINI_THINKING_LEVEL` work as for the worker; the other provider's model (e.g. `.env`'s
 `LLM_MODEL=claude-sonnet-5` with Gemini) is rejected, so set `LLM_MODEL=` (empty) for the provider's default.
+They read only the environment: the keys and defaults saved in Settings apply to the platform's tests, not to
+these tools.
 
 - DB tests clone a migrated template database per test file. They use `TEST_DATABASE_URL`, which defaults to the compose Postgres (`postgresql://platform:platform@localhost:5432/platform`). The role needs `CREATEDB`.
 - Redis tests use `TEST_REDIS_URL` (default `redis://localhost:6379/15`: a dedicated logical database, so tests never
@@ -257,14 +262,14 @@ and `GEMINI_THINKING_LEVEL` work as for the worker; the other provider's model (
 apps/api                     Fastify API: auth, runs, cancel, criteria (get/update/confirm), SSE events, artifact URLs, report
 apps/worker                  BullMQ jobs (analyze-run, execute-run, reap) + the browser sandbox
 apps/worker/src/sandbox      egress guard proxy, Chromium launcher, navigation guard (Task 13), Playwright runner child process (Task 17)
-apps/web                     Next.js UI: new test, criteria review, live progress (Task 19); report, run history (Task 20); server-side API proxy in app/api/[...path]
+apps/web                     Next.js UI: new test, criteria review, live progress (Task 19); report, run history (Task 20); Settings (AI provider keys, default model); server-side API proxy in app/api/[...path]
 packages/contracts           Zod schemas: the single source of truth
 packages/config              env schema (validated at start-up)
 packages/db                  Drizzle schema, SQL migrations, repositories, state machine
 packages/security            URL/IP policy, redaction, secret vault, destructive-action policy
 packages/storage             artifact storage (local, S3)
 packages/event-bus           event publisher, Redis fan-out, queue names
-packages/llm                 provider-neutral LLM client (redaction, retries, LlmCall records), Anthropic and Gemini adapters
+packages/llm                 provider-neutral LLM client (redaction, retries, LlmCall records, reasoning level), Anthropic and Gemini adapters, the model catalog
 packages/stagehand-adapter    Stagehand v4 explorer, ClientLLM bridge, the runtime extension (Task 14)
 packages/testing-engine       orchestrator + engine stages: requirement compiler, planner, exploration, verifier (Tasks 10-15), test compiler, Playwright rerun + evidence, reconciliation + report (Tasks 16-18)
 evals                         `pnpm eval <suite>` harness and cases; BASELINE.md records scores
@@ -283,12 +288,35 @@ docs/operations.md            deployment topology, network policy, key rotation,
 
 Each proposed criterion shows its wording and *what will be checked*. You can adjust a check's values — a number, a comparison, the text and how it matches (with or without case), shown or not shown, a list item — or remove a criterion; the server then writes the criterion's wording from its check, so the report never shows wording that differs from what was verified. What a check reads (the element and the moment) can't be changed in review, and AI-judged criteria can only be removed. For anything else use **Start over with a revised requirement**: it cancels the run and opens the new-test form with the website and requirement copied in (test data and secrets must be entered again — they are never copied). `PUT /v1/test-runs/:runId/criteria` enforces the same rules for any client, and accepts edits only while the run awaits confirmation (`409` before the criteria are ready or once they're confirmed): `400 VALIDATION_FAILED` (an added criterion, a changed fact, source text, precondition or fact reference, a regex that doesn't compile) or `400 STATEMENT_ONLY_EDIT` (wording changed without the check), each with per-field `issues`.
 
+### Settings: AI providers and models
+
+**Settings** in the header (`/settings`) holds, for the tenant, what the platform's tests run on:
+
+- **AI providers**: one API key per provider (Anthropic, Google Gemini), stored encrypted (AES-256-GCM with
+  `SECRETS_ENCRYPTION_KEY`) and never shown again: the page says only "Key saved · updated …", "Using the server's
+  key (`ANTHROPIC_API_KEY`)" or "No key". A key saved here is used instead of the server's; "Remove saved key" falls
+  back to it.
+- **Defaults for new tests**: the model (grouped by provider; a provider without a key has its models disabled,
+  "add a key"), its reasoning level ("Model default (…)", or low / medium / high — and minimal on the Gemini Flash
+  models), and the selected model's price per million tokens.
+
+A test can pick another model or level under the new-test form's Advanced options. Each run records the provider,
+model and reasoning level it was created with, in this order: the test's own choice, else the defaults saved in
+Settings, else the environment (`LLM_PROVIDER`, `LLM_MODEL` or the provider's default model, and
+`GEMINI_THINKING_LEVEL` for Gemini). Changing Settings never changes a run already created; the run page shows the
+run's model ("Claude Sonnet 5 · medium reasoning"). A test whose provider has no key, or whose model or level is not
+offered, is refused when it is submitted (`422 MODEL_NOT_AVAILABLE`, naming the fix). The fake engine ("Fake engine
+(development)") is offered only outside production. Over the API: `GET /v1/settings/llm`, `PUT /v1/settings/llm`
+with `{ "defaults": { "model", "reasoning" } }`, `PUT /v1/settings/llm/keys/{anthropic|gemini}` with
+`{ "apiKey": "…" }` (`null` removes it), and `llm: { model?, reasoning? }` on `POST /v1/test-runs`. The API and the
+worker must share the `LLM_*` variables (see [`docs/operations.md`](docs/operations.md)).
+
 ## Deviations from the plan
 
 - **Drizzle ORM instead of Prisma.** Prisma's CLI downloads a native engine from `binaries.prisma.sh`, which was unreachable in the build environments. Drizzle is pure TypeScript and gives the same Postgres tables, enums, and constraints. Migrations are plain SQL in `packages/db/migrations` (`pnpm --filter @platform/db db:generate` after editing `schema.ts`).
 - **rclone's S3 server instead of MinIO** in Docker Compose: MinIO images are no longer available on Docker Hub. Production can use any S3-compatible store.
 - **Zod pinned to 4.4.3** because Stagehand v4 pins it (Task 0 finding).
-- **Anthropic and Gemini are the V1 providers.** Gemini is reached through the Gemini Developer API with an API key (not Vertex AI), by plain `fetch` rather than Google's SDK, which would add 32 packages (google-auth-library among them) to the worker for one endpoint. `LLM_PROVIDER=openai` makes the worker fail at start-up. The model is set with `LLM_MODEL` (default `claude-sonnet-5`, or `gemini-3.8-flash` for Gemini).
+- **Anthropic and Gemini are the V1 providers.** Gemini is reached through the Gemini Developer API with an API key (not Vertex AI), by plain `fetch` rather than Google's SDK, which would add 32 packages (google-auth-library among them) to the worker for one endpoint. `LLM_PROVIDER=openai` makes the worker fail at start-up. Each test's model comes from Settings or the new-test form; `LLM_MODEL` (default `claude-sonnet-5`, or `gemini-3.8-flash` for Gemini) is the default while Settings hold none.
 - **Engine error classes live in `@platform/contracts`** (re-exported by `@platform/testing-engine`) so `@platform/llm` can throw `ModelProviderError` / `ContractError` / `CancelledError` without depending on the engine.
 - **`analyze` returns a draft; the orchestrator persists revision 1** (the plan's `compileRequirement` signature returns the stored requirement).
 - **`docs/ai-testing-platform-architecture.md`** is referenced by the plan but wasn't in the repo, so it hasn't been updated.
@@ -308,3 +336,4 @@ Each proposed criterion shows its wording and *what will be checked*. You can ad
   - **The confirmation-TTL test runs the worker's real reaper in the test process** with its clock moved 25 hours ahead (the "fake clock"), against the E2E database.
   - **`queue_depth` is exported by the API**, not the worker: the backlog matters most when workers are down.
 - **Destructive actions on production (amends D9; spec `docs/superpowers/specs/2026-09-28-production-destructive-actions-design.md`).** Destructive actions stay blocked by default. A production run may perform them only when its request sets `allowDestructiveActions` and `options.confirmProductionHost` equal to the target URL's host (the API answers `400` on `options.confirmProductionHost` otherwise); the new-test form asks for the host to be typed. A run that allows destructive actions skips the Playwright rerun unless it asks for it (`rerunGeneratedTest` defaults to `!allowDestructiveActions`), because the rerun repeats every action. With destructive actions allowed, the executor acts on a destructive element only for a planned step that is itself destructive (flagged by the planner or worded as one), and Stagehand's guardrail says the same. Run pages and the history mark such runs. The API does not derive the environment from the URL: `environment` is what the client declares, so API clients must label production targets "production" for the confirmation to apply.
+- **The model client is built per run** (spec `docs/superpowers/specs/2026-09-28-llm-settings-design.md`). The plan's worker built one `LlmClient` at start-up from `LLM_*`. Now the worker builds both engines at start-up and, for each run, a client from the provider, model and reasoning level the run recorded when it was created (`request.llm`; runs created before this change use `LLM_*`), with the key saved in Settings, else the environment's. The storage check and the browser and runner preflights therefore always run at start-up (the log says "test engines ready"). The reasoning level applies to requirement analysis, planning and report diagnostics; Stagehand's browser steps keep the model's default level. Claude Fable 5.1 and Opus 5.5 go through Anthropic's beta Messages API with server-side refusal fallback (`server-side-fallback-2026-07-01`): a call a fallback model answered is recorded and priced under that model.
