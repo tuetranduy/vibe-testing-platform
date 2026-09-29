@@ -12,7 +12,7 @@ import {
 } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ApiRequestError, createRun, getCriteria, getLlmSettings, getRun } from "../lib/api";
+import { ApiRequestError, createRun, getCriteria, getLlmSettings, getRun, getSuggestions } from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
 import { Icon, type IconName } from "./Icon";
 import { LEVEL_LABEL } from "./llm-format";
@@ -61,7 +61,7 @@ const DEFAULT_OPTIONS: Options = {
 
 const MSG = {
   url: "Enter an http:// or https:// URL, without a username or password.",
-  requirement: "Describe the requirement in at least 10 characters.",
+  requirement: "Describe the requirement in at least 10 characters, or leave it empty for suggestions.",
   dataKey: "Start with a letter; use letters, digits or _ (up to 64).",
   secretName: "Start with a lowercase letter; use a–z, 0–9 or _ (up to 32).",
   secretValue: "Enter at least 4 characters.",
@@ -109,7 +109,9 @@ function build(
   const errors: Errors = {};
   const url = targetUrl.trim();
   if (!HttpUrlSchema.safeParse(url).success) errors[fid.url] = MSG.url;
-  if (requirement.trim().length < 10) errors[fid.requirement] = MSG.requirement;
+  // Empty is allowed: the run explores the website and suggests tests (spec 2026-09-28-suggest-tests).
+  const text = requirement.trim();
+  if (text.length > 0 && text.length < 10) errors[fid.requirement] = MSG.requirement;
 
   const testData: Record<string, string> = {};
   for (const row of data) {
@@ -182,6 +184,14 @@ const OPTION_MSG: Record<string, string> = {
 };
 
 /** Starting points for an empty requirement; each fills in a full sentence to edit. */
+/** What a pre-filled form says it copied (test data and secrets never are). */
+const PREFILL_NOTICE = {
+  criteria: "Copied the website and requirement from your earlier run. Test data and secrets must be entered again — they are never copied.",
+  suggestion: "Copied the website and the suggested test from your earlier run. Test data and secrets must be entered again — they are never copied.",
+  url: "Copied the website from your earlier run. Test data and secrets must be entered again — they are never copied.",
+} as const;
+type Copied = keyof typeof PREFILL_NOTICE;
+
 const EXAMPLES = [
   { label: "Adding to cart updates the total", text: "A user can add a product to the cart, and the cart total updates to include its price." },
   { label: "Sign-in opens the account page", text: "A user can sign in with valid credentials and lands on their account page." },
@@ -201,31 +211,52 @@ function issuesToErrors(err: ApiRequestError): Errors {
 
 let nextRowId = 1;
 
-/** `from`: an earlier run to start over from (its website and requirement are copied in). */
-export function NewTestForm({ from = null }: { from?: string | null } = {}) {
+/**
+ * `from`: an earlier run to start over from (its website and requirement are copied in); with
+ * `suggestion`, one of that run's suggested tests is copied instead of its requirement.
+ */
+export function NewTestForm({ from = null, suggestion = null }: { from?: string | null; suggestion?: string | null } = {}) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const requirementRef = useRef<HTMLTextAreaElement>(null);
   const [targetUrl, setTargetUrl] = useState("");
   const [requirement, setRequirement] = useState("");
-  /** Pre-fill when starting over from an earlier run (its URL and full requirement text only). */
-  const [prefill, setPrefill] = useState<"loading" | "loaded" | "failed" | null>(from ? "loading" : null);
+  /**
+   * Pre-fill from an earlier run: its URL, plus the requirement it tested (its criteria's text) or,
+   * with `suggestion`, that suggested test's text. A run that never got criteria (it ended while
+   * exploring for test ideas or at "Choose what to test") gives its URL only.
+   */
+  const [prefill, setPrefill] = useState<"loading" | Copied | "failed" | null>(from ? "loading" : null);
   useEffect(() => {
     if (!from) return;
     let live = true;
-    Promise.all([getRun(from), getCriteria(from)]).then(
-      ([run, req]) => {
+    const text: Promise<{ copied: Copied; requirement: string }> = suggestion
+      ? getSuggestions(from).then((set) => {
+          const chosen = set.suggestions.find((s) => s.id === suggestion);
+          if (!chosen) throw new Error(`Suggestion ${suggestion} not found`);
+          return { copied: "suggestion" as const, requirement: chosen.requirement };
+        })
+      : getCriteria(from).then(
+          (req) => ({ copied: "criteria" as const, requirement: req.originalText }),
+          (err: unknown) => {
+            // 409: the run has no criteria — it never got past choosing what to test.
+            if (err instanceof ApiRequestError && err.status === 409) return { copied: "url" as const, requirement: "" };
+            throw err;
+          },
+        );
+    Promise.all([getRun(from), text]).then(
+      ([run, copied]) => {
         if (!live) return;
         setTargetUrl((v) => v || run.targetUrl);
-        setRequirement((v) => v || req.originalText);
-        setPrefill("loaded");
+        if (copied.requirement) setRequirement((v) => v || copied.requirement);
+        setPrefill(copied.copied);
       },
       () => live && setPrefill("failed"),
     );
     return () => {
       live = false;
     };
-  }, [from]);
+  }, [from, suggestion]);
   const [environment, setEnvironment] = useState<"staging" | "production">("staging");
   const [data, setData] = useState<DataRow[]>([]);
   const [secrets, setSecrets] = useState<SecretRow[]>([]);
@@ -385,11 +416,11 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
   return (
     <form ref={formRef} className="composer" noValidate onSubmit={onSubmit} aria-busy={pending}>
       <div className="composer-body">
-        {prefill === "loaded" && (
+        {(prefill === "criteria" || prefill === "suggestion" || prefill === "url") && (
           <div role="status" className="banner banner-info">
             <Icon name="info" />
             <div>
-              <p>Copied the website and requirement from your earlier run. Test data and secrets must be entered again — they are never copied.</p>
+              <p>{PREFILL_NOTICE[prefill]}</p>
             </div>
           </div>
         )}
@@ -441,7 +472,7 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
         </div>
 
         <div className="field">
-          <label htmlFor={fid.requirement}>Requirement</label>
+          <label htmlFor={fid.requirement}>Requirement (optional)</label>
           <div className="prompt-box">
             <textarea
               ref={requirementRef}
@@ -468,7 +499,8 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
             )}
           </div>
           <p id="requirement-hint" className="hint">
-            One behaviour per test works best: name the page, the action, and what you expect to see.
+            One behaviour per test works best: name the page, the action, and what you expect to see. Leave it empty and the agent
+            explores the website and suggests what to test.
           </p>
           {fieldError(fid.requirement)}
         </div>
@@ -794,7 +826,7 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
           {options.autoConfirmCriteria ? "Its criteria are confirmed automatically." : "You confirm the criteria before it starts."}
         </p>
         <button type="submit" className="button button-primary button-lg" disabled={pending}>
-          {pending ? "Starting…" : "Start test"}
+          {pending ? "Starting…" : requirement.trim() === "" ? "Explore and suggest tests" : "Start test"}
           <Icon name="arrow" />
         </button>
       </div>
