@@ -39,6 +39,11 @@ const ENDPOINTS: { method: Method; pattern: RegExp; query: readonly string[] }[]
   { method: "GET", pattern: new RegExp(`^/v1/test-data-sets/${ID}$`), query: [] },
   { method: "PUT", pattern: new RegExp(`^/v1/test-data-sets/${ID}$`), query: [] },
   { method: "DELETE", pattern: new RegExp(`^/v1/test-data-sets/${ID}$`), query: [] },
+  // Saved credentials: names only come back; there is no GET of a single profile.
+  { method: "GET", pattern: /^\/v1\/credential-profiles$/, query: [] },
+  { method: "POST", pattern: /^\/v1\/credential-profiles$/, query: [] },
+  { method: "PUT", pattern: new RegExp(`^/v1/credential-profiles/${ID}$`), query: [] },
+  { method: "DELETE", pattern: new RegExp(`^/v1/credential-profiles/${ID}$`), query: [] },
   { method: "POST", pattern: /^\/v1\/test-runs$/, query: [] },
   { method: "GET", pattern: /^\/v1\/test-runs$/, query: ["limit", "cursor", "owner"] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}$`), query: [] },

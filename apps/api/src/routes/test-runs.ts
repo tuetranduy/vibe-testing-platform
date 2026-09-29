@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
+import { audit } from "../services/audit";
 import { TestRunService } from "../services/test-run-service";
 
 const RunParams = z.object({ runId: z.string().min(1).max(100) });
@@ -24,6 +25,11 @@ export async function testRunRoutes(app: FastifyInstance, deps: ApiDeps): Promis
   app.post("/v1/test-runs", async (req, reply) => {
     const key = req.headers["idempotency-key"];
     const result = await service.create(req.principal, req.body, typeof key === "string" && key.length > 0 ? key : undefined);
+    // Each use of saved credentials is audited (V1.1 F4): the run, the profile, never a value.
+    const profileId = (req.body as { credentialProfileId?: unknown } | undefined)?.credentialProfileId;
+    if (typeof profileId === "string") {
+      await audit(deps, req, { action: "credential_profile.used", runId: result.body.runId, detail: { profileId } });
+    }
     return reply.status(result.status).send(result.body);
   });
 

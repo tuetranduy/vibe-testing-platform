@@ -9,11 +9,21 @@ import {
   type LlmOverride,
   type LlmSettingsView,
   type ReasoningLevel,
+  type CredentialProfile,
   type TestDataSet,
 } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ApiRequestError, createRun, getCriteria, getLlmSettings, getRun, getSuggestions, listTestDataSets } from "../lib/api";
+import {
+  ApiRequestError,
+  createRun,
+  getCriteria,
+  getLlmSettings,
+  getRun,
+  getSuggestions,
+  listCredentialProfiles,
+  listTestDataSets,
+} from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
 import { Icon, type IconName } from "./Icon";
 import { LEVEL_LABEL } from "./llm-format";
@@ -81,6 +91,7 @@ const fid = {
   option: (name: string) => `options-${name}`,
   llm: (name: "model" | "reasoning") => `llm-${name}`,
   testDataSet: "testDataSetId",
+  credentialProfile: "credentialProfileId",
 };
 
 /** The URL's host as the API compares it (lowercase, with a non-default port), or null while the URL is invalid. */
@@ -205,7 +216,7 @@ function issuesToErrors(err: ApiRequestError): Errors {
   const errors: Errors = {};
   for (const issue of err.issues ?? []) {
     const [head, name] = issue.path;
-    if (head === "targetUrl" || head === "requirement" || head === "testDataSetId") errors[head] = issue.message;
+    if (head === "targetUrl" || head === "requirement" || head === "testDataSetId" || head === "credentialProfileId") errors[head] = issue.message;
     else if (head === "options" && typeof name === "string") errors[fid.option(name)] = issue.message;
   }
   return errors;
@@ -270,10 +281,17 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   /** Saved test data sets (V1.1): offered only once loaded; a failed load just hides the choice. */
   const [dataSets, setDataSets] = useState<TestDataSet[]>([]);
   const [dataSetId, setDataSetId] = useState("");
+  /** Saved credentials (V1.1): names only; likewise hidden when they can't be loaded. */
+  const [profiles, setProfiles] = useState<CredentialProfile[]>([]);
+  const [profileId, setProfileId] = useState("");
   useEffect(() => {
     let live = true;
     listTestDataSets().then(
       (sets) => live && setDataSets(sets),
+      () => {},
+    );
+    listCredentialProfiles().then(
+      (ps) => live && setProfiles(ps),
       () => {},
     );
     return () => {
@@ -350,6 +368,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
     const llm = llmOverride(llmModel, llmReasoning);
     if (llm) body.llm = llm;
     if (dataSetId) body.testDataSetId = dataSetId;
+    if (profileId) body.credentialProfileId = profileId;
     setErrors(errs);
     setBanner(null);
     if (Object.keys(errs).length > 0) {
@@ -401,7 +420,10 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
         }
       } else if (err.code === "TOO_MANY_ACTIVE_RUNS") {
         setBanner({ title: "Can't start another run yet", message: `${err.message}. You can cancel a run or try again later.` });
-      } else if ((err.code === "VALIDATION_FAILED" || err.code === "TEST_DATA_SET_NOT_FOUND") && Object.keys(issuesToErrors(err)).length > 0) {
+      } else if (
+        ["VALIDATION_FAILED", "TEST_DATA_SET_NOT_FOUND", "CREDENTIAL_PROFILE_NOT_FOUND", "CREDENTIAL_PROFILE_UNREADABLE"].includes(err.code) &&
+        Object.keys(issuesToErrors(err)).length > 0
+      ) {
         const next = issuesToErrors(err);
         setErrors(next);
         focusFirstError(next);
@@ -422,6 +444,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
 
   const dataCount = data.filter((r) => r.key.trim() || r.value).length;
   const dataSet = dataSets.find((s) => s.id === dataSetId);
+  const profile = profiles.find((p) => p.id === profileId);
   const secretCount = secrets.filter((r) => r.name.trim()).length;
 
   /** Fills the requirement from an example; focus moves to it, since the example buttons go away. */
@@ -630,8 +653,33 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
           icon="lock"
           title="Secrets"
           description="Credentials such as a password: encrypted, redacted from all output, deleted when the run ends."
-          summary={secretCount === 0 ? "None" : plural(secretCount, "secret")}
+          summary={[profile?.name, secretCount === 0 ? (profile ? null : "None") : plural(secretCount, "secret")].filter(Boolean).join(" + ")}
         >
+          {profiles.length > 0 && (
+            <div className="field saved-picker">
+              <label htmlFor={fid.credentialProfile}>Saved credentials</label>
+              <select
+                id={fid.credentialProfile}
+                value={profileId}
+                onChange={(e) => setProfileId(e.target.value)}
+                aria-invalid={errors[fid.credentialProfile] ? true : undefined}
+                aria-describedby={`${fid.credentialProfile}-hint${errors[fid.credentialProfile] ? ` ${fid.credentialProfile}-error` : ""}`}
+              >
+                <option value="">None</option>
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <p id={`${fid.credentialProfile}-hint`} className="hint">
+                {profile
+                  ? `Provides ${profile.secretNames.join(", ")}. A secret you enter below with the same name wins.`
+                  : "Use a test account saved under Settings → Credentials."}
+              </p>
+              {fieldError(fid.credentialProfile)}
+            </div>
+          )}
           <p className="hint">
             <Icon name="lock" /> Secrets are filled in by the platform, never by the AI.
           </p>

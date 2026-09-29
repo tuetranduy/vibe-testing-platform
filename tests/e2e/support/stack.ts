@@ -20,6 +20,8 @@ export interface E2EStack {
   platform: "local" | "compose";
   apiUrl: string;
   apiToken: string;
+  /** The bootstrap administrator the API creates at start (V1.1 F1). */
+  admin: { email: string; password: string };
   /** The demo shop as this process reaches it (its test endpoints). */
   shopUrl: string;
   /** The demo shop as the platform reaches it: the base of every run's target URL. */
@@ -139,6 +141,7 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
     const apiPort = await freePort();
     const metricsPort = await freePort();
     const apiToken = `e2e-${randomBytes(12).toString("hex")}`;
+    const admin = { email: "admin@e2e.test", password: `admin-${randomBytes(9).toString("hex")}` };
     const s3Endpoint = process.env.E2E_S3_ENDPOINT ?? "http://localhost:9000";
     const runnerDir = platform === "compose" ? "/work/runs" : path.join(work, "runs");
     const env: Record<string, string> = {
@@ -154,6 +157,8 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
       S3_SECRET_ACCESS_KEY: "s3admin-secret",
       BROWSER_MODE: "local",
       API_TOKEN: apiToken,
+      BOOTSTRAP_ADMIN_EMAIL: admin.email,
+      BOOTSTRAP_ADMIN_PASSWORD: admin.password,
       API_PORT: platform === "compose" ? "3001" : String(apiPort),
       DEFAULT_TENANT_ID: "t_default",
       SECRETS_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
@@ -214,6 +219,7 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
         platform,
         apiUrl,
         apiToken,
+        admin,
         shopUrl: shop.url,
         targetUrl,
         databaseUrl: db.url,

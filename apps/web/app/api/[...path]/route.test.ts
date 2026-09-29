@@ -68,6 +68,10 @@ describe("API proxy allow-list", () => {
     ["GET", "/api/v1/test-data-sets/tds_1", GET],
     ["PUT", "/api/v1/test-data-sets/tds_1", PUT],
     ["DELETE", "/api/v1/test-data-sets/tds_1", DELETE],
+    ["GET", "/api/v1/credential-profiles", GET],
+    ["POST", "/api/v1/credential-profiles", POST],
+    ["PUT", "/api/v1/credential-profiles/cp_1", PUT],
+    ["DELETE", "/api/v1/credential-profiles/cp_1", DELETE],
   ] as const)("forwards %s %s", async (method, path, handler) => {
     const calls = stubUpstream();
     const res = await handler(req(method, path, method === "GET" ? {} : { headers: sameOrigin, body: "{}" }));
@@ -100,6 +104,7 @@ describe("API proxy allow-list", () => {
     ["GET", "/api/v1/users/usr_1/sessions", GET],
     ["DELETE", "/api/v1/test-data-sets", DELETE],
     ["PATCH", "/api/v1/test-data-sets/tds_1", PATCH],
+    ["GET", "/api/v1/credential-profiles/cp_1", GET],
   ] as const)("rejects %s %s with 404 and never forwards it", async (method, path, handler) => {
     const calls = stubUpstream();
     const res = await handler(req(method, path, method === "GET" ? {} : { headers: sameOrigin, body: "{}" }));

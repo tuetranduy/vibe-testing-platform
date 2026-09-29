@@ -43,6 +43,13 @@
       "when": 1790678360825,
       "tag": "0005_test_data_sets",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790678888179,
+      "tag": "0006_credential_profiles",
+      "breakpoints": true
     }
   ]
 }

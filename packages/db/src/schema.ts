@@ -121,6 +121,39 @@ export const testDataSets = pgTable(
   (t) => [uniqueIndex("test_data_sets_tenant_name").on(t.tenantId, t.name)],
 );
 
+/** Saved credentials (V1.1 F4): a named set of secrets a new run can copy. Values live in the next table. */
+export const credentialProfiles = pgTable(
+  "credential_profiles",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("credential_profiles_tenant_name").on(t.tenantId, t.name)],
+);
+
+/** One value of a profile, AES-256-GCM with AAD (tenant, profile, name): encryptProfileSecret. */
+export const credentialProfileSecrets = pgTable(
+  "credential_profile_secrets",
+  {
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => credentialProfiles.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    ciphertext: bytea("ciphertext").notNull(),
+    iv: bytea("iv").notNull(),
+    authTag: bytea("auth_tag").notNull(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.profileId, t.name] })],
+);
+
 export const testRuns = pgTable(
   "test_runs",
   {
