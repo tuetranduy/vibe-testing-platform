@@ -6,12 +6,17 @@ import {
   HttpUrlSchema,
   SecretNameSchema,
   type CreateTestRunRequestInput,
+  type LlmOverride,
+  type LlmSettingsView,
+  type ReasoningLevel,
 } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ApiRequestError, createRun, getCriteria, getRun } from "../lib/api";
+import { ApiRequestError, createRun, getCriteria, getLlmSettings, getRun } from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
 import { Icon, type IconName } from "./Icon";
+import { LEVEL_LABEL } from "./llm-format";
+import { ModelOptions } from "./ModelOptions";
 import { plural } from "./report-format";
 
 interface DataRow {
@@ -38,7 +43,10 @@ type Errors = Record<string, string>;
 interface Banner {
   title: string;
   message: string;
+  link?: { href: string; label: string };
 }
+/** The model catalog and defaults (GET /v1/settings/llm), for the Model and Reasoning selects. */
+type Catalog = { status: "loading" } | { status: "ready"; view: LlmSettingsView } | { status: "failed" };
 
 const DEFAULT_OPTIONS: Options = {
   maxExplorationSteps: "40",
@@ -70,11 +78,24 @@ const fid = {
   secretName: (id: number) => `secret-${id}-name`,
   secretValue: (id: number) => `secret-${id}-value`,
   option: (name: string) => `options-${name}`,
+  llm: (name: "model" | "reasoning") => `llm-${name}`,
 };
 
 /** The URL's host as the API compares it (lowercase, with a non-default port), or null while the URL is invalid. */
 function hostOf(url: string): string | null {
   return HttpUrlSchema.safeParse(url).success ? new URL(url).host : null;
+}
+
+/** The body's `llm`: only what the user changed from the defaults ("" = the default). */
+function llmOverride(model: string, reasoning: ReasoningLevel | ""): LlmOverride | undefined {
+  if (!model && !reasoning) return undefined;
+  return { ...(model ? { model } : {}), ...(reasoning ? { reasoning } : {}) };
+}
+
+/** "Claude Opus 5.5 · high reasoning": the overridden model and level, for the Advanced options summary. */
+function llmSummary(catalog: Catalog, model: string, reasoning: ReasoningLevel | ""): string | null {
+  const label = model && catalog.status === "ready" ? (catalog.view.models.find((m) => m.id === model)?.label ?? model) : null;
+  return [label, reasoning ? `${reasoning} reasoning` : null].filter(Boolean).join(" · ") || null;
 }
 
 function build(
@@ -209,6 +230,20 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
   const [data, setData] = useState<DataRow[]>([]);
   const [secrets, setSecrets] = useState<SecretRow[]>([]);
   const [options, setOptions] = useState<Options>(DEFAULT_OPTIONS);
+  /** This run's model and level ("" = the default: Settings, else the server's environment). */
+  const [llmModel, setLlmModel] = useState("");
+  const [llmReasoning, setLlmReasoning] = useState<ReasoningLevel | "">("");
+  const [catalog, setCatalog] = useState<Catalog>({ status: "loading" });
+  useEffect(() => {
+    let live = true;
+    getLlmSettings().then(
+      (view) => live && setCatalog({ status: "ready", view }),
+      () => live && setCatalog({ status: "failed" }),
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
   const [errors, setErrors] = useState<Errors>({});
   const [banner, setBanner] = useState<Banner | null>(null);
   const [pending, setPending] = useState(false);
@@ -252,10 +287,22 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
   const host = hostOf(targetUrl.trim());
   const rerunOn = options.generatePlaywright && options.rerunGeneratedTest;
 
+  /** The model the Reasoning select describes: the one chosen, else the default one (when it is in the catalog). */
+  const effectiveModel = catalog.status === "ready" ? catalog.view.models.find((m) => m.id === (llmModel || catalog.view.defaults.model)) : undefined;
+  const levels = (effectiveModel?.reasoningLevels ?? []).filter((l): l is Exclude<ReasoningLevel, "default"> => l !== "default");
+  const chooseModel = (id: string) => {
+    setLlmModel(id);
+    const next = catalog.status === "ready" ? catalog.view.models.find((m) => m.id === (id || catalog.view.defaults.model)) : undefined;
+    // A level the newly chosen model does not take goes back to Default.
+    if (llmReasoning && !next?.reasoningLevels.includes(llmReasoning)) setLlmReasoning("");
+  };
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (pending) return;
     const { errors: errs, body } = build(targetUrl, requirement, environment, data, secrets, options);
+    const llm = llmOverride(llmModel, llmReasoning);
+    if (llm) body.llm = llm;
     setErrors(errs);
     setBanner(null);
     if (Object.keys(errs).length > 0) {
@@ -295,6 +342,16 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
           title: "This test may already have started",
           message: "An earlier attempt reached the server. Check Test runs before starting it again; submitting again starts a new run.",
         });
+      } else if (err.code === "MODEL_NOT_AVAILABLE") {
+        const field = err.issues?.[0]?.path[1];
+        if (field === "model" || field === "reasoning") {
+          const next = { [fid.llm(field)]: err.message };
+          setErrors(next);
+          focusFirstError(next);
+        } else {
+          // The defaults are at fault (e.g. their provider's key was removed): only Settings can fix that.
+          setBanner({ title: "The default model can't be used", message: err.message, link: { href: "/settings", label: "Open Settings" } });
+        }
       } else if (err.code === "TOO_MANY_ACTIVE_RUNS") {
         setBanner({ title: "Can't start another run yet", message: `${err.message}. You can cancel a run or try again later.` });
       } else if (err.code === "VALIDATION_FAILED" && Object.keys(issuesToErrors(err)).length > 0) {
@@ -350,6 +407,11 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
             <div>
               <p className="banner-title">{banner.title}</p>
               <p>{banner.message}</p>
+              {banner.link && (
+                <p>
+                  <a href={banner.link.href}>{banner.link.label}</a>
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -564,9 +626,52 @@ export function NewTestForm({ from = null }: { from?: string | null } = {}) {
         <FormSection
           icon="sliders"
           title="Advanced options"
-          description="Step and time limits, the Playwright test, confirmation and extra hosts."
-          summary={optionsSummary(options)}
+          description="Model and reasoning, step and time limits, the Playwright test, confirmation and extra hosts."
+          summary={[llmSummary(catalog, llmModel, llmReasoning), optionsSummary(options)].filter(Boolean).join(" · ")}
         >
+          {catalog.status === "failed" ? (
+            <p className="hint">
+              <Icon name="info" /> Model choices couldn&apos;t be loaded; the default model will be used.
+            </p>
+          ) : (
+            <div className="field-pair">
+              <div className="field">
+                <label htmlFor={fid.llm("model")}>Model</label>
+                <select
+                  id={fid.llm("model")}
+                  value={llmModel}
+                  onChange={(e) => chooseModel(e.target.value)}
+                  disabled={catalog.status !== "ready"}
+                  aria-invalid={errors[fid.llm("model")] ? true : undefined}
+                  aria-describedby={describedBy(fid.llm("model"))}
+                >
+                  <option value="">{catalog.status === "ready" ? `Default — ${catalog.view.defaults.label}` : "Default"}</option>
+                  {catalog.status === "ready" && <ModelOptions models={catalog.view.models} />}
+                </select>
+                {fieldError(fid.llm("model"))}
+              </div>
+              <div className="field">
+                <label htmlFor={fid.llm("reasoning")}>Reasoning</label>
+                <select
+                  id={fid.llm("reasoning")}
+                  value={llmReasoning}
+                  onChange={(e) => setLlmReasoning(e.target.value as ReasoningLevel | "")}
+                  disabled={catalog.status !== "ready"}
+                  aria-invalid={errors[fid.llm("reasoning")] ? true : undefined}
+                  aria-describedby={describedBy(fid.llm("reasoning"))}
+                >
+                  <option value="">Default</option>
+                  {levels.map((level) => (
+                    <option key={level} value={level}>
+                      {LEVEL_LABEL[level]}
+                    </option>
+                  ))}
+                </select>
+                {fieldError(fid.llm("reasoning"))}
+              </div>
+            </div>
+          )}
+
           <div className="field-pair">
             <div className="field">
               <label htmlFor={fid.option("maxExplorationSteps")}>Max exploration steps</label>

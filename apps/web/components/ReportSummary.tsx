@@ -1,7 +1,8 @@
-import type { CancelReason, RunVerdict, TestReport } from "@platform/contracts";
+import type { CancelReason, RunVerdict, TestReport, TestRunSummary } from "@platform/contracts";
 import { useId, type ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
 import { CANCEL_REASON_TEXT, ERROR_CATEGORY_LABEL, formatTime } from "./format";
+import { llmChoiceText } from "./llm-format";
 import { CRITERION_STATUS_UI, VERDICT_UI, formatCount, formatDuration, formatUsd, plural } from "./report-format";
 
 const VERDICT_EXPLAIN: Record<RunVerdict, string> = {
@@ -25,10 +26,12 @@ interface Props {
   report: TestReport;
   /** Not part of the report; from the run summary or its `run.cancelled` event. */
   cancelReason: CancelReason | null;
+  /** Not part of the report either: the run's model and reasoning, from its summary. */
+  llm?: TestRunSummary["llm"];
 }
 
 /** The report's headline (verdict, or lifecycle + error for a partial report) with its criteria, then summary cards. */
-export function ReportSummary({ report, cancelReason }: Props) {
+export function ReportSummary({ report, cancelReason, llm = null }: Props) {
   const titleId = useId();
   const { summary, usage } = report;
   const decided = summary.passed + summary.failed;
@@ -56,6 +59,7 @@ export function ReportSummary({ report, cancelReason }: Props) {
           )}
         </Stat>
         <Stat label="Estimated model cost" value={formatUsd(usage.estimatedCostUsd)}>
+          {llm && <p className="stat-sub">{llmChoiceText(llm)}</p>}
           <p className="stat-sub">
             {plural(usage.llmCalls, "model call")} · {formatCount(usage.inputTokens + usage.outputTokens)} tokens
           </p>

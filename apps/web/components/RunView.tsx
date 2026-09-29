@@ -14,6 +14,7 @@ import { RunProgress } from "./RunProgress";
 import { RunReport } from "./RunReport";
 import { RunTimeline } from "./RunTimeline";
 import { CANCEL_REASON_TEXT, ERROR_CATEGORY_LABEL, LIFECYCLE_LABEL, VERDICT_LABEL } from "./format";
+import { llmChoiceText } from "./llm-format";
 import { displayUrl, formatWhen } from "./report-format";
 
 /** After analysis completes, how long to poll the run summary for AWAITING_CONFIRMATION. */
@@ -232,6 +233,13 @@ export function RunView({ runId }: { runId: string }) {
                   {summary.environment === "production" ? "Production · destructive actions allowed" : "Destructive actions allowed"}
                 </span>
               )}
+              {summary.llm && (
+                <span className="meta-chip" title={summary.llm.model}>
+                  <Icon name="sliders" />
+                  <span className="visually-hidden">Model: </span>
+                  {llmChoiceText(summary.llm)}
+                </span>
+              )}
               <span className="meta-text">
                 Created <time dateTime={summary.createdAt}>{formatWhen(summary.createdAt)}</time>
               </span>
@@ -330,6 +338,7 @@ export function RunView({ runId }: { runId: string }) {
         <>
           <RunReport
             runId={runId}
+            llm={summary.llm}
             artifacts={progress.artifacts}
             steps={progress.steps}
             cancelReason={progress.outcome?.kind === "cancelled" ? progress.outcome.reason : summary.cancelReason}
