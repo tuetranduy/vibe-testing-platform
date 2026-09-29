@@ -14,6 +14,7 @@ import {
   type LlmKeyProvider,
   type LlmSettingsView,
   type NormalizedRequirement,
+  type SelectSuggestionRequest,
   type SuggestionSetResponse,
   type TestReport,
   type TestRunListResponse,
@@ -111,6 +112,10 @@ export const updateCriteria = (runId: string, requirement: NormalizedRequirement
 /** A blank-requirement run's suggested tests (409 while it is still exploring, 404 for a run with a requirement). */
 export const getSuggestions = (runId: string): Promise<SuggestionSetResponse> =>
   request(SuggestionSetResponseSchema, `${runPath(runId)}/suggestions`);
+
+/** Chooses a suggested test (`requirement` only when edited): the run's new summary, now analysing it. */
+export const selectSuggestion = (runId: string, body: SelectSuggestionRequest): Promise<TestRunSummary> =>
+  request(TestRunSummarySchema, `${runPath(runId)}/suggestions/select`, { method: "POST", body });
 
 export const confirmCriteria = (runId: string): Promise<ConfirmResult> =>
   request(ConfirmResultSchema, `${runPath(runId)}/criteria/confirm`, { method: "POST" });

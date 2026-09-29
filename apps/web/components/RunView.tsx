@@ -13,6 +13,7 @@ import { LiveStats } from "./LiveStats";
 import { RunProgress } from "./RunProgress";
 import { RunReport } from "./RunReport";
 import { RunTimeline } from "./RunTimeline";
+import { SuggestionReview } from "./SuggestionReview";
 import { CANCEL_REASON_TEXT, ERROR_CATEGORY_LABEL, LIFECYCLE_LABEL, VERDICT_LABEL } from "./format";
 import { llmChoiceText } from "./llm-format";
 import { displayUrl, formatWhen, runTitle } from "./report-format";
@@ -143,6 +144,8 @@ export function RunView({ runId }: { runId: string }) {
   useEffect(() => {
     if (ended) refresh().catch(() => {});
   }, [ended, refresh]);
+
+  const onSelected = useCallback((s: TestRunSummary) => setSummary(s), []);
 
   const onConfirmed = useCallback((result: ConfirmResult) => {
     setConfirmation(result);
@@ -369,6 +372,8 @@ export function RunView({ runId }: { runId: string }) {
             </div>
           </div>
         </>
+      ) : lifecycle === "AWAITING_SELECTION" ? (
+        <SuggestionReview runId={runId} onSelected={onSelected} onCancel={() => setCancel("confirming")} />
       ) : lifecycle === "AWAITING_CONFIRMATION" ? (
         <CriteriaReview runId={runId} onConfirmed={onConfirmed} />
       ) : terminal ? (
