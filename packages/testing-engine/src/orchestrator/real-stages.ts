@@ -4,11 +4,14 @@ import { createRunTestStage, type RunTestStageDeps } from "../playwright-runner/
 import { createPlanStage } from "../planner/planner";
 import { createReportStage, type ReportStageDeps } from "../reporting/report-builder";
 import { createAnalyzeStage } from "../requirement/compiler";
+import { createSurveyStage, type SurveyStageDeps } from "../survey/survey-stage";
 import { verifyStage } from "../verification/verify-stage";
 import type { EngineStages } from "./stages";
 
 /** The model client is not a dependency: every real stage uses the run's own (`StageContext.llm`, requireLlm). */
 export interface RealStageDeps {
+  /** The run's sandbox without Stagehand, and screenshot storage, for the survey (a blank requirement). */
+  survey: SurveyStageDeps;
   /** Browser sandbox, explorer and persistence for the explore stage (Task 14). */
   exploration: ExploreStageDeps;
   /** Persistence for the generated test (Task 16, Ruling R28). */
@@ -25,6 +28,7 @@ export interface RealStageDeps {
  */
 export function createRealStages(deps: RealStageDeps): EngineStages {
   return {
+    survey: createSurveyStage(deps.survey), // spec 2026-09-28-suggest-tests
     analyze: createAnalyzeStage(), // Task 10
     plan: createPlanStage(), // Task 12
     explore: createExploreStage(deps.exploration), // Task 14

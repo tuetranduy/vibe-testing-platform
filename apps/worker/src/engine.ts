@@ -19,6 +19,7 @@ import { createGenerateTestDeps } from "./generated-test";
 import type { WorkerMetrics } from "./metrics";
 import { createReportDeps } from "./report";
 import { createRunTestDeps } from "./rerun";
+import { createSurveyDeps } from "./survey";
 
 /** What the engines read from the environment. The model is not here: it comes with each run (run-llm.ts). */
 export type EngineConfig = Partial<
@@ -91,6 +92,13 @@ export function createEngines(config: EngineConfig, deps: EngineDeps): Engines {
     ...(deps.rerun ? { overrides: deps.rerun } : {}),
   });
   const report = createReportDeps({ db: deps.db, logger: deps.logger });
-  const real = createRealStages({ exploration, generateTest: createGenerateTestDeps(deps.db, deps.logger), runTest, report });
+  const survey = createSurveyDeps({
+    db: deps.db,
+    storage: deps.storage,
+    logger: deps.logger,
+    metrics: deps.metrics,
+    config: { privateAllowlist, ...retention },
+  });
+  const real = createRealStages({ survey, exploration, generateTest: createGenerateTestDeps(deps.db, deps.logger), runTest, report });
   return { fake, real, for: (choice) => (choice.provider === "fake" ? fake : real) };
 }

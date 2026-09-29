@@ -26,6 +26,8 @@ export interface CompileRequirementInput {
  * ContractError. The orchestrator persists the draft and publishes the events.
  */
 export async function compileRequirement(llm: RequirementLlm, input: CompileRequirementInput): Promise<RequirementDraft> {
+  // A blank requirement is surveyed, never compiled: analysis only runs on a chosen text.
+  if (input.originalText.trim() === "") throw new ContractError("The requirement is empty: there is nothing to compile");
   const source = { originalText: input.originalText, testData: input.testData };
   const { data } = await llm.generateStructured({
     schema: CompilerOutputSchema,

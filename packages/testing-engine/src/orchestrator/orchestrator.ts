@@ -8,6 +8,8 @@ import type {
   RerunResult,
   RunLifecycle,
   RunVerdict,
+  SuggestionSet,
+  SuggestionSetDraft,
   TestPlan,
   TestReport,
 } from "@platform/contracts";
@@ -34,6 +36,8 @@ export interface RunPorts {
   savePlan(plan: TestPlan): Promise<void>;
   saveResults(results: ProvisionalResult[]): Promise<void>;
   enqueueExecute(): Promise<void>;
+  /** Stores the survey's suggestions for the run (nothing selected yet). */
+  saveSuggestions(draft: SuggestionSetDraft): Promise<SuggestionSet>;
 }
 
 /**
@@ -61,6 +65,7 @@ export function guard<T>(ctx: StageContext, work: Promise<T>): Promise<T> {
 }
 
 const STAGE_LABEL: Partial<Record<RunLifecycle, string>> = {
+  SURVEYING: "Exploring for test ideas",
   ANALYZING_REQUIREMENT: "Analyzing requirement",
   PLANNING: "Planning test",
   EXPLORING: "Exploring website",
@@ -80,9 +85,13 @@ async function skipped(ports: RunPorts, stage: RunLifecycle) {
   await ports.publish({ type: "stage.skipped", message: `${STAGE_LABEL[stage]} skipped`, payload: { stage } });
 }
 
-/** analyze-run: QUEUED → ANALYZING_REQUIREMENT → AWAITING_CONFIRMATION | PLANNING (+ enqueue execute-run). */
+/**
+ * analyze-run: QUEUED → ANALYZING_REQUIREMENT → AWAITING_CONFIRMATION | PLANNING (+ enqueue execute-run).
+ * After a selection the API has already moved the run to ANALYZING_REQUIREMENT (heartbeat reset),
+ * so the analysis starts from there.
+ */
 export async function runAnalysis(ctx: StageContext, ports: RunPorts, stages: EngineStages): Promise<void> {
-  await ports.transition("ANALYZING_REQUIREMENT", { heartbeatAt: ctx.now() });
+  if (ports.lifecycle() !== "ANALYZING_REQUIREMENT") await ports.transition("ANALYZING_REQUIREMENT", { heartbeatAt: ctx.now() });
   await started(ports, "ANALYZING_REQUIREMENT");
   await ctx.boundary();
 
@@ -115,6 +124,31 @@ export async function runAnalysis(ctx: StageContext, ports: RunPorts, stages: En
   } else {
     await ports.transition("AWAITING_CONFIRMATION", { heartbeatAt: null });
   }
+}
+
+/**
+ * analyze-run for a blank requirement: QUEUED → SURVEYING → AWAITING_SELECTION. The survey stage
+ * reads the website and proposes tests; the set is stored and announced (ids and titles only), and
+ * the run waits — held by nobody, like AWAITING_CONFIRMATION — for the user to choose one. A blank
+ * requirement always waits for the user: autoConfirmCriteria applies to the chosen test's criteria.
+ */
+export async function runSurvey(ctx: StageContext, ports: RunPorts, stages: EngineStages): Promise<void> {
+  await ports.transition("SURVEYING", { heartbeatAt: ctx.now() });
+  await started(ports, "SURVEYING");
+  await ctx.boundary();
+
+  const draft = await guard(ctx, stages.survey(ctx));
+  await ctx.boundary();
+  const set = await ports.saveSuggestions(draft);
+  const n = set.suggestions.length;
+  await ports.publish({
+    type: "suggestions.proposed",
+    message: `${n} ${n === 1 ? "test" : "tests"} suggested`,
+    payload: { count: n, suggestions: set.suggestions.map((s) => ({ id: s.id, title: s.title })) },
+  });
+  await completed(ports, "SURVEYING");
+  await ctx.boundary();
+  await ports.transition("AWAITING_SELECTION", { heartbeatAt: null });
 }
 
 export interface ExecutionResult {

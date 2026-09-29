@@ -76,6 +76,12 @@ const persist = (draft: RequirementDraft): NormalizedRequirement =>
 const sentText = (t: FakeTransport) => JSON.stringify(t.requests.map(({ signal: _s, ...r }) => r));
 
 describe("compileRequirement", () => {
+  it("refuses an empty requirement (a blank run chooses a suggested test first): ContractError, no model call", async () => {
+    const { llm, transport } = setup({ json: cartOutput() });
+    await expect(compileRequirement(llm, input("   "))).rejects.toBeInstanceOf(ContractError);
+    expect(transport.requests).toHaveLength(0);
+  });
+
   it("add-to-cart: 2 criteria → AC-1, AC-2; originalText unchanged; structured kinds; every FactRef declared", async () => {
     const { llm } = setup({ json: cartOutput() });
     const draft = await compileRequirement(llm, input(CART_TEXT));
@@ -291,6 +297,9 @@ function fakePorts() {
     savePlan: async () => {},
     saveResults: async () => {},
     enqueueExecute: async () => {},
+    saveSuggestions: async () => {
+      throw new Error("not used by these tests");
+    },
   };
   return { ports, events, saved: () => saved, lifecycle: () => lifecycle };
 }
@@ -302,7 +311,7 @@ describe("analyze stage (real compiler behind runAnalysis)", () => {
     const unusedExploration = { openSandbox: async () => ({}) as never, explorer: { start: async () => ({}) as never }, store: () => ({}) as never };
     const unusedRerun = { openProxy: async () => ({}) as never, spawn: async () => ({}) as never, workspace: { baseDir: "/nonexistent" }, evidence: () => ({}) as never };
     const unusedReport = { store: () => ({}) as never };
-    const stages = createRealStages({ exploration: unusedExploration, generateTest: { store: () => ({ save: async () => {} }) }, runTest: unusedRerun, report: unusedReport });
+    const stages = createRealStages({ survey: { openSandbox: async () => ({}) as never, store: () => ({}) as never }, exploration: unusedExploration, generateTest: { store: () => ({ save: async () => {} }) }, runTest: unusedRerun, report: unusedReport });
     const p = fakePorts();
 
     await runAnalysis({ ...stageContext(storedRequest(CART_TEXT)), llm }, p.ports, stages);

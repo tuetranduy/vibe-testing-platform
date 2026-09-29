@@ -2,17 +2,19 @@
  * Deterministic stand-in engine used until the real stages land (Tasks 10–18), and by lifecycle
  * tests forever after. Every behavior the worker must survive can be switched on with an option.
  */
-import type {
-  CriterionResult,
-  ExplorationOutcome,
-  ExplorationStep,
-  GeneratedTest,
-  NormalizedRequirement,
-  ObservedFact,
-  ProvisionalResult,
-  RerunResult,
-  TestPlan,
-  TestReport,
+import {
+  ContractError,
+  type CriterionResult,
+  type ExplorationOutcome,
+  type ExplorationStep,
+  type GeneratedTest,
+  type NormalizedRequirement,
+  type ObservedFact,
+  type ProvisionalResult,
+  type RerunResult,
+  type SuggestionSetDraft,
+  type TestPlan,
+  type TestReport,
 } from "@platform/contracts";
 import type { GeneratedTestStore } from "../compiler/generate-stage";
 import { aggregateVerdict } from "../verification/aggregate";
@@ -65,6 +67,46 @@ const sleep = (ms: number, signal: AbortSignal) =>
     );
   });
 
+/**
+ * The fake engine's survey result (the compose demo, no key): three fixed demo-shop suggestions —
+ * the last needs a `password` secret — and two pages, on the run's own origin.
+ */
+export function fakeSuggestionSet(targetUrl: string): SuggestionSetDraft {
+  const origin = new URL(targetUrl).origin;
+  return {
+    suggestions: [
+      {
+        id: "S-1",
+        title: "Add a product to the cart",
+        requirement: "A user can add iPhone 17 Pro to the cart from its product page, and the cart then lists it.",
+        why: "Product pages have an Add to cart button and the header shows the cart count.",
+        needs: { secrets: [], testData: [] },
+        destructive: false,
+      },
+      {
+        id: "S-2",
+        title: "Search for a product",
+        requirement: "Searching for iPhone on the products page lists only products whose names contain iPhone.",
+        why: "Every page has a product search form.",
+        needs: { secrets: [], testData: [] },
+        destructive: false,
+      },
+      {
+        id: "S-3",
+        title: "Sign in to the account",
+        requirement: "A user can sign in on the login page with valid credentials and lands on their account page.",
+        why: "The header links to a login page.",
+        needs: { secrets: ["password"], testData: ["email"] },
+        destructive: false,
+      },
+    ],
+    pages: [
+      { url: `${origin}/`, title: "Home · Demo Shop", status: "READ" },
+      { url: `${origin}/products`, title: "Products · Demo Shop", status: "READ" },
+    ],
+  };
+}
+
 export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & { browsers: FakeBrowser[] } {
   const browsers: FakeBrowser[] = [];
   const maybeFail = (stage: keyof EngineStages) => {
@@ -80,10 +122,22 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
   const stages: EngineStages & { browsers: FakeBrowser[] } = {
     browsers,
 
+    async survey(ctx): Promise<SuggestionSetDraft> {
+      await enter("survey");
+      if (opts.stepDelayMs) await sleep(opts.stepDelayMs, ctx.signal);
+      const set = fakeSuggestionSet(ctx.request.targetUrl);
+      for (const page of set.pages) {
+        const path = new URL(page.url).pathname;
+        await ctx.publish({ type: "page.surveyed", message: `Loaded ${path} — ${page.title}`, payload: { path, title: page.title, status: page.status } });
+      }
+      return set;
+    },
+
     async analyze(ctx): Promise<RequirementDraft> {
       await enter("analyze");
       if (opts.analyzeDelayMs) await sleep(opts.analyzeDelayMs, ctx.signal);
       const text = ctx.request.requirement;
+      if (text.trim() === "") throw new ContractError("The requirement is empty: choose a suggested test first");
       return {
         originalText: text,
         criteria: [
