@@ -6,7 +6,7 @@ import { listRuns } from "../lib/api";
 import { PROGRESS_STAGES, STAGE_LABELS, type ProgressStage } from "../lib/progress-reducer";
 import { Icon, type IconName } from "./Icon";
 import { ERROR_CATEGORY_LABEL, LIFECYCLE_LABEL } from "./format";
-import { durationBetween, formatDuration, formatWhen, hostOf, plural } from "./report-format";
+import { durationBetween, formatDuration, formatWhen, hostOf, plural, runTitle } from "./report-format";
 import { VerdictBadge } from "./StatusBadge";
 
 type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready" };
@@ -27,7 +27,7 @@ const FILTERS: readonly { id: FilterId; label: string; test: (r: TestRunSummary)
 
 const matchesQuery = (r: TestRunSummary, query: string) => {
   const q = query.trim().toLowerCase();
-  return q === "" || `${r.targetUrl} ${r.requirementPreview}`.toLowerCase().includes(q);
+  return q === "" || `${r.targetUrl} ${runTitle(r)}`.toLowerCase().includes(q);
 };
 
 /**
@@ -245,8 +245,8 @@ function RunTable({ runs }: { runs: TestRunSummary[] }) {
               <RunResult run={r} />
             </td>
             <td role="cell" className="history-main">
-              <a className="row-link" href={`/runs/${encodeURIComponent(r.runId)}`} title={r.requirementPreview}>
-                {r.requirementPreview}
+              <a className="row-link" href={`/runs/${encodeURIComponent(r.runId)}`} title={runTitle(r)}>
+                {runTitle(r)}
               </a>
               <span className="history-host">{hostOf(r.targetUrl)}</span>
               {r.environment === "production" && r.allowDestructiveActions && <span className="history-tag">Production · destructive</span>}
@@ -268,7 +268,13 @@ function RunTable({ runs }: { runs: TestRunSummary[] }) {
 }
 
 const LIFECYCLE_ICON = (r: TestRunSummary): IconName =>
-  r.lifecycle === "ERRORED" ? "error" : r.lifecycle === "CANCELLED" ? "stop" : r.lifecycle === "AWAITING_CONFIRMATION" ? "info" : "current";
+  r.lifecycle === "ERRORED"
+    ? "error"
+    : r.lifecycle === "CANCELLED"
+      ? "stop"
+      : r.lifecycle === "AWAITING_CONFIRMATION" || r.lifecycle === "AWAITING_SELECTION"
+        ? "info"
+        : "current";
 
 /** The verdict for a completed run; otherwise the lifecycle (plus the error category when errored). */
 function RunResult({ run }: { run: TestRunSummary }) {
@@ -369,18 +375,28 @@ function RunningNow({ runs }: { runs: TestRunSummary[] }) {
     );
   }
 
-  const stage = PROGRESS_STAGES.indexOf(run.lifecycle as ProgressStage); // -1 while queued
-  const waiting = run.lifecycle === "AWAITING_CONFIRMATION";
+  const stage = PROGRESS_STAGES.indexOf(run.lifecycle as ProgressStage); // -1 while queued or exploring for test ideas
+  const waiting = run.lifecycle === "AWAITING_CONFIRMATION" || run.lifecycle === "AWAITING_SELECTION";
+  const doing =
+    run.lifecycle === "AWAITING_SELECTION"
+      ? "Choose what to test"
+      : run.lifecycle === "AWAITING_CONFIRMATION"
+        ? "Confirm the criteria to start"
+        : run.lifecycle === "SURVEYING"
+          ? STAGE_LABELS.SURVEYING
+          : stage >= 0
+            ? STAGE_LABELS[run.lifecycle as ProgressStage]
+            : "Queued";
   return (
     <a className="ink running-card" href={`/runs/${encodeURIComponent(run.runId)}`}>
       <span className="running-label">
         <span className="live-dot" aria-hidden="true" />
         {waiting ? "Waiting for you" : "Running now"}
       </span>
-      <span className="running-title">{run.requirementPreview}</span>
+      <span className="running-title">{runTitle(run)}</span>
       <span className="running-foot">
         <span className="running-meta">
-          <span>{waiting ? "Confirm the criteria to start" : stage >= 0 ? STAGE_LABELS[run.lifecycle as ProgressStage] : "Queued"}</span>
+          <span>{doing}</span>
           <span>{stage >= 0 ? `Stage ${stage + 1} of ${PROGRESS_STAGES.length}` : hostOf(run.targetUrl)}</span>
         </span>
         <span className="mini-stages" aria-hidden="true">

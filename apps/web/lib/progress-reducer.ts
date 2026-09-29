@@ -10,6 +10,10 @@ import {
   type TestEvent,
 } from "@platform/contracts";
 
+/** A blank-requirement run first explores the website for test ideas and waits for the user's choice. */
+export const SURVEY_STAGES = ["SURVEYING", "AWAITING_SELECTION"] as const satisfies readonly RunLifecycle[];
+export type SurveyStage = (typeof SURVEY_STAGES)[number];
+
 /** The stages a run moves through, in order (terminal lifecycles are outcomes, not stages). */
 export const PROGRESS_STAGES = [
   "ANALYZING_REQUIREMENT",
@@ -23,7 +27,16 @@ export const PROGRESS_STAGES = [
 ] as const satisfies readonly RunLifecycle[];
 export type ProgressStage = (typeof PROGRESS_STAGES)[number];
 
-export const STAGE_LABELS: Record<ProgressStage, string> = {
+/** Every stage a run can show: the survey's (blank-requirement runs only), then the test's. */
+export type StageId = SurveyStage | ProgressStage;
+export const ALL_STAGES: readonly StageId[] = [...SURVEY_STAGES, ...PROGRESS_STAGES];
+
+/** The stages shown for a run: the survey's only when it explores for test ideas. */
+export const runStages = (survey: boolean): readonly StageId[] => (survey ? ALL_STAGES : PROGRESS_STAGES);
+
+export const STAGE_LABELS: Record<StageId, string> = {
+  SURVEYING: "Exploring for test ideas",
+  AWAITING_SELECTION: "Choosing what to test",
   ANALYZING_REQUIREMENT: "Analyzing requirement",
   AWAITING_CONFIRMATION: "Confirming criteria",
   PLANNING: "Planning test",
@@ -35,12 +48,15 @@ export const STAGE_LABELS: Record<ProgressStage, string> = {
 };
 
 /**
- * Share of the progress bar each stage is worth (sums to 100). Roughly the time each stage takes:
- * exploration gets the largest share (its budget is up to 60 % of the run), the Playwright rerun the
- * next (up to 25 %); confirmation is a user gate and is worth nothing. A skipped stage's weight is
- * dropped from the total, so the remaining stages fill the bar.
+ * Share of the progress bar each stage is worth. The test's stages sum to 100, roughly the time each
+ * takes: exploration gets the largest share (its budget is up to 60 % of the run), the Playwright
+ * rerun the next (up to 25 %); confirmation is a user gate and is worth nothing. The survey's stages
+ * count only for a run that surveys (exploring for ideas 10, the user's choice nothing). A skipped
+ * stage's weight is dropped from the total, so the remaining stages fill the bar.
  */
-export const STAGE_WEIGHTS: Record<ProgressStage, number> = {
+export const STAGE_WEIGHTS: Record<StageId, number> = {
+  SURVEYING: 10,
+  AWAITING_SELECTION: 0,
   ANALYZING_REQUIREMENT: 10,
   AWAITING_CONFIRMATION: 0,
   PLANNING: 10,
@@ -102,11 +118,15 @@ export interface StepInfo {
 
 export interface ProgressState {
   latestSequence: number;
-  stages: Record<ProgressStage, StageState>;
-  currentStage: ProgressStage | null;
+  stages: Record<StageId, StageState>;
+  currentStage: StageId | null;
   percent: number;
   /** Furthest lifecycle stamped on any event (events carry the lifecycle at publish time). */
   latestStage: RunLifecycle | null;
+  /** The run explores for test ideas first (a blank requirement): its events said so. */
+  survey: boolean;
+  /** A suggested test was chosen (`suggestion.selected`): the run analyses it next. */
+  suggestionSelected: boolean;
   criteriaConfirmed: boolean;
   plannedSteps: number | null;
   stepsRecorded: number;
@@ -120,16 +140,19 @@ export interface ProgressState {
   outcome: RunOutcome | null;
 }
 
-const isProgressStage = (s: RunLifecycle): s is ProgressStage => (PROGRESS_STAGES as readonly string[]).includes(s);
+const isStage = (s: RunLifecycle): s is StageId => (ALL_STAGES as readonly string[]).includes(s);
+const isSurveyStage = (s: RunLifecycle): s is SurveyStage => (SURVEY_STAGES as readonly string[]).includes(s);
 export const lifecycleRank = (l: RunLifecycle): number => RunLifecycleSchema.options.indexOf(l);
 
 export function initialProgress(): ProgressState {
   return {
     latestSequence: 0,
-    stages: Object.fromEntries(PROGRESS_STAGES.map((s) => [s, "pending"])) as Record<ProgressStage, StageState>,
+    stages: Object.fromEntries(ALL_STAGES.map((s) => [s, "pending"])) as Record<StageId, StageState>,
     currentStage: null,
     percent: 0,
     latestStage: null,
+    survey: false,
+    suggestionSelected: false,
     criteriaConfirmed: false,
     plannedSteps: null,
     stepsRecorded: 0,
@@ -146,7 +169,7 @@ function percentOf(s: ProgressState): number {
   if (s.outcome?.kind === "completed") return 100;
   let total = 0;
   let done = 0;
-  for (const stage of PROGRESS_STAGES) {
+  for (const stage of runStages(s.survey)) {
     const w = STAGE_WEIGHTS[stage];
     const state = s.stages[stage];
     if (state === "skipped") continue;
@@ -164,7 +187,11 @@ function tone(e: TestEvent): Tone {
     case "stage.completed":
     case "criteria.confirmed":
     case "test.generated":
+    case "suggestions.proposed":
+    case "suggestion.selected":
       return "success";
+    case "page.surveyed":
+      return e.payload.status === "READ" ? "success" : "warning";
     case "step.recorded":
       return e.payload.outcome === "SUCCESS" ? "success" : "warning";
     case "criterion.evaluated":
@@ -196,9 +223,9 @@ function reference(e: TestEvent): string | null {
   }
 }
 
-/** Marks every still-pending stage before `stage` done (a later stage has started, so they finished). */
-function settleBefore(stages: Record<ProgressStage, StageState>, stage: ProgressStage) {
-  for (const s of PROGRESS_STAGES) {
+/** Marks every still-pending stage of the run before `stage` done (a later stage has started, so they finished). */
+function settleBefore(stages: Record<StageId, StageState>, stage: StageId, survey: boolean) {
+  for (const s of runStages(survey)) {
     if (s === stage) return;
     if (stages[s] === "pending" || stages[s] === "current") stages[s] = "done";
   }
@@ -225,8 +252,9 @@ export function progressReducer(state: ProgressState, e: TestEvent): ProgressSta
   switch (e.type) {
     case "stage.started": {
       const s = e.payload.stage;
-      if (!isProgressStage(s)) break;
-      settleBefore(stages, s);
+      if (!isStage(s)) break;
+      if (isSurveyStage(s)) next.survey = true;
+      settleBefore(stages, s, next.survey);
       stages[s] = "current";
       currentStage = s;
       if (!state.executionStartedAt && lifecycleRank(s) >= lifecycleRank("PLANNING")) next.executionStartedAt = e.timestamp;
@@ -234,21 +262,28 @@ export function progressReducer(state: ProgressState, e: TestEvent): ProgressSta
     }
     case "stage.completed": {
       const s = e.payload.stage;
-      if (!isProgressStage(s)) break;
-      settleBefore(stages, s);
+      if (!isStage(s)) break;
+      if (isSurveyStage(s)) next.survey = true;
+      settleBefore(stages, s, next.survey);
       stages[s] = "done";
       if (currentStage === s) currentStage = null;
       break;
     }
     case "stage.skipped": {
       const s = e.payload.stage;
-      if (!isProgressStage(s)) break;
+      if (!isStage(s)) break;
       stages[s] = "skipped";
       if (currentStage === s) currentStage = null;
       break;
     }
+    case "suggestion.selected":
+      next.survey = true;
+      settleBefore(stages, "AWAITING_SELECTION", true);
+      stages.AWAITING_SELECTION = "done";
+      next.suggestionSelected = true;
+      break;
     case "criteria.confirmed":
-      settleBefore(stages, "AWAITING_CONFIRMATION");
+      settleBefore(stages, "AWAITING_CONFIRMATION", next.survey);
       stages.AWAITING_CONFIRMATION = "done";
       next.criteriaConfirmed = true;
       break;
@@ -276,7 +311,7 @@ export function progressReducer(state: ProgressState, e: TestEvent): ProgressSta
       }
       break;
     case "run.completed":
-      for (const s of PROGRESS_STAGES) if (stages[s] !== "skipped") stages[s] = "done";
+      for (const s of runStages(next.survey)) if (stages[s] !== "skipped") stages[s] = "done";
       currentStage = null;
       next.outcome = { kind: "completed", verdict: e.payload.verdict };
       break;
@@ -301,15 +336,21 @@ export function progressReducer(state: ProgressState, e: TestEvent): ProgressSta
 
 /**
  * The stages as shown for a run in `lifecycle`. Events mark stages current, but some lifecycles have
- * no event of their own (awaiting confirmation), and a page may render before the events arrive: the
- * lifecycle's stage is then shown as current, with the stages before it done. Pure; `state` is untouched.
+ * no event of their own (awaiting a selection or a confirmation), and a page may render before the
+ * events arrive: the lifecycle's stage is then shown as current, with the stages before it done.
+ * `surveyHint`: the run has a blank requirement, so it surveys before any event says so. Pure.
  */
-export function stagesFor(state: ProgressState, lifecycle: RunLifecycle): Pick<ProgressState, "stages" | "currentStage"> {
-  if (state.currentStage || state.outcome || !isProgressStage(lifecycle) || state.stages[lifecycle] !== "pending") {
-    return { stages: state.stages, currentStage: state.currentStage };
+export function stagesFor(
+  state: ProgressState,
+  lifecycle: RunLifecycle,
+  surveyHint = false,
+): Pick<ProgressState, "stages" | "currentStage" | "survey"> {
+  const survey = state.survey || surveyHint || isSurveyStage(lifecycle);
+  if (state.currentStage || state.outcome || !isStage(lifecycle) || state.stages[lifecycle] !== "pending") {
+    return { stages: state.stages, currentStage: state.currentStage, survey };
   }
   const stages = { ...state.stages };
-  settleBefore(stages, lifecycle);
+  settleBefore(stages, lifecycle, survey);
   stages[lifecycle] = "current";
-  return { stages, currentStage: lifecycle };
+  return { stages, currentStage: lifecycle, survey };
 }
