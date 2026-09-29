@@ -94,6 +94,11 @@ export const runSecrets = pgTable(
     ciphertext: bytea("ciphertext").notNull(),
     iv: bytea("iv").notNull(),
     authTag: bytea("auth_tag").notNull(),
+    /**
+     * HMAC of the value (@platform/security secretFingerprint), so the API can find it in text sent after
+     * creation without decrypting it (D7). Null for runs created before it existed; wiped by purge.
+     */
+    fingerprint: bytea("fingerprint"),
     purgedAt: ts("purged_at"),
     createdAt: createdAt(),
   },

@@ -1,0 +1,1 @@
+ALTER TABLE "run_secrets" ADD COLUMN "fingerprint" "bytea";
