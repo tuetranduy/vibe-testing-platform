@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { DataKeySchema, HostnameSchema, HttpUrlSchema, IsoDateTime, SecretNameSchema } from "./common";
-import type { LlmChoice } from "./llm";
+import { LlmOverrideSchema, LlmProviderSchema, ReasoningLevelSchema, type LlmChoice } from "./llm";
 
 export const RunLifecycleSchema = z.enum([
   "QUEUED",
@@ -107,6 +107,8 @@ export const CreateTestRunRequestSchema = z
       .default({}),
     // .prefault({}) — Zod 4 .default() short-circuits and would skip nested defaults.
     options: RunOptionsSchema.prefault({}),
+    /** This run's model and/or reasoning level; omitted: the defaults (Settings, else the environment). */
+    llm: LlmOverrideSchema.optional(),
   })
   .superRefine((r, ctx) => {
     // D9, amended 2026-09-28: production allows destructive actions only with the target host typed as confirmation.
@@ -177,6 +179,10 @@ export const TestRunSummarySchema = z.object({
   createdAt: IsoDateTime,
   startedAt: IsoDateTime.nullable(),
   finishedAt: IsoDateTime.nullable(),
+  /** The run's recorded model choice; `label` from the catalog (the id when not in it). Null: created before model choice. */
+  llm: z
+    .object({ provider: LlmProviderSchema, model: z.string(), label: z.string(), reasoning: ReasoningLevelSchema })
+    .nullable(),
 });
 export type TestRunSummary = z.infer<typeof TestRunSummarySchema>;
 
