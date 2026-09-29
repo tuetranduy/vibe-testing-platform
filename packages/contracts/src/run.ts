@@ -87,6 +87,15 @@ export type SavedRef = z.infer<typeof SavedRefSchema>;
 
 const SavedIdSchema = z.string().trim().min(1).max(100);
 
+/** At most this many secrets per run (the run's own plus a saved profile's, merged). */
+export const MAX_SECRETS = 10;
+/** A secret's value: 4–4096 characters. No message quotes it. */
+export const SecretValueSchema = z.string().min(4, "Enter at least 4 characters").max(4096);
+/** Secrets by name: a run's, or a saved profile's (V1.1 F4). */
+export const SecretRecordSchema = z
+  .record(SecretNameSchema, SecretValueSchema)
+  .refine((o) => Object.keys(o).length <= MAX_SECRETS, `At most ${MAX_SECRETS} secrets`);
+
 export const EnvironmentSchema = z.enum(["staging", "production"]);
 export type Environment = z.infer<typeof EnvironmentSchema>;
 
@@ -125,10 +134,12 @@ export const CreateTestRunRequestSchema = z
     /** A saved test data set (V1.1 F3): its values are merged under `testData` (the request's own win). */
     testDataSetId: SavedIdSchema.optional(),
     /** Write-only. Never returned, logged, or sent to a model. */
-    secrets: z
-      .record(SecretNameSchema, z.string().min(4).max(4096))
-      .refine((o) => Object.keys(o).length <= 10, "At most 10 secrets")
-      .default({}),
+    secrets: SecretRecordSchema.default({}),
+    /**
+     * Saved credentials (V1.1 F4): the profile's values become this run's secrets at creation (the request's
+     * own win on a name), 10 at most together.
+     */
+    credentialProfileId: SavedIdSchema.optional(),
     // .prefault({}) — Zod 4 .default() short-circuits and would skip nested defaults.
     options: RunOptionsSchema.prefault({}),
     /** This run's model and/or reasoning level; omitted: the defaults (Settings, else the environment). */
@@ -158,9 +169,11 @@ export type CreateTestRunRequest = z.output<typeof CreateTestRunRequestSchema>;
  * The request as persisted: never contains secret values, only their names. `testData` is the merged map; the
  * saved set it came from is named by `testDataSet` (its later edits never change this run).
  */
-export type StoredTestRunRequest = Omit<CreateTestRunRequest, "secrets" | "llm" | "testDataSetId"> & {
+export type StoredTestRunRequest = Omit<CreateTestRunRequest, "secrets" | "llm" | "testDataSetId" | "credentialProfileId"> & {
   secretNames: string[];
   testDataSet?: SavedRef;
+  /** The saved credential profile whose values were copied into this run's secrets (V1.1 F4). */
+  credentialProfile?: SavedRef;
   /**
    * The model the run uses, resolved when it was created (request override → Settings → environment).
    * Absent on runs created before model choice existed: they use the environment's (resolveEnvLlmChoice).

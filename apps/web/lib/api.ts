@@ -5,6 +5,8 @@ import {
   SuggestionSetResponseSchema,
   NormalizedRequirementSchema,
   SessionViewSchema,
+  CredentialProfileListSchema,
+  CredentialProfileSchema,
   TestDataSetListSchema,
   TestDataSetSchema,
   UserListResponseSchema,
@@ -17,6 +19,9 @@ import {
   type CreateTestRunResponse,
   type CreateUserRequestInput,
   type SessionView,
+  type CreateCredentialProfileRequestInput,
+  type CredentialProfile,
+  type UpdateCredentialProfileRequest,
   type TestDataSet,
   type TestDataSetInput,
   type UpdateUserRequest,
@@ -188,6 +193,22 @@ export const updateTestDataSet = (id: string, body: TestDataSetInput): Promise<T
 
 export const deleteTestDataSet = async (id: string): Promise<void> => {
   await request(NoContentSchema, `${SETS}/${seg(id)}`, { method: "DELETE" });
+};
+
+const PROFILES = "/api/v1/credential-profiles";
+
+/** Saved credentials (V1.1 F4): names only, never a value. */
+export const listCredentialProfiles = async (): Promise<CredentialProfile[]> => (await request(CredentialProfileListSchema, PROFILES)).items;
+
+export const createCredentialProfile = (body: CreateCredentialProfileRequestInput): Promise<CredentialProfile> =>
+  request(CredentialProfileSchema, PROFILES, { method: "POST", body });
+
+/** A value replaces the secret, null removes it, an omitted name is kept. */
+export const updateCredentialProfile = (id: string, body: UpdateCredentialProfileRequest): Promise<CredentialProfile> =>
+  request(CredentialProfileSchema, `${PROFILES}/${seg(id)}`, { method: "PUT", body });
+
+export const deleteCredentialProfile = async (id: string): Promise<void> => {
+  await request(NoContentSchema, `${PROFILES}/${seg(id)}`, { method: "DELETE" });
 };
 
 const SETTINGS = "/api/v1/settings/llm";

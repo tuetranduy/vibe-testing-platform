@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getLlmSettings, listTestDataSets } from "../lib/api";
+import { getLlmSettings, listCredentialProfiles, listTestDataSets } from "../lib/api";
 import { json, llmSettingsFixture, requirementFixture, suggestionsFixture, summaryFixture } from "../test/fixtures";
 import { NewTestForm } from "./NewTestForm";
 
@@ -13,6 +13,7 @@ vi.mock("../lib/api", async (importOriginal) => ({
   getLlmSettings: vi.fn(),
   // Saved test data sets (V1.1) load on mount too; none unless a test says otherwise.
   listTestDataSets: vi.fn(async () => []),
+  listCredentialProfiles: vi.fn(async () => []),
 }));
 
 
@@ -33,6 +34,7 @@ beforeEach(() => {
   push.mockReset();
   vi.mocked(getLlmSettings).mockResolvedValue(llmSettingsFixture());
   vi.mocked(listTestDataSets).mockResolvedValue([]);
+  vi.mocked(listCredentialProfiles).mockResolvedValue([]);
 });
 
 describe("NewTestForm", () => {
@@ -789,5 +791,39 @@ describe("NewTestForm saved test data (V1.1)", () => {
     await user.selectOptions(await screen.findByLabelText("Saved test data set"), "tds_1");
     await user.click(screen.getByRole("button", { name: /start test/i }));
     expect(await screen.findByText("This test data set no longer exists")).toBeInTheDocument();
+  });
+});
+
+describe("NewTestForm saved credentials (V1.1)", () => {
+  const profile = {
+    id: "cp_1",
+    name: "Staging admin",
+    description: "",
+    secretNames: ["password", "username"],
+    createdBy: null,
+    createdAt: "2026-09-29T10:00:00.000Z",
+    updatedAt: "2026-09-29T10:00:00.000Z",
+  };
+
+  it("sends the chosen profile's id, names what it provides, and keeps the choice after a failed submit", async () => {
+    vi.mocked(listCredentialProfiles).mockResolvedValue([profile]);
+    const user = userEvent.setup();
+    const fetch = mockFetch(
+      json(422, {
+        code: "CREDENTIAL_PROFILE_UNREADABLE",
+        message: "x",
+        issues: [{ path: ["credentialProfileId"], message: "These saved credentials can't be read; save their values again in Settings → Credentials" }],
+      }),
+    );
+    render(<NewTestForm />);
+    await fillValid(user);
+    const select = await screen.findByLabelText("Saved credentials");
+    await user.selectOptions(select, "cp_1");
+    expect(select).toHaveAccessibleDescription("Provides password, username. A secret you enter below with the same name wins.");
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(bodyOf(fetch)).toMatchObject({ credentialProfileId: "cp_1", secrets: {} });
+    expect(await screen.findByText(/These saved credentials can't be read/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Saved credentials")).toHaveValue("cp_1");
   });
 });

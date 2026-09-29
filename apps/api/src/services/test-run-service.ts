@@ -1,5 +1,6 @@
 import {
   CreateTestRunRequestSchema,
+  MAX_SECRETS,
   MAX_TEST_DATA_ENTRIES,
   isTerminalLifecycle,
   type CreateTestRunResponse,
@@ -26,6 +27,7 @@ import { actorId, listScope, runScope, type Principal } from "../auth/principal"
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 import { NO_VERDICT, observeStage } from "../metrics";
+import { CredentialProfileService } from "./credential-profile-service";
 import { resolveRunLlm } from "./llm-choice";
 import { LlmSettingsService, modelNotAvailable } from "./llm-settings-service";
 
@@ -137,8 +139,23 @@ export class TestRunService {
       }
     }
 
+    // Saved credentials (V1.1 F4, D7 amended): the profile's values become this run's own secrets, below the
+    // request's; they are encrypted, fingerprinted, redacted and purged exactly like typed ones.
+    let secrets = req.secrets;
+    let credentialProfile: StoredTestRunRequest["credentialProfile"];
+    if (req.credentialProfileId) {
+      const saved = await new CredentialProfileService(this.deps).secretsFor(tenantId, req.credentialProfileId);
+      secrets = { ...saved.secrets, ...req.secrets };
+      credentialProfile = saved.ref;
+      if (Object.keys(secrets).length > MAX_SECRETS) {
+        throw new HttpError(400, "VALIDATION_FAILED", "Request validation failed", [
+          { path: ["secrets"], message: `At most ${MAX_SECRETS} secrets, the saved credentials' included` },
+        ]);
+      }
+    }
+
     // `llm` is stored as the resolved choice, not the override the request sent.
-    const { secrets, llm: _override, testDataSetId: _set, ...requested } = req;
+    const { secrets: _typed, llm: _override, testDataSetId: _set, credentialProfileId: _profile, ...requested } = req;
     const rest = { ...requested, testData };
     const redact = createRunRedactor(Object.values(secrets));
     // Secret values can also appear in the requirement text or test data: redact them by key and
@@ -148,6 +165,7 @@ export class TestRunService {
       secretNames: Object.keys(secrets).sort(),
       llm: resolved.choice,
       ...(testDataSet ? { testDataSet } : {}),
+      ...(credentialProfile ? { credentialProfile } : {}),
     };
     const publisher = this.publisher(redact);
     const runId = newId("run");
