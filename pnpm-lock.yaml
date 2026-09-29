@@ -83,6 +83,9 @@ importers:
       '@platform/event-bus':
         specifier: workspace:*
         version: link:../../packages/event-bus
+      '@platform/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
       '@platform/security':
         specifier: workspace:*
         version: link:../../packages/security
