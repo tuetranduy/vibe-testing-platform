@@ -49,6 +49,17 @@ describe("RunReport", () => {
     expect(screen.getByText("The site loaded slowly on the first visit.")).toBeInTheDocument();
   });
 
+  it("tags non-critical results and says the verdict ignores the ones that did not pass (V1.1)", async () => {
+    const base = reportFixture();
+    const criteria = base.criteria.map((c) => (c.criterionId === "AC-2" ? { ...c, critical: false } : c));
+    reportFetch(() => json(200, { ...base, criteria, summary: { ...base.summary, nonCritical: { total: 1, notPassed: 1 } } }));
+    renderReport();
+    expect(await screen.findByText("1 non-critical criterion did not pass; the verdict ignores it.")).toBeInTheDocument();
+    const row = screen.getByRole("button", { name: /^AC-2\b/ }).closest("li")!;
+    expect(within(row).getByText("Non-critical")).toBeInTheDocument();
+    expect(screen.getAllByText("Non-critical")).toHaveLength(1);
+  });
+
   it("shows a partial report for an errored run: lifecycle, error category and message, and what exists", async () => {
     reportFetch(() =>
       json(
@@ -58,7 +69,7 @@ describe("RunReport", () => {
           verdict: null,
           partial: true,
           error: { category: "BROWSER_PROVIDER", message: "chromium: No usable sandbox!" },
-          summary: { totalCriteria: 1, passed: 0, failed: 0, blocked: 0, inconclusive: 1, confirmedByRerun: 0 },
+          summary: { totalCriteria: 1, passed: 0, failed: 0, blocked: 0, inconclusive: 1, confirmedByRerun: 0, nonCritical: { total: 0, notPassed: 0 } },
           criteria: [resultFixture({ criterionId: "AC-1", status: "INCONCLUSIVE", reason: "FACT_NOT_OBSERVED" })],
           generatedTest: null,
           playwright: null,
@@ -93,7 +104,7 @@ describe("RunReport", () => {
           partial: true,
           error: null,
           requirement: null,
-          summary: { totalCriteria: 0, passed: 0, failed: 0, blocked: 0, inconclusive: 0, confirmedByRerun: 0 },
+          summary: { totalCriteria: 0, passed: 0, failed: 0, blocked: 0, inconclusive: 0, confirmedByRerun: 0, nonCritical: { total: 0, notPassed: 0 } },
           criteria: [],
           generatedTest: null,
           playwright: null,

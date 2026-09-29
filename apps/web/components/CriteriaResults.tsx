@@ -101,6 +101,11 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
           </h3>
 
           <p className="result-meta">
+            {!r.critical && (
+              <span className="weight-tag" title="A non-critical criterion is reported but never changes the verdict">
+                Non-critical
+              </span>
+            )}
             {decided && r.verdictSource ? (
               <>
                 <span className={`confirmation confirmation-${r.verdictSource === "PLAYWRIGHT_RERUN" ? "yes" : "no"}`}>

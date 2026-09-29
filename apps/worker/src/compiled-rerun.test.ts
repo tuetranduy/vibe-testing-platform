@@ -117,6 +117,7 @@ const criterion = (id: string, statement: string, expectedOutcome: AcceptanceCri
   statement,
   expectedOutcome,
   preconditions: [],
+  critical: true,
   ambiguity: null,
 });
 

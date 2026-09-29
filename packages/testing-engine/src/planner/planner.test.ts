@@ -64,6 +64,7 @@ const cartRequirement = () =>
           delta: 1,
         },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
       {
@@ -77,6 +78,7 @@ const cartRequirement = () =>
           match: "contains",
         },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
       {
@@ -85,6 +87,7 @@ const cartRequirement = () =>
         statement: "A checkout button is visible on the cart page",
         expectedOutcome: { kind: "visible", fact: { key: "checkoutButton", checkpoint: "cart_page" }, expected: true },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
       {
@@ -93,6 +96,7 @@ const cartRequirement = () =>
         statement: "The cart looks tidy",
         expectedOutcome: { kind: "semantic", description: "The cart looks tidy." },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
     ],
@@ -134,6 +138,7 @@ const loginRequirement = (preconditions: NormalizedRequirement["criteria"][numbe
         statement: "The order history is visible after login",
         expectedOutcome: { kind: "visible", fact: { key: "orderHistory", checkpoint: "orders_page" }, expected: true },
         preconditions: [{ kind: "authenticated", description: "User is logged in" }, ...preconditions],
+        critical: true,
         ambiguity: null,
       },
       {
@@ -142,6 +147,7 @@ const loginRequirement = (preconditions: NormalizedRequirement["criteria"][numbe
         statement: "The home page shows a banner",
         expectedOutcome: { kind: "visible", fact: { key: "banner", checkpoint: "home" }, expected: true },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
     ],
@@ -178,6 +184,7 @@ const deleteRequirement = () =>
         statement: "The settings page shows the account email",
         expectedOutcome: { kind: "visible", fact: { key: "accountEmail", checkpoint: "settings" }, expected: true },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
       {
@@ -186,6 +193,7 @@ const deleteRequirement = () =>
         statement: "A confirmation message is shown after deleting the account",
         expectedOutcome: { kind: "visible", fact: { key: "deletedMessage", checkpoint: "after_delete" }, expected: true },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
     ],

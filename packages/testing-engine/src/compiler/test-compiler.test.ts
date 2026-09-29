@@ -148,6 +148,7 @@ const criterion = (id: string, expectedOutcome: ExpectedOutcome, statement = `St
   statement,
   expectedOutcome,
   preconditions: [],
+  critical: true,
   ambiguity: null,
 });
 const shopCriteria = (): AcceptanceCriterion[] => [

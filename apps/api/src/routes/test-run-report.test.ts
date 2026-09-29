@@ -53,6 +53,7 @@ const draft: Omit<NormalizedRequirement, "runId" | "revision" | "confirmedAt"> =
       statement: "The cart count increases",
       expectedOutcome: { kind: "numeric_compare", left: after, operator: "gt", right: before },
       preconditions: [],
+      critical: true,
       ambiguity: null,
     },
     {
@@ -61,6 +62,7 @@ const draft: Omit<NormalizedRequirement, "runId" | "revision" | "confirmedAt"> =
       statement: "The cart lists the product",
       expectedOutcome: { kind: "collection_contains", collection: items, item: "iPhone", match: "contains" },
       preconditions: [],
+      critical: true,
       ambiguity: null,
     },
   ],
@@ -186,6 +188,7 @@ describe("GET /v1/test-runs/:runId/report", () => {
         evidenceArtifactIds: ["art_trace", "art_s1"],
         relatedStepIds: [steps[1]!.id],
         aiNote: null,
+        critical: true,
       },
       {
         ...provisional("AC-2", "INCONCLUSIVE", [items]),
@@ -197,6 +200,7 @@ describe("GET /v1/test-runs/:runId/report", () => {
         evidenceArtifactIds: ["art_s2"],
         relatedStepIds: [steps[2]!.id],
         aiNote: null,
+        critical: true,
       },
     ];
     for (const r of final) await new ResultRepository(t.tdb.db).upsert(run.id, r);

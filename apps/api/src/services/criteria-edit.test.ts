@@ -12,7 +12,7 @@ const facts: NormalizedRequirement["facts"] = [
 const ref = (key: string, checkpoint: string) => ({ key, checkpoint });
 
 function criterion(id: string, expectedOutcome: AcceptanceCriterion["expectedOutcome"], patch: Partial<AcceptanceCriterion> = {}): AcceptanceCriterion {
-  return { id, sourceText: "The cart holds 1 item.", statement: `${id} as the model wrote it`, expectedOutcome, preconditions: [], ambiguity: null, ...patch };
+  return { id, sourceText: "The cart holds 1 item.", statement: `${id} as the model wrote it`, expectedOutcome, preconditions: [], critical: true, ambiguity: null, ...patch };
 }
 
 function latest(): NormalizedRequirement {
@@ -104,6 +104,22 @@ describe("applyCriteriaEdit", () => {
       facts,
     });
     expect(r.ok && r.criteria[0]!.statement).toBe("Cart badge count (at “after add”) equals 3.");
+  });
+
+  it("accepts marking a criterion non-critical without touching its wording or check (V1.1)", () => {
+    const l = latest();
+    const r = applyCriteriaEdit(l, bodyWith("AC-2", (c) => ({ ...c, critical: false })));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const ac2 = r.criteria.find((c) => c.id === "AC-2")!;
+    const before = l.criteria.find((c) => c.id === "AC-2")!;
+    expect(ac2).toEqual({ ...before, critical: false });
+    expect(r.criteria.filter((c) => c.id !== "AC-2")).toEqual(l.criteria.filter((c) => c.id !== "AC-2"));
+  });
+
+  it("keeps the weight sent with an edited check (V1.1)", () => {
+    const r = applyCriteriaEdit(latest(), bodyWith("AC-1", (c) => ({ ...c, critical: false, expectedOutcome: { ...outcomeOf(c, "numeric_compare"), right: 2 } })));
+    expect(r.ok && r.criteria.find((c) => c.id === "AC-1")).toMatchObject({ critical: false, statement: expect.stringContaining("2") });
   });
 
   it("rejects a wording-only change with STATEMENT_ONLY_EDIT", () => {

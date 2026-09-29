@@ -10,6 +10,7 @@ const criterion = (id: string, checkpoint: string | null, preconditions: Accepta
     ? { kind: "visible", fact: { key: "thing", checkpoint }, expected: true }
     : { kind: "semantic", description: "Looks right" },
   preconditions,
+  critical: true,
   ambiguity: null,
 });
 

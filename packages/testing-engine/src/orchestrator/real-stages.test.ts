@@ -26,6 +26,7 @@ const criterion = (id: string, expectedOutcome: AcceptanceCriterion["expectedOut
   statement: `stmt ${id}`,
   expectedOutcome,
   preconditions: [],
+  critical: true,
   ambiguity: null,
 });
 const requirement = {
