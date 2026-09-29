@@ -1,10 +1,11 @@
-import type {
-  CriterionStatus,
-  ExplorationStep,
-  RerunOutcome,
-  RunVerdict,
-  StatusReason,
-  TestRunSummary,
+import {
+  STATUS_REASON_TEXT,
+  type CriterionStatus,
+  type ExplorationStep,
+  type RerunOutcome,
+  type RunVerdict,
+  type StatusReason,
+  type TestRunSummary,
 } from "@platform/contracts";
 import type { IconName } from "./Icon";
 
@@ -34,27 +35,8 @@ export const VERDICT_UI: Record<RunVerdict, StatusUi> = {
   INCONCLUSIVE: { label: "Inconclusive", icon: "unknown", tone: "inconclusive" },
 };
 
-/** One plain-language sentence for every BLOCKED and INCONCLUSIVE reason in the contracts (Section 2.2). */
-export const STATUS_REASON_TEXT: Record<StatusReason, string> = {
-  // BLOCKED
-  MISSING_SECRET: "A secret this check needs (for example a password) was not provided",
-  MISSING_TEST_DATA: "Test data this check needs was not provided",
-  DESTRUCTIVE_ACTION_NOT_AUTHORIZED: "Checking it needs an action that could change or delete data, which this run's policy did not allow at that step",
-  TARGET_BLOCKED_BY_POLICY: "The page it needs is not allowed by the network policy",
-  OFF_DOMAIN_NAVIGATION: "Checking it would have meant leaving the allowed website",
-  LOGIN_FAILED: "Logging in failed with the credentials provided",
-  PRECONDITION_NOT_MET: "An earlier step it depends on could not be completed",
-  // INCONCLUSIVE
-  STEP_LIMIT_REACHED: "The run reached its step limit before this could be checked",
-  EXPLORATION_BUDGET_EXHAUSTED: "Exploring the site ran out of time before this could be checked",
-  FACT_NOT_OBSERVED: "The information needed to check this was not found on the page",
-  UNVERIFIED_EVIDENCE: "The evidence was read by the AI model and could not be confirmed from the page itself",
-  DISCOVERY_RERUN_DISAGREE: "Exploring the site and rerunning the generated test gave different results",
-  AI_JUDGED_ONLY: "This can only be judged by the AI model, so it gets no pass or fail",
-  AMBIGUOUS_CRITERION: "The criterion was too ambiguous to check reliably",
-  RERUN_NOT_REACHED: "The saved test stopped before it reached this check",
-  NOT_IN_GENERATED_TEST: "The saved test has no check for this criterion, so a rerun cannot confirm it",
-};
+/** One plain-language sentence for every BLOCKED and INCONCLUSIVE reason: shared with the Markdown export. */
+export { STATUS_REASON_TEXT };
 
 export const reasonText = (reason: StatusReason | null): string => (reason ? STATUS_REASON_TEXT[reason] : "No reason was recorded");
 

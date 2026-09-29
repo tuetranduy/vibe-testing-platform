@@ -128,6 +128,9 @@ export const listRuns = (cursor: string | null = null, limit = 50, owner?: "me" 
   return request(TestRunListResponseSchema, `${BASE}?${q}`);
 };
 
+/** The report as a Markdown file, downloaded by the browser through this app's proxy (V1.1). */
+export const reportMarkdownPath = (runId: string) => `${runPath(runId)}/report.md`;
+
 /** The final report (COMPLETED) or a partial one (ERRORED / CANCELLED); 409 while the run is still going. */
 export const getReport = (runId: string): Promise<TestReport> => request(TestReportSchema, `${runPath(runId)}/report`);
 

@@ -60,6 +60,15 @@ describe("RunReport", () => {
     expect(screen.getAllByText("Non-critical")).toHaveLength(1);
   });
 
+  it("links the Markdown download and the printable report (V1.1)", async () => {
+    reportFetch(() => json(200, reportFixture()));
+    renderReport();
+    const md = await screen.findByRole("link", { name: "Download Markdown" });
+    expect(md).toHaveAttribute("href", "/api/v1/test-runs/run_1/report.md");
+    expect(md).toHaveAttribute("download");
+    expect(screen.getByRole("link", { name: "Print or save as PDF" })).toHaveAttribute("href", "/runs/run_1/print");
+  });
+
   it("offers a rerun of the saved test only when told the run's secrets and the test checks something (V1.1)", async () => {
     reportFetch(() => json(200, reportFixture()));
     const { unmount } = render(<RunReport runId="run_1" artifacts={[]} steps={[]} secretNames={["password"]} />);

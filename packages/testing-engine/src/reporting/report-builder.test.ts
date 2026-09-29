@@ -502,6 +502,7 @@ describe("@platform/testing-engine/reporting entry point (Ruling R36)", () => {
       "orchestrator/stages.ts",
       "reconciliation/reconcile.ts",
       "reporting/index.ts",
+      "reporting/markdown.ts",
       "reporting/report-builder.ts",
       "reporting/rerun-only.ts",
       "shared/fact-values.ts",

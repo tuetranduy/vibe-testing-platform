@@ -326,3 +326,24 @@ describe("GET /v1/test-runs/:runId/report", () => {
     expect((await t.app.inject({ method: "GET", url: `/v1/test-runs/${run.id}/report` })).statusCode).toBe(401);
   });
 });
+
+describe("GET /v1/test-runs/:runId/report.md (V1.1 F6)", () => {
+  const getMarkdown = (runId: string) => t.app.inject({ method: "GET", url: `/v1/test-runs/${runId}/report.md`, headers: auth });
+
+  it("downloads the report as Markdown", async () => {
+    const run = await runAt("CANCELLED");
+    const res = await getMarkdown(run.id);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toBe("text/markdown; charset=utf-8");
+    expect(res.headers["content-disposition"]).toBe(`attachment; filename="report-${run.id}.md"`);
+    expect(res.body.startsWith("# Test report\n")).toBe(true);
+    expect(res.body).toContain("- **Partial report:**");
+  });
+
+  it("follows the JSON report's rules: 409 while running, 404 outside the caller's scope", async () => {
+    const running = await runAt("RUNNING_PLAYWRIGHT");
+    expect((await getMarkdown(running.id)).statusCode).toBe(409);
+    const other = await runAt("COMPLETED", OTHER_TENANT_ID);
+    expect((await getMarkdown(other.id)).statusCode).toBe(404);
+  });
+});
