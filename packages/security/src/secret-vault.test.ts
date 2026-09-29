@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { decryptSecret, encryptSecret, type EncryptedSecret } from "./secret-vault";
+import { decryptProviderKey, decryptSecret, encryptProviderKey, encryptSecret, type EncryptedSecret } from "./secret-vault";
 
 const key = randomBytes(32);
 const aad = { runId: "run_123", name: "PASSWORD" };
@@ -75,5 +75,37 @@ describe("secret vault", () => {
     const enc = encryptSecret("x", aad, key);
     expect(() => decryptSecret({ ...enc, iv: enc.iv.subarray(0, 8) }, aad, key)).toThrow();
     expect(() => decryptSecret({ ...enc, authTag: enc.authTag.subarray(0, 4) }, aad, key)).toThrow();
+  });
+});
+
+describe("provider key vault (Settings → AI providers)", () => {
+  const owner = { tenantId: "t_default", provider: "anthropic" };
+  const apiKey = "sk-ant-api03-Provider-Key-777";
+
+  it("round-trips, and the ciphertext does not contain the key", () => {
+    const enc = encryptProviderKey(apiKey, owner, key);
+    expect(decryptProviderKey(enc, owner, key)).toBe(apiKey);
+    expect(enc.iv).toHaveLength(12);
+    expect(enc.authTag).toHaveLength(16);
+    expect(enc.ciphertext.toString("utf8")).not.toContain("Provider-Key");
+  });
+
+  it("fails for another tenant or another provider", () => {
+    const enc = encryptProviderKey(apiKey, owner, key);
+    expect(() => decryptProviderKey(enc, { ...owner, tenantId: "t_other" }, key)).toThrow();
+    expect(() => decryptProviderKey(enc, { ...owner, provider: "gemini" }, key)).toThrow();
+  });
+
+  it("never opens with a run secret's AAD, nor opens a run secret", () => {
+    const providerKey = encryptProviderKey(apiKey, owner, key);
+    expect(() => decryptSecret(providerKey, { runId: owner.tenantId, name: owner.provider }, key)).toThrow();
+    expect(() => decryptSecret(providerKey, { runId: "llm-provider-key", name: owner.tenantId }, key)).toThrow();
+    const runSecret = encryptSecret(apiKey, { runId: owner.tenantId, name: owner.provider }, key);
+    expect(() => decryptProviderKey(runSecret, owner, key)).toThrow();
+  });
+
+  it("fails after SECRETS_ENCRYPTION_KEY is rotated", () => {
+    const enc = encryptProviderKey(apiKey, owner, key);
+    expect(() => decryptProviderKey(enc, owner, randomBytes(32))).toThrow();
   });
 });

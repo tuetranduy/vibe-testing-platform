@@ -4,6 +4,7 @@ import {
   CancelReasonSchema,
   CriterionStatusSchema,
   ErrorCategorySchema,
+  ReasoningLevelSchema,
   RunLifecycleSchema,
   RunVerdictSchema,
 } from "@platform/contracts";
@@ -18,6 +19,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -32,6 +34,7 @@ export const cancelReasonEnum = pgEnum("cancel_reason", values(CancelReasonSchem
 export const criterionStatusEnum = pgEnum("criterion_status", values(CriterionStatusSchema.options));
 export const artifactTypeEnum = pgEnum("artifact_type", values(ArtifactTypeSchema.options));
 export const artifactSensitivityEnum = pgEnum("artifact_sensitivity", values(ArtifactSensitivitySchema.options));
+export const reasoningLevelEnum = pgEnum("reasoning_level", values(ReasoningLevelSchema.options));
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
@@ -246,4 +249,34 @@ export const llmCalls = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("llm_calls_run").on(t.runId)],
+);
+
+/** Settings → Defaults for new tests, per tenant. No row: the defaults come from the LLM_* environment. */
+export const llmSettings = pgTable("llm_settings", {
+  tenantId: text("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id),
+  /** A model id from the @platform/llm catalog (checked by the API when saved). */
+  defaultModel: text("default_model").notNull(),
+  defaultReasoning: reasoningLevelEnum("default_reasoning").notNull(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
+/** Each tenant's saved API key per provider, encrypted with tenant and provider as AAD. */
+export const llmProviderKeys = pgTable(
+  "llm_provider_keys",
+  {
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    provider: text("provider").notNull(),
+    ciphertext: bytea("ciphertext").notNull(),
+    iv: bytea("iv").notNull(),
+    authTag: bytea("auth_tag").notNull(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.provider] }),
+    check("llm_provider_keys_provider", sql`${t.provider} IN ('anthropic', 'gemini')`),
+  ],
 );
