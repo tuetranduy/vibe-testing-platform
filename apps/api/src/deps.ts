@@ -1,3 +1,4 @@
+import type { LlmChoice, LlmKeyProvider } from "@platform/contracts";
 import type { Database } from "@platform/db";
 import type { RunEventHub, RunQueue } from "@platform/event-bus";
 import type { Resolver } from "@platform/security";
@@ -15,6 +16,14 @@ export interface ApiConfig {
   /** Signed artifact URL lifetime; capped at 300 s. */
   artifactUrlTtlSeconds: number;
   sseHeartbeatMs: number;
+  /** The LLM_* environment, which the API shares with the worker (compose's x-app-env). */
+  llm: ApiLlmConfig;
+}
+
+export interface ApiLlmConfig {
+  envChoice: LlmChoice;
+  envKeys: Record<LlmKeyProvider, boolean>;
+  fakeAllowed: boolean;
 }
 
 export interface ApiDeps {

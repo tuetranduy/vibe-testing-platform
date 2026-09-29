@@ -1,4 +1,4 @@
-import { createLogger, loadEnvOrExit } from "@platform/config";
+import { createLogger, loadEnvOrExit, resolveEnvLlmChoice } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
 import { RunEventHub, createRunQueue } from "@platform/event-bus";
 import { defaultResolver } from "@platform/security";
@@ -47,6 +47,11 @@ const app = await buildApp(
       secretsKey: env.secretsKey,
       artifactUrlTtlSeconds: 300,
       sseHeartbeatMs: 20_000,
+      llm: {
+        envChoice: resolveEnvLlmChoice(env),
+        envKeys: { anthropic: Boolean(env.ANTHROPIC_API_KEY?.trim()), gemini: Boolean(env.GEMINI_API_KEY?.trim()) },
+        fakeAllowed: env.NODE_ENV !== "production",
+      },
     },
     db: handle.db,
     redis,
