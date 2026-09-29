@@ -3,3 +3,4 @@ export * from "./url-policy";
 export * from "./redaction";
 export * from "./secret-vault";
 export * from "./action-policy";
+export * from "./secret-fingerprint";

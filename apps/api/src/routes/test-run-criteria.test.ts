@@ -104,8 +104,8 @@ function requirementWithWarnings(): Draft {
   };
 }
 
-async function setupAwaitingConfirmation(draft: Draft = baseRequirement()): Promise<string> {
-  const { runId } = (await post(validBody({ requirement: ORIGINAL_TEXT }))).json();
+async function setupAwaitingConfirmation(draft: Draft = baseRequirement(), extra: Record<string, unknown> = {}): Promise<string> {
+  const { runId } = (await post(validBody({ requirement: ORIGINAL_TEXT, ...extra }))).json();
   const runs = new RunRepository(t.tdb.db);
   await runs.transition(runId, "QUEUED", "ANALYZING_REQUIREMENT");
   await runs.transition(runId, "ANALYZING_REQUIREMENT", "AWAITING_CONFIRMATION");
@@ -183,6 +183,24 @@ describe("PUT /v1/test-runs/:runId/criteria", () => {
     expect(updated).toBeDefined();
     expect(updated!.payload).toEqual({ revision: 2 });
     expect(updated!.message).toBe("Criteria revision 2 saved");
+  });
+
+  it("refuses a check value that is one of the run's secret values (found by fingerprint), and stores nothing", async () => {
+    const runId = await setupAwaitingConfirmation(baseRequirement(), { secrets: { password: "hunter2-long-pw" } });
+    const current = getCriteriaBody(await getCriteria(runId));
+    const res = await putCriteria(runId, {
+      ...current,
+      criteria: current.criteria.map((c: NormalizedRequirement["criteria"][number], i: number) =>
+        i === 1 ? { ...c, expectedOutcome: { ...c.expectedOutcome, match: { mode: "contains", value: "pw hunter2-long-pw", caseSensitive: false } } } : c,
+      ),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [{ path: ["criteria", 1, "expectedOutcome", "match", "value"] }],
+    });
+    expect((await new RequirementRepository(t.tdb.db).getLatest(runId)).revision).toBe(1);
+    expect(res.body).not.toContain("hunter2-long-pw");
   });
 
   /** "The cart holds 1 item": a numeric check against a literal. */

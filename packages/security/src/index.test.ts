@@ -18,6 +18,9 @@ describe("@platform/security public API", () => {
       "decryptSecret",
       "assertActionAllowed",
       "DESTRUCTIVE_TERMS",
+      "secretFingerprint",
+      "redactFingerprintedSecrets",
+      "containsFingerprintedSecret",
     ]) {
       expect(security, name).toHaveProperty(name);
     }

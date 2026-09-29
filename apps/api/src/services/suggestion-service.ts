@@ -10,7 +10,7 @@ import {
 } from "@platform/db";
 import { createRunEventPublisher, type RunEventPublisher } from "@platform/event-bus";
 import { catalogModel } from "@platform/llm/catalog";
-import { redactByKey } from "@platform/security";
+import { redactByKey, redactFingerprintedSecrets } from "@platform/security";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 import { NO_VERDICT, observeStage } from "../metrics";
@@ -83,9 +83,12 @@ export class SuggestionService {
     if (!suggestion) throw unknownSuggestion(suggestionId);
     const text = parsed.data.requirement ?? suggestion.requirement;
     const edited = text !== suggestion.requirement;
-    // Only key-based redaction is possible here (D7), as for criteria edits; a plain text has no keys,
-    // so it passes as sent. The worker masks the run's secret values in it before any model sees it.
-    const requirement = redactByKey(text) as string;
+    // Secret plaintext never reaches the API (D7): the run's secret values are found by their
+    // fingerprints and masked before the text is stored, so a value typed into the edit never lands
+    // in the database even if no worker ever picks the run up. The worker's run redactor also masks
+    // encoded forms before any model sees it.
+    const fingerprints = await new SecretRepository(this.deps.db).listFingerprints(runId);
+    const requirement = redactFingerprintedSecrets(redactByKey(text) as string, fingerprints, this.deps.config.secretsKey);
 
     let selected: Awaited<ReturnType<SuggestionRepository["select"]>>;
     try {
