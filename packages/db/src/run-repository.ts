@@ -318,6 +318,15 @@ export class RunRepository {
     return rows.map(toRun);
   }
 
+  /** Runs waiting for the user to choose a suggested test since before `before`. */
+  async findAwaitingSelectionSince(before: Date): Promise<TestRun[]> {
+    const rows = await this.db
+      .select()
+      .from(testRuns)
+      .where(and(eq(testRuns.lifecycle, "AWAITING_SELECTION"), lt(testRuns.lifecycleChangedAt, before)));
+    return rows.map(toRun);
+  }
+
   async findTerminal(opts: { limit: number }): Promise<TestRun[]> {
     const rows = await this.db
       .select()

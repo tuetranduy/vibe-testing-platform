@@ -1,5 +1,5 @@
-import type { FactValue, LlmChoice, RunLifecycle, StoredTestRunRequest, TestEvent } from "@platform/contracts";
-import { EventRepository, RequirementRepository, RunRepository, SecretRepository, type TestRun } from "@platform/db";
+import type { FactValue, LlmChoice, RunLifecycle, StoredTestRunRequest, SuggestionSetDraft, TestEvent } from "@platform/contracts";
+import { EventRepository, RequirementRepository, RunRepository, SecretRepository, SuggestionRepository, type TestRun } from "@platform/db";
 import { TEST_TENANT_ID, createTestDatabase, type TestDatabase } from "@platform/db/testing";
 import { runCancelChannel, type RunQueue } from "@platform/event-bus";
 import { encryptSecret } from "@platform/security";
@@ -120,7 +120,33 @@ export function request(overrides: Partial<StoredTestRunRequest["options"]> = {}
   };
 }
 
-/** Creates a run and walks it to `lifecycle` (PLANNING includes a confirmed requirement). */
+/** What seedRun stores for a run it walks to AWAITING_SELECTION (the survey's suggestions, in short). */
+export const SEEDED_SUGGESTIONS: SuggestionSetDraft = {
+  suggestions: [
+    {
+      id: "S-1",
+      title: "Add a product to the cart",
+      requirement: "A user can add iPhone 17 Pro to the cart from its product page.",
+      why: "Product pages have an Add to cart button.",
+      needs: { secrets: [], testData: [] },
+      destructive: false,
+    },
+    {
+      id: "S-2",
+      title: "Sign in to the account",
+      requirement: "A user can sign in on the login page with valid credentials and lands on their account page.",
+      why: "The header links to a login page.",
+      needs: { secrets: ["password"], testData: ["email"] },
+      destructive: false,
+    },
+  ],
+  pages: [{ url: "https://shop.example.com/", title: "Home · Demo Shop", status: "READ" }],
+};
+
+/**
+ * Creates a run and walks it to `lifecycle` (PLANNING includes a confirmed requirement;
+ * AWAITING_SELECTION stores SEEDED_SUGGESTIONS). `requirement: ""` makes a blank-requirement run.
+ */
 export async function seedRun(
   h: WorkerHarness,
   opts: {
@@ -129,14 +155,19 @@ export async function seedRun(
     secrets?: Record<string, string>;
     /** The run's recorded model choice; unset, a run created before model choice (the environment's). */
     llm?: LlmChoice;
+    requirement?: string;
   } = {},
 ): Promise<TestRun> {
   const runs = new RunRepository(h.tdb.db);
   const secrets = opts.secrets ?? {};
+  const stored = request(opts.options, Object.keys(secrets));
   const run = await runs.create({
     tenantId: TEST_TENANT_ID,
     targetUrl: "https://shop.example.com",
-    request: { ...request(opts.options, Object.keys(secrets)), ...(opts.llm ? { llm: opts.llm } : {}) },
+    request: {
+      ...(opts.requirement === undefined ? stored : { ...stored, requirement: opts.requirement }),
+      ...(opts.llm ? { llm: opts.llm } : {}),
+    },
   });
   await new SecretRepository(h.tdb.db).insertMany(
     run.id,
@@ -144,6 +175,13 @@ export async function seedRun(
   );
   const target = opts.lifecycle ?? "QUEUED";
   if (target === "QUEUED") return run;
+  if (target === "SURVEYING" || target === "AWAITING_SELECTION") {
+    await runs.transition(run.id, "QUEUED", "SURVEYING", { heartbeatAt: new Date() });
+    if (target === "SURVEYING") return runs.getById(run.id);
+    await new SuggestionRepository(h.tdb.db).save(run.id, SEEDED_SUGGESTIONS);
+    await runs.transition(run.id, "SURVEYING", "AWAITING_SELECTION", { heartbeatAt: null });
+    return runs.getById(run.id);
+  }
   await runs.transition(run.id, "QUEUED", "ANALYZING_REQUIREMENT", { heartbeatAt: new Date() });
   if (target === "ANALYZING_REQUIREMENT") return runs.getById(run.id);
   const stages = createFakeStages();

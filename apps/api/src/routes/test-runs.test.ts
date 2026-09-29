@@ -342,6 +342,19 @@ describe("GET /v1/test-runs/:runId and list", () => {
 });
 
 describe("POST /v1/test-runs/:runId/cancel", () => {
+  it("cancels an AWAITING_SELECTION run immediately (no worker holds it) and purges its secrets", async () => {
+    const { runId } = (await post(validBody({ requirement: "", secrets: { password: "pw-123456" } }))).json();
+    const runs = new RunRepository(t.tdb.db);
+    await runs.transition(runId, "QUEUED", "SURVEYING");
+    await runs.transition(runId, "SURVEYING", "AWAITING_SELECTION");
+    const res = await t.app.inject({ method: "POST", url: `/v1/test-runs/${runId}/cancel`, headers: auth });
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toMatchObject({ lifecycle: "CANCELLED", cancelReason: "USER_REQUESTED" });
+    expect(await new SecretRepository(t.tdb.db).listActive(runId)).toHaveLength(0);
+    const events = await new EventRepository(t.tdb.db).listAfter(runId, 0, 10);
+    expect(events.map((e) => e.type)).toEqual(["run.created", "run.cancelled"]);
+  });
+
   it("cancels a QUEUED run immediately and publishes run.cancelled", async () => {
     const { runId } = (await post(validBody({ secrets: { password: "abcd1234" } }))).json();
     const res = await t.app.inject({ method: "POST", url: `/v1/test-runs/${runId}/cancel`, headers: auth });

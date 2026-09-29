@@ -9,6 +9,7 @@ export interface ReapResult {
   timedOut: string[];
   neverStarted: string[];
   confirmationExpired: string[];
+  selectionExpired: string[];
   secretsPurged: string[];
 }
 
@@ -19,6 +20,7 @@ const REAPED_REASON = { WORKER_LOST: "WORKER_LOST", TIMEOUT: "TIMEOUT", INTERNAL
  * Maintenance (every 60 s):
  *  - active run with a stale heartbeat → ERRORED / WORKER_LOST (unless its execute-run job is still waiting)
  *  - AWAITING_CONFIRMATION past CONFIRMATION_TTL_HOURS → CANCELLED / CONFIRMATION_EXPIRED
+ *  - AWAITING_SELECTION past CONFIRMATION_TTL_HOURS → CANCELLED / SELECTION_EXPIRED
  *  - purge secrets of terminal runs (safety net)
  * Losing a CAS race to a live worker is expected and ignored.
  */
@@ -32,7 +34,7 @@ export async function reapJob(deps: WorkerDeps): Promise<ReapResult> {
     redact: redactByKey,
     logger: deps.logger,
   });
-  const result: ReapResult = { workerLost: [], timedOut: [], neverStarted: [], confirmationExpired: [], secretsPurged: [] };
+  const result: ReapResult = { workerLost: [], timedOut: [], neverStarted: [], confirmationExpired: [], selectionExpired: [], secretsPurged: [] };
 
   // Each run is counted as soon as it is ended, so a pass that fails later still counts it.
   const errorRun = async (run: TestRun, category: keyof typeof REAPED_REASON, message: string) => {
@@ -100,6 +102,25 @@ export async function reapJob(deps: WorkerDeps): Promise<ReapResult> {
         payload: { reason: "CONFIRMATION_EXPIRED" },
       });
       result.confirmationExpired.push(run.id);
+    });
+  }
+
+  // A blank-requirement run whose suggested tests nobody chose: the same TTL as a confirmation.
+  for (const run of await runs.findAwaitingSelectionSince(new Date(now.getTime() - ttlMs))) {
+    await safely(run, async () => {
+      await runs.transition(run.id, "AWAITING_SELECTION", "CANCELLED", { cancelReason: "SELECTION_EXPIRED" });
+      observeStage(deps.metrics, "AWAITING_SELECTION", run.lifecycleChangedAt, now);
+      deps.metrics?.testRuns.inc({ lifecycle: "CANCELLED", verdict: NO_VERDICT });
+      deps.metrics?.runsReaped.inc({ reason: "SELECTION_EXPIRED" });
+      await secrets.purge(run.id);
+      await publisher.publish({
+        runId: run.id,
+        stage: "CANCELLED",
+        type: "run.cancelled",
+        message: "Run cancelled: no suggested test was chosen in time",
+        payload: { reason: "SELECTION_EXPIRED" },
+      });
+      result.selectionExpired.push(run.id);
     });
   }
 

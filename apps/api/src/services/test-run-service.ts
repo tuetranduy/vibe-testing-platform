@@ -216,7 +216,7 @@ export class TestRunService {
   }
 
   /**
-   * QUEUED / AWAITING_CONFIRMATION: cancelled immediately (no worker holds them).
+   * QUEUED / AWAITING_SELECTION / AWAITING_CONFIRMATION: cancelled immediately (no worker holds them).
    * Active: cancel requested + Redis signal; the worker stops at the next boundary.
    */
   async cancel(runId: string): Promise<TestRunSummary> {
@@ -226,7 +226,7 @@ export class TestRunService {
       throw new HttpError(409, "RUN_TERMINAL", `Run is already ${run.lifecycle}`);
     }
 
-    if (run.lifecycle === "QUEUED" || run.lifecycle === "AWAITING_CONFIRMATION") {
+    if (run.lifecycle === "QUEUED" || run.lifecycle === "AWAITING_SELECTION" || run.lifecycle === "AWAITING_CONFIRMATION") {
       try {
         const cancelled = await this.runs.transition(run.id, run.lifecycle, "CANCELLED", {
           cancelReason: "USER_REQUESTED",
