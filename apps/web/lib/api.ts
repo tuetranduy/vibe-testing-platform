@@ -2,6 +2,7 @@ import {
   ApiErrorSchema,
   CreateTestRunResponseSchema,
   LlmSettingsViewSchema,
+  SuggestionSetResponseSchema,
   NormalizedRequirementSchema,
   TestReportSchema,
   TestRunListResponseSchema,
@@ -13,6 +14,7 @@ import {
   type LlmKeyProvider,
   type LlmSettingsView,
   type NormalizedRequirement,
+  type SuggestionSetResponse,
   type TestReport,
   type TestRunListResponse,
   type TestRunSummary,
@@ -105,6 +107,10 @@ export const getCriteria = (runId: string): Promise<NormalizedRequirement> =>
 /** Saves a new criteria revision; the API takes the full requirement. */
 export const updateCriteria = (runId: string, requirement: NormalizedRequirement): Promise<NormalizedRequirement> =>
   request(NormalizedRequirementSchema, `${runPath(runId)}/criteria`, { method: "PUT", body: requirement });
+
+/** A blank-requirement run's suggested tests (409 while it is still exploring, 404 for a run with a requirement). */
+export const getSuggestions = (runId: string): Promise<SuggestionSetResponse> =>
+  request(SuggestionSetResponseSchema, `${runPath(runId)}/suggestions`);
 
 export const confirmCriteria = (runId: string): Promise<ConfirmResult> =>
   request(ConfirmResultSchema, `${runPath(runId)}/criteria/confirm`, { method: "POST" });

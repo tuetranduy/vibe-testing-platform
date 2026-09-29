@@ -4,8 +4,12 @@ import { HowItWorks, RecentRuns } from "../../../components/NewTestAside";
 
 export const metadata: Metadata = { title: "New test" };
 
-export default async function NewTestPage({ searchParams }: { searchParams: Promise<{ from?: string | string[] }> }) {
-  const { from } = await searchParams;
+export default async function NewTestPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string | string[]; suggestion?: string | string[] }>;
+}) {
+  const { from, suggestion } = await searchParams;
   return (
     <div className="new-test">
       <div className="new-test-main">
@@ -17,7 +21,7 @@ export default async function NewTestPage({ searchParams }: { searchParams: Prom
             runs, then get a report with the evidence for each one.
           </p>
         </div>
-        <NewTestForm from={typeof from === "string" ? from : null} />
+        <NewTestForm from={typeof from === "string" ? from : null} suggestion={typeof suggestion === "string" ? suggestion : null} />
       </div>
       <aside className="new-test-aside" aria-label="About test runs">
         <HowItWorks />

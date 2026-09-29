@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getLlmSettings } from "../lib/api";
-import { json, llmSettingsFixture, requirementFixture, summaryFixture } from "../test/fixtures";
+import { json, llmSettingsFixture, requirementFixture, suggestionsFixture, summaryFixture } from "../test/fixtures";
 import { NewTestForm } from "./NewTestForm";
 
 const push = vi.fn();
@@ -642,5 +642,98 @@ describe("NewTestForm: model and reasoning (Advanced options)", () => {
     expect(summary).toHaveTextContent("Claude Opus 5.5 · 40 steps · 5 min · rerun on");
     await user.selectOptions(screen.getByLabelText("Reasoning"), "high");
     expect(summary).toHaveTextContent("Claude Opus 5.5 · high reasoning · 40 steps · 5 min · rerun on");
+  });
+});
+
+describe("NewTestForm: the requirement is optional", () => {
+  it("labels the requirement optional and says what leaving it empty does", () => {
+    render(<NewTestForm />);
+    expect(screen.getByLabelText("Requirement (optional)")).toHaveAccessibleDescription(
+      /Leave it empty and the agent explores the website and suggests what to test\./,
+    );
+  });
+
+  it("with an empty requirement the button reads 'Explore and suggest tests' and the run is created with requirement ''", async () => {
+    const user = userEvent.setup();
+    const fetch = mockFetch(json(202, { runId: "run_s", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_s/events" }));
+    render(<NewTestForm />);
+    await user.type(screen.getByLabelText(/website url/i), "https://shop.example.com");
+    expect(screen.queryByRole("button", { name: /start test/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Explore and suggest tests" }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_s"));
+    expect(bodyOf(fetch).requirement).toBe("");
+  });
+
+  it("reads 'Start test' once there is a requirement; whitespace alone is still empty", async () => {
+    const user = userEvent.setup();
+    render(<NewTestForm />);
+    const field = screen.getByLabelText(/requirement/i);
+    await user.type(field, "   ");
+    expect(screen.getByRole("button", { name: "Explore and suggest tests" })).toBeInTheDocument();
+    await user.type(field, "A user can add a product to the cart.");
+    expect(screen.getByRole("button", { name: /start test/i })).toBeInTheDocument();
+  });
+
+  it("1–9 characters: asks for 10, or none, and sends nothing", async () => {
+    const user = userEvent.setup();
+    const fetch = mockFetch();
+    render(<NewTestForm />);
+    await user.type(screen.getByLabelText(/website url/i), "https://shop.example.com");
+    await user.type(screen.getByLabelText(/requirement/i), "too short");
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    expect(screen.getByLabelText(/requirement/i)).toHaveAccessibleDescription(
+      /Describe the requirement in at least 10 characters, or leave it empty for suggestions\./,
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("NewTestForm pre-filled from a suggested test", () => {
+  it("copies the website and that suggestion's text, and asks for test data and secrets again", async () => {
+    const fetch = vi.fn(async (url: RequestInfo | URL) =>
+      String(url).endsWith("/suggestions")
+        ? json(200, suggestionsFixture())
+        : json(200, summaryFixture({ lifecycle: "AWAITING_SELECTION", requirementPreview: "" })),
+    );
+    vi.stubGlobal("fetch", fetch);
+    render(<NewTestForm from="run_1" suggestion="S-2" />);
+    expect(await screen.findByDisplayValue("https://shop.example.com/")).toBeInTheDocument();
+    expect(screen.getByLabelText(/requirement/i)).toHaveValue(suggestionsFixture().suggestions[1]!.requirement);
+    expect(
+      screen.getByText(
+        "Copied the website and the suggested test from your earlier run. Test data and secrets must be entered again — they are never copied.",
+      ),
+    ).toBeInTheDocument();
+    expect(fetch.mock.calls.map(([u]) => String(u))).not.toContain("/api/v1/test-runs/run_1/criteria");
+  });
+
+  it("a suggestion the run doesn't have leaves the form empty, with a notice", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL) => (String(url).endsWith("/suggestions") ? json(200, suggestionsFixture()) : json(200, summaryFixture()))),
+    );
+    render(<NewTestForm from="run_1" suggestion="S-8" />);
+    expect(await screen.findByText(/couldn't load the earlier run/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/requirement/i)).toHaveValue("");
+  });
+});
+
+describe("NewTestForm 'Run again' from a run that never got criteria", () => {
+  it("copies the website only, leaving the requirement empty to explore again", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL) =>
+        String(url).endsWith("/criteria")
+          ? json(409, { code: "CRITERIA_NOT_READY", message: "Criteria have not been compiled for this run yet" })
+          : json(200, summaryFixture({ lifecycle: "CANCELLED", cancelReason: "USER_REQUESTED", requirementPreview: "" })),
+      ),
+    );
+    render(<NewTestForm from="run_1" />);
+    expect(await screen.findByDisplayValue("https://shop.example.com/")).toBeInTheDocument();
+    expect(screen.getByLabelText(/requirement/i)).toHaveValue("");
+    expect(
+      screen.getByText("Copied the website from your earlier run. Test data and secrets must be entered again — they are never copied."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Explore and suggest tests" })).toBeInTheDocument();
   });
 });

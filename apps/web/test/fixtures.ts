@@ -4,6 +4,7 @@ import {
   type CriterionResult,
   type LlmSettingsView,
   type NormalizedRequirement,
+  type SuggestionSetResponse,
   type TestReport,
   type TestRunSummary,
 } from "@platform/contracts";
@@ -246,3 +247,49 @@ export const reportFixture = (patch: Partial<TestReport> = {}): TestReport =>
     durationMs: 95000,
     ...patch,
   });
+
+/** A survey's suggestions as `GET …/suggestions` returns them: S-3 needs a secret the run lacks, S-4 changes data. */
+export const suggestionsFixture = (patch: Partial<SuggestionSetResponse> = {}): SuggestionSetResponse => ({
+  suggestions: [
+    {
+      id: "S-1",
+      title: "Add a product to the cart",
+      requirement: "A user can add iPhone 17 Pro to the cart from its product page, and the cart then lists it.",
+      why: "Product pages have an Add to cart button.",
+      needs: { secrets: [], testData: [] },
+      destructive: false,
+    },
+    {
+      id: "S-2",
+      title: "Search for a product",
+      requirement: "Searching for iPhone on the products page lists only products whose names contain iPhone.",
+      why: "Every page has a product search form.",
+      needs: { secrets: [], testData: [] },
+      destructive: false,
+    },
+    {
+      id: "S-3",
+      title: "Sign in to the account",
+      requirement: "A user can sign in on the login page with valid credentials and lands on their account page.",
+      why: "The header links to a login page.",
+      needs: { secrets: ["password"], testData: ["email"] },
+      destructive: false,
+    },
+    {
+      id: "S-4",
+      title: "Empty the cart",
+      requirement: "A user can delete every item from the cart, and the cart then says it is empty.",
+      why: "The cart page has an Empty cart button.",
+      needs: { secrets: [], testData: [] },
+      destructive: true,
+    },
+  ],
+  pages: [
+    { url: "https://shop.example.com/", title: "Home · Demo Shop", status: "READ" },
+    { url: "https://shop.example.com/cart", title: "Your cart · Demo Shop", status: "READ" },
+    { url: "https://shop.example.com/account", title: "", status: "SKIPPED" },
+  ],
+  selected: null,
+  run: { secretNames: [], testDataKeys: ["email"], destructiveActionsAllowed: false },
+  ...patch,
+});
