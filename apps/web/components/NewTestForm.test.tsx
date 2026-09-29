@@ -1,11 +1,14 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { json, requirementFixture, summaryFixture } from "../test/fixtures";
+import { getLlmSettings } from "../lib/api";
+import { json, llmSettingsFixture, requirementFixture, summaryFixture } from "../test/fixtures";
 import { NewTestForm } from "./NewTestForm";
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+// The model catalog loads on mount; stubbing it here keeps `fetch` (and its call order) for the run requests.
+vi.mock("../lib/api", async (importOriginal) => ({ ...(await importOriginal<typeof import("../lib/api")>()), getLlmSettings: vi.fn() }));
 
 
 function mockFetch(...responses: Response[]) {
@@ -21,7 +24,10 @@ async function fillValid(user: ReturnType<typeof userEvent.setup>) {
 
 const bodyOf = (fetch: ReturnType<typeof mockFetch>, call = 0) => JSON.parse(String(fetch.mock.calls[call]![1]!.body));
 
-beforeEach(() => push.mockReset());
+beforeEach(() => {
+  push.mockReset();
+  vi.mocked(getLlmSettings).mockResolvedValue(llmSettingsFixture());
+});
 
 describe("NewTestForm", () => {
   it("requires an http(s) URL", async () => {
@@ -517,5 +523,124 @@ describe("NewTestForm — destructive actions", () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_9"));
     expect(bodyOf(fetch)).toMatchObject({ environment: "staging", options: { allowDestructiveActions: true } });
     expect(bodyOf(fetch).options).not.toHaveProperty("confirmProductionHost");
+  });
+});
+
+describe("NewTestForm: model and reasoning (Advanced options)", () => {
+  const created = () => json(202, { runId: "run_3", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_3/events" });
+  const openAdvanced = async (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByText("Advanced options"));
+
+  it("offers the default model first, then the catalog by provider; a model whose provider has no key is disabled", async () => {
+    const user = userEvent.setup();
+    mockFetch();
+    render(<NewTestForm />);
+    await openAdvanced(user);
+    const model = screen.getByLabelText("Model");
+    await waitFor(() => expect(model).toBeEnabled());
+    expect(within(model).getAllByRole("option")[0]).toHaveTextContent("Default — Claude Sonnet 5");
+    expect(within(model).getAllByRole("group").map((g) => g.getAttribute("label"))).toEqual(["Anthropic", "Google Gemini", "Development"]);
+    expect(within(model).getByRole("option", { name: "Gemini 3.8 Flash — add a key" })).toBeDisabled();
+  });
+
+  it.each([
+    ["nothing changed: no llm at all", {}, undefined],
+    ["a model", { model: "claude-opus-5-5" }, { model: "claude-opus-5-5" }],
+    ["a level for the default model", { reasoning: "high" }, { reasoning: "high" }],
+    ["both", { model: "claude-opus-5-5", reasoning: "low" }, { model: "claude-opus-5-5", reasoning: "low" }],
+  ] as const)("the body carries llm only for what was changed: %s", async (_what, pick, expected) => {
+    const user = userEvent.setup();
+    const fetch = mockFetch(created());
+    render(<NewTestForm />);
+    await fillValid(user);
+    await openAdvanced(user);
+    await waitFor(() => expect(screen.getByLabelText("Model")).toBeEnabled());
+    if ("model" in pick) await user.selectOptions(screen.getByLabelText("Model"), pick.model);
+    if ("reasoning" in pick) await user.selectOptions(screen.getByLabelText("Reasoning"), pick.reasoning);
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    await waitFor(() => expect(push).toHaveBeenCalled());
+    expect(bodyOf(fetch).llm).toEqual(expected);
+  });
+
+  it("the reasoning options are the chosen model's; a level it lacks goes back to Default", async () => {
+    const user = userEvent.setup();
+    mockFetch();
+    render(<NewTestForm />);
+    await openAdvanced(user);
+    const reasoning = screen.getByLabelText("Reasoning");
+    await waitFor(() => expect(reasoning).toBeEnabled());
+    expect(within(reasoning).getAllByRole("option").map((o) => o.textContent)).toEqual(["Default", "Low", "Medium", "High"]);
+    await user.selectOptions(reasoning, "high");
+    await user.selectOptions(screen.getByLabelText("Model"), "claude-haiku-4-5");
+    expect(within(reasoning).getAllByRole("option").map((o) => o.textContent)).toEqual(["Default"]);
+    expect(reasoning).toHaveValue("");
+  });
+
+  it("when the catalog can't be loaded, the selects give way to a notice and the default model is used", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getLlmSettings).mockRejectedValue(new Error("down"));
+    const fetch = mockFetch(created());
+    render(<NewTestForm />);
+    await openAdvanced(user);
+    expect(await screen.findByText("Model choices couldn't be loaded; the default model will be used.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Model")).not.toBeInTheDocument();
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    await waitFor(() => expect(push).toHaveBeenCalled());
+    expect(bodyOf(fetch)).not.toHaveProperty("llm");
+  });
+
+  it("a 422 MODEL_NOT_AVAILABLE on the model lands on the Model field, opening Advanced options", async () => {
+    const user = userEvent.setup();
+    mockFetch(
+      json(422, {
+        code: "MODEL_NOT_AVAILABLE",
+        message: "Add a Google Gemini API key in Settings",
+        issues: [{ path: ["llm", "model"], message: "Add a Google Gemini API key in Settings" }],
+      }),
+    );
+    render(<NewTestForm />);
+    await fillValid(user);
+    await openAdvanced(user);
+    await waitFor(() => expect(screen.getByLabelText("Model")).toBeEnabled());
+    await user.selectOptions(screen.getByLabelText("Model"), "claude-opus-5-5");
+    await user.click(screen.getByText("Advanced options")); // collapse it again
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+
+    const model = screen.getByLabelText("Model");
+    await waitFor(() => expect(model).toHaveAttribute("aria-invalid", "true"));
+    expect(model).toHaveAccessibleDescription(/Add a Google Gemini API key in Settings/);
+    expect(model.closest("details")).toHaveAttribute("open");
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("a 422 MODEL_NOT_AVAILABLE at the defaults is a banner that links to Settings", async () => {
+    const user = userEvent.setup();
+    mockFetch(
+      json(422, {
+        code: "MODEL_NOT_AVAILABLE",
+        message: "Add an Anthropic API key in Settings: the default model (Claude Sonnet 5) needs it",
+        issues: [{ path: ["llm"], message: "Add an Anthropic API key in Settings: the default model (Claude Sonnet 5) needs it" }],
+      }),
+    );
+    render(<NewTestForm />);
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/The default model can't be used.*Add an Anthropic API key in Settings/);
+    expect(within(banner).getByRole("link", { name: "Open Settings" })).toHaveAttribute("href", "/settings");
+  });
+
+  it("the Advanced options summary names an overridden model and level", async () => {
+    const user = userEvent.setup();
+    mockFetch();
+    render(<NewTestForm />);
+    const summary = screen.getByText("Advanced options").closest("summary")!;
+    await user.click(summary);
+    await waitFor(() => expect(screen.getByLabelText("Model")).toBeEnabled());
+    expect(summary).toHaveTextContent("40 steps · 5 min · rerun on");
+    await user.selectOptions(screen.getByLabelText("Model"), "claude-opus-5-5");
+    expect(summary).toHaveTextContent("Claude Opus 5.5 · 40 steps · 5 min · rerun on");
+    await user.selectOptions(screen.getByLabelText("Reasoning"), "high");
+    expect(summary).toHaveTextContent("Claude Opus 5.5 · high reasoning · 40 steps · 5 min · rerun on");
   });
 });

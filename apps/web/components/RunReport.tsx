@@ -1,6 +1,6 @@
 "use client";
 
-import type { CancelReason, TestReport } from "@platform/contracts";
+import type { CancelReason, TestReport, TestRunSummary } from "@platform/contracts";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { getReport } from "../lib/api";
 import type { ArtifactInfo, StepInfo } from "../lib/progress-reducer";
@@ -21,6 +21,8 @@ interface Props {
   artifacts: readonly ArtifactInfo[];
   steps: readonly StepInfo[];
   cancelReason?: CancelReason | null;
+  /** The run's model and reasoning, from its summary (null: a run created before model choice). */
+  llm?: TestRunSummary["llm"];
   /** Shown with the error when the report can't be loaded (the outcome from the run summary / events). */
   fallback?: ReactNode;
 }
@@ -31,7 +33,7 @@ type State = { status: "loading" } | { status: "ready"; report: TestReport } | {
  * The final report of a terminal run: full for COMPLETED, partial (`partial: true`) for ERRORED /
  * CANCELLED. Criterion-centric: summary → criteria (expandable) → diagnostics → generated test → all evidence.
  */
-export function RunReport({ runId, artifacts, steps, cancelReason = null, fallback }: Props) {
+export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = null, fallback }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
   const artifactMap = useMemo(() => new Map(artifacts.map((a) => [a.artifactId, a])), [artifacts]);
@@ -80,7 +82,7 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, fallba
   const general = report.diagnostics.filter((d) => d.criterionId === null);
   return (
     <>
-      <ReportSummary report={report} cancelReason={cancelReason} />
+      <ReportSummary report={report} cancelReason={cancelReason} llm={llm} />
       <CriteriaResults
         runId={runId}
         criteria={report.criteria}

@@ -235,6 +235,29 @@ describe("RunView", () => {
     expect(screen.queryByRole("link", { name: /run again/i })).not.toBeInTheDocument();
   });
 
+  it("shows the run's model and reasoning as a meta chip, and repeats it on the report's cost card; nothing for runs without a recorded choice", async () => {
+    const llm = { provider: "anthropic", model: "claude-sonnet-5", label: "Claude Sonnet 5", reasoning: "medium" } as const;
+    routeFetch({
+      [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "COMPLETED", verdict: "FAILED", llm })),
+      [`GET ${RUN}/report`]: () => json(200, reportFixture()),
+    });
+    const { unmount } = render(<RunView runId="run_1" />);
+    await screen.findByRole("heading", { name: /verdict: failed/i });
+    expect(screen.getByText("Claude Sonnet 5 · medium reasoning", { selector: ".run-meta .meta-chip" })).toHaveTextContent(/Model:/);
+    expect(screen.getByRole("group", { name: /estimated model cost/i })).toHaveTextContent("Claude Sonnet 5 · medium reasoning");
+    unmount();
+
+    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING", llm: { ...llm, reasoning: "default" } })) });
+    const second = render(<RunView runId="run_1" />);
+    expect(await screen.findByText("Claude Sonnet 5 · model default")).toBeInTheDocument();
+    second.unmount();
+
+    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING", llm: null })) });
+    render(<RunView runId="run_1" />);
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.queryByText(/model default|reasoning/)).not.toBeInTheDocument();
+  });
+
   it.each([
     [{ environment: "production", allowDestructiveActions: true }, "Production · destructive actions allowed"],
     [{ environment: "staging", allowDestructiveActions: true }, "Destructive actions allowed"],
