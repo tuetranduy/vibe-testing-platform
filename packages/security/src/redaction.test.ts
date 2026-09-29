@@ -55,6 +55,14 @@ describe("redactByKey", () => {
     expect(redactByKey({ [key]: "v" })).toEqual({ [key]: REDACTED });
   });
 
+  it.each(["apiKey", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "anthropic_api_key"])(
+    "redacts the provider key field %s (settings bodies, environment dumps: the apikey suffix rule)",
+    (key) => {
+      expect(isSensitiveKey(key)).toBe(true);
+      expect(redactByKey({ provider: "anthropic", [key]: "sk-ant-api03-x" })).toEqual({ provider: "anthropic", [key]: REDACTED });
+    },
+  );
+
   it.each(["email", "username", "tokens", "maxTokens", "inputTokens", "tokenCount", "secretName", "sessions", "name"])(
     "does not redact %s",
     (key) => {
