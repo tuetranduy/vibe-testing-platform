@@ -6,6 +6,8 @@ export const formatTime = (iso: string): string =>
 
 export const LIFECYCLE_LABEL: Record<RunLifecycle, string> = {
   QUEUED: "Queued",
+  SURVEYING: "Exploring for test ideas",
+  AWAITING_SELECTION: "Awaiting your choice",
   ANALYZING_REQUIREMENT: "Analyzing",
   AWAITING_CONFIRMATION: "Awaiting confirmation",
   PLANNING: "Planning",
@@ -39,4 +41,5 @@ export const ERROR_CATEGORY_LABEL: Record<ErrorCategory, string> = {
 export const CANCEL_REASON_TEXT: Record<CancelReason, string> = {
   USER_REQUESTED: "The run was cancelled at your request.",
   CONFIRMATION_EXPIRED: "The criteria weren't confirmed in time, so the run was cancelled.",
+  SELECTION_EXPIRED: "No suggested test was chosen in time, so the run was cancelled.",
 };

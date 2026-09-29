@@ -4,6 +4,10 @@ import { LlmOverrideSchema, LlmProviderSchema, ReasoningLevelSchema, type LlmCho
 
 export const RunLifecycleSchema = z.enum([
   "QUEUED",
+  // A blank requirement: the run surveys the website, then waits for the user to choose a suggested
+  // test (spec 2026-09-28-suggest-tests). Placed before ANALYZING_REQUIREMENT: the web orders stages by it.
+  "SURVEYING",
+  "AWAITING_SELECTION",
   "ANALYZING_REQUIREMENT",
   "AWAITING_CONFIRMATION",
   "PLANNING",
@@ -40,7 +44,7 @@ export const ErrorCategorySchema = z.enum([
 ]);
 export type ErrorCategory = z.infer<typeof ErrorCategorySchema>;
 
-export const CancelReasonSchema = z.enum(["USER_REQUESTED", "CONFIRMATION_EXPIRED"]);
+export const CancelReasonSchema = z.enum(["USER_REQUESTED", "CONFIRMATION_EXPIRED", "SELECTION_EXPIRED"]);
 export type CancelReason = z.infer<typeof CancelReasonSchema>;
 
 export const BlockReasonSchema = z.enum([
@@ -93,7 +97,13 @@ export type RunOptions = z.infer<typeof RunOptionsSchema>;
 export const CreateTestRunRequestSchema = z
   .object({
     targetUrl: HttpUrlSchema,
-    requirement: z.string().trim().min(10).max(20_000),
+    /** Empty: the run explores the website and suggests tests to choose from (spec 2026-09-28-suggest-tests). */
+    requirement: z
+      .string()
+      .trim()
+      .max(20_000)
+      .default("")
+      .refine((r) => r.length === 0 || r.length >= 10, "Describe the requirement in at least 10 characters, or leave it empty for suggestions."),
     environment: EnvironmentSchema.default("staging"),
     browser: z.literal("chromium").default("chromium"),
     testData: z
