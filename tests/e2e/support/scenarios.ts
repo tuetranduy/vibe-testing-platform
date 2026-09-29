@@ -21,6 +21,37 @@ export const REQUIREMENTS = {
   probe: "Verify that the egress probe page shows its heading",
 } as const;
 
+/**
+ * What the scripted model suggests when a blank-requirement run surveys the demo shop (CI mode).
+ * S-1's text differs from REQUIREMENTS.cart on purpose: platform-suggest.spec.ts edits it into that
+ * requirement, which the cart scenario below answers.
+ */
+export const DEMO_SHOP_SUGGESTIONS = {
+  suggestions: [
+    {
+      title: "Add an iPhone to the cart",
+      requirement: "A user can search for an iPhone and add it to the cart.",
+      why: "Every page has a product search, and product pages have an Add to cart button.",
+      needs: { secrets: [], testData: [] },
+      destructive: false,
+    },
+    {
+      title: "Search the catalog",
+      requirement: "Searching for Pixel on the products page lists only products whose names contain Pixel.",
+      why: "The products page has a search form.",
+      needs: { secrets: [], testData: [] },
+      destructive: false,
+    },
+    {
+      title: "Sign in to the account",
+      requirement: REQUIREMENTS.account,
+      why: "The header links to a login page.",
+      needs: { secrets: ["password"], testData: ["email"] },
+      destructive: false,
+    },
+  ],
+};
+
 const step = (kind: string, description: string, extra: Record<string, unknown> = {}) => ({
   kind,
   description,

@@ -44,6 +44,8 @@ export function api(stack: E2EStack) {
     criteria: async (runId: string) => (await call("GET", `/v1/test-runs/${runId}/criteria`)).json,
     putCriteria: (runId: string, body: unknown) => call("PUT", `/v1/test-runs/${runId}/criteria`, body),
     confirm: (runId: string) => call("POST", `/v1/test-runs/${runId}/criteria/confirm`),
+    suggestions: (runId: string) => call("GET", `/v1/test-runs/${runId}/suggestions`),
+    select: (runId: string, body: unknown) => call("POST", `/v1/test-runs/${runId}/suggestions/select`, body),
     cancel: (runId: string) => call("POST", `/v1/test-runs/${runId}/cancel`),
     artifactUrl: async (runId: string, artifactId: string, reveal = false): Promise<{ url: string }> =>
       (await call("GET", `/v1/test-runs/${runId}/artifacts/${artifactId}/url${reveal ? "?reveal=true" : ""}`)).json,
@@ -142,6 +144,12 @@ export function secretForms(value: string): string[] {
 
 export async function shopStats(stack: E2EStack): Promise<{ deleteClicks: number }> {
   return (await fetch(`${stack.shopUrl}/__test/stats`)).json() as Promise<{ deleteClicks: number }>;
+}
+
+/** The demo shop's request log (method + path, never the query), oldest first; `seq` only grows. */
+export async function shopRequests(stack: E2EStack): Promise<{ seq: number; method: string; path: string }[]> {
+  const body = (await (await fetch(`${stack.shopUrl}/__test/requests`)).json()) as { requests: { seq: number; method: string; path: string }[] };
+  return body.requests;
 }
 
 /** Sum of a metric's samples whose labels include `labels` (Prometheus text format). */
