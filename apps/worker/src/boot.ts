@@ -1,6 +1,6 @@
 import { createLogger, createRunLogRegistry, loadEnvOrExit, resolveEnvLlmChoice } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
-import { createRunQueue } from "@platform/event-bus";
+import { DEFAULT_REAPER_CONFIG, createRunQueue } from "@platform/event-bus";
 import type { LlmTransport } from "@platform/llm";
 import { createArtifactStorage } from "@platform/storage";
 import { writeFileSync } from "node:fs";
@@ -85,10 +85,8 @@ export async function bootWorker(opts: BootOptions = {}): Promise<void> {
         analysisTimeoutSeconds: env.ANALYSIS_TIMEOUT_SECONDS,
         surveyTimeoutSeconds: env.SURVEY_TIMEOUT_SECONDS,
         heartbeatMs: 10_000,
-        staleAfterMs: 60_000,
+        ...DEFAULT_REAPER_CONFIG,
         confirmationTtlHours: env.CONFIRMATION_TTL_HOURS,
-        queuedStaleAfterMs: 10 * 60_000,
-        deadlineGraceMs: 60_000,
         timeScale: 1,
       },
       db: handle.db,

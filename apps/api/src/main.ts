@@ -1,6 +1,6 @@
 import { createLogger, loadEnvOrExit, resolveEnvLlmChoice } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
-import { RunEventHub, createRunQueue } from "@platform/event-bus";
+import { DEFAULT_REAPER_CONFIG, RunEventHub, createRunQueue, startReaper } from "@platform/event-bus";
 import { defaultResolver } from "@platform/security";
 import { createArtifactStorage } from "@platform/storage";
 import { Redis } from "ioredis";
@@ -65,8 +65,23 @@ const app = await buildApp(
   { logger: { level: env.LOG_LEVEL, redact: ["req.headers.authorization", "req.headers.cookie"] } },
 );
 
+// The reaper runs here as well as in the workers (one of them per tick), so a run whose only worker
+// crashed is still ended ERRORED / WORKER_LOST while no worker is up (Section 6: within 2 minutes).
+const reaper = await startReaper(
+  {
+    config: { ...DEFAULT_REAPER_CONFIG, confirmationTtlHours: env.CONFIRMATION_TTL_HOURS },
+    db: handle.db,
+    redis,
+    queue,
+    logger: log,
+    metrics,
+  },
+  { connection: queueConnection },
+);
+
 const shutdown = async () => {
   await app.close();
+  await reaper.close();
   await queue.close();
   redis.disconnect();
   subscriber.disconnect();

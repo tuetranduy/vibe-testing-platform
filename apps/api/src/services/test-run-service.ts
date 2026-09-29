@@ -17,7 +17,7 @@ import {
 } from "@platform/db";
 import { createRunEventPublisher, type RunEventPublisher } from "@platform/event-bus";
 import { catalogModel } from "@platform/llm/catalog";
-import { createRunRedactor, encryptSecret, redactByKey, validateTargetUrl } from "@platform/security";
+import { createRunRedactor, encryptSecret, redactByKey, secretFingerprint, validateTargetUrl } from "@platform/security";
 import { createHmac } from "node:crypto";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
@@ -139,6 +139,8 @@ export class TestRunService {
           Object.entries(secrets).map(([name, value]) => ({
             name,
             ...encryptSecret(value, { runId: run.id, name }, this.deps.config.secretsKey),
+            // Lets the API find this value in text edited later without decrypting it (D7).
+            fingerprint: secretFingerprint(value, this.deps.config.secretsKey).digest,
           })),
         );
         const event = await new EventRepository(tx).append(
@@ -202,7 +204,7 @@ export class TestRunService {
         payload: { category: "INTERNAL", message: ENQUEUE_FAILED },
       });
     } catch {
-      // best effort; the reaper does not touch QUEUED runs, so log-level visibility is enough here
+      // best effort; a run left QUEUED here is ended by the reaper ("never picked up")
     }
   }
 

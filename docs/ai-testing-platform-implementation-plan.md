@@ -1,4 +1,4 @@
-# AI Testing Platform V1 Implementation Plan — Revision 2
+# AI Testing Platform V1 Implementation Plan — Revision 2 (status and amendments: Revision 3, 2026-09-29)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Section 2 (Core Runtime Model) and Task 2 (Contracts) are binding for every task — read both before starting any task.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, pnpm workspaces, Next.js, React, Fastify, Zod 4, PostgreSQL, Prisma, Redis, BullMQ, Stagehand v4, Playwright Test, Vitest, Docker Compose, MinIO / S3, `ipaddr.js`.
 
-**Spec:** `docs/ai-testing-platform-architecture.md`. Where the spec and this plan disagree on run states, verdict rules, reconciliation, or security controls, **this plan wins**; update the spec before Task 1.
+**Spec:** `docs/ai-testing-platform-architecture.md` *(never added to the repo; this plan with Revision 3 is the spec)*. Where the spec and this plan disagree on run states, verdict rules, reconciliation, or security controls, **this plan wins**; update the spec before Task 1.
 
 ---
 
@@ -32,6 +32,70 @@
 
 ---
 
+## Revision 3 — Status, Amendments and Outstanding Work (2026-09-29)
+
+Revision 2 below is unchanged except for ticked steps, inline *(notes)* where the build differs, and the
+amendments marked **(R3)** in D9 and Sections 2.1 and 2.5. This section is the record of what changed after it and
+what is left. Details: `README.md` ("Status", "Deviations from the plan"), `docs/known-issues.md` (KI-001 to
+KI-030), and the feature specs in `docs/superpowers/specs/`.
+
+### Status
+
+| Milestone | Tasks | State |
+|---|---|---|
+| A — Control plane | 0–9 | Done; demo `scripts/milestone-a-demo.sh` |
+| B — AI discovery backend | 10–15 | Done; first real-provider run 2026-09-26; eval baselines in `evals/BASELINE.md` |
+| C — Regression and evidence | 16–18 | Done; `scripts/milestone-c-demo.sh` has **not** completed against a real model (credit ran out) |
+| D — Product UI | 19–20 | Done; gate demonstrated 2026-09-26 |
+| E — Release candidate | 21–22 | Built and green in CI mode; **live gate not passed** (KI-001), Task 21 step 6 open |
+
+Test suites on 2026-09-29: typecheck clean; `pnpm test` ≈ 2,000 passing; `pnpm test:integration` 32/32;
+`pnpm test:e2e` (CI mode) 20 passing, 1 live-only skipped.
+
+### Amendments to Revision 2
+
+| # | Area | Change | Where recorded |
+|---|---|---|---|
+| A1 | Stack | Drizzle ORM instead of Prisma; rclone's S3 server instead of MinIO; Zod pinned to 4.4.3 (Stagehand's pin) | README "Deviations" |
+| A2 | Engine | `analyze` returns a draft and the orchestrator persists revision 1; engine error classes live in `@platform/contracts` | README "Deviations" |
+| A3 | Stagehand | Caching unavailable (Browserbase-only): `llm.cacheHit` is always null; its telemetry is denied by the egress proxy | `docs/spikes/stagehand-v4.md`, Rulings R21–R22 |
+| A4 | Rerun (Task 17) | No navigation guard in the rerun (R31); a rerun that fails on its own ends the *rerun* `ERRORED`, not the run (R41); a generation failure skips the rerun (R45); per-criterion rerun outcomes live in the `playwright.completed` event | README "Deviations" |
+| A5 | E2E (Task 21) | Runs on Vitest (drives the API, not a browser); `egress.blocked` asserted on `/egress-probe`; `queue_depth` exported by the API | README "Deviations" |
+| A6 | Models | Anthropic and Gemini providers; each run records its provider, model and reasoning level (request → Settings → environment); provider keys can be saved encrypted in Settings; `LLM_PROVIDER=openai` refused | `specs/2026-09-28-llm-settings-design.md` |
+| A7 | Criteria review (Task 11, D5) | Users edit a criterion's **check**, never its wording alone; the server writes the wording from the check | `specs/2026-09-26-criteria-check-edit-design.md` |
+| A8 | D9 | Production may perform destructive actions only with `allowDestructiveActions` **and** the target host typed as `confirmProductionHost`; such runs skip the rerun unless asked (`rerunGeneratedTest` defaults to `!allowDestructiveActions`) | `specs/2026-09-28-production-destructive-actions-design.md` |
+| A9 | Lifecycle (2.1), D5 | The requirement is optional: a blank one surveys the site (`SURVEYING`) and waits for the user to pick a suggested test (`AWAITING_SELECTION`, expiring `SELECTION_EXPIRED`) before `ANALYZING_REQUIREMENT` | `specs/2026-09-28-suggest-tests-design.md` |
+| A10 | Safety (Task 4, D9) | Destructive terms go beyond Task 4's list: erase/revoke/terminate wording, commit verb + order/payment noun, bookings, donations, six more languages, diacritic-insensitive | KI-021 |
+| A11 | Secrets (D7) | Secret values are fingerprinted (HMAC) at creation, so the API masks them in an edited suggestion and refuses them in a criteria edit without decrypting anything | KI-022 |
+| A12 | Jobs (2.5) | The reaper runs in the API as well as the workers, every 30 s (was 60 s in the workers only): lost runs end within ≈ 90 s even with no worker up | KI-024 |
+| A13 | Config (Task 1) | `NODE_ENV=production` refuses the example `SECRETS_ENCRYPTION_KEY` and the development `API_TOKEN` | KI-023 |
+| A14 | Delivery | GitHub Actions CI: typecheck, unit, integration and CI-mode E2E on every push; live suite nightly; release gate on demand | KI-025, `docs/operations.md` "Release checks" |
+
+### Outstanding tasks
+
+In priority order. None blocks development; items 1–3 block the V1 release gate.
+
+1. **Live release gate** (KI-001, Task 21 step 6, Milestone E): `./scripts/e2e-live-gate.sh` green three times in
+   a row. Needs a billing-enabled Gemini key (`LLM_PROVIDER=gemini LLM_MODEL=`) or Anthropic credit — the key tried
+   on 2026-09-29 was free tier (20 requests/day). Then tick Task 21 step 6.
+2. **Evals for every offered model** (KI-026, KI-018): only `claude-sonnet-5` and `gemini-3.5-flash-lite` are
+   scored; the survey eval has never run; the compiler's current prompt was never fully re-scored. Run `pnpm eval
+   requirement-compiler | planner | survey` per model and record the rows, or hide unscored models in Settings.
+3. **Milestone C live demo**: `./scripts/milestone-c-demo.sh` against a real model (never completed).
+4. **Repository remote and first CI run** (KI-025): add a remote, push, add the `GEMINI_API_KEY` secret, and fix
+   whatever the first run of `.github/workflows/ci.yml` finds (it has not run yet).
+5. **Runner isolation** (KI-029): the rerun is a child process of the worker (same user, filesystem and network);
+   `infra/runner/Dockerfile` has never been built. With no navigation guard in the rerun (A4), public hosts are
+   reachable from it.
+6. **Tenant ids on child rows** (KI-027): D6 says every row carries `tenantId`; 11 child tables rely on `run_id`.
+7. **Durable audit of revealed artifacts** (KI-028): a reveal is only a log line.
+8. **Housekeeping** (KI-030): the stale copy of this plan in `Claude outputs/`; the missing architecture doc
+   (Section 8); the S3 storage tests are opt-in locally (`S3_TEST_ENDPOINT`), always on in CI.
+
+The post-V1 backlog (Section 7) is unchanged; V1.1 starts after items 1–3.
+
+---
+
 ## V1 Decisions (fixed — do not revisit during implementation)
 
 - **D1 — Two status fields.** `lifecycle` tracks where the run is; `verdict` is the test outcome and is set only when `lifecycle = COMPLETED`.
@@ -42,7 +106,7 @@
 - **D6 — Single-tenant deployment, tenant-scoped data.** Every row carries `tenantId` (seeded default) so multi-tenancy later needs no migration. API auth is a bearer token from config; the browser never sees it.
 - **D7 — Per-run secrets.** Encrypted at rest, decrypted only in the worker, filled by our code (never by the model), redacted by value everywhere, purged when the run ends.
 - **D8 — Egress enforcement.** Every browser connection goes through the egress guard proxy, which resolves DNS itself, rejects non-public addresses, and connects to the vetted IP (defeats DNS rebinding).
-- **D9 — Destructive actions.** Blocked by default. Always blocked when `environment = production`.
+- **D9 — Destructive actions.** Blocked by default. Always blocked when `environment = production`. **(R3, A8)** Production allows them only with the target host typed as confirmation.
 - **D10 — No job retries.** BullMQ `attempts: 1`. Lost work is detected by heartbeat and marked `ERRORED / WORKER_LOST`.
 - **D11 — No runtime values in generated source.** Values live in `run-data.json`; secrets in `process.env.SECRET_*`.
 - **D12 — One scenario per run in V1.** Multi-scenario runs are V1.1.
@@ -133,6 +197,9 @@ Terminal states: `COMPLETED`, `ERRORED`, `CANCELLED`.
 | From | To | When |
 |---|---|---|
 | `QUEUED` | `ANALYZING_REQUIREMENT` | analyze job starts |
+| `QUEUED` | `SURVEYING` | **(R3, A9)** analyze job starts, requirement empty |
+| `SURVEYING` | `AWAITING_SELECTION` | **(R3, A9)** suggested tests stored |
+| `AWAITING_SELECTION` | `ANALYZING_REQUIREMENT` | **(R3, A9)** user selects a suggestion (its text becomes the requirement) |
 | `ANALYZING_REQUIREMENT` | `AWAITING_CONFIRMATION` | criteria compiled, `autoConfirmCriteria = false` |
 | `ANALYZING_REQUIREMENT` | `PLANNING` | criteria compiled, `autoConfirmCriteria = true` |
 | `AWAITING_CONFIRMATION` | `PLANNING` | user confirms criteria |
@@ -193,7 +260,7 @@ A requirement always has ≥ 1 criterion (schema-enforced), so there is no empty
 |---|---|---|---|
 | `runs` | `analyze-run` | `POST /v1/test-runs` | `ANALYZING_REQUIREMENT` → `AWAITING_CONFIRMATION` or `PLANNING` (+ enqueue `execute-run`) |
 | `runs` | `execute-run` | confirm endpoint or auto-confirm | `PLANNING` → … → `COMPLETED` |
-| `maintenance` | `reap` | repeatable, every 60 s | stale heartbeat → `ERRORED/WORKER_LOST`; confirmation older than `CONFIRMATION_TTL_HOURS` → `CANCELLED/CONFIRMATION_EXPIRED`; purge secrets of terminal runs |
+| `maintenance` | `reap` | repeatable, every 60 s — **(R3, A12)** every 30 s, consumed by the workers and the API | stale heartbeat → `ERRORED/WORKER_LOST`; confirmation older than `CONFIRMATION_TTL_HOURS` → `CANCELLED/CONFIRMATION_EXPIRED`; purge secrets of terminal runs |
 | `maintenance` | `retention` | repeatable, daily | delete artifacts past `expiresAt` (Task 22) |
 
 All jobs: `attempts: 1`, payload `{ runId }` only. Active jobs update `heartbeatAt` every 10 s. Enqueuing `execute-run` resets `heartbeatAt`, and the reaper skips runs whose job is still waiting in the queue. No browser is held while waiting for confirmation.
@@ -264,7 +331,7 @@ Checkpoints:
 
 **Why:** Tasks 13, 14 and 16 depend on Stagehand details that change quickly. Answer these questions against the current SDK and docs before writing adapter code.
 
-- [ ] **Step 1: Answer each question with a code snippet that proves it**
+- [x] **Step 1: Answer each question with a code snippet that proves it**
 
 | # | Question | Needed by |
 |---|---|---|
@@ -277,13 +344,13 @@ Checkpoints:
 | Q7 | Is a local Chromium mode supported (required for the egress proxy), or is a hosted browser mandatory? | 13 |
 | Q8 | How is the model configured? Can we inject our own client so usage flows through `@platform/llm`? | 10, 14 |
 
-- [ ] **Step 2: Record the go/no-go decision**
+- [x] **Step 2: Record the go/no-go decision**
 
 - **Go:** Q1, Q2, Q3 and Q7 are all "yes".
 - **Fallback (pre-approved):** if Q1, Q2 or Q3 is "no", use Stagehand only for `observe()` / `extract()` (finding elements and reading meaning) and perform every action through Playwright ourselves. The rest of the plan is unchanged; `BrowserExplorer` hides the difference.
 - If Q7 is "no", stop and escalate: the egress guard (D8) can't be enforced.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/spikes/stagehand-v4.md
@@ -302,7 +369,7 @@ git commit -m "docs: stagehand v4 capability spike"
 - Create: `package.json` + `tsconfig.json` + `vitest.config.ts` for every package in Section 1
 - Test: `packages/config/src/env.test.ts`
 
-- [ ] **Step 1: Workspace definitions**
+- [x] **Step 1: Workspace definitions**
 
 ```json
 {
@@ -332,11 +399,11 @@ packages:
 
 All packages use the `@platform/<name>` scope. Pin `zod@^4`.
 
-- [ ] **Step 2: Docker Compose with infra services and health checks**
+- [x] **Step 2: Docker Compose with infra services and health checks** *(Done with rclone's S3 server instead of MinIO: MinIO images left Docker Hub; README "Deviations from the plan".)*
 
 Services now: `postgres`, `redis`, `minio` (+ bucket-creation init container). Later tasks add `demo-shop` (Task 6), `api` (Task 7), `worker` (Task 9), `web` (Task 19). Each service has a `healthcheck`.
 
-- [ ] **Step 3: Write failing config tests**
+- [x] **Step 3: Write failing config tests**
 
 ```ts
 it("fails fast when DATABASE_URL is missing", () => {
@@ -354,7 +421,7 @@ it("requires a 32-byte SECRETS_ENCRYPTION_KEY", () => {
 });
 ```
 
-- [ ] **Step 4: Implement the env schema**
+- [x] **Step 4: Implement the env schema**
 
 Required: `NODE_ENV`, `DATABASE_URL`, `REDIS_URL`, `ARTIFACT_STORAGE_TYPE` (`local` | `s3`), `ARTIFACT_BUCKET`, `LLM_PROVIDER`, `BROWSER_MODE` (`local` in V1), `API_TOKEN`, `DEFAULT_TENANT_ID`, `SECRETS_ENCRYPTION_KEY` (base64, 32 bytes).
 
@@ -362,7 +429,7 @@ Optional with defaults: `MAX_ACTIVE_RUNS_PER_TENANT=3`, `CONFIRMATION_TTL_HOURS=
 
 Provider-specific keys are conditionally required by `LLM_PROVIDER` / `ARTIFACT_STORAGE_TYPE`. `loadEnv()` runs at process start in api, worker, and web server; a failure exits the process with the list of bad keys.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 ```bash
 pnpm install
@@ -373,7 +440,7 @@ pnpm typecheck
 
 Expected: infra healthy, tests PASS, typecheck clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add .
@@ -390,7 +457,7 @@ git commit -m "chore: bootstrap monorepo, local infra, and env config"
 
 **Interfaces:** Every later task imports types from here. Do not redefine any of these shapes elsewhere.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```ts
 describe("CreateTestRunRequestSchema", () => {
@@ -438,13 +505,13 @@ describe("statuses", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests and confirm failure**
+- [x] **Step 2: Run tests and confirm failure**
 
 ```bash
 pnpm --filter @platform/contracts test
 ```
 
-- [ ] **Step 3: Implement `common.ts` and `run.ts`**
+- [x] **Step 3: Implement `common.ts` and `run.ts`**
 
 ```ts
 // common.ts
@@ -543,7 +610,7 @@ export const CreateTestRunResponseSchema = z.object({
 });
 ```
 
-- [ ] **Step 4: Implement `requirement.ts`**
+- [x] **Step 4: Implement `requirement.ts`**
 
 ```ts
 export const TextMatchSchema = z.object({
@@ -611,7 +678,7 @@ export const NormalizedRequirementSchema = z.object({
 });
 ```
 
-- [ ] **Step 5: Implement `plan.ts`**
+- [x] **Step 5: Implement `plan.ts`**
 
 ```ts
 export const InputRefSchema = z.object({
@@ -649,7 +716,7 @@ export const TestPlanSchema = z.object({
 });
 ```
 
-- [ ] **Step 6: Implement `exploration.ts`**
+- [x] **Step 6: Implement `exploration.ts`**
 
 ```ts
 export const LocatorCandidateSchema = z.discriminatedUnion("strategy", [
@@ -705,7 +772,7 @@ export const ObservedFactSchema = z.object({
 });
 ```
 
-- [ ] **Step 7: Implement `results.ts`**
+- [x] **Step 7: Implement `results.ts`**
 
 ```ts
 export const VerdictSourceSchema = z.enum(["PLAYWRIGHT_RERUN", "EXPLORATION_ONLY"]);
@@ -765,7 +832,7 @@ export const RerunResultSchema = z.object({
 
 `SandboxedPage` is a worker-internal type (Task 13), not a contract.
 
-- [ ] **Step 8: Implement `events.ts`**
+- [x] **Step 8: Implement `events.ts`**
 
 Envelope fields: `id`, `runId`, `sequence` (positive int), `timestamp`, `stage` (lifecycle at publish time), `type`, `message` (template-built, ≤ 300 chars, shown in the UI timeline), `payload`.
 
@@ -791,7 +858,7 @@ Envelope fields: `id`, `runId`, `sequence` (positive int), `timestamp`, `stage` 
 | `run.cancelled` | `{ reason }` |
 | `run.errored` | `{ category, message }` |
 
-- [ ] **Step 9: Implement `report.ts`**
+- [x] **Step 9: Implement `report.ts`**
 
 ```ts
 export const TestReportSchema = z.object({
@@ -823,7 +890,7 @@ export const TestReportSchema = z.object({
 });
 ```
 
-- [ ] **Step 10: Run tests**
+- [x] **Step 10: Run tests**
 
 ```bash
 pnpm --filter @platform/contracts test
@@ -832,7 +899,7 @@ pnpm --filter @platform/contracts typecheck
 
 Expected: PASS.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add packages/contracts
@@ -870,11 +937,11 @@ RequirementRepository.confirm(runId, revision): Promise<NormalizedRequirement>
 RequirementRepository.getLatest(runId): Promise<NormalizedRequirement>
 ```
 
-- [ ] **Step 1: Write state machine tests (table-driven)**
+- [x] **Step 1: Write state machine tests (table-driven)**
 
 Every row of Section 2.1 is legal. Assert a sample of illegal transitions throw `IllegalRunTransitionError`, including `QUEUED → VERIFYING`, `COMPLETED → CANCELLED`, `AWAITING_CONFIRMATION → EXPLORING`. Assert every non-terminal state can go to `CANCELLED` and `ERRORED`, and no terminal state can go anywhere.
 
-- [ ] **Step 2: Write repository tests**
+- [x] **Step 2: Write repository tests**
 
 - create → `lifecycle = QUEUED`, `verdict = null`
 - two concurrent `transition(runId, "QUEUED", "ANALYZING_REQUIREMENT")` → exactly one succeeds, the other throws `StaleTransitionError`
@@ -884,13 +951,13 @@ Every row of Section 2.1 is legal. Assert a sample of illegal transitions throw 
 - `createRevision` after `confirm` → throws `RequirementFrozenError`
 - `createRevision` when lifecycle is not `ANALYZING_REQUIREMENT` or `AWAITING_CONFIRMATION` → throws
 
-- [ ] **Step 3: Run tests and confirm failure**
+- [x] **Step 3: Run tests and confirm failure**
 
 ```bash
 pnpm --filter @platform/db test
 ```
 
-- [ ] **Step 4: Create Prisma models**
+- [x] **Step 4: Create Prisma models** *(Done with Drizzle instead of Prisma: Prisma's engine download was unreachable; same tables, enums and constraints; SQL migrations in `packages/db/migrations`.)*
 
 - `Tenant` (seeded with `DEFAULT_TENANT_ID`)
 - `TestRun` — `tenantId`, `targetUrl`, `requestJson` (request **without secrets**), `lifecycle`, `verdict?`, `errorCategory?`, `errorMessage?`, `cancelRequestedAt?`, `cancelReason?`, `heartbeatAt?`, `deadlineAt?`, `startedAt?`, `finishedAt?`, `nextEventSequence Int @default(0)`, `idempotencyKey?`, `requestHash?`; `@@unique([tenantId, idempotencyKey])`, `@@index([tenantId, createdAt])`, `@@index([lifecycle, heartbeatAt])`
@@ -906,15 +973,15 @@ pnpm --filter @platform/db test
 
 Status columns are Prisma enums generated from the same values as the contracts; add a test that the two lists match.
 
-- [ ] **Step 5: Implement state machine and CAS transitions**
+- [x] **Step 5: Implement state machine and CAS transitions**
 
 `transition()` runs `UPDATE "TestRun" SET lifecycle = $to, ... WHERE id = $id AND lifecycle = $from`, checks one row was affected, and calls `assertTransition` first. It enforces the `verdict`/`errorCategory` invariants of Section 2.1. No other code path may write `lifecycle`.
 
-- [ ] **Step 6: Implement transactional sequence allocation**
+- [x] **Step 6: Implement transactional sequence allocation**
 
 In one transaction: `UPDATE "TestRun" SET "nextEventSequence" = "nextEventSequence" + 1 WHERE id = $runId RETURNING "nextEventSequence"`, then insert the event with that sequence. The row lock serializes concurrent publishers.
 
-- [ ] **Step 7: Migrate and run tests**
+- [x] **Step 7: Migrate and run tests** *(Drizzle: `pnpm db:migrate`.)*
 
 ```bash
 pnpm --filter @platform/db prisma migrate dev --name initial_platform_schema
@@ -923,7 +990,7 @@ pnpm --filter @platform/db test
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/db
@@ -951,7 +1018,7 @@ decryptSecret(enc: EncryptedSecret, aad: { runId: string; name: string }, key: B
 assertActionAllowed(action: ActionDescriptor, policy: ActionPolicy): ActionDecision
 ```
 
-- [ ] **Step 1: Write IP/URL policy tests**
+- [x] **Step 1: Write IP/URL policy tests**
 
 Reject (with a fake resolver where a hostname is involved):
 
@@ -971,7 +1038,7 @@ Allow `http://demo-shop:4000` only when `privateAllowlist` contains `demo-shop:4
 
 Use `ipaddr.js` for parsing and range matching. IPv4-mapped and NAT64 IPv6 addresses are unwrapped and re-checked as IPv4.
 
-- [ ] **Step 2: Write redaction tests**
+- [x] **Step 2: Write redaction tests**
 
 Key-based (case-insensitive, deep, arrays included): `authorization`, `cookie`, `set-cookie`, `password`, `passwd`, `secret`, `token`, `access_token`, `refresh_token`, `api_key`, `apikey`, `x-api-key`, `session`, `sessionid`.
 
@@ -985,15 +1052,15 @@ Key-based (case-insensitive, deep, arrays included): `authorization`, `cookie`, 
 
 Value-based: with secret `hunter2-long`, the string `"typed hunter2-long into field"` becomes `"typed [REDACTED] into field"`. Also redact the URL-encoded and base64 forms of each secret value.
 
-- [ ] **Step 3: Write secret vault tests**
+- [x] **Step 3: Write secret vault tests**
 
 Round-trip succeeds; tampered ciphertext fails; decrypting with a different `runId` in AAD fails. AES-256-GCM, random 12-byte IV.
 
-- [ ] **Step 4: Write action policy tests**
+- [x] **Step 4: Write action policy tests**
 
 Default policy (`allowDestructive = false`) denies actions whose instruction or target element text/name matches (case-insensitive, word-boundary): `delete`, `remove account`, `close account`, `deactivate`, `pay`, `pay now`, `place order`, `purchase`, `buy now`, `checkout` + submit, `transfer`, `send money`, `unsubscribe`, `cancel subscription`, `cancel plan`. Allowed: `add to cart`, `search`, `open cart`, `log in`. Denial returns `{ allowed: false, reason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED", matched: "<term>" }`. Policy with `allowDestructive = true` allows all of them.
 
-- [ ] **Step 5: Implement and run tests**
+- [x] **Step 5: Implement and run tests**
 
 ```bash
 pnpm --filter @platform/security test
@@ -1001,7 +1068,7 @@ pnpm --filter @platform/security test
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/security
@@ -1029,18 +1096,18 @@ interface ArtifactStorage {
 }
 ```
 
-- [ ] **Step 1: Write tests**
+- [x] **Step 1: Write tests**
 
 - Object key for `tenantId=t_1, runId=r_1, type=SCREENSHOT, fileName=before-add.png` starts with `tenants/t_1/runs/r_1/screenshots/` and ends with a random suffix + `.png` (no collisions on repeated names).
 - `fileName` containing `../` or `/` is sanitized.
 - `sha256` and `bytes` are computed while streaming.
 - S3 implementation tested against compose MinIO: put, signed URL fetch returns the same bytes, URL expires.
 
-- [ ] **Step 2: Implement local (dev only) and S3 storage**
+- [x] **Step 2: Implement local (dev only) and S3 storage**
 
 S3 config: bucket, endpoint, region, credentials, `forcePathStyle` for MinIO. Signed URL TTL max 300 s.
 
-- [ ] **Step 3: Run tests and commit**
+- [x] **Step 3: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/storage test
@@ -1059,7 +1126,7 @@ git commit -m "feat: add artifact storage"
 
 **Why now:** Tasks 13, 14, 17 and 21 all need a stable, controllable target.
 
-- [ ] **Step 1: Routes and behavior**
+- [x] **Step 1: Routes and behavior**
 
 | Route | Behavior |
 |---|---|
@@ -1076,18 +1143,18 @@ git commit -m "feat: add artifact storage"
 
 State is in memory, keyed by a session cookie. Every element uses accessible markup (labels, roles, button names). A few elements have `data-testid`.
 
-- [ ] **Step 2: Bug and timing flags**
+- [x] **Step 2: Bug and timing flags**
 
 Flags are set via query on any page and persisted in a `flags` cookie, so they survive navigation and are re-applied when a fresh session opens the same target URL:
 
 - `?bug=empty_cart` — badge increments, cart page always shows zero items.
 - `?slow=<ms>` — every page response delayed by `<ms>` (cancel tests).
 
-- [ ] **Step 3: Test the fixture itself**
+- [x] **Step 3: Test the fixture itself**
 
 Plain `@playwright/test` script: add to cart → badge = 1 → cart lists "iPhone 17 Pro"; with `?bug=empty_cart` → badge = 1, cart empty; `/account` redirects to `/login` when logged out.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tests/fixtures/demo-shop infra/compose
@@ -1115,7 +1182,7 @@ POST /v1/test-runs/:runId/cancel            → 202 TestRunSummary
 GET  /v1/test-runs/:runId/artifacts/:artifactId/url → 200 { url, expiresAt }
 ```
 
-- [ ] **Step 1: Write API tests**
+- [x] **Step 1: Write API tests**
 
 - No / wrong bearer token → 401 (timing-safe compare).
 - Valid create → 202, `lifecycle = QUEUED`, `runId` present, `analyze-run` job enqueued with `{ runId }` only.
@@ -1129,19 +1196,19 @@ GET  /v1/test-runs/:runId/artifacts/:artifactId/url → 200 { url, expiresAt }
 - List returns newest first with a working cursor; no cross-tenant rows.
 - Artifact URL: other tenant → 404; `SECRET_BEARING` artifact requires `?reveal=true` and is audit-logged; TTL ≤ 300 s.
 
-- [ ] **Step 2: Run tests and confirm failure**
+- [x] **Step 2: Run tests and confirm failure**
 
 ```bash
 pnpm --filter @platform/api test
 ```
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - Validation uses `CreateTestRunRequestSchema` from contracts directly (Fastify Zod type provider). No duplicated schema.
 - Create flow: validate → `validateTargetUrl` → count active runs → in one transaction insert `TestRun` + encrypted `RunSecret` rows + `run.created` event → commit → enqueue.
 - The web app never holds `API_TOKEN` in the browser; see Task 19.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/api test
@@ -1170,14 +1237,14 @@ subscribeRunEvents(redis, runId, onEvent): Promise<Unsubscribe>
 GET /v1/test-runs/:runId/events?afterSequence=N   (or Last-Event-ID header)
 ```
 
-- [ ] **Step 1: Write publisher tests**
+- [x] **Step 1: Write publisher tests**
 
 - Two publishes → sequences 1, 2; both in DB; both published on `run-events:<runId>`.
 - Payload containing a secret value (run redactor) is stored and published redacted.
 - Payload not matching `TestEventSchema` → throws before persisting.
 - If Redis publish fails, the DB event still exists and the call succeeds (logs a warning).
 
-- [ ] **Step 2: Write SSE route tests**
+- [x] **Step 2: Write SSE route tests**
 
 - Persist 3 events, connect with `afterSequence=1` → receives 2, 3.
 - `Last-Event-ID: 2` → receives 3 only. If both are given, the larger cursor wins.
@@ -1187,11 +1254,11 @@ GET /v1/test-runs/:runId/events?afterSequence=N   (or Last-Event-ID header)
 - Stream closes after the terminal event (`run.completed` / `run.cancelled` / `run.errored`) is sent; connecting to an already-terminal run replays and closes.
 - Other tenant → 404.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Publisher: validate → redact → `EventRepository.append` → `redis.publish`. Wire the publisher into Task 7's immediate-cancel (`run.cancelled`) and enqueue-failure (`run.errored`) paths, and add tests for both. SSE route: subscribe → backfill in pages of 500 → flush buffer (drop `sequence ≤ lastSent`) → live.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/event-bus test
@@ -1228,7 +1295,7 @@ interface EngineStages {
 // Typed errors: ModelProviderError, BrowserProviderError, StorageError, ContractError, DeadlineExceededError, CancelledError
 ```
 
-- [ ] **Step 1: Write lifecycle tests with `fake-stages.ts`**
+- [x] **Step 1: Write lifecycle tests with `fake-stages.ts`**
 
 - `analyze-run`, `autoConfirmCriteria=false`: `QUEUED → ANALYZING_REQUIREMENT → AWAITING_CONFIRMATION`; `criteria.proposed` published; no `execute-run` enqueued.
 - `analyze-run`, `autoConfirmCriteria=true`: ends at `PLANNING`; `execute-run` enqueued.
@@ -1236,7 +1303,7 @@ interface EngineStages {
 - `generatePlaywright=false`: `VERIFYING → GENERATING_REPORT`, `stage.skipped` for the two skipped stages.
 - Plan blocks every criterion: `PLANNING → GENERATING_REPORT`, verdict `BLOCKED`.
 
-- [ ] **Step 2: Write cancellation, error, and deadline tests**
+- [x] **Step 2: Write cancellation, error, and deadline tests**
 
 - Cancel signal while the fake explorer is between steps → `CANCELLED`; fake browser `close()` called once; `run.cancelled` published.
 - Fake planner throws `ModelProviderError` → `ERRORED / MODEL_PROVIDER`; `run.errored { category: "MODEL_PROVIDER" }` published; no `CriterionResult` rows with `FAIL`.
@@ -1244,21 +1311,21 @@ interface EngineStages {
 - Exploration budget exhausted → run continues to `VERIFYING` (not an error).
 - `RunSecret` rows are purged (`purgedAt` set) after every terminal outcome.
 
-- [ ] **Step 3: Write reaper tests**
+- [x] **Step 3: Write reaper tests**
 
 - Active run with `heartbeatAt` older than 60 s → `ERRORED / WORKER_LOST`; `run.errored` published.
 - `AWAITING_CONFIRMATION` older than `CONFIRMATION_TTL_HOURS` → `CANCELLED / CONFIRMATION_EXPIRED`; `run.cancelled` published.
 - A `PLANNING` run whose `execute-run` job is still waiting in the queue is not reaped.
 - Healthy runs untouched. Reaper losing a CAS race to the worker is not an error.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 - BullMQ: queues `runs` and `maintenance`; `attempts: 1`; `reap` is a repeatable job every 60 s.
 - `RunContext` holds `AbortController`, `deadlineAt`, stage budgets (Section 2.7), heartbeat interval (10 s), the run redactor (built from decrypted secret values), and a Redis subscription to `run-cancel:<runId>`.
 - The orchestrator checks `signal.aborted` at every stage and step boundary.
 - `try/catch/finally`: map typed errors to `ErrorCategory` (unknown → `INTERNAL`); `finally` releases every resource listed in Section 2.7.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/worker test
@@ -1291,7 +1358,7 @@ compileRequirement(input: {
 }): Promise<NormalizedRequirement> // revision 1
 ```
 
-- [ ] **Step 1: Write LLM client tests (fake transport)**
+- [x] **Step 1: Write LLM client tests (fake transport)**
 
 - Valid structured output → returned; one `LlmCall` row with tokens, model, cost, latency.
 - Malformed output → exactly one correction retry with the Zod issues in the prompt; still invalid → `ContractError`.
@@ -1299,7 +1366,7 @@ compileRequirement(input: {
 - Abort signal → request cancelled, `CancelledError`.
 - Inputs pass through the run redactor before sending (assert a secret value never reaches the transport).
 
-- [ ] **Step 2: Write compiler tests (fake LLM)**
+- [x] **Step 2: Write compiler tests (fake LLM)**
 
 - *"A user can add a product to the cart. The cart count should increase."* → fake returns 2 criteria → `AC-1`, `AC-2`; `originalText` unchanged; outcome kinds structured; facts declared for every `FactRef`.
 - **Deterministic post-validation** (runs on real model output too):
@@ -1309,19 +1376,19 @@ compileRequirement(input: {
 - Only secret **names** appear in the prompt. Assert no secret value is sent.
 - Events: `stage.started`, `criteria.proposed` (`"2 acceptance criteria identified"`), `stage.completed`. No model reasoning is streamed.
 
-- [ ] **Step 3: Implement client, one provider adapter, and compiler**
+- [x] **Step 3: Implement client, one provider adapter, and compiler**
 
 Provider chosen by `LLM_PROVIDER`; add further vendors behind the same interface later. `pricing.ts` maps model → per-token price for `estimatedCostUsd`. If the Task 0 spike (Q8) allows it, Stagehand's model calls also go through this client.
 
-- [ ] **Step 4: Wire into `analyze-run`**
+- [x] **Step 4: Wire into `analyze-run`**
 
 Replace the fake `analyze` stage. Persist revision 1 via `RequirementRepository.createRevision`.
 
-- [ ] **Step 5: Seed the eval harness**
+- [x] **Step 5: Seed the eval harness**
 
 At least 20 cases in `evals/requirement-compiler/cases/`, each with: input text, test data keys, secret names, expected criterion count range, required outcome kinds, `mustFlagAmbiguous: boolean`. Include vague, multi-criterion, login-dependent, destructive, and non-English-phrased cases. `pnpm eval requirement-compiler` calls the real provider, prints per-case pass/fail and totals, and exits 0 regardless. Record the first score in `evals/BASELINE.md`. Re-run before any prompt or model change.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/llm test
@@ -1347,7 +1414,7 @@ PUT  /v1/test-runs/:runId/criteria           → 200 NormalizedRequirement (new 
 POST /v1/test-runs/:runId/criteria/confirm   → 202 { revision, warnings: string[] }
 ```
 
-- [ ] **Step 1: Write tests**
+- [x] **Step 1: Write tests**
 
 - `GET` before analysis finishes → 409 `{ code: "CRITERIA_NOT_READY" }`.
 - `PUT` in `AWAITING_CONFIRMATION` with a valid edited requirement (statement text, match values, removed criterion) → revision n+1; `criteria.updated` event. The body must pass `NormalizedRequirementSchema` incl. cross-reference checks; `originalText` cannot change.
@@ -1356,7 +1423,7 @@ POST /v1/test-runs/:runId/criteria/confirm   → 202 { revision, warnings: strin
 - Confirm with ambiguous or `semantic` criteria remaining → 202 with a warning per criterion ("will be reported as Inconclusive").
 - Second confirm → 409. `PUT` after confirm → 409. Confirm on a cancelled run → 409.
 
-- [ ] **Step 2: Implement, run tests, commit**
+- [x] **Step 2: Implement, run tests, commit**
 
 ```bash
 pnpm --filter @platform/api test
@@ -1377,7 +1444,7 @@ git commit -m "feat: let users review and confirm criteria before exploration"
 - Consumes: confirmed `NormalizedRequirement`, test data keys, secret names, `ActionPolicy`.
 - Produces: `TestPlan` (one scenario).
 
-- [ ] **Step 1: Write planner tests (fake LLM)**
+- [x] **Step 1: Write planner tests (fake LLM)**
 
 - Cart requirement with 4 criteria → one scenario referencing all 4 criterion ids; step kinds include `search`, `click`, `capture_checkpoint` (before add), `click` (add to cart), `capture_checkpoint` (after add), `navigate`/`click` (open cart), `capture_checkpoint` (cart page). Assert kinds and checkpoints, not wording.
 - Every checkpoint referenced by the requirement's facts appears as a `capture_checkpoint` step, in an order where `before` precedes `after`. Missing checkpoint → correction retry → `ContractError`.
@@ -1388,11 +1455,11 @@ git commit -m "feat: let users review and confirm criteria before exploration"
   - Step fails `assertActionAllowed` (e.g. *"Verify that account deletion works"* under default policy) → scenario truncated before that step; criteria whose checkpoints come at or after it → `DESTRUCTIVE_ACTION_NOT_AUTHORIZED`.
 - Step descriptions never contain secret values (assert with a secret present).
 
-- [ ] **Step 2: Implement planner and wire into `execute-run`; publish `plan.created`**
+- [x] **Step 2: Implement planner and wire into `execute-run`; publish `plan.created`**
 
-- [ ] **Step 3: Add ≥ 10 planner eval cases** (reuse compiler cases where possible) and record a baseline.
+- [x] **Step 3: Add ≥ 10 planner eval cases** (reuse compiler cases where possible) and record a baseline.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/testing-engine test
@@ -1417,14 +1484,14 @@ launchSandboxedBrowser(opts: { proxyUrl: string; runId: string }): Promise<Sandb
 installNavigationGuard(page, { allowedHosts: string[]; onBlock }): void
 ```
 
-- [ ] **Step 1: Write egress proxy unit tests**
+- [x] **Step 1: Write egress proxy unit tests**
 
 - HTTP forward and HTTPS `CONNECT` to a public address → allowed.
 - Hostname resolving to any non-public address (Task 4 `classifyAddress`) → 403, `onBlock` called with host and reason.
 - **DNS rebinding:** fake resolver returns a public IP on the first call and a private IP on the second → the proxy dials the IP it vetted (resolves once per connection and connects to that IP), never re-resolves.
 - `privateAllowlist` entries (`demo-shop:4000`) allowed; same host on another port blocked.
 
-- [ ] **Step 2: Write browser sandbox integration tests (real Chromium, demo shop)**
+- [x] **Step 2: Write browser sandbox integration tests (real Chromium, demo shop)**
 
 - Browser launched with `--proxy-server=<egress>`, `--proxy-bypass-list=<-loopback>` (so loopback also goes through the proxy), `--disable-quic`, `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`, a fresh temporary profile.
 - Page on demo shop that loads `<img src="http://169.254.169.254/latest">` → request never succeeds; `egress.blocked` event published.
@@ -1433,11 +1500,11 @@ installNavigationGuard(page, { allowedHosts: string[]; onBlock }): void
 - Downloads disabled; file chooser and `window.open` popups follow the same guards; JS dialogs auto-dismissed.
 - Browser context and profile directory deleted after `close()`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Allowed hosts for navigation = target host + its subdomains + `options.additionalAllowedHosts`. In production, the worker's network policy only permits egress through the proxy (documented in Task 22).
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/worker test
@@ -1477,7 +1544,7 @@ rankLocatorCandidates(candidates: LocatorCandidate[]): LocatorCandidate[]
 
 Only `packages/stagehand-adapter` imports Stagehand. The implementation follows the Task 0 go/no-go result.
 
-- [ ] **Step 1: Write executor tests (fake explorer)**
+- [x] **Step 1: Write executor tests (fake explorer)**
 
 - Fake sequence `navigate → observe → act → extract { cartCount: 1 }` → `ExplorationStep` rows persisted in order with `onGoldenPath` set correctly (retries and observes are not on the golden path).
 - `maxExplorationSteps = 3`, objective never met → stops after 3 steps; `ExplorationOutcome.stopReason = "STEP_LIMIT_REACHED"`.
@@ -1486,7 +1553,7 @@ Only `packages/stagehand-adapter` imports Stagehand. The implementation follows 
 - Action blocked by `assertActionAllowed` (checked against the observed element's role/name/text before acting) → step `BLOCKED_BY_POLICY` with `blockReason` set, action not executed; exploration stops (steps after it depend on it).
 - Abort signal between steps → executor stops, session closed.
 
-- [ ] **Step 2: Write recorder tests (real Chromium)**
+- [x] **Step 2: Write recorder tests (real Chromium)**
 
 Static fixture with: a button with role+name, an input with label, an input with placeholder only, a duplicated "Buy" button, an element with only `data-testid`.
 
@@ -1496,7 +1563,7 @@ Static fixture with: a button with role+name, an input with label, an input with
 - DOM value equals model value (normalized) → `DOM_VERIFIED`; differs → `MODEL_EXTRACTED` with both values kept; no locatable element → `MODEL_EXTRACTED`.
 - The reserved `url` fact is captured at every checkpoint as `DOM_VERIFIED`.
 
-- [ ] **Step 3: Implement adapter, guardrails, recorder**
+- [x] **Step 3: Implement adapter, guardrails, recorder**
 
 Guardrail system text (defense in depth only; enforcement is Tasks 4 and 13):
 
@@ -1513,11 +1580,11 @@ Screenshots at each checkpoint → `ArtifactStorage` (`STANDARD`, or `SECRET_BEA
 
 Publish `step.recorded` after every step and `fact.observed` after every fact (no values in the payload). Replace the fake `explore` stage in `execute-run`.
 
-- [ ] **Step 4: Live smoke test (`@live`)**
+- [x] **Step 4: Live smoke test (`@live`)**
 
 Against the demo shop only: navigate → find "Add to cart" → click → read badge count → assert 1.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/testing-engine test
@@ -1547,7 +1614,7 @@ verifyCriterion(input: {
 aggregateVerdict(results: { status: CriterionStatus }[]): RunVerdict // Section 2.4
 ```
 
-- [ ] **Step 1: Write rule tests**
+- [x] **Step 1: Write rule tests**
 
 ```ts
 // numeric_compare: "count after > count before"
@@ -1571,15 +1638,15 @@ expect(verify({ kind: "numeric_delta", before, after, delta: 1 }, { before: 1, a
 - Criterion with non-null `ambiguity` and a `semantic` outcome → `INCONCLUSIVE / AMBIGUOUS_CRITERION`.
 - `expected` / `actual` strings are template-built (e.g. `"Cart count after (1) > before (0)"`).
 
-- [ ] **Step 2: Write aggregation tests**
+- [x] **Step 2: Write aggregation tests**
 
 Table-driven over Section 2.4, including: `[FAIL, BLOCKED] → FAILED`, `[BLOCKED, INCONCLUSIVE] → BLOCKED`, `[PASS, INCONCLUSIVE] → INCONCLUSIVE`, `[PASS, PASS] → PASSED`.
 
-- [ ] **Step 3: Implement, wire into `execute-run` (VERIFYING), publish `criterion.evaluated` with `provisional: true`**
+- [x] **Step 3: Implement, wire into `execute-run` (VERIFYING), publish `criterion.evaluated` with `provisional: true`**
 
 On the `PLANNING → GENERATING_REPORT` path (every criterion blocked), the orchestrator also calls `verifyCriterion` with `plan.blockedCriteria` and no facts, so reconciliation always has provisional input.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/testing-engine test
@@ -1610,33 +1677,33 @@ compilePlaywrightTest(input: {
 
 Generated workspace layout: `run.spec.ts`, `helpers.ts` (fixed template), `run-data.json`.
 
-- [ ] **Step 1: Write snapshot test**
+- [x] **Step 1: Write snapshot test**
 
 Golden-path steps `Navigate / → Click link Products → Fill Search with iPhone → Click iPhone 17 Pro → Click Add to cart` produce a source that imports only `@playwright/test`, `./helpers`, and `./run-data.json`; opens `data.targetUrl`; uses semantic locators; reads `"iPhone"` from `data`, not a literal.
 
-- [ ] **Step 2: Write locator-priority test**
+- [x] **Step 2: Write locator-priority test**
 
 Element with `role=button, name="Add to cart"` → `page.getByRole("button", { name: "Add to cart" })`, not CSS/XPath. Element with only XPath → XPath locator plus a `// brittle-locator` comment and `notes` entry in the report.
 
-- [ ] **Step 3: Write assertion-policy tests**
+- [x] **Step 3: Write assertion-policy tests**
 
 - Each criterion's assertions sit inside `await test.step("[AC-1] <statement>", …)` so the runner can tell which were reached.
 - Assertions use `expect.soft(…, "[AC-1] …")` so every criterion is evaluated; navigation and actions stay hard.
 - `visible` → `await expect.soft(locator, msg).toBeVisible()` (web-first). `text_matches` → `toHaveText` / `toContainText`. Numeric facts → read via helper, then `expect.soft(after, msg).toBeGreaterThan(before)` / delta check. Collection → `allTextContents()` then contains check.
 - Criteria not compiled, with reason in `notCompiled`: provisional `BLOCKED`/`INCONCLUSIVE`; any fact `MODEL_EXTRACTED`; `semantic` outcome.
 
-- [ ] **Step 4: Write safety tests**
+- [x] **Step 4: Write safety tests**
 
 - **Injection:** product name `"); process.exit(1); ("` and a test data value with backticks and `${}` appear only in `run-data.json`; the source parses and passes the AST guard.
 - Secrets: source uses `process.env.SECRET_PASSWORD`; no secret value in source, helpers, or data file.
 - AST guard rejects a hand-crafted source containing `require(`, `import("…")`, `eval`, `new Function`, `child_process`, `fs`, any import outside the allow-list, or any `process.*` access other than `process.env.SECRET_<NAME>`.
 - Generated workspace passes `tsc --noEmit` in a fixture workspace with `@playwright/test` installed.
 
-- [ ] **Step 5: Implement**
+- [x] **Step 5: Implement**
 
 Emit code via the TypeScript factory API (or an emitter where every string literal goes through `JSON.stringify`). Never concatenate raw values into source. Persist `GeneratedTest`, publish `test.generated`, and replace the fake `generateTest` stage in `execute-run`.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/testing-engine test
@@ -1662,11 +1729,11 @@ runGeneratedTest(input: { runId: string; test: GeneratedTest; secrets: Record<st
   Promise<{ status: "PASSED" | "FAILED" | "ERRORED"; perCriterion: Record<CriterionId, RerunOutcome>; artifacts: LocalArtifact[]; durationMs: number }>
 ```
 
-- [ ] **Step 1: Write workspace tests**
+- [x] **Step 1: Write workspace tests**
 
 Workspace `/work/runs/<runId>/` is deleted and recreated; `node_modules` is linked from the runner image; workspace removed after upload.
 
-- [ ] **Step 2: Write runner fixture tests (demo shop)**
+- [x] **Step 2: Write runner fixture tests (demo shop)**
 
 - Passing test → `status = PASSED`; every compiled criterion `PASSED`.
 - One soft assertion fails (`?bug=empty_cart`) → `status = FAILED`; that criterion `ASSERTION_FAILED`; other criteria still `PASSED`.
@@ -1676,11 +1743,11 @@ Workspace `/work/runs/<runId>/` is deleted and recreated; `node_modules` is link
 - The child process environment contains only `SECRET_*` for this run, `PATH`, and Playwright vars — assert `DATABASE_URL`, `API_TOKEN`, `SECRETS_ENCRYPTION_KEY` are absent.
 - Browser traffic goes through the egress proxy (a blocked address in the test fails with a block, not a connection).
 
-- [ ] **Step 3: Write trace scrubber tests**
+- [x] **Step 3: Write trace scrubber tests**
 
 Build a trace zip containing a secret value in action params and a network header. After scrubbing, no text entry contains the secret (plain, URL-encoded, base64). Unparseable zip → trace dropped, `artifact.omitted` published.
 
-- [ ] **Step 4: Implement config and runner**
+- [x] **Step 4: Implement config and runner** *(The worker image carries the runner; `infra/runner/Dockerfile` exists but has never been built: see Revision 3, outstanding.)*
 
 ```ts
 {
@@ -1697,11 +1764,11 @@ Build a trace zip containing a secret value in action params and a network heade
 }
 ```
 
-- [ ] **Step 5: Upload evidence**
+- [x] **Step 5: Upload evidence**
 
 For each file: scrub if trace → SHA-256 → `ArtifactStorage.put` (`SECRET_BEARING` when the run has secrets; `expiresAt` from retention config) → `Artifact` row → `artifact.created`. Publish `playwright.completed` when the run finishes. Replace the fake `runTest` stage in `execute-run`.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/testing-engine test
@@ -1733,11 +1800,11 @@ buildReport(runId: string): Promise<TestReport>
 GET /v1/test-runs/:runId/report
 ```
 
-- [ ] **Step 1: Write reconciliation tests**
+- [x] **Step 1: Write reconciliation tests**
 
 Table-driven: one test case per row of Section 2.3, plus: `EXPLORATION_ONLY` PASS requires every referenced fact `DOM_VERIFIED`; one `MODEL_EXTRACTED` fact → `INCONCLUSIVE / UNVERIFIED_EVIDENCE`.
 
-- [ ] **Step 2: Write report tests**
+- [x] **Step 2: Write report tests**
 
 - 4 results (3 PASS, 1 FAIL) → summary `{ totalCriteria: 4, passed: 3, failed: 1, blocked: 0, inconclusive: 0 }`; verdict `FAILED`.
 - `confirmedByRerun` counts `PLAYWRIGHT_RERUN` results only.
@@ -1746,13 +1813,13 @@ Table-driven: one test case per row of Section 2.3, plus: `EXPLORATION_ONLY` PAS
 - `usage` totals match `LlmCall` rows.
 - For `semantic` criteria the diagnostics call returns `{ criterionId, note }`, stored as `aiNote`; the status stays `INCONCLUSIVE / AI_JUDGED_ONLY` (asserted).
 
-- [ ] **Step 3: Write endpoint tests**
+- [x] **Step 3: Write endpoint tests**
 
 `COMPLETED` → full report. `ERRORED` / `CANCELLED` → `partial: true` with whatever exists. Non-terminal → 409. Other tenant → 404.
 
-- [ ] **Step 4: Implement, wire into `GENERATING_REPORT`, publish final `criterion.evaluated` (`provisional: false`) and `run.completed`**
+- [x] **Step 4: Implement, wire into `GENERATING_REPORT`, publish final `criterion.evaluated` (`provisional: false`) and `run.completed`**
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/testing-engine test
@@ -1785,30 +1852,30 @@ git commit -m "feat: reconcile discovery with rerun and build evidence-backed re
 5. Blocked-before-start states — target not allowed, too many active runs.
 6. Cancelled and errored states.
 
-- [ ] **Step 1: Write form tests**
+- [x] **Step 1: Write form tests**
 
 `http/https` URL required; requirement ≥ 10 chars; secret fields render as password inputs and are cleared after submit; server 422 `TARGET_NOT_ALLOWED` shown inline on the URL field; 429 shown as a banner.
 
-- [ ] **Step 2: Write criteria review tests**
+- [x] **Step 2: Write criteria review tests**
 
 Renders every criterion; ambiguous ones show reason + suggestions; editing sends `PUT` with the full requirement; confirm shows the server warnings, then switches to progress view; confirm button disabled while pending.
 
-- [ ] **Step 3: Write progress reducer tests**
+- [x] **Step 3: Write progress reducer tests**
 
 Events `stage.completed ANALYZING_REQUIREMENT`, `criteria.confirmed`, `stage.completed PLANNING`, `stage.started EXPLORING` → current stage `EXPLORING`; prior stages done; progress from stage weights; `stage.skipped` stages shown as skipped and their weight redistributed. Duplicate or out-of-order sequences are ignored.
 
-- [ ] **Step 4: Write SSE client tests**
+- [x] **Step 4: Write SSE client tests**
 
 Tracks `latestSequence`; on disconnect reconnects with `Last-Event-ID`; stops after a terminal event.
 
-- [ ] **Step 5: Implement**
+- [x] **Step 5: Implement** *(The "Screens to design (Figma)" step was skipped: the screens were built directly and checked in the browser at 1280 px and 375 px; README "Milestone D demo".)*
 
 - `/runs/[runId]` renders by lifecycle: analyzing → criteria review → progress → (report in Task 20).
 - Timeline items: timestamp, icon/state, event `message`, optional criterion/step reference. No model reasoning anywhere.
 - On `artifact.created` (screenshot), fetch a signed URL through the proxy and update the evidence panel. `STANDARD` screenshots load automatically; `SECRET_BEARING` ones show a "Reveal" action instead.
 - `API_TOKEN` exists only on the Next.js server.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/web test
@@ -1827,30 +1894,30 @@ git commit -m "feat: create runs, review criteria, and watch live progress"
 
 **Screens to design (Figma):** report summary, criteria table with expandable detail, artifact viewer, generated test viewer, run history list, partial report (errored/cancelled).
 
-- [ ] **Step 1: Write criteria table tests**
+- [x] **Step 1: Write criteria table tests**
 
 - `PASS`, `FAIL`, `BLOCKED`, `INCONCLUSIVE` render with distinct color, icon, and label. BLOCKED/INCONCLUSIVE are never shown as failures.
 - Each status shows its reason in plain language (e.g. `MISSING_SECRET` → "No password was provided for login").
 - PASS/FAIL show confirmation source: "Confirmed by rerun" (`PLAYWRIGHT_RERUN`) or "Not confirmed by rerun" (`EXPLORATION_ONLY`).
 - `aiNote` shown as "AI note", visually separate from status.
 
-- [ ] **Step 2: Implement summary cards**
+- [x] **Step 2: Implement summary cards**
 
 Overall verdict (or lifecycle + error for partial reports), criteria counts, confirmed-by-rerun count, duration, estimated model cost.
 
-- [ ] **Step 3: Implement expandable criterion details**
+- [x] **Step 3: Implement expandable criterion details**
 
 Requirement text → Expected → Actual → Related steps → Evidence → Diagnostics.
 
-- [ ] **Step 4: Implement artifact list and generated test viewer**
+- [x] **Step 4: Implement artifact list and generated test viewer**
 
 `SECRET_BEARING` artifacts are hidden behind a "Reveal (may contain entered credentials)" action. Test viewer is read-only, syntax-highlighted; shows `notCompiled` criteria with reasons.
 
-- [ ] **Step 5: Implement run history**
+- [x] **Step 5: Implement run history**
 
 `GET /v1/test-runs?limit=50&cursor=…` (Task 7). Columns: created time, target host, requirement preview, lifecycle/verdict, duration. "Load more" via cursor.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 ```bash
 pnpm --filter @platform/web test
@@ -2104,25 +2171,25 @@ Implement only after the V1 gates pass.
 
 Before implementation begins:
 
-- [ ] `docs/ai-testing-platform-architecture.md` updated to match Section 2 (lifecycle, verdict, reconciliation, security).
-- [ ] Task 0 spike completed and the go/fallback decision recorded.
+- [ ] `docs/ai-testing-platform-architecture.md` updated to match Section 2 (lifecycle, verdict, reconciliation, security). **Not done:** the architecture doc was never in the repo; this plan, with Revision 3, is the spec.
+- [x] Task 0 spike completed and the go/fallback decision recorded.
 
 During and after implementation:
 
-- [ ] Lifecycle and verdict are separate everywhere (DB, API, events, UI).
-- [ ] Every row of Sections 2.1, 2.3, and 2.4 has a test.
-- [ ] Every UI event comes from a typed, persisted, redacted event.
-- [ ] Criteria are frozen at confirmation; edits after that are rejected.
-- [ ] Stagehand never decides a status; the verifier and reconciliation are pure functions.
-- [ ] Generated Playwright code contains no runtime values and passes the AST guard.
-- [ ] Trace/evidence exists for every failed criterion; traces are scrubbed.
-- [ ] Every run has a step limit, stage budgets, and a hard deadline.
-- [ ] SSRF is enforced per connection (egress proxy), including redirects and DNS rebinding.
-- [ ] Destructive actions are blocked by default and always in production.
-- [ ] Secrets are redacted by key and value before persistence, logging, publishing, and model calls; purged at run end.
-- [ ] Cancellation and crashes release browsers and runner processes.
-- [ ] CI-mode E2E deterministically produces PASS, FAIL, BLOCKED, and CANCELLED.
-- [ ] V1 has not expanded into visual, accessibility, or security scanning.
+- [x] Lifecycle and verdict are separate everywhere (DB, API, events, UI).
+- [x] Every row of Sections 2.1, 2.3, and 2.4 has a test.
+- [x] Every UI event comes from a typed, persisted, redacted event.
+- [x] Criteria are frozen at confirmation; edits after that are rejected.
+- [x] Stagehand never decides a status; the verifier and reconciliation are pure functions.
+- [x] Generated Playwright code contains no runtime values and passes the AST guard.
+- [x] Trace/evidence exists for every failed criterion; traces are scrubbed.
+- [x] Every run has a step limit, stage budgets, and a hard deadline.
+- [x] SSRF is enforced per connection (egress proxy), including redirects and DNS rebinding.
+- [x] Destructive actions are blocked by default and always in production. *(D9 amended 2026-09-28: production allows them only with the target host typed as confirmation; term list broadened 2026-09-29, KI-021.)*
+- [x] Secrets are redacted by key and value before persistence, logging, publishing, and model calls; purged at run end. *(Also in text edited after creation, by fingerprint, since 2026-09-29: KI-022.)*
+- [x] Cancellation and crashes release browsers and runner processes.
+- [x] CI-mode E2E deterministically produces PASS, FAIL, BLOCKED, and CANCELLED.
+- [x] V1 has not expanded into visual, accessibility, or security scanning.
 
 ---
 
