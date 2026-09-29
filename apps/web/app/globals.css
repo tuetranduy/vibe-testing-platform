@@ -3713,3 +3713,57 @@ a.running-card:hover {
   font-size: 0.75rem;
   font-weight: 560;
 }
+
+/* V1.1: saved test data and credentials */
+.saved-list {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.saved-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.saved-head .muted {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+.kv-list {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 0.875rem;
+}
+.kv-list > div {
+  display: contents;
+}
+.kv-list dt {
+  color: var(--text-muted);
+}
+.kv-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.field-legend {
+  margin-bottom: 4px;
+  padding: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+fieldset.stack-tight {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.saved-picker {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+}

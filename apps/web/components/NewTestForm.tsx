@@ -9,10 +9,11 @@ import {
   type LlmOverride,
   type LlmSettingsView,
   type ReasoningLevel,
+  type TestDataSet,
 } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ApiRequestError, createRun, getCriteria, getLlmSettings, getRun, getSuggestions } from "../lib/api";
+import { ApiRequestError, createRun, getCriteria, getLlmSettings, getRun, getSuggestions, listTestDataSets } from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
 import { Icon, type IconName } from "./Icon";
 import { LEVEL_LABEL } from "./llm-format";
@@ -79,6 +80,7 @@ const fid = {
   secretValue: (id: number) => `secret-${id}-value`,
   option: (name: string) => `options-${name}`,
   llm: (name: "model" | "reasoning") => `llm-${name}`,
+  testDataSet: "testDataSetId",
 };
 
 /** The URL's host as the API compares it (lowercase, with a non-default port), or null while the URL is invalid. */
@@ -203,7 +205,7 @@ function issuesToErrors(err: ApiRequestError): Errors {
   const errors: Errors = {};
   for (const issue of err.issues ?? []) {
     const [head, name] = issue.path;
-    if (head === "targetUrl" || head === "requirement") errors[head] = issue.message;
+    if (head === "targetUrl" || head === "requirement" || head === "testDataSetId") errors[head] = issue.message;
     else if (head === "options" && typeof name === "string") errors[fid.option(name)] = issue.message;
   }
   return errors;
@@ -265,6 +267,19 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const [llmModel, setLlmModel] = useState("");
   const [llmReasoning, setLlmReasoning] = useState<ReasoningLevel | "">("");
   const [catalog, setCatalog] = useState<Catalog>({ status: "loading" });
+  /** Saved test data sets (V1.1): offered only once loaded; a failed load just hides the choice. */
+  const [dataSets, setDataSets] = useState<TestDataSet[]>([]);
+  const [dataSetId, setDataSetId] = useState("");
+  useEffect(() => {
+    let live = true;
+    listTestDataSets().then(
+      (sets) => live && setDataSets(sets),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
   useEffect(() => {
     let live = true;
     getLlmSettings().then(
@@ -334,6 +349,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
     const { errors: errs, body } = build(targetUrl, requirement, environment, data, secrets, options);
     const llm = llmOverride(llmModel, llmReasoning);
     if (llm) body.llm = llm;
+    if (dataSetId) body.testDataSetId = dataSetId;
     setErrors(errs);
     setBanner(null);
     if (Object.keys(errs).length > 0) {
@@ -385,7 +401,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
         }
       } else if (err.code === "TOO_MANY_ACTIVE_RUNS") {
         setBanner({ title: "Can't start another run yet", message: `${err.message}. You can cancel a run or try again later.` });
-      } else if (err.code === "VALIDATION_FAILED" && Object.keys(issuesToErrors(err)).length > 0) {
+      } else if ((err.code === "VALIDATION_FAILED" || err.code === "TEST_DATA_SET_NOT_FOUND") && Object.keys(issuesToErrors(err)).length > 0) {
         const next = issuesToErrors(err);
         setErrors(next);
         focusFirstError(next);
@@ -405,6 +421,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
     ) : null;
 
   const dataCount = data.filter((r) => r.key.trim() || r.value).length;
+  const dataSet = dataSets.find((s) => s.id === dataSetId);
   const secretCount = secrets.filter((r) => r.name.trim()).length;
 
   /** Fills the requirement from an example; focus moves to it, since the example buttons go away. */
@@ -533,8 +550,33 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
           icon="data"
           title="Test data"
           description="Values the test may type, such as a search term. Empty rows are ignored."
-          summary={dataCount === 0 ? "None" : plural(dataCount, "value")}
+          summary={[dataSet?.name, dataCount === 0 ? (dataSet ? null : "None") : plural(dataCount, "value")].filter(Boolean).join(" + ")}
         >
+          {dataSets.length > 0 && (
+            <div className="field saved-picker">
+              <label htmlFor={fid.testDataSet}>Saved test data set</label>
+              <select
+                id={fid.testDataSet}
+                value={dataSetId}
+                onChange={(e) => setDataSetId(e.target.value)}
+                aria-invalid={errors[fid.testDataSet] ? true : undefined}
+                aria-describedby={`${fid.testDataSet}-hint${errors[fid.testDataSet] ? ` ${fid.testDataSet}-error` : ""}`}
+              >
+                <option value="">None</option>
+                {dataSets.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <p id={`${fid.testDataSet}-hint`} className="hint">
+                {dataSet
+                  ? `Adds ${Object.keys(dataSet.values).join(", ") || "no values"}. A value you enter below with the same key wins.`
+                  : "Start from values saved under Settings → Test data."}
+              </p>
+              {fieldError(fid.testDataSet)}
+            </div>
+          )}
           {data.map((row, i) => (
             <div key={row.id} className="row">
               <div className="row-cell">
