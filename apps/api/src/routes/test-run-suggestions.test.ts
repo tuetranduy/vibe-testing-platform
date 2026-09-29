@@ -129,6 +129,18 @@ describe("POST /v1/test-runs/:runId/suggestions/select", () => {
     expect(events.at(-1)).toMatchObject({ message: "Suggestion S-2 selected (edited)", payload: { suggestionId: "S-2", edited: true } });
   });
 
+  it("a secret value typed into the edit is masked before it is stored (by fingerprint; D7: no decryption in the API)", async () => {
+    const runId = await blankRun("AWAITING_SELECTION", { secrets: { password: "hunter2-long-pw" } });
+    const res = await select(runId, {
+      suggestionId: "S-3",
+      requirement: "A user signs in with qa@demo.test and hunter2-long-pw and lands on their account page.",
+    });
+    expect(res.statusCode).toBe(202);
+    const run = await new RunRepository(t.tdb.db).getById(runId);
+    expect(run.request.requirement).toBe("A user signs in with qa@demo.test and [REDACTED] and lands on their account page.");
+    expect(res.body).not.toContain("hunter2-long-pw");
+  });
+
   it("the suggestion's own text sent back is not an edit", async () => {
     const runId = await blankRun();
     await select(runId, { suggestionId: "S-1", requirement: ` ${DRAFT.suggestions[0]!.requirement} ` });
@@ -184,6 +196,7 @@ describe("POST /v1/test-runs/:runId/suggestions/select", () => {
     const run = await new RunRepository(t.tdb.db).getById(runId);
     expect(run).toMatchObject({ lifecycle: "ERRORED", errorCategory: "INTERNAL", errorMessage: "Queue unavailable after selection" });
     expect(await new SecretRepository(t.tdb.db).listActive(runId)).toHaveLength(0);
+    expect(await new SecretRepository(t.tdb.db).listFingerprints(runId)).toHaveLength(0);
     expect((await new EventRepository(t.tdb.db).listAfter(runId, 0, 50)).at(-1)).toMatchObject({ type: "run.errored", payload: { category: "INTERNAL" } });
   });
 

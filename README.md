@@ -5,6 +5,10 @@ Plan: [`docs/ai-testing-platform-implementation-plan.md`](docs/ai-testing-platfo
 
 ## Status
 
+**Current status, the amendments since the plan, and the outstanding work (in priority order) are in the plan's
+[Revision 3](docs/ai-testing-platform-implementation-plan.md#revision-3--status-amendments-and-outstanding-work-2026-09-29).**
+The V1 release gate (live E2E suite green 3 times, KI-001) has not passed yet: it needs a billing-enabled model key.
+
 **Milestone A (Tasks 0–9) is done**: contracts, database and run state machine, security primitives, artifact storage, demo shop, API (create / get / list / cancel / artifact URLs), live events over SSE, and the worker lifecycle with cancellation, deadlines, and crash recovery.
 
 **Milestone B (Tasks 10–15) is implemented**: with `LLM_PROVIDER=anthropic` (+ `ANTHROPIC_API_KEY`, optional `LLM_MODEL`, default `claude-sonnet-5`) the worker runs the real discovery engine — the requirement is compiled into acceptance criteria (Task 10, confirmable/editable through the API per D5), the test plan is built with deterministic blocking for missing secrets, missing test data, and destructive actions (Task 12), and the plan is explored with Stagehand v4 inside the browser sandbox: the worker launches its own Chromium behind the egress guard proxy (Task 13, `apps/worker/src/sandbox/`) with the Stagehand runtime extension preloaded (`@platform/stagehand-adapter`, Task 14), then the verifier turns the recorded steps and facts into provisional PASS/FAIL/BLOCKED/INCONCLUSIVE results (Task 15). `LLM_PROVIDER=fake` (the default for local dev and compose) still runs the fully deterministic **fake** engine (`packages/testing-engine/src/orchestrator/fake-stages.ts`), so the Milestone A demo and compose keep working without an API key (Ruling R7).
@@ -280,8 +284,8 @@ these tools.
 ## Layout
 
 ```text
-apps/api                     Fastify API: auth, runs, cancel, criteria (get/update/confirm), SSE events, artifact URLs, report
-apps/worker                  BullMQ jobs (analyze-run, execute-run, reap) + the browser sandbox
+apps/api                     Fastify API: auth, runs, cancel, criteria (get/update/confirm), SSE events, artifact URLs, report; also runs the reaper
+apps/worker                  BullMQ jobs (analyze-run, execute-run, retention; the reaper too) + the browser sandbox
 apps/worker/src/sandbox      egress guard proxy, Chromium launcher, navigation guard (Task 13), Playwright runner child process (Task 17)
 apps/web                     Next.js UI: new test, criteria review, live progress (Task 19); report, run history (Task 20); Settings (AI provider keys, default model); server-side API proxy in app/api/[...path]
 packages/contracts           Zod schemas: the single source of truth
@@ -289,7 +293,7 @@ packages/config              env schema (validated at start-up)
 packages/db                  Drizzle schema, SQL migrations, repositories, state machine
 packages/security            URL/IP policy, redaction, secret vault, destructive-action policy
 packages/storage             artifact storage (local, S3)
-packages/event-bus           event publisher, Redis fan-out, queue names
+packages/event-bus           event publisher, Redis fan-out, queue names, the reaper (run by the workers and the API)
 packages/llm                 provider-neutral LLM client (redaction, retries, LlmCall records, reasoning level), Anthropic and Gemini adapters, the model catalog
 packages/stagehand-adapter    Stagehand v4 explorer, ClientLLM bridge, the runtime extension (Task 14)
 packages/testing-engine       orchestrator + engine stages: requirement compiler, planner, exploration, verifier (Tasks 10-15), test compiler, Playwright rerun + evidence, reconciliation + report (Tasks 16-18), survey (suggested tests for a blank requirement)
@@ -360,3 +364,18 @@ worker must share the `LLM_*` variables (see [`docs/operations.md`](docs/operati
   - **`queue_depth` is exported by the API**, not the worker: the backlog matters most when workers are down.
 - **Destructive actions on production (amends D9; spec `docs/superpowers/specs/2026-09-28-production-destructive-actions-design.md`).** Destructive actions stay blocked by default. A production run may perform them only when its request sets `allowDestructiveActions` and `options.confirmProductionHost` equal to the target URL's host (the API answers `400` on `options.confirmProductionHost` otherwise); the new-test form asks for the host to be typed. A run that allows destructive actions skips the Playwright rerun unless it asks for it (`rerunGeneratedTest` defaults to `!allowDestructiveActions`), because the rerun repeats every action. With destructive actions allowed, the executor acts on a destructive element only for a planned step that is itself destructive (flagged by the planner or worded as one), and Stagehand's guardrail says the same. Run pages and the history mark such runs. The API does not derive the environment from the URL: `environment` is what the client declares, so API clients must label production targets "production" for the confirmation to apply.
 - **The model client is built per run** (spec `docs/superpowers/specs/2026-09-28-llm-settings-design.md`). The plan's worker built one `LlmClient` at start-up from `LLM_*`. Now the worker builds both engines at start-up and, for each run, a client from the provider, model and reasoning level the run recorded when it was created (`request.llm`; runs created before this change use `LLM_*`), with the key saved in Settings, else the environment's. The storage check and the browser and runner preflights therefore always run at start-up (the log says "test engines ready"). The reasoning level applies to requirement analysis, planning and report diagnostics; Stagehand's browser steps keep the model's default level. Claude Fable 5.1 and Opus 5.5 go through Anthropic's beta Messages API with server-side refusal fallback (`server-side-fallback-2026-07-01`): a call a fallback model answered is recorded and priced under that model.
+- **Audit fixes (2026-09-29; [`docs/known-issues.md`](docs/known-issues.md) KI-021 to KI-026):**
+  - **The destructive-action terms go beyond the plan's Task 4 list**: erasing and revoking wording ("Erase all data",
+    "Terminate account", "Revoke access"), commit verb + order/payment noun ("Confirm payment", "Submit your order",
+    but not "the order confirmation page"), bookings and donations, and the same actions in German, French, Spanish,
+    Italian, Portuguese and Dutch, matched without diacritics. It still errs on the side of blocking: "Löschen" or
+    "Eliminar" on a cart item blocks the criterion, as "Delete" does.
+  - **Secret values are fingerprinted at creation** (`run_secrets.fingerprint`, HMAC with `SECRETS_ENCRYPTION_KEY`),
+    so the API finds them in text sent later without decrypting anything (D7): a suggestion's edited wording has them
+    masked before it is stored, and a criteria edit whose check contains one is refused (`400 VALIDATION_FAILED`).
+    Runs created before the change have no fingerprints and keep the old behaviour.
+  - **The reaper runs in the API as well as the workers** (plan 2.5 puts it in the workers), every 30 s instead of
+    60 s, so a lost run is ended within about 90 s even when no worker is up (Section 6: within 2 minutes).
+  - **Production refuses placeholder secrets**: the all-zero example `SECRETS_ENCRYPTION_KEY` and the development
+    `API_TOKEN` fail start-up when `NODE_ENV=production`.
+  - **CI**: `.github/workflows/ci.yml` (see [`docs/operations.md`](docs/operations.md#release-checks)).
