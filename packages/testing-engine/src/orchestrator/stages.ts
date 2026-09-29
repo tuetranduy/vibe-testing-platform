@@ -1,14 +1,16 @@
-import type {
-  ExplorationOutcome,
-  GeneratedTest,
-  NormalizedRequirement,
-  ProvisionalResult,
-  RerunResult,
-  StoredTestRunRequest,
-  TestEventInput,
-  TestPlan,
-  TestReport,
+import {
+  ContractError,
+  type ExplorationOutcome,
+  type GeneratedTest,
+  type NormalizedRequirement,
+  type ProvisionalResult,
+  type RerunResult,
+  type StoredTestRunRequest,
+  type TestEventInput,
+  type TestPlan,
+  type TestReport,
 } from "@platform/contracts";
+import type { LlmClient } from "@platform/llm";
 
 export type EventDraft = TestEventInput extends infer E ? (E extends unknown ? Omit<E, "runId" | "stage"> : never) : never;
 
@@ -39,6 +41,17 @@ export interface StageContext {
   /** A signal that fires after `ms` or when the run signal fires, whichever is first. */
   budgetSignal(ms: number): AbortSignal;
   now(): Date;
+  /**
+   * The run's model client: its recorded provider, model and reasoning level (the worker builds one per run).
+   * Null only for runs on the fake engine, which makes no model call.
+   */
+  llm: LlmClient | null;
+}
+
+/** The run's model client, for a real stage; a run without one (the fake engine's choice) is a contract error. */
+export function requireLlm(ctx: Pick<StageContext, "llm">): LlmClient {
+  if (!ctx.llm) throw new ContractError("This run has no model client: the real engine cannot run it");
+  return ctx.llm;
 }
 
 export type RequirementDraft = Omit<NormalizedRequirement, "runId" | "revision" | "confirmedAt">;

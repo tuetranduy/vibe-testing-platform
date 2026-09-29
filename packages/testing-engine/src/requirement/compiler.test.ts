@@ -251,6 +251,7 @@ function stageContext(request: StoredTestRunRequest, secrets: Record<string, str
     boundary: async () => {},
     budgetSignal: () => ac.signal,
     now: () => new Date(),
+    llm: null,
   };
 }
 
@@ -301,10 +302,10 @@ describe("analyze stage (real compiler behind runAnalysis)", () => {
     const unusedExploration = { openSandbox: async () => ({}) as never, explorer: { start: async () => ({}) as never }, store: () => ({}) as never };
     const unusedRerun = { openProxy: async () => ({}) as never, spawn: async () => ({}) as never, workspace: { baseDir: "/nonexistent" }, evidence: () => ({}) as never };
     const unusedReport = { store: () => ({}) as never };
-    const stages = createRealStages({ llm, exploration: unusedExploration, generateTest: { store: () => ({ save: async () => {} }) }, runTest: unusedRerun, report: unusedReport });
+    const stages = createRealStages({ exploration: unusedExploration, generateTest: { store: () => ({ save: async () => {} }) }, runTest: unusedRerun, report: unusedReport });
     const p = fakePorts();
 
-    await runAnalysis(stageContext(storedRequest(CART_TEXT)), p.ports, stages);
+    await runAnalysis({ ...stageContext(storedRequest(CART_TEXT)), llm }, p.ports, stages);
 
     expect(p.events.map((e) => e.type)).toEqual(["stage.started", "criteria.proposed", "stage.completed"]);
     expect(p.events[1]!.message).toBe("2 acceptance criteria identified");
@@ -320,7 +321,7 @@ describe("analyze stage (real compiler behind runAnalysis)", () => {
       password: secret,
     });
 
-    await createAnalyzeStage(llm)(ctx);
+    await createAnalyzeStage()({ ...ctx, llm });
 
     const sent = sentText(transport);
     expect(sent).toContain("password");

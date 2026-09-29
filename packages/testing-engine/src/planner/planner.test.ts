@@ -546,6 +546,7 @@ function stageContext(request: StoredTestRunRequest, secrets: Record<string, str
     boundary: async () => {},
     budgetSignal: () => ac.signal,
     now: () => new Date(),
+    llm: null,
   };
 }
 
@@ -589,14 +590,14 @@ describe("actionPolicyFor (D9, amended 2026-09-28)", () => {
 describe("createPlanStage", () => {
   it("production without a confirmed host blocks destructive steps even when allowDestructiveActions is on", async () => {
     const { llm } = setup({ json: deletePlan() });
-    const plan = await createPlanStage(llm)(stageContext(storedRequest("production", true)), deleteRequirement());
+    const plan = await createPlanStage()({ ...stageContext(storedRequest("production", true)), llm }, deleteRequirement());
     expect(blocked(plan)).toEqual([["AC-2", "DESTRUCTIVE_ACTION_NOT_AUTHORIZED"]]);
     expect(plan.blockedCriteria[0]!.detail).toContain("destructive actions are not allowed for this run (allowDestructiveActions is off)");
   });
 
   it("production with the host confirmed plans the destructive step unblocked", async () => {
     const { llm } = setup({ json: deletePlan() });
-    const plan = await createPlanStage(llm)(stageContext(storedRequest("production", true, {}, "shop.example.com")), deleteRequirement());
+    const plan = await createPlanStage()({ ...stageContext(storedRequest("production", true, {}, "shop.example.com")), llm }, deleteRequirement());
     expect(plan.blockedCriteria).toEqual([]);
     expect(plan.scenarios[0]!.steps[3]!.destructive).toBe(true);
   });
@@ -605,7 +606,7 @@ describe("createPlanStage", () => {
     const secret = "pw-Stage-Secret-5";
     const { llm, transport } = setup({ json: loginPlan() });
     const ctx = stageContext(storedRequest("staging", false, { email: "alice.tester@example.com" }), { password: secret });
-    const plan = await createPlanStage(llm)(ctx, loginRequirement());
+    const plan = await createPlanStage()({ ...ctx, llm }, loginRequirement());
     expect(plan.blockedCriteria).toEqual([]);
     const sent = sentText(transport);
     expect(sent).toContain("email");
@@ -646,13 +647,15 @@ function executionPorts(requirement: NormalizedRequirement) {
 }
 
 /** Real analyze/plan stages; exploration stays fake here (the real explore stage is tested in exploration/). */
-function realPlanStages(llm: Parameters<typeof createRealStages>[0]["llm"]) {
+function realPlanStages(llm: LlmClient) {
   const fake = createFakeStages();
   const unused = { openSandbox: async () => ({}) as never, explorer: { start: async () => ({}) as never }, store: () => ({}) as never };
   // No rerun here: a proxy that cannot start makes the rerun ERRORED without running anything.
   const noRerun = { openProxy: async () => Promise.reject(new Error("no rerun")), spawn: async () => ({}) as never, workspace: { baseDir: "/nonexistent" }, evidence: () => ({}) as never };
   const report = { store: () => ({ saveDiagnostics: async () => {}, llmUsage: async () => [] }) };
-  return { ...createRealStages({ llm, exploration: unused, generateTest: { store: () => ({ save: async () => {} }) }, runTest: noRerun, report }), explore: fake.explore };
+  const real = createRealStages({ exploration: unused, generateTest: { store: () => ({ save: async () => {} }) }, runTest: noRerun, report });
+  // The plan stage runs on the run's client, as the worker's context gives it (StageContext.llm).
+  return { ...real, plan: (ctx: StageContext, requirement: NormalizedRequirement) => real.plan({ ...ctx, llm }, requirement), explore: fake.explore };
 }
 
 describe("plan stage behind runExecution (real planner, fake later stages)", () => {

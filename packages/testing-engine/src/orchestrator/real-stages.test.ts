@@ -1,4 +1,5 @@
 import {
+  ContractError,
   ProvisionalResultSchema,
   RerunResultSchema,
   type RerunResult,
@@ -9,6 +10,7 @@ import {
   type ObservedFact,
   type TestPlan,
 } from "@platform/contracts";
+import type { LlmClient } from "@platform/llm";
 import { describe, expect, it } from "vitest";
 import { createRealStages } from "./real-stages";
 import type { StageContext } from "./stages";
@@ -70,7 +72,6 @@ const fact = (ref: FactRef, value: ObservedFact["value"], provenance: ObservedFa
 });
 const exploration = (facts: ObservedFact[]): ExplorationOutcome => ({ steps: [], facts, stopReason: "COMPLETED" });
 
-const llm = { generateStructured: async () => ({}) as never };
 const explorationDeps = { openSandbox: async () => ({}) as never, explorer: { start: async () => ({}) as never }, store: () => ({}) as never };
 const generateTestDeps = { store: () => ({ save: async () => {} }) };
 /** A rerun whose egress proxy cannot start: the stage must answer ERRORED without running anything. */
@@ -91,7 +92,35 @@ const ctx = {
 } as unknown as StageContext;
 const reportDeps = { store: () => ({ saveDiagnostics: async () => {}, llmUsage: async () => [] }) };
 const stagesWith = () =>
-  createRealStages({ llm, exploration: explorationDeps, generateTest: generateTestDeps, runTest: runTestDeps, report: reportDeps });
+  createRealStages({ exploration: explorationDeps, generateTest: generateTestDeps, runTest: runTestDeps, report: reportDeps });
+
+describe("createRealStages: the run's model client (StageContext.llm)", () => {
+  /** A client that records which stage called it, then stops the stage. */
+  const recording = () => {
+    const calls: string[] = [];
+    const client = {
+      generateStructured: async (input: { stage: string }) => {
+        calls.push(input.stage);
+        throw new Error("stopped after the call");
+      },
+    } as unknown as LlmClient;
+    return { calls, client };
+  };
+  const runCtx = (llm: LlmClient | null) =>
+    ({ ...ctx, request: { ...ctx.request, requirement: "A user can add a product to the cart.", testData: {}, options: { allowDestructiveActions: false } }, llm }) as unknown as StageContext;
+
+  it("analyze and plan call the run's client", async () => {
+    const { calls, client } = recording();
+    await expect(stagesWith().analyze(runCtx(client))).rejects.toThrow("stopped after the call");
+    await expect(stagesWith().plan(runCtx(client), requirement)).rejects.toThrow("stopped after the call");
+    expect(calls).toEqual(["ANALYZING_REQUIREMENT", "PLANNING"]);
+  });
+
+  it("a run without a client (the fake engine's choice) fails with ContractError before any model call", async () => {
+    await expect(stagesWith().analyze(runCtx(null))).rejects.toBeInstanceOf(ContractError);
+    await expect(stagesWith().plan(runCtx(null), requirement)).rejects.toBeInstanceOf(ContractError);
+  });
+});
 
 describe("createRealStages: verify (Task 15)", () => {
   it("verifies every criterion from the recorded facts", () => {

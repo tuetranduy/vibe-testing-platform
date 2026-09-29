@@ -215,6 +215,7 @@ function fakeCtx(o: CtxOptions = {}) {
     },
     budgetSignal: () => budget.signal,
     now: () => new Date("2026-09-26T10:00:00.000Z"),
+    llm: null, // the executor makes no model call of its own (the explorer does, through the stage)
   };
   return { ctx, run, budget, events, cleanups };
 }

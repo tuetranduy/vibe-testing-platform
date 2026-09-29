@@ -1,6 +1,6 @@
 import { ContractError, type TestDataValue } from "@platform/contracts";
 import type { LlmClient } from "@platform/llm";
-import type { RequirementDraft, StageContext } from "../orchestrator/stages";
+import { requireLlm, type RequirementDraft, type StageContext } from "../orchestrator/stages";
 import { CompilerOutputSchema } from "./model-output";
 import { postValidate } from "./post-validate";
 import { REQUIREMENT_SYSTEM_PROMPT, buildRequirementPrompt } from "./prompts";
@@ -57,10 +57,10 @@ export async function compileRequirement(llm: RequirementLlm, input: CompileRequ
   return result.draft;
 }
 
-/** The real `analyze` stage: compiles the run's requirement with the run's redactor and deadline. */
-export function createAnalyzeStage(llm: RequirementLlm): (ctx: StageContext) => Promise<RequirementDraft> {
-  return (ctx) =>
-    compileRequirement(llm, {
+/** The real `analyze` stage: compiles the run's requirement with the run's model client, redactor and deadline. */
+export function createAnalyzeStage(): (ctx: StageContext) => Promise<RequirementDraft> {
+  return async (ctx) =>
+    compileRequirement(requireLlm(ctx), {
       runId: ctx.runId,
       originalText: ctx.request.requirement,
       testData: ctx.request.testData,

@@ -3,13 +3,12 @@ import { createExploreStage, type ExploreStageDeps } from "../exploration/explor
 import { createRunTestStage, type RunTestStageDeps } from "../playwright-runner/run-stage";
 import { createPlanStage } from "../planner/planner";
 import { createReportStage, type ReportStageDeps } from "../reporting/report-builder";
-import { createAnalyzeStage, type RequirementLlm } from "../requirement/compiler";
+import { createAnalyzeStage } from "../requirement/compiler";
 import { verifyStage } from "../verification/verify-stage";
 import type { EngineStages } from "./stages";
 
+/** The model client is not a dependency: every real stage uses the run's own (`StageContext.llm`, requireLlm). */
 export interface RealStageDeps {
-  /** Structured-output LLM port shared by the analyze and plan stages. */
-  llm: RequirementLlm;
   /** Browser sandbox, explorer and persistence for the explore stage (Task 14). */
   exploration: ExploreStageDeps;
   /** Persistence for the generated test (Task 16, Ruling R28). */
@@ -26,8 +25,8 @@ export interface RealStageDeps {
  */
 export function createRealStages(deps: RealStageDeps): EngineStages {
   return {
-    analyze: createAnalyzeStage(deps.llm), // Task 10
-    plan: createPlanStage(deps.llm), // Task 12
+    analyze: createAnalyzeStage(), // Task 10
+    plan: createPlanStage(), // Task 12
     explore: createExploreStage(deps.exploration), // Task 14
     verify: verifyStage, // Task 15
     generateTest: createGenerateTestStage(deps.generateTest), // Task 16

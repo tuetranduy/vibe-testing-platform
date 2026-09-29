@@ -109,6 +109,9 @@ export function createClientLlmBridge(opts: ClientLlmBridgeOptions): ClientLlmBr
       redact: opts.redact,
       deadlineAt: opts.deadlineAt ?? null,
       maxTokens: opts.maxTokens,
+      // Browser steps keep the model's own level whatever the run's: each has a 60 s limit and runs many
+      // times, and exploration quality was measured (evals) at the default.
+      reasoning: "default",
     });
     usage = {
       calls: usage.calls + 1,
