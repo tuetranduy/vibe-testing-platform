@@ -205,6 +205,13 @@ limit" in the log), and leaves the rest to the next pass; S3 calls also fail aft
 of silence. As a backstop, configure an S3 lifecycle rule that expires objects some time after the longest retention
 (e.g. 45 days).
 
+The same daily pass deletes exploration cache entries (V1.1, `exploration_cache`) no run has reused for 30 days.
+Entries hold selectors and accessible names, never page values; an administrator can clear a tenant's cache at
+once from Settings (`DELETE /v1/exploration-cache`, audited), e.g. after a site redesign.
+
+Saved test data sets and credential profiles (V1.1) are kept until someone deletes them. A run takes its own copy
+when it is created; a profile's copy is purged with the run's other secrets when the run ends.
+
 ## Release checks
 
 CI (`.github/workflows/ci.yml`, GitHub Actions) runs typecheck, `pnpm test` (with the S3 tests), `pnpm
