@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { ApiRequestError, changePassword } from "../lib/api";
-import { useMe } from "../lib/me";
+import { ApiRequestError, changePassword, logout } from "../lib/api";
+import { resetMe, useMe } from "../lib/me";
 import { Icon } from "./Icon";
 
 type Field = "currentPassword" | "newPassword" | "confirm";
 
 /** Your account: who you are signed in as, and a new password (your other sessions end; this one stays). */
-export function AccountSettings() {
+export function AccountSettings({ navigate = (url: string) => window.location.assign(url) }: { navigate?: (url: string) => void }) {
   const me = useMe();
   const [values, setValues] = useState<Record<Field, string>>({ currentPassword: "", newPassword: "", confirm: "" });
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
@@ -70,6 +70,19 @@ export function AccountSettings() {
           <p>
             <strong>{me.name}</strong> · {me.email} · {me.role === "admin" ? "Administrator" : "Member"}
           </p>
+          <div className="actions">
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={async () => {
+                await logout().catch(() => {});
+                resetMe();
+                navigate("/login");
+              }}
+            >
+              Sign out
+            </button>
+          </div>
         </section>
       )}
       <form className="card stack" aria-labelledby="account-password" onSubmit={onSubmit} noValidate>
