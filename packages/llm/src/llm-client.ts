@@ -82,17 +82,23 @@ export class LlmClient {
   private readonly retry: RetryPolicy;
   private readonly now: () => number;
   private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** Models already reported as unpriced (the requested one, and any fallback that served a call). */
+  private readonly unpriced = new Set<string>();
 
   constructor(private readonly opts: LlmClientOptions) {
     this.retry = { ...DEFAULT_RETRY, ...opts.retry };
     this.now = opts.now ?? Date.now;
     this.sleep = opts.sleep ?? defaultSleep;
-    if (!priceFor(opts.model)) {
-      (opts.logger ?? consoleLogger).warn(
-        { model: opts.model, provider: opts.transport.provider },
-        "LLM model has no price in @platform/llm pricing; estimatedCostUsd will be recorded as 0",
-      );
-    }
+    this.warnIfUnpriced(opts.model);
+  }
+
+  private warnIfUnpriced(model: string): void {
+    if (priceFor(model) || this.unpriced.has(model)) return;
+    this.unpriced.add(model);
+    (this.opts.logger ?? consoleLogger).warn(
+      { model, provider: this.opts.transport.provider },
+      "LLM model has no price in @platform/llm pricing; estimatedCostUsd will be recorded as 0",
+    );
   }
 
   get model(): string {
@@ -139,16 +145,18 @@ export class LlmClient {
     let messages = input.messages;
     for (let round = 0; ; round++) {
       const { response, latencyMs, answeredAt } = await this.request(input, messages, jsonSchema);
-      // Priced and recorded by the requested model (providers may echo a resolved snapshot id), at
-      // the price in force when it answered.
-      const cost = estimateCostUsd(this.opts.model, response.usage.inputTokens, response.usage.outputTokens, new Date(answeredAt)) ?? 0;
+      // Priced and recorded by the requested model (providers may echo a resolved snapshot id), or by the
+      // model that served it after a refusal fallback, at the price in force when it answered.
+      const servedBy = response.fallbackModel ?? this.opts.model;
+      if (response.fallbackModel) this.warnIfUnpriced(response.fallbackModel);
+      const cost = estimateCostUsd(servedBy, response.usage.inputTokens, response.usage.outputTokens, new Date(answeredAt)) ?? 0;
       usage.inputTokens += response.usage.inputTokens;
       usage.outputTokens += response.usage.outputTokens;
       usage.estimatedCostUsd = round6(usage.estimatedCostUsd + cost);
 
       const result = parseAndValidate(response.text, validate);
       await this.record(input, {
-        model: this.opts.model,
+        model: servedBy,
         inputTokens: response.usage.inputTokens,
         outputTokens: response.usage.outputTokens,
         estimatedCostUsd: cost,

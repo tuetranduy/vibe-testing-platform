@@ -249,6 +249,32 @@ describe("LlmClient.generateStructured", () => {
     expect(calls[1]!.estimatedCostUsd).toBe(0.007);
   });
 
+  it("prices and records a call a refusal fallback served under the serving model", async () => {
+    const { client, transport, calls } = setup({ model: "claude-fable-5-1" });
+    transport.enqueue({ json: { answer: "ok", count: 1 }, usage: { inputTokens: 1000, outputTokens: 500 }, fallbackModel: "claude-opus-5-5" });
+    const res = await client.generateStructured({ ...base(), schema: Answer });
+    // Opus 5.5 ($4 / $20 per MTok), not the requested Fable 5.1 ($10 / $50).
+    expect(res.usage.estimatedCostUsd).toBe(0.014);
+    expect(calls).toMatchObject([{ model: "claude-opus-5-5", estimatedCostUsd: 0.014, status: "SUCCESS" }]);
+  });
+
+  it("an unpriced fallback model is surfaced once through the logger", async () => {
+    const warn = vi.fn();
+    const { client, transport, calls } = setup({ model: "claude-fable-5-1", logger: { warn } });
+    transport.enqueue(
+      { json: { answer: "ok", count: 1 }, fallbackModel: "claude-future-9" },
+      { json: { answer: "ok", count: 1 }, fallbackModel: "claude-future-9" },
+    );
+    await client.generateStructured({ ...base(), schema: Answer });
+    await client.generateStructured({ ...base(), schema: Answer });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]![0]).toMatchObject({ model: "claude-future-9" });
+    expect(calls.map((c) => [c.model, c.estimatedCostUsd])).toEqual([
+      ["claude-future-9", 0],
+      ["claude-future-9", 0],
+    ]);
+  });
+
   it("an unpriced model is surfaced once through the logger, not silently costed at $0", async () => {
     const warn = vi.fn();
     const { client, transport, calls } = setup({ model: "claude-future-9", logger: { warn } });

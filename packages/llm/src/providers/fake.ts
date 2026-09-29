@@ -4,8 +4,8 @@ type Usage = { inputTokens: number; outputTokens: number };
 
 /** A scripted reply: a JSON value, raw text, an error to throw, or "hang" until the request is aborted. */
 export type FakeReply =
-  | { json: unknown; usage?: Usage; model?: string }
-  | { text: string; usage?: Usage; model?: string }
+  | { json: unknown; usage?: Usage; model?: string; fallbackModel?: string }
+  | { text: string; usage?: Usage; model?: string; fallbackModel?: string }
   | { error: Error }
   | "hang";
 
@@ -39,6 +39,11 @@ export class FakeTransport implements LlmTransport {
     }
     if ("error" in reply) throw reply.error;
     const text = "json" in reply ? JSON.stringify(reply.json) : reply.text;
-    return { text, model: reply.model ?? request.model, usage: reply.usage ?? DEFAULT_USAGE };
+    return {
+      text,
+      model: reply.model ?? request.model,
+      usage: reply.usage ?? DEFAULT_USAGE,
+      ...(reply.fallbackModel ? { fallbackModel: reply.fallbackModel } : {}),
+    };
   }
 }
