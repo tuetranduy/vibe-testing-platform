@@ -12,6 +12,8 @@ interface Props {
   secretNames: readonly string[];
   /** How many criteria the saved test checks. */
   compiledCount: number;
+  /** The run allowed destructive actions: the rerun repeats them, so it must be confirmed. */
+  destructive?: boolean;
   navigate?: (url: string) => void;
 }
 
@@ -19,8 +21,9 @@ interface Props {
  * "Rerun test" (V1.1 F5): starts a new run that reruns this run's saved Playwright test, with no exploration
  * and no AI. Asks for the secrets the test needs (typed, or saved credentials); opens the new run.
  */
-export function RerunPanel({ runId, secretNames, compiledCount, navigate = (url) => window.location.assign(url) }: Props) {
+export function RerunPanel({ runId, secretNames, compiledCount, destructive = false, navigate = (url) => window.location.assign(url) }: Props) {
   const [open, setOpen] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [profiles, setProfiles] = useState<CredentialProfile[]>([]);
   const [profileId, setProfileId] = useState("");
@@ -55,6 +58,7 @@ export function RerunPanel({ runId, secretNames, compiledCount, navigate = (url)
         else secrets[name] = v;
       } else if (!covered.has(name)) next[name] = `Enter ${name}, or choose saved credentials that have it.`;
     }
+    if (destructive && !confirmed) next.confirmDestructiveActions = "Confirm that the rerun repeats destructive actions.";
     setErrors(next);
     if (Object.keys(next).length > 0) return;
     setPending(true);
@@ -62,7 +66,11 @@ export function RerunPanel({ runId, secretNames, compiledCount, navigate = (url)
     setValues({});
     key.current ??= newIdempotencyKey();
     try {
-      const created = await rerunRun(runId, { secrets, ...(profileId ? { credentialProfileId: profileId } : {}) }, key.current);
+      const created = await rerunRun(
+        runId,
+        { secrets, ...(profileId ? { credentialProfileId: profileId } : {}), ...(destructive ? { confirmDestructiveActions: true } : {}) },
+        key.current,
+      );
       navigate(`/runs/${encodeURIComponent(created.runId)}`);
     } catch (err) {
       key.current = null;
@@ -139,6 +147,27 @@ export function RerunPanel({ runId, secretNames, compiledCount, navigate = (url)
                 </div>
               ))}
             </>
+          )}
+          {destructive && (
+            <div className="note note-warning">
+              <p className="note-title">This run allowed destructive actions</p>
+              <p>The saved test repeats every action it recorded: whatever it deleted, ordered or paid for happens again.</p>
+              <label className="choice">
+                <input
+                  type="checkbox"
+                  checked={confirmed}
+                  onChange={(e) => setConfirmed(e.target.checked)}
+                  aria-invalid={errors.confirmDestructiveActions ? true : undefined}
+                  aria-describedby={errors.confirmDestructiveActions ? "rerun-destructive-error" : undefined}
+                />
+                I understand: repeat the destructive actions
+              </label>
+              {errors.confirmDestructiveActions && (
+                <p id="rerun-destructive-error" className="field-error">
+                  <Icon name="error" /> {errors.confirmDestructiveActions}
+                </p>
+              )}
+            </div>
           )}
           {(errors.form || errors.credentialProfileId) && (
             <p role="alert" className="field-error">

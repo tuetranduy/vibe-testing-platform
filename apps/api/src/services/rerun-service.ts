@@ -1,4 +1,10 @@
-import { RerunRequestSchema, isTerminalLifecycle, type CreateTestRunResponse, type StoredTestRunRequest } from "@platform/contracts";
+import {
+  RerunRequestSchema,
+  destructiveActionsAllowed,
+  isTerminalLifecycle,
+  type CreateTestRunResponse,
+  type StoredTestRunRequest,
+} from "@platform/contracts";
 import {
   EventRepository,
   GeneratedTestRepository,
@@ -53,6 +59,12 @@ export class RerunService {
     ]);
     if (!test || test.compiledCriteria.length === 0 || !requirement?.confirmedAt) {
       throw new HttpError(409, "NOTHING_TO_RERUN", "This run has no generated Playwright test to rerun");
+    }
+    // The saved test repeats every recorded action: a run that could delete or pay does so again.
+    if (destructiveActionsAllowed(source.request) && req.confirmDestructiveActions !== true) {
+      throw new HttpError(422, "CONFIRMATION_REQUIRED", "This run allowed destructive actions: confirm that the rerun repeats them", [
+        { path: ["confirmDestructiveActions"], message: "The rerun repeats every action the test recorded, destructive ones included: confirm it" },
+      ]);
     }
 
     // Every secret the saved test fills must be given again (the source's values are gone).

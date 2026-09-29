@@ -388,6 +388,7 @@ export function RunView({ runId }: { runId: string }) {
             runId={runId}
             llm={summary.llm}
             secretNames={summary.secretNames}
+            destructive={summary.allowDestructiveActions}
             artifacts={progress.artifacts}
             steps={progress.steps}
             cancelReason={progress.outcome?.kind === "cancelled" ? progress.outcome.reason : summary.cancelReason}
