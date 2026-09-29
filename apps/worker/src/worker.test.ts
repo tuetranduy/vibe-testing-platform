@@ -1,4 +1,4 @@
-import { ArtifactRepository, RunRepository } from "@platform/db";
+import { ArtifactRepository, RunRepository, SuggestionRepository } from "@platform/db";
 import { TEST_TENANT_ID } from "@platform/db/testing";
 import type { ArtifactStorage } from "@platform/storage";
 import { createRunQueue } from "@platform/event-bus";
@@ -23,6 +23,37 @@ afterAll(async () => {
 });
 
 describe("BullMQ wiring", () => {
+  it("after a selection the analysis runs, although the survey's own job id (same run) is taken by its completed job", async () => {
+    const queue = createRunQueue(connection);
+    const deps = h.deps(createFakeStages(), { queue });
+    const workers = await startWorkers(deps, { connection, concurrency: 2, reapEveryMs: 60_000 });
+    try {
+      const run = await seedRun(h, { requirement: "" });
+      await queue.enqueueAnalyze(run.id);
+      await vi.waitFor(async () => expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("AWAITING_SELECTION"), {
+        timeout: 30_000,
+        interval: 100,
+      });
+      const chosen = (await new SuggestionRepository(h.tdb.db).get(run.id))!.suggestions[0]!;
+      await new SuggestionRepository(h.tdb.db).select(run.id, { suggestionId: chosen.id, requirement: chosen.requirement, edited: false });
+
+      // The survey's job is kept once completed (removeOnComplete): adding its id again adds nothing.
+      await vi.waitFor(async () => expect(await queue.isAnalyzePending(run.id)).toBe(false), { timeout: 10_000, interval: 100 });
+      await queue.enqueueAnalyze(run.id);
+      expect(await queue.isAnalyzePending(run.id)).toBe(false);
+
+      expect(await queue.isAnalyzeAfterSelectionWaiting(run.id)).toBe(false);
+      await queue.enqueueAnalyzeAfterSelection(run.id);
+      await vi.waitFor(async () => expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("AWAITING_CONFIRMATION"), {
+        timeout: 30_000,
+        interval: 100,
+      });
+    } finally {
+      await workers.close();
+      await queue.close();
+    }
+  }, 45_000);
+
   it("runs analyze-run then execute-run end to end through real queues", async () => {
     const queue = createRunQueue(connection);
     const deps = h.deps(createFakeStages(), { queue });

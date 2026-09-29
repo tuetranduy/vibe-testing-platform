@@ -18,6 +18,12 @@ const validEnv: Record<string, string | undefined> = {
 };
 
 describe("loadEnv", () => {
+  it("SURVEY_TIMEOUT_SECONDS: the survey's hard deadline, 180 by default", () => {
+    expect(loadEnv(validEnv).SURVEY_TIMEOUT_SECONDS).toBe(180);
+    expect(loadEnv({ ...validEnv, SURVEY_TIMEOUT_SECONDS: "60" }).SURVEY_TIMEOUT_SECONDS).toBe(60);
+    expect(() => loadEnv({ ...validEnv, SURVEY_TIMEOUT_SECONDS: "0" })).toThrow(/SURVEY_TIMEOUT_SECONDS/);
+  });
+
   it("parses a valid environment and applies defaults", () => {
     const env = loadEnv(validEnv);
     expect(env.MAX_ACTIVE_RUNS_PER_TENANT).toBe(3);

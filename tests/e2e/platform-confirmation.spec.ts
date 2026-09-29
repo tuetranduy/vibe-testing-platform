@@ -52,6 +52,7 @@ describe("Task 21 step 8 — confirmation", () => {
         config: {
           secretsKey: Buffer.alloc(32),
           analysisTimeoutSeconds: 120,
+          surveyTimeoutSeconds: 180,
           heartbeatMs: 10_000,
           staleAfterMs: 60_000,
           confirmationTtlHours: 24,

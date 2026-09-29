@@ -83,6 +83,7 @@ export async function bootWorker(opts: BootOptions = {}): Promise<void> {
       config: {
         secretsKey: env.secretsKey,
         analysisTimeoutSeconds: env.ANALYSIS_TIMEOUT_SECONDS,
+        surveyTimeoutSeconds: env.SURVEY_TIMEOUT_SECONDS,
         heartbeatMs: 10_000,
         staleAfterMs: 60_000,
         confirmationTtlHours: env.CONFIRMATION_TTL_HOURS,
