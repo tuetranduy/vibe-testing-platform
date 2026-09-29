@@ -101,6 +101,8 @@ const EnvSchema = z
     MAX_ACTIVE_RUNS_PER_TENANT: intWithDefault(3),
     CONFIRMATION_TTL_HOURS: intWithDefault(24),
     ANALYSIS_TIMEOUT_SECONDS: intWithDefault(120),
+    /** A blank requirement's survey (explore the site, suggest tests): its hard deadline. Page loading stops at 60 % of it. */
+    SURVEY_TIMEOUT_SECONDS: intWithDefault(180),
     WORKER_CONCURRENCY: intWithDefault(2),
     ARTIFACT_RETENTION_DAYS: intWithDefault(30),
     SECRET_ARTIFACT_RETENTION_DAYS: intWithDefault(7),

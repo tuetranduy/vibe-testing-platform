@@ -40,6 +40,14 @@ export class FakeQueue implements RunQueue {
   async isAnalyzePending(runId: string) {
     return this.analyzePending.has(runId);
   }
+  afterSelection: string[] = [];
+  afterSelectionWaiting = new Set<string>();
+  async enqueueAnalyzeAfterSelection(runId: string) {
+    this.afterSelection.push(runId);
+  }
+  async isAnalyzeAfterSelectionWaiting(runId: string) {
+    return this.afterSelectionWaiting.has(runId);
+  }
   async close() {}
 }
 
@@ -74,6 +82,7 @@ export async function createHarness(): Promise<WorkerHarness> {
       config: {
         secretsKey: SECRETS_KEY,
         analysisTimeoutSeconds: 120,
+        surveyTimeoutSeconds: 180,
         heartbeatMs: 20,
         staleAfterMs: 60_000,
         confirmationTtlHours: 24,

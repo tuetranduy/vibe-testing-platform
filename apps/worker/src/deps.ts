@@ -17,6 +17,8 @@ export interface WorkerLogger {
 export interface WorkerConfig {
   secretsKey: Buffer;
   analysisTimeoutSeconds: number;
+  /** SURVEY_TIMEOUT_SECONDS: the hard deadline of a blank-requirement run's survey (its analyze-run job). */
+  surveyTimeoutSeconds: number;
   heartbeatMs: number;
   /** A run whose heartbeat is older than this is considered lost (WORKER_LOST). */
   staleAfterMs: number;

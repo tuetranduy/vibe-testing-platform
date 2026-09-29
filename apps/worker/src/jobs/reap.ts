@@ -18,7 +18,8 @@ const REAPED_REASON = { WORKER_LOST: "WORKER_LOST", TIMEOUT: "TIMEOUT", INTERNAL
 
 /**
  * Maintenance (every 60 s):
- *  - active run with a stale heartbeat → ERRORED / WORKER_LOST (unless its execute-run job is still waiting)
+ *  - active run with a stale heartbeat → ERRORED / WORKER_LOST (unless the job that will pick it up is still
+ *    waiting: PLANNING's execute-run, or the post-selection analyze-run of an ANALYZING_REQUIREMENT run)
  *  - AWAITING_CONFIRMATION past CONFIRMATION_TTL_HOURS → CANCELLED / CONFIRMATION_EXPIRED
  *  - AWAITING_SELECTION past CONFIRMATION_TTL_HOURS → CANCELLED / SELECTION_EXPIRED
  *  - purge secrets of terminal runs (safety net)
@@ -63,6 +64,8 @@ export async function reapJob(deps: WorkerDeps): Promise<ReapResult> {
 
   for (const run of await runs.findStale(new Date(now.getTime() - deps.config.staleAfterMs))) {
     if (run.lifecycle === "PLANNING" && (await deps.queue.isExecuteWaiting(run.id))) continue;
+    // After a selection the API moves the run to ANALYZING_REQUIREMENT before any worker holds it.
+    if (run.lifecycle === "ANALYZING_REQUIREMENT" && (await deps.queue.isAnalyzeAfterSelectionWaiting(run.id))) continue;
     await safely(run, async () => {
       await errorRun(run, "WORKER_LOST", "No heartbeat from the worker");
       result.workerLost.push(run.id);

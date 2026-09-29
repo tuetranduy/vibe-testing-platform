@@ -66,6 +66,17 @@ describe("reaper", () => {
     expect((await eventsOf(h, run.id)).at(-1)).toMatchObject({ type: "run.cancelled", payload: { reason: "CONFIRMATION_EXPIRED" } });
   });
 
+  it("leaves a selected run alone while its post-selection analyze job is still waiting in the queue", async () => {
+    const run = await seedRun(h, { lifecycle: "ANALYZING_REQUIREMENT" });
+    await new RunRepository(h.tdb.db).heartbeat(run.id, minutesAgo(5));
+    h.queue.afterSelectionWaiting.add(run.id);
+    const r = await reapJob(h.deps(createFakeStages()));
+    expect(r.workerLost).not.toContain(run.id);
+    expect((await new RunRepository(h.tdb.db).getById(run.id)).lifecycle).toBe("ANALYZING_REQUIREMENT");
+    h.queue.afterSelectionWaiting.delete(run.id);
+    expect((await reapJob(h.deps(createFakeStages()))).workerLost).toContain(run.id);
+  });
+
   it("leaves a PLANNING run alone while its execute-run job is still waiting in the queue", async () => {
     const run = await seedRun(h, { lifecycle: "PLANNING" });
     await new RunRepository(h.tdb.db).heartbeat(run.id, minutesAgo(5));

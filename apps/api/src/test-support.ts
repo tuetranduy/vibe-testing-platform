@@ -38,6 +38,14 @@ export class FakeQueue implements RunQueue {
   async isAnalyzePending() {
     return false;
   }
+  afterSelection: string[] = [];
+  async enqueueAnalyzeAfterSelection(runId: string) {
+    if (this.fail) throw new Error("queue down");
+    this.afterSelection.push(runId);
+  }
+  async isAnalyzeAfterSelectionWaiting(_runId: string) {
+    return false;
+  }
   depthValue = 0;
   depthFails = false;
   /** Like the real queue while Redis is down: ioredis holds the command until it reconnects. */
