@@ -46,13 +46,20 @@ export interface LlmCallInput {
   reasoning?: ReasoningLevel;
 }
 
+/** What a caller's `check` is told about the answer it judges. */
+export interface CheckContext {
+  /** True for the answer to the correction round: the last one the client asks for. */
+  corrected: boolean;
+}
+
 export interface GenerateStructuredInput<T> extends LlmCallInput {
   schema: ZodType<T>;
   /**
    * Extra deterministic validation of the parsed value. Returned issues trigger the same single
-   * correction round as schema failures.
+   * correction round as schema failures; `context.corrected` says whether this is the corrected
+   * answer (a caller may accept a partly valid last answer and keep what is valid).
    */
-  check?: (data: T) => string[];
+  check?: (data: T, context: CheckContext) => string[];
 }
 
 export interface GenerateJsonInput extends LlmCallInput {
@@ -61,7 +68,7 @@ export interface GenerateJsonInput extends LlmCallInput {
    * Deterministic validation of the parsed JSON (the provider constrains the shape, this checks what
    * the caller relies on). Returned issues trigger the same single correction round as schema failures.
    */
-  check?: (data: unknown) => string[];
+  check?: (data: unknown, context: CheckContext) => string[];
 }
 
 export interface StructuredResult<T> {
@@ -117,10 +124,10 @@ export class LlmClient {
   /** Structured output validated with a Zod schema (plus optional `check`). */
   generateStructured<T>(input: GenerateStructuredInput<T>): Promise<StructuredResult<T>> {
     const jsonSchema = zodToJsonSchema(input.schema);
-    return this.run(input, jsonSchema, (value) => {
+    return this.run(input, jsonSchema, (value, context) => {
       const parsed = input.schema.safeParse(value);
       if (!parsed.success) return { ok: false, issues: parsed.error.issues.map(formatIssue) };
-      const issues = input.check?.(parsed.data) ?? [];
+      const issues = input.check?.(parsed.data, context) ?? [];
       return issues.length > 0 ? { ok: false, issues } : { ok: true, data: parsed.data };
     });
   }
@@ -130,8 +137,8 @@ export class LlmClient {
    * Stagehand ClientLLM bridge). The provider constrains the shape; the client only checks it's JSON.
    */
   generateJson(input: GenerateJsonInput): Promise<StructuredResult<unknown>> {
-    return this.run(input, input.jsonSchema, (value) => {
-      const issues = input.check?.(value) ?? [];
+    return this.run(input, input.jsonSchema, (value, context) => {
+      const issues = input.check?.(value, context) ?? [];
       return issues.length > 0 ? { ok: false, issues } : { ok: true, data: value };
     });
   }
@@ -139,7 +146,7 @@ export class LlmClient {
   private async run<T>(
     input: LlmCallInput,
     jsonSchema: JsonSchema,
-    validate: (value: unknown) => Validation<T>,
+    validate: (value: unknown, context: CheckContext) => Validation<T>,
   ): Promise<StructuredResult<T>> {
     const usage: LlmUsage = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
     let messages = input.messages;
@@ -154,7 +161,7 @@ export class LlmClient {
       usage.outputTokens += response.usage.outputTokens;
       usage.estimatedCostUsd = round6(usage.estimatedCostUsd + cost);
 
-      const result = parseAndValidate(response.text, validate);
+      const result = parseAndValidate(response.text, (value) => validate(value, { corrected: round > 0 }));
       await this.record(input, {
         model: servedBy,
         inputTokens: response.usage.inputTokens,
