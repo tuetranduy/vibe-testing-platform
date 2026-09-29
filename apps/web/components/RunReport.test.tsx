@@ -60,6 +60,18 @@ describe("RunReport", () => {
     expect(screen.getAllByText("Non-critical")).toHaveLength(1);
   });
 
+  it("offers a rerun of the saved test only when told the run's secrets and the test checks something (V1.1)", async () => {
+    reportFetch(() => json(200, reportFixture()));
+    const { unmount } = render(<RunReport runId="run_1" artifacts={[]} steps={[]} secretNames={["password"]} />);
+    expect(await screen.findByRole("heading", { name: "Rerun the saved test" })).toBeInTheDocument();
+    expect(screen.getByText(/It checks 3 criteria/)).toBeInTheDocument();
+    unmount();
+    reportFetch(() => json(200, reportFixture()));
+    renderReport();
+    await screen.findByRole("heading", { name: /verdict/i });
+    expect(screen.queryByRole("heading", { name: "Rerun the saved test" })).not.toBeInTheDocument();
+  });
+
   it("shows a partial report for an errored run: lifecycle, error category and message, and what exists", async () => {
     reportFetch(() =>
       json(

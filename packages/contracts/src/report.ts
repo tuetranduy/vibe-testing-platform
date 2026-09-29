@@ -10,6 +10,8 @@ export const TestReportSchema = z.object({
   verdict: RunVerdictSchema.nullable(),
   error: z.object({ category: ErrorCategorySchema, message: z.string() }).nullable(),
   partial: z.boolean(), // true for ERRORED / CANCELLED
+  /** A manual rerun's source run (V1.1 F5); null for every other run. */
+  rerunOf: z.string().nullable().default(null),
   targetUrl: z.string(),
   requirement: NormalizedRequirementSchema.nullable(),
   summary: z.object({

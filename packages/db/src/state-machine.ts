@@ -9,6 +9,8 @@ const EDGES: ReadonlyArray<readonly [RunLifecycle, RunLifecycle]> = [
   ["SURVEYING", "AWAITING_SELECTION"],
   ["AWAITING_SELECTION", "ANALYZING_REQUIREMENT"],
   ["QUEUED", "ANALYZING_REQUIREMENT"],
+  // A manual rerun (V1.1 F5): the saved Playwright test, straight from the queue.
+  ["QUEUED", "RUNNING_PLAYWRIGHT"],
   ["ANALYZING_REQUIREMENT", "AWAITING_CONFIRMATION"],
   ["ANALYZING_REQUIREMENT", "PLANNING"],
   ["AWAITING_CONFIRMATION", "PLANNING"],

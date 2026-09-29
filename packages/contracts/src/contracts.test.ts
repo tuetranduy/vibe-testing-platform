@@ -359,6 +359,9 @@ describe("TestRunSummarySchema", () => {
     startedAt: null,
     finishedAt: null,
     owner: null,
+    kind: "discovery",
+    sourceRunId: null,
+    secretNames: [],
   };
 
   it("names the run's owner (V1.1), or null for the service token and older runs", () => {

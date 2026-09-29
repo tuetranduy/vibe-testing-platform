@@ -58,3 +58,47 @@ describe("V1.1 F4 — saved credentials", () => {
     expect(await store.secretsActive(runId)).toEqual([]);
   });
 });
+
+describe("V1.1 F5 — manual rerun", () => {
+  it("reruns a passing run's saved test as a new run: rerun-confirmed PASS, no model call, the source untouched", async () => {
+    const source = await service.create({
+      targetUrl: `${stack.targetUrl}/`,
+      requirement: REQUIREMENTS.cart,
+      options: { autoConfirmCriteria: true },
+    });
+    expect(await service.finished(source)).toMatchObject({ lifecycle: "COMPLETED", verdict: "PASSED" });
+    const sourceReport = await service.report(source);
+
+    const res = await service.call("POST", `/v1/test-runs/${source}/rerun`, {});
+    expect(res.status).toBe(202);
+    const rerun = res.json.runId as string;
+    expect(await service.finished(rerun)).toMatchObject({ lifecycle: "COMPLETED", verdict: "PASSED", kind: "rerun", sourceRunId: source });
+
+    const report = await service.report(rerun);
+    expect(report.rerunOf).toBe(source);
+    expect(report.criteria.length).toBe(sourceReport.criteria.length);
+    for (const c of report.criteria) expect(c).toMatchObject({ status: "PASS", verdictSource: "PLAYWRIGHT_RERUN", rerunOutcome: "PASSED" });
+    expect(report.playwright?.status).toBe("PASSED");
+    expect(await store.llmCalls(rerun)).toEqual([]);
+    const stages = (await store.events(rerun)).filter((e) => e.type === "stage.started").map((e) => (e.payload as { stage: string }).stage);
+    expect(stages).toEqual(["RUNNING_PLAYWRIGHT", "GENERATING_REPORT"]);
+    expect(await service.report(source)).toEqual(sourceReport);
+  });
+
+  it("a run whose test needs a secret asks for it again", async () => {
+    const source = await service.create({
+      targetUrl: `${stack.targetUrl}/`,
+      requirement: REQUIREMENTS.account,
+      testData: { email: VALID_EMAIL },
+      secrets: { password: VALID_PASSWORD },
+      options: { autoConfirmCriteria: true },
+    });
+    expect(await service.finished(source)).toMatchObject({ lifecycle: "COMPLETED", verdict: "PASSED" });
+    const missing = await service.call("POST", `/v1/test-runs/${source}/rerun`, {});
+    expect(missing.status).toBe(422);
+    expect(missing.json.code).toBe("SECRETS_REQUIRED");
+    const res = await service.call("POST", `/v1/test-runs/${source}/rerun`, { secrets: { password: VALID_PASSWORD } });
+    expect(await service.finished(res.json.runId)).toMatchObject({ lifecycle: "COMPLETED", verdict: "PASSED" });
+    expect(await store.secretsActive(res.json.runId)).toEqual([]);
+  });
+});

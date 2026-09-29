@@ -28,6 +28,15 @@ export class FakeQueue implements RunQueue {
     if (this.fail) throw new Error("queue down");
     this.analyze.push(runId);
   }
+  rerun: string[] = [];
+  rerunPending = new Set<string>();
+  async enqueueRerun(runId: string) {
+    if ((this as { fail?: boolean }).fail) throw new Error("queue down");
+    this.rerun.push(runId);
+  }
+  async isRerunPending(runId: string) {
+    return this.rerunPending.has(runId);
+  }
   async enqueueExecute(runId: string) {
     if (this.fail) throw new Error("queue down");
     this.execute.push(runId);

@@ -13,6 +13,7 @@ import type {
   TestPlan,
   TestReport,
 } from "@platform/contracts";
+import { rerunOnlyResults } from "../reporting/rerun-only";
 import { aggregateVerdict } from "../verification/aggregate";
 import type { EngineStages, EventDraft, RequirementDraft, StageContext } from "./stages";
 
@@ -36,6 +37,8 @@ export interface RunPorts {
   savePlan(plan: TestPlan): Promise<void>;
   saveResults(results: ProvisionalResult[]): Promise<void>;
   enqueueExecute(): Promise<void>;
+  /** A manual rerun's copy of its source run's generated test (V1.1 F5). */
+  getGeneratedTest(): Promise<GeneratedTest>;
   /** Stores the survey's suggestions for the run (nothing selected yet). */
   saveSuggestions(draft: SuggestionSetDraft): Promise<SuggestionSet>;
 }
@@ -271,4 +274,45 @@ export async function runExecution(ctx: StageContext, ports: RunPorts, stages: E
   await ports.transition("COMPLETED", { verdict });
   await ports.publish({ type: "run.completed", message: `Run completed: ${verdict}`, payload: { verdict } });
   return { verdict, report: { ...report, verdict, lifecycle: "COMPLETED" } };
+}
+
+/**
+ * rerun-run (V1.1 F5): a manual rerun of a saved Playwright test. QUEUED → RUNNING_PLAYWRIGHT →
+ * GENERATING_REPORT → COMPLETED, with no exploration and no model call; the stages before the rerun are
+ * published as skipped. Statuses come from the rerun alone (rerunOnlyResults). A rerun that fails on its own
+ * is reported, not thrown (Ruling R41); cancel, the hard deadline and infrastructure errors still throw.
+ */
+export async function runRerunOnly(ctx: StageContext, ports: RunPorts, stages: EngineStages): Promise<ExecutionResult["verdict"]> {
+  await ctx.boundary();
+  const [requirement, test] = await Promise.all([ports.getConfirmedRequirement(), ports.getGeneratedTest()]);
+
+  await ports.transition("RUNNING_PLAYWRIGHT", { heartbeatAt: ctx.now() });
+  for (const s of ["ANALYZING_REQUIREMENT", "PLANNING", "EXPLORING", "VERIFYING", "GENERATING_TEST"] as const) await skipped(ports, s);
+  await started(ports, "RUNNING_PLAYWRIGHT");
+  const rerun = await guard(ctx, stages.runTest(ctx, test));
+  await ports.publish({
+    type: "playwright.completed",
+    message: `Playwright rerun ${rerun.status.toLowerCase()}`,
+    payload: { status: rerun.status, durationMs: rerun.durationMs, perCriterion: rerun.perCriterion },
+  });
+  await completed(ports, "RUNNING_PLAYWRIGHT");
+  await ctx.boundary();
+
+  await ports.transition("GENERATING_REPORT");
+  await started(ports, "GENERATING_REPORT");
+  const results = rerunOnlyResults(requirement, test, rerun);
+  await ports.saveResults(results);
+  for (const r of results) {
+    await ports.publish({
+      type: "criterion.evaluated",
+      message: `${r.criterionId} ${r.status}`,
+      payload: { criterionId: r.criterionId, status: r.status, reason: r.reason, provisional: false },
+    });
+  }
+  const verdict = aggregateVerdict(results);
+  await completed(ports, "GENERATING_REPORT");
+  await ctx.boundary();
+  await ports.transition("COMPLETED", { verdict });
+  await ports.publish({ type: "run.completed", message: `Run completed: ${verdict}`, payload: { verdict } });
+  return verdict;
 }

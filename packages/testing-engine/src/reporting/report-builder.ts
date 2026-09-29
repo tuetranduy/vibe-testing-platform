@@ -171,6 +171,8 @@ export interface AssembleReportInput {
   llmCalls: readonly LlmUsageRow[];
   startedAt: Date | null;
   finishedAt: Date | null;
+  /** A manual rerun's source run (V1.1 F5). */
+  rerunOf?: string | null;
 }
 
 /** The TestReport, validated with the shared contract. `partial` for ERRORED / CANCELLED runs. */
@@ -184,6 +186,7 @@ export function assembleReport(input: AssembleReportInput): TestReport {
     verdict,
     error: input.error,
     partial,
+    rerunOf: input.rerunOf ?? null,
     targetUrl: input.targetUrl,
     requirement: input.requirement,
     summary: summarize(input.criteria),
@@ -219,6 +222,8 @@ export interface PersistedRunSources {
     targetUrl: string;
     startedAt: Date | null;
     finishedAt: Date | null;
+    /** A manual rerun's source run (V1.1 F5). */
+    rerunOf?: string | null;
   };
   requirement: NormalizedRequirement | null;
   plan: TestPlan | null;
@@ -268,6 +273,7 @@ export function createReportBuilder(load: ReportSourceLoader): { buildReport(run
         llmCalls: s.llmCalls,
         startedAt: s.run.startedAt,
         finishedAt: s.run.finishedAt,
+        rerunOf: s.run.rerunOf ?? null,
       });
     },
   };

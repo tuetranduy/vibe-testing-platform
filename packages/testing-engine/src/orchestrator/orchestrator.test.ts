@@ -2,14 +2,16 @@ import {
   CancelledError,
   ContractError,
   SuggestionSetSchema,
+  type GeneratedTest,
   type NormalizedRequirement,
+  type ProvisionalResult,
   type RunLifecycle,
   type StoredTestRunRequest,
   type SuggestionSet,
 } from "@platform/contracts";
 import { describe, expect, it } from "vitest";
 import { createFakeStages, fakeSuggestionSet } from "./fake-stages";
-import { runAnalysis, runSurvey, type RunPorts, type TransitionPatch } from "./orchestrator";
+import { runAnalysis, runRerunOnly, runSurvey, type RunPorts, type TransitionPatch } from "./orchestrator";
 import type { EventDraft, StageContext } from "./stages";
 
 const request = (requirement: string, patch: Partial<StoredTestRunRequest["options"]> = {}): StoredTestRunRequest => ({
@@ -72,6 +74,9 @@ function ports(start: RunLifecycle) {
     savePlan: async () => {},
     saveResults: async () => {},
     enqueueExecute: async () => {},
+    getGeneratedTest: async () => {
+      throw new Error("no generated test in this test");
+    },
     saveSuggestions: async (draft) => (saved = SuggestionSetSchema.parse({ ...draft, selected: null })),
   };
   return { ports: p, events, transitions, saved: () => saved, requirement: () => requirement, lifecycle: () => lifecycle };
@@ -156,5 +161,69 @@ describe("runAnalysis after a selection", () => {
 
   it("the fake engine refuses an empty requirement too", async () => {
     await expect(createFakeStages().analyze(context(request("")))).rejects.toBeInstanceOf(ContractError);
+  });
+});
+
+describe("runRerunOnly (a manual rerun, V1.1 F5)", () => {
+  const requirement: NormalizedRequirement = {
+    runId: "run_1",
+    revision: 1,
+    originalText: "The cart count is 1.",
+    criteria: [
+      {
+        id: "AC-1",
+        sourceText: "The cart count is 1.",
+        statement: "Cart count is 1",
+        expectedOutcome: { kind: "numeric_compare", left: { key: "cartCount", checkpoint: "after_add" }, operator: "eq", right: 1 },
+        preconditions: [],
+        critical: true,
+        ambiguity: null,
+      },
+    ],
+    facts: [{ key: "cartCount", checkpoint: "after_add", description: "Cart count", valueType: "number" }],
+    confirmedAt: "2026-09-29T10:00:00.000Z",
+  };
+  const test: GeneratedTest = { id: "gt_1", source: "", helpersSource: "", dataJson: "{}", compiledCriteria: ["AC-1"], notCompiled: [], notes: [] };
+
+  function rerunPorts() {
+    const p = ports("QUEUED");
+    const saved: ProvisionalResult[] = [];
+    p.ports.getConfirmedRequirement = async () => requirement;
+    p.ports.getGeneratedTest = async () => test;
+    p.ports.saveResults = async (r) => void saved.push(...r);
+    return { ...p, saved };
+  }
+
+  it("QUEUED → RUNNING_PLAYWRIGHT → GENERATING_REPORT → COMPLETED; earlier stages skipped; PASS from the rerun alone", async () => {
+    const p = rerunPorts();
+    let modelCalls = 0;
+    const stages = createFakeStages();
+    const analyze = stages.analyze;
+    stages.analyze = async (ctx) => (modelCalls++, analyze(ctx));
+    const verdict = await runRerunOnly(context(request("The cart count is 1.")), p.ports, stages);
+
+    expect(verdict).toBe("PASSED");
+    expect(modelCalls).toBe(0);
+    expect(p.transitions.map(([to]) => to)).toEqual(["RUNNING_PLAYWRIGHT", "GENERATING_REPORT", "COMPLETED"]);
+    const skipped = p.events.filter((e) => e.type === "stage.skipped").map((e) => (e.payload as { stage: string }).stage);
+    expect(skipped).toEqual(["ANALYZING_REQUIREMENT", "PLANNING", "EXPLORING", "VERIFYING", "GENERATING_TEST"]);
+    expect(p.events.map((e) => e.type)).toContain("playwright.completed");
+    expect(p.saved).toMatchObject([{ criterionId: "AC-1", status: "PASS", verdictSource: "PLAYWRIGHT_RERUN" }]);
+    expect(p.events.at(-1)).toMatchObject({ type: "run.completed", payload: { verdict: "PASSED" } });
+  });
+
+  it("a failing rerun ends COMPLETED / FAILED with a rerun-confirmed FAIL", async () => {
+    const p = rerunPorts();
+    const verdict = await runRerunOnly(context(request("The cart count is 1.")), p.ports, createFakeStages({ provisionalStatus: "FAIL" }));
+    expect(verdict).toBe("FAILED");
+    expect(p.saved).toMatchObject([{ status: "FAIL", verdictSource: "PLAYWRIGHT_RERUN", rerunOutcome: "ASSERTION_FAILED" }]);
+  });
+
+  it("cancellation before the rerun throws and never reaches COMPLETED", async () => {
+    const p = rerunPorts();
+    await expect(runRerunOnly(context(request("x".repeat(20)), { cancelAfterStage: () => true }), p.ports, createFakeStages())).rejects.toBeInstanceOf(
+      CancelledError,
+    );
+    expect(p.transitions).toEqual([]);
   });
 });

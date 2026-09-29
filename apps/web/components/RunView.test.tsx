@@ -150,6 +150,12 @@ describe("RunView", () => {
     expect(await screen.findByRole("heading", { name: /run cancelled/i })).toBeInTheDocument();
   });
 
+  it("a manual rerun links the run it reruns (V1.1)", async () => {
+    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "RUNNING_PLAYWRIGHT", kind: "rerun", sourceRunId: "run_src" })) });
+    render(<RunView runId="run_1" />);
+    expect(await screen.findByRole("link", { name: "Rerun of an earlier run" })).toHaveAttribute("href", "/runs/run_src");
+  });
+
   it("a QUEUED blank-requirement run already lists the survey stage", async () => {
     routeFetch({ [`GET ${RUN}`]: summaries(surveyRun("QUEUED")) });
     render(<RunView runId="run_1" />);

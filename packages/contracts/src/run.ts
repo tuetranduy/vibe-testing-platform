@@ -67,6 +67,9 @@ export const InconclusiveReasonSchema = z.enum([
   "DISCOVERY_RERUN_DISAGREE",
   "AI_JUDGED_ONLY",
   "AMBIGUOUS_CRITERION",
+  // A rerun-only run (V1.1 F5): the saved test did not reach the criterion's assertion, or does not have one.
+  "RERUN_NOT_REACHED",
+  "NOT_IN_GENERATED_TEST",
 ]);
 export type InconclusiveReason = z.infer<typeof InconclusiveReasonSchema>;
 
@@ -175,6 +178,11 @@ export type StoredTestRunRequest = Omit<CreateTestRunRequest, "secrets" | "llm" 
   /** The saved credential profile whose values were copied into this run's secrets (V1.1 F4). */
   credentialProfile?: SavedRef;
   /**
+   * A manual rerun (V1.1 F5): the run whose saved Playwright test this run reruns, with no exploration and no
+   * model call. Its requirement and generated test are copies of that run's.
+   */
+  rerunOf?: string;
+  /**
    * The model the run uses, resolved when it was created (request override → Settings → environment).
    * Absent on runs created before model choice existed: they use the environment's (resolveEnvLlmChoice).
    */
@@ -226,6 +234,11 @@ export const TestRunSummarySchema = z.object({
     .nullable(),
   /** Who created the run (V1.1); null: the service token, or created before users existed. */
   owner: RunOwnerSchema.nullable(),
+  /** `rerun`: a manual rerun of `sourceRunId`'s saved test (V1.1 F5); `discovery`: every other run. */
+  kind: z.enum(["discovery", "rerun"]),
+  sourceRunId: z.string().nullable(),
+  /** The secret names the run uses (never values): what a manual rerun must be given again. */
+  secretNames: z.array(z.string()),
 });
 export type TestRunSummary = z.infer<typeof TestRunSummarySchema>;
 
@@ -234,6 +247,16 @@ export const TestRunListResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 export type TestRunListResponse = z.infer<typeof TestRunListResponseSchema>;
+
+/**
+ * `POST /v1/test-runs/:runId/rerun` (V1.1 F5): every secret the source run had must be given again (its
+ * values were purged when it ended), typed here or through saved credentials.
+ */
+export const RerunRequestSchema = z.object({
+  secrets: SecretRecordSchema.default({}),
+  credentialProfileId: SavedIdSchema.optional(),
+});
+export type RerunRequestInput = z.input<typeof RerunRequestSchema>;
 
 export const CreateTestRunResponseSchema = z.object({
   runId: z.string(),

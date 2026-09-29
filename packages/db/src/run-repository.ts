@@ -107,6 +107,9 @@ export function toRunSummary(
     finishedAt: run.finishedAt?.toISOString() ?? null,
     llm: llm ? { provider: llm.provider, model: llm.model, label: modelLabel(llm.model), reasoning: llm.reasoning } : null,
     owner: run.ownerUserId ? { id: run.ownerUserId, name: ownerName(run.ownerUserId) ?? "Former user" } : null,
+    kind: run.request.rerunOf ? "rerun" : "discovery",
+    sourceRunId: run.request.rerunOf ?? null,
+    secretNames: run.request.secretNames,
   };
 }
 

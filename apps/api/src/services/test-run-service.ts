@@ -34,7 +34,7 @@ import { LlmSettingsService, modelNotAvailable } from "./llm-settings-service";
 const ENQUEUE_FAILED = "Queue unavailable at creation";
 
 /** Stable JSON (sorted keys) so equal bodies hash equally regardless of key order. */
-function canonical(value: unknown): string {
+export function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") {
     return `{${Object.keys(value)
@@ -58,7 +58,7 @@ export async function summaryOf(db: ApiDeps["db"], run: TestRun): Promise<TestRu
   return (await summariesOf(db, run.tenantId, [run]))[0]!;
 }
 
-function isUniqueViolation(err: unknown): boolean {
+export function isUniqueViolation(err: unknown): boolean {
   let e: unknown = err;
   for (let i = 0; i < 3 && e; i++) {
     if ((e as { code?: string }).code === "23505") return true;
@@ -74,11 +74,13 @@ export class TestRunService {
     this.runs = new RunRepository(deps.db);
   }
 
-  private publisher(redact: (v: unknown) => unknown = redactByKey): RunEventPublisher {
+  /** Shared with RerunService. */
+  publisher(redact: (v: unknown) => unknown = redactByKey): RunEventPublisher {
     return createRunEventPublisher({ events: new EventRepository(this.deps.db), redis: this.deps.redis, redact });
   }
 
-  private response(run: TestRun): CreateTestRunResponse {
+  /** Shared with RerunService. */
+  response(run: TestRun): CreateTestRunResponse {
     return { runId: run.id, lifecycle: "QUEUED", eventsUrl: `/v1/test-runs/${run.id}/events` };
   }
 
@@ -232,7 +234,8 @@ export class TestRunService {
    * Same key + same body → the original response. A run that failed to enqueue (the client got 503
    * and was told to retry) releases its key so the retry creates a fresh run; returns null then.
    */
-  private async replay(existing: TestRun, requestHash: string, principal: Principal): Promise<{ status: 202; body: CreateTestRunResponse } | null> {
+  /** Shared with RerunService. */
+  async replay(existing: TestRun, requestHash: string, principal: Principal): Promise<{ status: 202; body: CreateTestRunResponse } | null> {
     // Another user's key is never replayed to this caller: same outcome as a different body.
     if (existing.requestHash !== requestHash || existing.ownerUserId !== actorId(principal)) throw new IdempotencyConflictError(existing.id);
     if (existing.lifecycle === "ERRORED" && existing.errorMessage === ENQUEUE_FAILED) {
@@ -242,7 +245,8 @@ export class TestRunService {
     return { status: 202, body: this.response(existing) };
   }
 
-  private async failEnqueue(run: TestRun): Promise<void> {
+  /** Shared with RerunService. */
+  async failEnqueue(run: TestRun): Promise<void> {
     try {
       const errored = await this.runs.transition(run.id, "QUEUED", "ERRORED", {
         errorCategory: "INTERNAL",

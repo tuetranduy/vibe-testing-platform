@@ -368,6 +368,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
         verdict: aggregateVerdict(criteria),
         error: null,
         partial: false,
+        rerunOf: null,
         targetUrl: ctx.request.targetUrl,
         requirement: input.requirement,
         summary: summarize(criteria),
