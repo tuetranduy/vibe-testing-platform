@@ -5,6 +5,7 @@ export * from "./state-machine";
 export * from "./run-repository";
 export * from "./event-repository";
 export * from "./requirement-repository";
+export * from "./suggestion-repository";
 export * from "./secret-repository";
 export * from "./artifact-repository";
 export * from "./result-repository";

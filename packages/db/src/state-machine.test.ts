@@ -1,10 +1,13 @@
 import { RunLifecycleSchema, type RunLifecycle } from "@platform/contracts";
 import { describe, expect, it } from "vitest";
 import { IllegalRunTransitionError } from "./errors";
-import { NON_TERMINAL_LIFECYCLES, TERMINAL_LIFECYCLES, assertTransition, isLegalTransition } from "./state-machine";
+import { ACTIVE_LIFECYCLES, NON_TERMINAL_LIFECYCLES, TERMINAL_LIFECYCLES, assertTransition, isLegalTransition } from "./state-machine";
 
-// Section 2.1, verbatim.
+// Section 2.1, plus the survey's edges (spec 2026-09-28-suggest-tests).
 const LEGAL: [RunLifecycle, RunLifecycle][] = [
+  ["QUEUED", "SURVEYING"],
+  ["SURVEYING", "AWAITING_SELECTION"],
+  ["AWAITING_SELECTION", "ANALYZING_REQUIREMENT"],
   ["QUEUED", "ANALYZING_REQUIREMENT"],
   ["ANALYZING_REQUIREMENT", "AWAITING_CONFIRMATION"],
   ["ANALYZING_REQUIREMENT", "PLANNING"],
@@ -33,6 +36,12 @@ describe("run state machine", () => {
     ["EXPLORING", "PLANNING"],
     ["VERIFYING", "RUNNING_PLAYWRIGHT"],
     ["QUEUED", "QUEUED"],
+    ["QUEUED", "AWAITING_SELECTION"],
+    ["SURVEYING", "ANALYZING_REQUIREMENT"],
+    ["SURVEYING", "AWAITING_CONFIRMATION"],
+    ["AWAITING_SELECTION", "SURVEYING"],
+    ["AWAITING_SELECTION", "PLANNING"],
+    ["ANALYZING_REQUIREMENT", "AWAITING_SELECTION"],
   ] as [RunLifecycle, RunLifecycle][])("rejects %s → %s", (from, to) => {
     expect(() => assertTransition(from, to)).toThrow(IllegalRunTransitionError);
   });
@@ -44,6 +53,12 @@ describe("run state machine", () => {
 
   it.each(TERMINAL_LIFECYCLES.map((l) => [l]))("terminal %s goes nowhere", (from) => {
     for (const to of RunLifecycleSchema.options) expect(isLegalTransition(from, to)).toBe(false);
+  });
+
+  it("a worker holds SURVEYING (heartbeat); nobody holds AWAITING_SELECTION, which is still not terminal", () => {
+    expect(ACTIVE_LIFECYCLES).toContain("SURVEYING");
+    expect(ACTIVE_LIFECYCLES).not.toContain("AWAITING_SELECTION");
+    expect(NON_TERMINAL_LIFECYCLES).toContain("AWAITING_SELECTION");
   });
 
   it("allows exactly the table plus cancel/error edges", () => {

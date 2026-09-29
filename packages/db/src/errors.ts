@@ -53,3 +53,11 @@ export class IdempotencyConflictError extends Error {
     this.name = "IdempotencyConflictError";
   }
 }
+
+/** A selection named a suggestion that is not in the run's set. */
+export class UnknownSuggestionError extends Error {
+  constructor(public readonly suggestionId: string) {
+    super(`Suggestion ${suggestionId} is not one of this run's suggested tests`);
+    this.name = "UnknownSuggestionError";
+  }
+}
