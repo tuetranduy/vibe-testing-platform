@@ -11,6 +11,7 @@ import { testRunSuggestionRoutes } from "./routes/test-run-suggestions";
 import { testRunEventRoutes } from "./routes/test-run-events";
 import { testRunReportRoutes } from "./routes/test-run-report";
 import { testRunRoutes } from "./routes/test-runs";
+import { testDataSetRoutes } from "./routes/test-data-sets";
 
 export async function buildApp(deps: ApiDeps, opts: FastifyServerOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({ bodyLimit: 1_000_000, ...opts });
@@ -46,6 +47,7 @@ export async function buildApp(deps: ApiDeps, opts: FastifyServerOptions = {}): 
     await testRunReportRoutes(v1, deps);
     await artifactRoutes(v1, deps);
     await llmSettingsRoutes(v1, deps);
+    await testDataSetRoutes(v1, deps);
   });
   return app;
 }

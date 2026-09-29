@@ -103,6 +103,24 @@ export const auditEvents = pgTable(
   (t) => [index("audit_events_tenant_created").on(t.tenantId, t.createdAt)],
 );
 
+/** Reusable test data (V1.1 F3): a named map a new run can start from. Not secret. */
+export const testDataSets = pgTable(
+  "test_data_sets",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    name: text("name").notNull(),
+    /** TestDataRecordSchema, validated on every write and read. */
+    values: jsonb("values").notNull(),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("test_data_sets_tenant_name").on(t.tenantId, t.name)],
+);
+
 export const testRuns = pgTable(
   "test_runs",
   {

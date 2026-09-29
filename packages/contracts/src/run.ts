@@ -73,6 +73,20 @@ export type InconclusiveReason = z.infer<typeof InconclusiveReasonSchema>;
 export const TestDataValueSchema = z.union([z.string().max(2000), z.number(), z.boolean(), z.null()]);
 export type TestDataValue = z.infer<typeof TestDataValueSchema>;
 
+/** At most this many test data entries per run (the run's own plus a saved set's, merged). */
+export const MAX_TEST_DATA_ENTRIES = 50;
+
+/** A run's test data, or a saved set's (V1.1 F3): same keys, values and limit. */
+export const TestDataRecordSchema = z
+  .record(DataKeySchema, TestDataValueSchema)
+  .refine((o) => Object.keys(o).length <= MAX_TEST_DATA_ENTRIES, `At most ${MAX_TEST_DATA_ENTRIES} test data entries`);
+
+/** A saved resource a run was created from, as its stored request records it (V1.1 F3, F4). */
+export const SavedRefSchema = z.object({ id: z.string(), name: z.string() });
+export type SavedRef = z.infer<typeof SavedRefSchema>;
+
+const SavedIdSchema = z.string().trim().min(1).max(100);
+
 export const EnvironmentSchema = z.enum(["staging", "production"]);
 export type Environment = z.infer<typeof EnvironmentSchema>;
 
@@ -107,10 +121,9 @@ export const CreateTestRunRequestSchema = z
       .refine((r) => r.length === 0 || r.length >= 10, "Describe the requirement in at least 10 characters, or leave it empty for suggestions."),
     environment: EnvironmentSchema.default("staging"),
     browser: z.literal("chromium").default("chromium"),
-    testData: z
-      .record(DataKeySchema, TestDataValueSchema)
-      .refine((o) => Object.keys(o).length <= 50, "At most 50 test data entries")
-      .default({}),
+    testData: TestDataRecordSchema.default({}),
+    /** A saved test data set (V1.1 F3): its values are merged under `testData` (the request's own win). */
+    testDataSetId: SavedIdSchema.optional(),
     /** Write-only. Never returned, logged, or sent to a model. */
     secrets: z
       .record(SecretNameSchema, z.string().min(4).max(4096))
@@ -141,9 +154,13 @@ export const CreateTestRunRequestSchema = z
   });
 export type CreateTestRunRequestInput = z.input<typeof CreateTestRunRequestSchema>;
 export type CreateTestRunRequest = z.output<typeof CreateTestRunRequestSchema>;
-/** The request as persisted: never contains secret values, only their names. */
-export type StoredTestRunRequest = Omit<CreateTestRunRequest, "secrets" | "llm"> & {
+/**
+ * The request as persisted: never contains secret values, only their names. `testData` is the merged map; the
+ * saved set it came from is named by `testDataSet` (its later edits never change this run).
+ */
+export type StoredTestRunRequest = Omit<CreateTestRunRequest, "secrets" | "llm" | "testDataSetId"> & {
   secretNames: string[];
+  testDataSet?: SavedRef;
   /**
    * The model the run uses, resolved when it was created (request override → Settings → environment).
    * Absent on runs created before model choice existed: they use the environment's (resolveEnvLlmChoice).

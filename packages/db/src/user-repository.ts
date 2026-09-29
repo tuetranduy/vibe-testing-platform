@@ -29,7 +29,7 @@ export class EmailTakenError extends Error {
   }
 }
 
-function isUniqueViolation(err: unknown): boolean {
+export function isUniqueViolation(err: unknown): boolean {
   let e: unknown = err;
   for (let i = 0; i < 3 && e; i++) {
     if ((e as { code?: string }).code === "23505") return true;

@@ -5,6 +5,8 @@ import {
   SuggestionSetResponseSchema,
   NormalizedRequirementSchema,
   SessionViewSchema,
+  TestDataSetListSchema,
+  TestDataSetSchema,
   UserListResponseSchema,
   UserViewSchema,
   TestReportSchema,
@@ -15,6 +17,8 @@ import {
   type CreateTestRunResponse,
   type CreateUserRequestInput,
   type SessionView,
+  type TestDataSet,
+  type TestDataSetInput,
   type UpdateUserRequest,
   type UserView,
   type LlmDefaultsInput,
@@ -171,6 +175,20 @@ export const createUser = (body: CreateUserRequestInput): Promise<UserView> => r
 
 export const updateUser = (userId: string, body: UpdateUserRequest): Promise<UserView> =>
   request(UserViewSchema, `${USERS}/${seg(userId)}`, { method: "PATCH", body });
+
+const SETS = "/api/v1/test-data-sets";
+
+/** Saved test data sets (V1.1 F3), by name. */
+export const listTestDataSets = async (): Promise<TestDataSet[]> => (await request(TestDataSetListSchema, SETS)).items;
+
+export const createTestDataSet = (body: TestDataSetInput): Promise<TestDataSet> => request(TestDataSetSchema, SETS, { method: "POST", body });
+
+export const updateTestDataSet = (id: string, body: TestDataSetInput): Promise<TestDataSet> =>
+  request(TestDataSetSchema, `${SETS}/${seg(id)}`, { method: "PUT", body });
+
+export const deleteTestDataSet = async (id: string): Promise<void> => {
+  await request(NoContentSchema, `${SETS}/${seg(id)}`, { method: "DELETE" });
+};
 
 const SETTINGS = "/api/v1/settings/llm";
 

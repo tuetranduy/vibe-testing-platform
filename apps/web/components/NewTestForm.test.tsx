@@ -1,14 +1,19 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getLlmSettings } from "../lib/api";
+import { getLlmSettings, listTestDataSets } from "../lib/api";
 import { json, llmSettingsFixture, requirementFixture, suggestionsFixture, summaryFixture } from "../test/fixtures";
 import { NewTestForm } from "./NewTestForm";
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 // The model catalog loads on mount; stubbing it here keeps `fetch` (and its call order) for the run requests.
-vi.mock("../lib/api", async (importOriginal) => ({ ...(await importOriginal<typeof import("../lib/api")>()), getLlmSettings: vi.fn() }));
+vi.mock("../lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/api")>()),
+  getLlmSettings: vi.fn(),
+  // Saved test data sets (V1.1) load on mount too; none unless a test says otherwise.
+  listTestDataSets: vi.fn(async () => []),
+}));
 
 
 function mockFetch(...responses: Response[]) {
@@ -27,6 +32,7 @@ const bodyOf = (fetch: ReturnType<typeof mockFetch>, call = 0) => JSON.parse(Str
 beforeEach(() => {
   push.mockReset();
   vi.mocked(getLlmSettings).mockResolvedValue(llmSettingsFixture());
+  vi.mocked(listTestDataSets).mockResolvedValue([]);
 });
 
 describe("NewTestForm", () => {
@@ -735,5 +741,53 @@ describe("NewTestForm 'Run again' from a run that never got criteria", () => {
       screen.getByText("Copied the website from your earlier run. Test data and secrets must be entered again — they are never copied."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Explore and suggest tests" })).toBeInTheDocument();
+  });
+});
+
+describe("NewTestForm saved test data (V1.1)", () => {
+  const set = {
+    id: "tds_1",
+    name: "Returning shopper",
+    values: { email: "qa@demo.test", searchTerm: "iPhone" },
+    createdBy: null,
+    createdAt: "2026-09-29T10:00:00.000Z",
+    updatedAt: "2026-09-29T10:00:00.000Z",
+  };
+
+  it("offers no choice when there are no saved sets", async () => {
+    render(<NewTestForm />);
+    await waitFor(() => expect(listTestDataSets).toHaveBeenCalled());
+    expect(screen.queryByLabelText("Saved test data set")).not.toBeInTheDocument();
+  });
+
+  it("sends the chosen set's id and says which keys it adds", async () => {
+    vi.mocked(listTestDataSets).mockResolvedValue([set]);
+    const user = userEvent.setup();
+    const fetch = mockFetch(json(202, { runId: "run_7", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_7/events" }));
+    render(<NewTestForm />);
+    await fillValid(user);
+    const select = await screen.findByLabelText("Saved test data set");
+    await user.selectOptions(select, "tds_1");
+    expect(select).toHaveAccessibleDescription("Adds email, searchTerm. A value you enter below with the same key wins.");
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(bodyOf(fetch)).toMatchObject({ testDataSetId: "tds_1", testData: {} });
+  });
+
+  it("puts a deleted set's 422 on the picker", async () => {
+    vi.mocked(listTestDataSets).mockResolvedValue([set]);
+    const user = userEvent.setup();
+    mockFetch(
+      json(422, {
+        code: "TEST_DATA_SET_NOT_FOUND",
+        message: "gone",
+        issues: [{ path: ["testDataSetId"], message: "This test data set no longer exists" }],
+      }),
+    );
+    render(<NewTestForm />);
+    await fillValid(user);
+    await user.selectOptions(await screen.findByLabelText("Saved test data set"), "tds_1");
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    expect(await screen.findByText("This test data set no longer exists")).toBeInTheDocument();
   });
 });

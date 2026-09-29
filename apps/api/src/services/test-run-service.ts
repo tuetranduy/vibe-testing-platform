@@ -1,5 +1,6 @@
 import {
   CreateTestRunRequestSchema,
+  MAX_TEST_DATA_ENTRIES,
   isTerminalLifecycle,
   type CreateTestRunResponse,
   type StoredTestRunRequest,
@@ -11,6 +12,7 @@ import {
   RunRepository,
   SecretRepository,
   StaleTransitionError,
+  TestDataSetRepository,
   newId,
   UserRepository,
   toRunSummary,
@@ -116,8 +118,28 @@ export class TestRunService {
     const resolved = resolveRunLlm({ override: req.llm, saved, env: this.deps.config.llm.envChoice, availability });
     if (!resolved.ok) throw modelNotAvailable(resolved.issue);
 
+    // A saved test data set (V1.1 F3): its values under the request's own, copied now.
+    let testData = req.testData;
+    let testDataSet: StoredTestRunRequest["testDataSet"];
+    if (req.testDataSetId) {
+      const set = await new TestDataSetRepository(this.deps.db).find(tenantId, req.testDataSetId);
+      if (!set) {
+        throw new HttpError(422, "TEST_DATA_SET_NOT_FOUND", "The saved test data set does not exist (it may have been deleted)", [
+          { path: ["testDataSetId"], message: "This test data set no longer exists" },
+        ]);
+      }
+      testData = { ...set.values, ...req.testData };
+      testDataSet = { id: set.id, name: set.name };
+      if (Object.keys(testData).length > MAX_TEST_DATA_ENTRIES) {
+        throw new HttpError(400, "VALIDATION_FAILED", "Request validation failed", [
+          { path: ["testData"], message: `At most ${MAX_TEST_DATA_ENTRIES} test data entries, the saved set's included` },
+        ]);
+      }
+    }
+
     // `llm` is stored as the resolved choice, not the override the request sent.
-    const { secrets, llm: _override, ...rest } = req;
+    const { secrets, llm: _override, testDataSetId: _set, ...requested } = req;
+    const rest = { ...requested, testData };
     const redact = createRunRedactor(Object.values(secrets));
     // Secret values can also appear in the requirement text or test data: redact them by key and
     // value before anything is persisted (D7). The worker only ever sees this redacted copy.
@@ -125,6 +147,7 @@ export class TestRunService {
       ...(redact(rest) as typeof rest),
       secretNames: Object.keys(secrets).sort(),
       llm: resolved.choice,
+      ...(testDataSet ? { testDataSet } : {}),
     };
     const publisher = this.publisher(redact);
     const runId = newId("run");
