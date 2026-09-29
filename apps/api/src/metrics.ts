@@ -54,6 +54,8 @@ export function createApiMetrics(opts: { queue?: Pick<RunQueue, "depth">; depthT
       buckets: [1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600],
       registers,
     }),
+    // The API runs the reaper too (@platform/event-bus startReaper), so it counts what it reaps.
+    runsReaped: new Counter({ name: "runs_reaped_total", help: "Runs the reaper ended", labelNames: ["reason"], registers }),
   };
 }
 
