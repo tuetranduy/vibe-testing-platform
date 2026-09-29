@@ -1,0 +1,36 @@
+id: blog
+tags: [synthetic, content]
+startUrl: https://blog.example.com/
+pages:
+  - url: https://blog.example.com/
+    inventory:
+      title: Wanderlust — a travel blog
+      description: Stories and tips from ten years on the road.
+      headings: [{ level: 1, text: Wanderlust }, { level: 2, text: Latest articles }, { level: 2, text: Newsletter }]
+      links:
+        - { text: Home, url: "https://blog.example.com/", area: nav }
+        - { text: Articles, url: "https://blog.example.com/articles", area: nav }
+        - { text: Travel, url: "https://blog.example.com/category/travel", area: nav }
+        - { text: Food, url: "https://blog.example.com/category/food", area: nav }
+        - { text: About, url: "https://blog.example.com/about", area: nav }
+        - { text: Ten days in Kyoto, url: "https://blog.example.com/articles/ten-days-in-kyoto", area: main }
+        - { text: The best street food in Hanoi, url: "https://blog.example.com/articles/hanoi-street-food", area: main }
+      forms:
+        - { name: Search articles, fields: [{ label: Search, type: search, placeholder: Search articles }], submit: Search }
+        - { name: Newsletter, fields: [{ label: Email address, type: email, placeholder: you@example.com }], submit: Subscribe }
+      buttons: []
+  - url: https://blog.example.com/articles/ten-days-in-kyoto
+    inventory:
+      title: Ten days in Kyoto — Wanderlust
+      description: ""
+      headings: [{ level: 1, text: Ten days in Kyoto }, { level: 2, text: Comments }]
+      links:
+        - { text: Travel, url: "https://blog.example.com/category/travel", area: main }
+        - { text: Next article, url: "https://blog.example.com/articles/hanoi-street-food", area: main }
+      forms:
+        - name: Leave a comment
+          fields: [{ label: Name, type: text, placeholder: "" }, { label: Comment, type: textarea, placeholder: "" }]
+          submit: Post comment
+      buttons: [Share]
+expect:
+  themes: [[article, post, read], [search], [categor, travel, food]]

@@ -1,0 +1,51 @@
+id: demo-shop-home
+tags: [shop, demo-shop]
+# The demo shop's home page and pages the survey loads from it, as the inventory script reads them.
+startUrl: http://localhost:4000/
+pages:
+  - url: http://localhost:4000/
+    inventory:
+      title: Home · Demo Shop
+      description: ""
+      headings: [{ level: 1, text: Demo Shop }, { level: 2, text: Featured products }]
+      links:
+        - { text: Demo Shop, url: "http://localhost:4000/", area: nav }
+        - { text: Products, url: "http://localhost:4000/products", area: nav }
+        - { text: Cart, url: "http://localhost:4000/cart", area: nav }
+        - { text: Login, url: "http://localhost:4000/login", area: nav }
+        - { text: iPhone 17 Pro, url: "http://localhost:4000/products/1", area: main }
+        - { text: Pixel 11, url: "http://localhost:4000/products/2", area: main }
+        - { text: Galaxy S27, url: "http://localhost:4000/products/3", area: main }
+      forms:
+        - { name: Product search, fields: [{ label: Search products, type: search, placeholder: "" }], submit: Search }
+      buttons: []
+  - url: http://localhost:4000/products/1
+    inventory:
+      title: iPhone 17 Pro · Demo Shop
+      description: ""
+      headings: [{ level: 1, text: iPhone 17 Pro }]
+      links: [{ text: Back to products, url: "http://localhost:4000/products", area: main }]
+      forms: [{ name: "", fields: [], submit: Add to cart }]
+      buttons: []
+  - url: http://localhost:4000/cart
+    inventory:
+      title: Cart · Demo Shop
+      description: ""
+      headings: [{ level: 1, text: Your cart }]
+      links: [{ text: Browse products, url: "http://localhost:4000/products", area: main }]
+      forms: []
+      buttons: []
+  - url: http://localhost:4000/login
+    inventory:
+      title: Log in · Demo Shop
+      description: ""
+      headings: [{ level: 1, text: Log in }]
+      links: []
+      forms:
+        - name: Log in
+          fields: [{ label: Email, type: email, placeholder: "" }, { label: Password, type: password, placeholder: "" }]
+          submit: Log in
+      buttons: []
+expect:
+  themes: [[cart], [search], [log in, login, sign in]]
+  needsSecrets: [password]

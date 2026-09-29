@@ -1,0 +1,46 @@
+id: saas-sign-in
+tags: [synthetic, auth]
+startUrl: https://app.example.com/login
+testDataKeys: [email]
+secretNames: [password]
+pages:
+  - url: https://app.example.com/login
+    inventory:
+      title: Sign in · Acme Analytics
+      description: Sign in to your Acme Analytics workspace.
+      headings: [{ level: 1, text: Sign in to Acme }]
+      links:
+        - { text: Forgot your password?, url: "https://app.example.com/password/reset", area: main }
+        - { text: Create an account, url: "https://app.example.com/signup", area: main }
+        - { text: Terms, url: "https://app.example.com/terms", area: main }
+      forms:
+        - name: Sign in
+          fields: [{ label: Work email, type: email, placeholder: name@company.com }, { label: Password, type: password, placeholder: "" }]
+          submit: Sign in
+      buttons: [Continue with Google]
+  - url: https://app.example.com/password/reset
+    inventory:
+      title: Reset your password · Acme Analytics
+      description: ""
+      headings: [{ level: 1, text: Reset your password }]
+      links: [{ text: Back to sign in, url: "https://app.example.com/login", area: main }]
+      forms: [{ name: Reset password, fields: [{ label: Work email, type: email, placeholder: "" }], submit: Send reset link }]
+      buttons: []
+  - url: https://app.example.com/signup
+    inventory:
+      title: Create your account · Acme Analytics
+      description: ""
+      headings: [{ level: 1, text: Start your free trial }]
+      links: [{ text: Sign in, url: "https://app.example.com/login", area: main }]
+      forms:
+        - name: Sign up
+          fields:
+            - { label: Full name, type: text, placeholder: "" }
+            - { label: Work email, type: email, placeholder: "" }
+            - { label: Password, type: password, placeholder: "" }
+          submit: Create account
+      buttons: []
+expect:
+  themes: [[sign in, log in], [forgot, reset]]
+  needsSecrets: [password]
+  destructiveWords: [sign up, signup, create an account, create account, register]

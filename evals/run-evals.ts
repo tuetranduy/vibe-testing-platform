@@ -9,6 +9,7 @@ import { EnvValidationError, defaultLlmModel, loadLiveLlmEnv, resolveEnvLlmChoic
 import { LlmClient, createTransport } from "@platform/llm";
 import { loadPlannerCases, runPlannerSuite } from "./planner/suite";
 import { loadCases, runRequirementCompilerSuite } from "./requirement-compiler/suite";
+import { loadSurveyCases, runSurveySuite } from "./survey/suite";
 import { createUsageMeter, type CaseResult, type UsageMeter } from "./usage";
 
 interface LoadedSuite {
@@ -27,6 +28,7 @@ const suite =
 const SUITES: Record<string, () => LoadedSuite> = {
   "requirement-compiler": suite(loadCases, runRequirementCompilerSuite),
   planner: suite(loadPlannerCases, runPlannerSuite),
+  survey: suite(loadSurveyCases, runSurveySuite),
 };
 
 async function main(): Promise<number> {
