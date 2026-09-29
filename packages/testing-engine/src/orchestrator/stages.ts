@@ -6,6 +6,7 @@ import {
   type ProvisionalResult,
   type RerunResult,
   type StoredTestRunRequest,
+  type SuggestionSetDraft,
   type TestEventInput,
   type TestPlan,
   type TestReport,
@@ -74,6 +75,11 @@ export interface ReportInput {
 }
 
 export interface EngineStages {
+  /**
+   * A blank requirement (spec 2026-09-28-suggest-tests): survey the website read-only and propose
+   * tests. Publishes `page.surveyed` / `artifact.created` itself; the orchestrator stores the set.
+   */
+  survey(ctx: StageContext): Promise<SuggestionSetDraft>;
   analyze(ctx: StageContext): Promise<RequirementDraft>;
   plan(ctx: StageContext, requirement: NormalizedRequirement): Promise<TestPlan>;
   /** Must return (not throw) when the exploration budget or step limit is exhausted. */

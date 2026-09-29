@@ -6,6 +6,7 @@ import {
   ResultRepository,
   RunRepository,
   SecretRepository,
+  SuggestionRepository,
   type TestRun,
 } from "@platform/db";
 import { createRunEventPublisher } from "@platform/event-bus";
@@ -138,6 +139,7 @@ export async function createRunContext(
       if (disagreements > 0) deps.metrics?.reconciliationDisagreements.inc(disagreements);
     },
     enqueueExecute: () => deps.queue.enqueueExecute(run.id),
+    saveSuggestions: (draft) => new SuggestionRepository(deps.db).save(run.id, draft),
   };
 
   // Registered last: nothing above can fail after it, so a registration is always released by dispose().

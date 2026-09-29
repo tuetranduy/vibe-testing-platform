@@ -642,6 +642,9 @@ function executionPorts(requirement: NormalizedRequirement) {
       results = r;
     },
     enqueueExecute: async () => {},
+    saveSuggestions: async () => {
+      throw new Error("not used by these tests");
+    },
   };
   return { ports, events, transitions, saved: () => saved, results: () => results };
 }
@@ -653,7 +656,7 @@ function realPlanStages(llm: LlmClient) {
   // No rerun here: a proxy that cannot start makes the rerun ERRORED without running anything.
   const noRerun = { openProxy: async () => Promise.reject(new Error("no rerun")), spawn: async () => ({}) as never, workspace: { baseDir: "/nonexistent" }, evidence: () => ({}) as never };
   const report = { store: () => ({ saveDiagnostics: async () => {}, llmUsage: async () => [] }) };
-  const real = createRealStages({ exploration: unused, generateTest: { store: () => ({ save: async () => {} }) }, runTest: noRerun, report });
+  const real = createRealStages({ survey: { openSandbox: async () => ({}) as never, store: () => ({}) as never }, exploration: unused, generateTest: { store: () => ({ save: async () => {} }) }, runTest: noRerun, report });
   // The plan stage runs on the run's client, as the worker's context gives it (StageContext.llm).
   return { ...real, plan: (ctx: StageContext, requirement: NormalizedRequirement) => real.plan({ ...ctx, llm }, requirement), explore: fake.explore };
 }

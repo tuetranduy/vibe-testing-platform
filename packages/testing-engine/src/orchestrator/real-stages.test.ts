@@ -92,7 +92,7 @@ const ctx = {
 } as unknown as StageContext;
 const reportDeps = { store: () => ({ saveDiagnostics: async () => {}, llmUsage: async () => [] }) };
 const stagesWith = () =>
-  createRealStages({ exploration: explorationDeps, generateTest: generateTestDeps, runTest: runTestDeps, report: reportDeps });
+  createRealStages({ survey: { openSandbox: async () => ({}) as never, store: () => ({}) as never }, exploration: explorationDeps, generateTest: generateTestDeps, runTest: runTestDeps, report: reportDeps });
 
 describe("createRealStages: the run's model client (StageContext.llm)", () => {
   /** A client that records which stage called it, then stops the stage. */
