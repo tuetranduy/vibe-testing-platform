@@ -126,6 +126,14 @@ describe("POST /v1/test-runs/:runId/rerun", () => {
     expect((await call("POST", "/v1/test-runs/run_missing/rerun", {})).statusCode).toBe(404);
   });
 
+  it("a run that allowed destructive actions is rerun only when that is confirmed", async () => {
+    const source = await finishedSource({ options: { allowDestructiveActions: true } });
+    const refused = await call("POST", `/v1/test-runs/${source}/rerun`, {});
+    expect(refused.statusCode).toBe(422);
+    expect(refused.json()).toMatchObject({ code: "CONFIRMATION_REQUIRED", issues: [{ path: ["confirmDestructiveActions"] }] });
+    expect((await call("POST", `/v1/test-runs/${source}/rerun`, { confirmDestructiveActions: true })).statusCode).toBe(202);
+  });
+
   it("replays an Idempotency-Key instead of creating a second rerun", async () => {
     const source = await finishedSource();
     const headers = { ...auth, "idempotency-key": `rerun-${source}` };

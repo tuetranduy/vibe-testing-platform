@@ -265,6 +265,11 @@ export type TestRunListResponse = z.infer<typeof TestRunListResponseSchema>;
 export const RerunRequestSchema = z.object({
   secrets: SecretRecordSchema.default({}),
   credentialProfileId: SavedIdSchema.optional(),
+  /**
+   * Required (true) when the source run allowed destructive actions: the saved test repeats every action it
+   * recorded, deletions and payments included (the reason such runs skip the automatic rerun, D9 amended).
+   */
+  confirmDestructiveActions: z.boolean().optional(),
 });
 export type RerunRequestInput = z.input<typeof RerunRequestSchema>;
 

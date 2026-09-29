@@ -88,3 +88,21 @@ describe("RerunPanel", () => {
     expect(screen.getByLabelText("pin")).toHaveValue("");
   });
 });
+
+describe("RerunPanel for a run that allowed destructive actions", () => {
+  it("warns, and sends nothing until the repeat is confirmed", async () => {
+    const fetch = api({ [`POST ${RERUN}`]: () => json(202, { runId: "run_4", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_4/events" }) });
+    const navigate = vi.fn();
+    const user = userEvent.setup();
+    render(<RerunPanel runId="run_1" secretNames={[]} compiledCount={1} destructive navigate={navigate} />);
+    await user.click(screen.getByRole("button", { name: "Rerun test" }));
+    expect(screen.getByText(/whatever it deleted, ordered or paid for happens again/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Start rerun" }));
+    expect(screen.getByText("Confirm that the rerun repeats destructive actions.")).toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("checkbox", { name: "I understand: repeat the destructive actions" }));
+    await user.click(screen.getByRole("button", { name: "Start rerun" }));
+    expect(fetch).toHaveBeenCalledWith(RERUN, expect.objectContaining({ body: JSON.stringify({ secrets: {}, confirmDestructiveActions: true }) }));
+    expect(navigate).toHaveBeenCalledWith("/runs/run_4");
+  });
+});
