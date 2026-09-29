@@ -31,6 +31,7 @@ const requirement = (statement = "Cart count increases"): Omit<NormalizedRequire
         right: { key: "cartCount", checkpoint: "before_add" },
       },
       preconditions: [],
+      critical: true,
       ambiguity: null,
     },
   ],

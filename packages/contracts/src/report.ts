@@ -19,6 +19,8 @@ export const TestReportSchema = z.object({
     blocked: z.number().int(),
     inconclusive: z.number().int(),
     confirmedByRerun: z.number().int(),
+    /** V1.1: non-critical criteria, and how many of them did not pass (they never change the verdict). */
+    nonCritical: z.object({ total: z.number().int(), notPassed: z.number().int() }).default({ total: 0, notPassed: 0 }),
   }),
   criteria: z.array(CriterionResultSchema),
   generatedTest: z

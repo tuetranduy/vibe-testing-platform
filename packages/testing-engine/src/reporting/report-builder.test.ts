@@ -40,6 +40,7 @@ const criterion = (id: string, expectedOutcome: AcceptanceCriterion["expectedOut
   statement: `Statement of ${id}`,
   expectedOutcome,
   preconditions: [],
+  critical: true,
   ambiguity: null,
 });
 const declared = (r: FactRef, valueType: "number" | "string" | "string_list") => ({ ...r, description: `The ${r.key}`, valueType });
@@ -197,6 +198,16 @@ describe("report stage: summary and verdict", () => {
     expect(report.startedAt).toBe("2026-09-26T10:00:00.000Z");
     expect(report.finishedAt).toBe("2026-09-26T10:05:00.000Z");
     expect(report.durationMs).toBe(300_000);
+  });
+
+  it("a non-critical FAIL is reported but does not change the verdict (V1.1)", async () => {
+    const failing = (await createReportStage({ store: fakeStore().store })(ctx, input())).criteria.find((c) => c.status === "FAIL")!.criterionId;
+    const requirement = requirementOf(FOUR.criteria.map((c) => (c.id === failing ? { ...c, critical: false } : c)));
+    const report = await createReportStage({ store: fakeStore().store })(ctx, input({ requirement }));
+    expect(report.verdict).toBe("PASSED");
+    expect(report.criteria.find((c) => c.criterionId === failing)).toMatchObject({ status: "FAIL", critical: false });
+    expect(report.criteria.filter((c) => c.critical)).toHaveLength(3);
+    expect(report.summary).toMatchObject({ failed: 1, nonCritical: { total: 1, notPassed: 1 } });
   });
 
   it("confirmedByRerun counts PLAYWRIGHT_RERUN results only", async () => {
@@ -562,7 +573,15 @@ describe("buildReport (the API's report over persisted data, Ruling R36)", () =>
       persisted({ run: { ...persisted().run, lifecycle: "CANCELLED", verdict: null, startedAt: null, finishedAt: null }, plan: null, steps: [], facts: [], results: [], playwright: null, diagnostics: [], llmCalls: [] }),
     ).buildReport("run_1");
     expect(report).toMatchObject({ lifecycle: "CANCELLED", partial: true, verdict: null, error: null, criteria: [], requirement: FOUR });
-    expect(report.summary).toEqual({ totalCriteria: 0, passed: 0, failed: 0, blocked: 0, inconclusive: 0, confirmedByRerun: 0 });
+    expect(report.summary).toEqual({
+      totalCriteria: 0,
+      passed: 0,
+      failed: 0,
+      blocked: 0,
+      inconclusive: 0,
+      confirmedByRerun: 0,
+      nonCritical: { total: 0, notPassed: 0 },
+    });
     expect(report.usage).toEqual({ llmCalls: 0, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 });
   });
 });

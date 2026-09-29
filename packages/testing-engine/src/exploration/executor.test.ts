@@ -253,6 +253,7 @@ function requirementWith(facts: NormalizedRequirement["facts"], outcome?: Normal
         statement: "The cart count increases",
         expectedOutcome: outcome ?? { kind: "semantic", description: "the cart count increases" },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
     ],

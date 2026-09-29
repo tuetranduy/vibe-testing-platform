@@ -104,7 +104,13 @@ describe("reconcile (Section 2.3)", () => {
       evidenceArtifactIds: ["art_1"],
       relatedStepIds: ["st_1"],
       aiNote: null,
+      critical: true,
     });
+  });
+
+  it("carries the criterion's weight without letting it touch the status (V1.1)", () => {
+    const r = reconcile(provisional("FAIL"), "ASSERTION_FAILED", dom, { ...extras, critical: false });
+    expect(r).toMatchObject({ status: "FAIL", verdictSource: "PLAYWRIGHT_RERUN", critical: false });
   });
 
   it("covers every (provisional status × rerun outcome) pair", () => {

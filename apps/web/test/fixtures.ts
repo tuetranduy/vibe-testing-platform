@@ -25,6 +25,7 @@ export const requirementFixture = (): NormalizedRequirement => ({
         right: { key: "cartCount", checkpoint: "before_add" },
       },
       preconditions: [],
+      critical: true,
       ambiguity: null,
     },
     {
@@ -38,6 +39,7 @@ export const requirementFixture = (): NormalizedRequirement => ({
         delta: 1,
       },
       preconditions: [],
+      critical: true,
       ambiguity: { reason: "Amount not specified", suggestions: ["Increase by exactly 1", "Increase by the quantity chosen"] },
     },
     {
@@ -46,6 +48,7 @@ export const requirementFixture = (): NormalizedRequirement => ({
       statement: "The page feels fast",
       expectedOutcome: { kind: "semantic", description: "The page responds quickly" },
       preconditions: [],
+      critical: true,
       ambiguity: null,
     },
   ],
@@ -116,6 +119,7 @@ const reportRequirement = (): NormalizedRequirement => ({
         match: "contains",
       },
       preconditions: [],
+      critical: true,
       ambiguity: null,
     },
     {
@@ -129,6 +133,7 @@ const reportRequirement = (): NormalizedRequirement => ({
         right: { key: "cartCount", checkpoint: "before_add" },
       },
       preconditions: [],
+      critical: true,
       ambiguity: null,
     },
     {
@@ -137,6 +142,7 @@ const reportRequirement = (): NormalizedRequirement => ({
       statement: "A logged-in user can see their order history",
       expectedOutcome: { kind: "visible", fact: { key: "orderHistory", checkpoint: "after_login" }, expected: true },
       preconditions: [{ kind: "secret", ref: "password", description: "Account password" }],
+      critical: true,
       ambiguity: null,
     },
     {
@@ -145,6 +151,7 @@ const reportRequirement = (): NormalizedRequirement => ({
       statement: "The page feels fast",
       expectedOutcome: { kind: "semantic", description: "The page responds quickly" },
       preconditions: [],
+      critical: true,
       ambiguity: null,
     },
     {
@@ -153,6 +160,7 @@ const reportRequirement = (): NormalizedRequirement => ({
       statement: "The product price is shown",
       expectedOutcome: { kind: "visible", fact: { key: "price", checkpoint: "after_add" }, expected: true },
       preconditions: [],
+      critical: true,
       ambiguity: null,
     },
   ],
@@ -178,6 +186,7 @@ export const resultFixture = (r: ResultPatch): CriterionResult => ({
   evidenceArtifactIds: [],
   relatedStepIds: [],
   aiNote: null,
+  critical: true,
   ...r,
 });
 

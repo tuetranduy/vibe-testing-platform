@@ -70,8 +70,9 @@ function compiles(pattern: string, caseSensitive: boolean): boolean {
  * criteria may be removed (with the facts no remaining criterion reads), and a criterion's check
  * may change its literal values. For an edited criterion the server writes the statement from the
  * check and clears `ambiguity`, so the wording can never describe a different check than the one
- * the verifier runs. Anything else is rejected. Unedited criteria are returned exactly as in the
- * latest revision.
+ * the verifier runs. `critical` (V1.1) may change on any criterion, alone or with its check; it never
+ * changes the wording. Anything else is rejected. Unedited criteria are returned exactly as in the
+ * latest revision (with their weight as sent).
  */
 export function applyCriteriaEdit(latest: NormalizedRequirement, body: Pick<NormalizedRequirement, "criteria" | "facts">): EditResult {
   const invalid: EditIssue[] = [];
@@ -105,12 +106,18 @@ export function applyCriteriaEdit(latest: NormalizedRequirement, body: Pick<Norm
         invalid.push({ path: at("expectedOutcome", "match", "value"), message: "Not a valid pattern" });
         return;
       }
-      criteria.push({ ...before, expectedOutcome: outcome, statement: describeExpectedOutcome(outcome, body.facts), ambiguity: null });
+      criteria.push({
+        ...before,
+        critical: c.critical,
+        expectedOutcome: outcome,
+        statement: describeExpectedOutcome(outcome, body.facts),
+        ambiguity: null,
+      });
       return;
     }
     if (c.statement !== before.statement) wordingOnly.push({ path: at("statement"), message: "Change the check, not only its wording" });
     if (!same(c.ambiguity, before.ambiguity)) invalid.push({ path: at("ambiguity"), message: "ambiguity changes only with the check" });
-    criteria.push(before);
+    criteria.push({ ...before, critical: c.critical });
   });
 
   if (invalid.length > 0) return { ok: false, code: "VALIDATION_FAILED", issues: invalid };

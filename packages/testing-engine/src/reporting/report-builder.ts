@@ -95,9 +95,10 @@ export function reconcileCriteria(input: ReconcileCriteriaInput): CriterionResul
   const steps = [...input.steps].sort((a, b) => a.index - b.index);
   const planned = (input.plan?.scenarios ?? []).flatMap((s) => s.steps);
   const redact = input.redact ?? ((s: string) => s);
+  const criticalOf = new Map((input.requirement?.criteria ?? []).map((c) => [c.id, c.critical]));
 
   return results.map((r) => {
-    if (isFinal(r)) return CriterionResultSchema.parse(r);
+    if (isFinal(r)) return CriterionResultSchema.parse({ ...r, critical: criticalOf.get(r.criterionId) ?? r.critical });
     const p = ProvisionalResultSchema.parse(r);
     const outcome: RerunOutcome = input.rerun?.perCriterion[p.criterionId] ?? "UNAVAILABLE";
 
@@ -113,6 +114,7 @@ export function reconcileCriteria(input: ReconcileCriteriaInput): CriterionResul
       evidenceArtifactIds: evidence,
       relatedStepIds: related.map((s) => s.id),
       aiNote: null,
+      critical: criticalOf.get(p.criterionId) ?? true,
     });
     const errorText = input.rerun?.errorText?.[p.criterionId];
     if (!errorText || (outcome !== "ASSERTION_FAILED" && outcome !== "NOT_REACHED")) return result;
@@ -134,6 +136,10 @@ export function summarize(criteria: readonly CriterionResult[]): ReportSummary {
     blocked: count("BLOCKED"),
     inconclusive: count("INCONCLUSIVE"),
     confirmedByRerun: criteria.filter((c) => c.verdictSource === "PLAYWRIGHT_RERUN").length,
+    nonCritical: {
+      total: criteria.filter((c) => !c.critical).length,
+      notPassed: criteria.filter((c) => !c.critical && c.status !== "PASS").length,
+    },
   };
 }
 

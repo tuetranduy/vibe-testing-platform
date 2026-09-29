@@ -17,6 +17,7 @@ import {
   type TestReport,
 } from "@platform/contracts";
 import type { GeneratedTestStore } from "../compiler/generate-stage";
+import { summarize } from "../reporting/report-builder";
 import { aggregateVerdict } from "../verification/aggregate";
 import type { EngineStages, RequirementDraft, StageContext } from "./stages";
 
@@ -152,6 +153,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
               right: { key: "cartCount", checkpoint: "before_add" },
             },
             preconditions: [],
+            critical: true,
             ambiguity: null,
           },
           {
@@ -165,6 +167,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
               match: "contains",
             },
             preconditions: [],
+            critical: true,
             ambiguity: null,
           },
         ],
@@ -343,6 +346,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
     async report(ctx, input): Promise<TestReport> {
       await enter("report");
       // Minimal stand-in for Task 18 reconciliation: rerun-confirmed PASS/FAIL, else provisional.
+      const criticalOf = new Map(input.requirement.criteria.map((c) => [c.id, c.critical]));
       const criteria: CriterionResult[] = input.provisional.map((p) => {
         const rerunOutcome = input.rerun?.perCriterion[p.criterionId] ?? "UNAVAILABLE";
         const decided = p.status === "PASS" || p.status === "FAIL";
@@ -354,9 +358,9 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
           evidenceArtifactIds: [],
           relatedStepIds: [],
           aiNote: null,
+          critical: criticalOf.get(p.criterionId) ?? true,
         };
       });
-      const count = (s: string) => criteria.filter((c) => c.status === s).length;
       const finishedAt = ctx.now();
       return {
         runId: ctx.runId,
@@ -366,14 +370,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
         partial: false,
         targetUrl: ctx.request.targetUrl,
         requirement: input.requirement,
-        summary: {
-          totalCriteria: criteria.length,
-          passed: count("PASS"),
-          failed: count("FAIL"),
-          blocked: count("BLOCKED"),
-          inconclusive: count("INCONCLUSIVE"),
-          confirmedByRerun: criteria.filter((c) => c.verdictSource === "PLAYWRIGHT_RERUN").length,
-        },
+        summary: summarize(criteria),
         criteria,
         generatedTest: input.generatedTest && {
           id: input.generatedTest.id,

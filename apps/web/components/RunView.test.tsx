@@ -53,7 +53,7 @@ const partialReport = (lifecycle: "ERRORED" | "CANCELLED") =>
     verdict: null,
     partial: true,
     error: null,
-    summary: { totalCriteria: 0, passed: 0, failed: 0, blocked: 0, inconclusive: 0, confirmedByRerun: 0 },
+    summary: { totalCriteria: 0, passed: 0, failed: 0, blocked: 0, inconclusive: 0, confirmedByRerun: 0, nonCritical: { total: 0, notPassed: 0 } },
     criteria: [],
     generatedTest: null,
     playwright: null,

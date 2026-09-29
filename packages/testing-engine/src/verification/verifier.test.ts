@@ -113,6 +113,7 @@ const criterion = (expectedOutcome: ExpectedOutcome, extra: Partial<AcceptanceCr
   statement: "The cart count increases after adding a product",
   expectedOutcome,
   preconditions: [],
+  critical: true,
   ambiguity: null,
   ...extra,
 });

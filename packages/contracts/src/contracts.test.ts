@@ -184,6 +184,19 @@ function requirement(overrides: Partial<NormalizedRequirement> = {}): unknown {
 }
 
 describe("NormalizedRequirementSchema", () => {
+  it("marks every criterion critical by default, and needs at least one critical criterion (V1.1)", () => {
+    const parsed = NormalizedRequirementSchema.parse(requirement());
+    expect(parsed.criteria.every((c) => c.critical)).toBe(true);
+    const none = requirement() as NormalizedRequirement;
+    none.criteria = none.criteria.map((c) => ({ ...c, critical: false }));
+    const r = NormalizedRequirementSchema.safeParse(none);
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.map((i) => i.path.join("."))).toContain("criteria");
+    const one = requirement() as NormalizedRequirement;
+    one.criteria = one.criteria.map((c, i) => ({ ...c, critical: i === 0 }));
+    expect(NormalizedRequirementSchema.safeParse(one).success).toBe(true);
+  });
+
   it("accepts a well-formed requirement, including the reserved url fact at a declared checkpoint", () => {
     const r = NormalizedRequirementSchema.safeParse(requirement());
     expect(r.error?.issues).toBeUndefined();
@@ -345,7 +358,14 @@ describe("TestRunSummarySchema", () => {
     createdAt: "2026-09-28T10:00:00.000Z",
     startedAt: null,
     finishedAt: null,
+    owner: null,
   };
+
+  it("names the run's owner (V1.1), or null for the service token and older runs", () => {
+    expect(TestRunSummarySchema.safeParse({ ...summary, llm: null, owner: { id: "usr_1", name: "Ann" } }).success).toBe(true);
+    const { owner: _owner, ...withoutOwner } = summary;
+    expect(TestRunSummarySchema.safeParse({ ...withoutOwner, llm: null }).success).toBe(false);
+  });
 
   it("carries the run's model choice with its catalog label, or null for runs created before model choice", () => {
     const llm = { provider: "anthropic", model: "claude-sonnet-5", label: "Claude Sonnet 5", reasoning: "medium" };

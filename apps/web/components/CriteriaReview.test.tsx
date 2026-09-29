@@ -242,6 +242,39 @@ describe("CriteriaReview", () => {
     await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(2));
   });
 
+  it("marks a criterion non-critical with PUT, and keeps the last critical one on (V1.1)", async () => {
+    const user = userEvent.setup();
+    let sent: NormalizedRequirement | null = null;
+    routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`PUT ${CRITERIA}`]: (init) => {
+        sent = JSON.parse(String(init!.body));
+        return json(200, { ...sent!, revision: 2 });
+      },
+    });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    const box = within(cards[1]!).getByRole("checkbox", { name: "Critical" });
+    expect(box).toBeChecked();
+    await user.click(box);
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(sent!.criteria.map((c) => c.critical)).toEqual([true, false, true]);
+    expect(sent!.criteria[1]!.statement).toBe(requirementFixture().criteria[1]!.statement);
+    await waitFor(() => expect(within(cards[1]!).getByRole("checkbox", { name: "Critical" })).not.toBeChecked());
+    expect(within(screen.getByRole("complementary")).getByText("Non-critical")).toBeInTheDocument();
+  });
+
+  it("disables the switch on the only critical criterion", async () => {
+    const r = requirementFixture();
+    r.criteria = r.criteria.map((c, i) => ({ ...c, critical: i === 0 }));
+    routeFetch({ [`GET ${CRITERIA}`]: () => json(200, r) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    expect(within(cards[0]!).getByRole("checkbox", { name: "Critical" })).toBeDisabled();
+    expect(within(cards[0]!).getByText("Decides the verdict. At least one criterion must stay critical.")).toBeInTheDocument();
+    expect(within(cards[1]!).getByRole("checkbox", { name: "Critical" })).toBeEnabled();
+  });
+
   it("renders repeated suggestions without duplicate React keys", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const r = requirementFixture();

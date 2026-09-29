@@ -3693,3 +3693,23 @@ a.running-card:hover {
     padding-inline: 8px;
   }
 }
+
+/* V1.1: criterion weight */
+.weight-field {
+  display: grid;
+  gap: 4px;
+}
+.weight-field .hint {
+  margin: 0;
+}
+.weight-tag {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 8px;
+  padding: 1px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 560;
+}
