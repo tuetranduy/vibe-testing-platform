@@ -8,6 +8,7 @@ import {
   CredentialProfileListSchema,
   CredentialProfileSchema,
   TestDataSetListSchema,
+  UsageReportSchema,
   TestDataSetSchema,
   UserListResponseSchema,
   UserViewSchema,
@@ -24,6 +25,7 @@ import {
   type CredentialProfile,
   type UpdateCredentialProfileRequest,
   type TestDataSet,
+  type UsageReport,
   type TestDataSetInput,
   type UpdateUserRequest,
   type UserView,
@@ -217,6 +219,12 @@ export const updateCredentialProfile = (id: string, body: UpdateCredentialProfil
 
 export const deleteCredentialProfile = async (id: string): Promise<void> => {
   await request(NoContentSchema, `${PROFILES}/${seg(id)}`, { method: "DELETE" });
+};
+
+/** Model spend over whole UTC days (V1.1): the last 30 by default; `owner` as for the run list. */
+export const getUsage = (range: { from?: string; to?: string; owner?: "me" | "all" } = {}): Promise<UsageReport> => {
+  const q = new URLSearchParams(Object.entries(range).filter((e): e is [string, string] => typeof e[1] === "string"));
+  return request(UsageReportSchema, `/api/v1/usage${q.size > 0 ? `?${q}` : ""}`);
 };
 
 const SETTINGS = "/api/v1/settings/llm";

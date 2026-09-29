@@ -57,7 +57,7 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
       )}
       <a className="button button-primary nav-cta" href="/runs/new" aria-current={current("/runs/new")}>
         <Icon name="plus" />
-        New test
+        <span className="nav-cta-label">New test</span>
       </a>
     </nav>
   );

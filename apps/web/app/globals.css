@@ -78,6 +78,8 @@
 
   /* Mix bar segments that are not a verdict (running, cancelled, errored) */
   --mix-other: #dcd9cf;
+  /* Single-series chart bars (usage): validated against the light surface. */
+  --chart-bar: #2f54eb;
 
   /* Shape, elevation, motion */
   --radius-sm: 8px;
@@ -104,6 +106,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    /* Validated against the dark surface (lightness band 0.48–0.67). */
+    --chart-bar: #6582f5;
     --bg: #121114;
     --surface: #1b1a1f;
     --surface-muted: #26252b;
@@ -3686,6 +3690,8 @@ a.running-card:hover {
   }
 }
 .data-table-wrap {
+  /* Relative: a visually-hidden (absolute) label inside a cell must not escape the scroll box. */
+  position: relative;
   overflow-x: auto;
 }
 @media (max-width: 560px) {
@@ -3876,5 +3882,86 @@ fieldset.stack-tight {
   }
   .print-report {
     max-width: none;
+  }
+}
+
+/* V1.1: usage */
+.usage-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+.usage-stats {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.usage-hero {
+  font-size: 2.5rem;
+}
+.usage-chart {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+}
+.usage-chart svg {
+  display: block;
+}
+.chart-bar {
+  fill: var(--chart-bar);
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.chart-grid {
+  stroke: var(--border-soft);
+  stroke-width: 1;
+}
+.chart-axis {
+  fill: var(--text-subtle);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.chart-tooltip {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.usage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+/* V1.1: the header at phone width — icon-only "New test", sign-out on the Account page */
+@media (max-width: 560px) {
+  .nav-signout {
+    display: none;
+  }
+  .nav-cta-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .nav-cta {
+    padding-inline: 10px;
+  }
+  .nav-user .nav-link {
+    padding-inline: 8px;
+  }
+  .usage-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .usage-hero {
+    font-size: 2rem;
   }
 }

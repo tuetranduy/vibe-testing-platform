@@ -6,6 +6,7 @@ export * from "./run-repository";
 export * from "./user-repository";
 export * from "./test-data-set-repository";
 export * from "./credential-profile-repository";
+export * from "./usage-repository";
 export * from "./event-repository";
 export * from "./requirement-repository";
 export * from "./suggestion-repository";

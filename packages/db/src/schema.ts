@@ -375,7 +375,8 @@ export const llmCalls = pgTable(
     status: text("status").notNull(),
     createdAt: createdAt(),
   },
-  (t) => [index("llm_calls_run").on(t.runId)],
+  // llm_calls_created: the cost dashboard's date-range scans (V1.1 F7).
+  (t) => [index("llm_calls_run").on(t.runId), index("llm_calls_created").on(t.createdAt)],
 );
 
 /** Settings → Defaults for new tests, per tenant. No row: the defaults come from the LLM_* environment. */

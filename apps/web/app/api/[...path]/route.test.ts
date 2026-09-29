@@ -71,6 +71,7 @@ describe("API proxy allow-list", () => {
     ["GET", "/api/v1/credential-profiles", GET],
     ["POST", "/api/v1/test-runs/run_1/rerun", POST],
     ["GET", "/api/v1/test-runs/run_1/report.md", GET],
+    ["GET", "/api/v1/usage?from=2026-09-01&to=2026-09-29&owner=me", GET],
     ["POST", "/api/v1/credential-profiles", POST],
     ["PUT", "/api/v1/credential-profiles/cp_1", PUT],
     ["DELETE", "/api/v1/credential-profiles/cp_1", DELETE],
