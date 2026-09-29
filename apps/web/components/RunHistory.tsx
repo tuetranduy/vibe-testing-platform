@@ -3,6 +3,7 @@
 import { isTerminalLifecycle, type TestRunSummary } from "@platform/contracts";
 import { useCallback, useEffect, useId, useState } from "react";
 import { listRuns } from "../lib/api";
+import { isAdminUser, useMe } from "../lib/me";
 import { PROGRESS_STAGES, STAGE_LABELS, type ProgressStage } from "../lib/progress-reducer";
 import { Icon, type IconName } from "./Icon";
 import { ERROR_CATEGORY_LABEL, LIFECYCLE_LABEL } from "./format";
@@ -43,12 +44,17 @@ export function RunHistory() {
   const [moreError, setMoreError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterId>("all");
   const [query, setQuery] = useState("");
+  /** Administrators: everyone's runs (the API's default) or only their own. Members only ever get their own. */
+  const [owner, setOwner] = useState<"all" | "me">("all");
   const searchId = useId();
+  const me = useMe();
+  const isAdmin = isAdminUser(me);
+  const ownerParam = owner === "me" ? "me" : undefined;
 
   useEffect(() => {
     let live = true;
     setLoad({ status: "loading" });
-    listRuns().then(
+    listRuns(null, 50, ownerParam).then(
       (page) => {
         if (!live) return;
         setItems(page.items);
@@ -60,14 +66,14 @@ export function RunHistory() {
     return () => {
       live = false;
     };
-  }, [attempt]);
+  }, [attempt, ownerParam]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor) return;
     setLoadingMore(true);
     setMoreError(null);
     try {
-      const page = await listRuns(nextCursor);
+      const page = await listRuns(nextCursor, 50, ownerParam);
       // A run can appear on two pages if runs were created meanwhile; keep the first copy.
       setItems((prev) => {
         const seen = new Set(prev.map((r) => r.runId));
@@ -79,14 +85,30 @@ export function RunHistory() {
     } finally {
       setLoadingMore(false);
     }
-  }, [nextCursor]);
+  }, [nextCursor, ownerParam]);
 
   const hasRuns = load.status === "ready" && items.length > 0;
   const head = (
     <div className="page-head">
       <div className="title-block">
         <h1 className="page-title">Test runs</h1>
-        <p className="page-lede">Every run, its verdict, and the evidence behind it.</p>
+        <p className="page-lede">
+          {me && !isAdmin ? "Your runs, their verdicts, and the evidence behind them." : "Every run, its verdict, and the evidence behind it."}
+        </p>
+        {isAdmin && (
+          <div className="filter-chips" role="group" aria-label="Whose runs">
+            {(
+              [
+                ["all", "Everyone's runs"],
+                ["me", "My runs"],
+              ] as const
+            ).map(([id, label]) => (
+              <button key={id} type="button" className="chip" aria-pressed={owner === id} onClick={() => setOwner(id)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       {hasRuns && (
         <div className="input-with-icon search-field">
@@ -250,6 +272,7 @@ function RunTable({ runs }: { runs: TestRunSummary[] }) {
               </a>
               <span className="history-host">{hostOf(r.targetUrl)}</span>
               {r.environment === "production" && r.allowDestructiveActions && <span className="history-tag">Production · destructive</span>}
+              {r.owner && <span className="history-owner">by {r.owner.name}</span>}
             </td>
             <td role="cell" className="history-created">
               <time dateTime={r.createdAt}>{formatWhen(r.createdAt)}</time>

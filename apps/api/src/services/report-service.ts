@@ -11,6 +11,7 @@ import {
   ResultRepository,
   RunRepository,
   type Database,
+  type RunScope,
 } from "@platform/db";
 // The pure assembler only (Ruling R36): this entry point never loads Stagehand, a browser or an LLM client.
 import { createReportBuilder, type PersistedRunSources } from "@platform/testing-engine/reporting";
@@ -69,8 +70,8 @@ export class ReportService {
     this.builder = createReportBuilder((runId) => loadReportSources(deps.db, runId));
   }
 
-  async get(runId: string): Promise<TestReport> {
-    const run = await new RunRepository(this.deps.db).getRequired(this.deps.config.defaultTenantId, runId);
+  async get(scope: RunScope, runId: string): Promise<TestReport> {
+    const run = await new RunRepository(this.deps.db).getRequired(scope, runId);
     if (!isTerminalLifecycle(run.lifecycle)) {
       throw new HttpError(409, "REPORT_NOT_READY", `The report is available once the run ends (it is ${run.lifecycle})`);
     }

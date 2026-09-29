@@ -12,6 +12,7 @@ import {
   SecretRepository,
   StaleTransitionError,
   newId,
+  UserRepository,
   toRunSummary,
   type TestRun,
 } from "@platform/db";
@@ -19,6 +20,7 @@ import { createRunEventPublisher, type RunEventPublisher } from "@platform/event
 import { catalogModel } from "@platform/llm/catalog";
 import { createRunRedactor, encryptSecret, redactByKey, secretFingerprint, validateTargetUrl } from "@platform/security";
 import { createHmac } from "node:crypto";
+import { actorId, listScope, runScope, type Principal } from "../auth/principal";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 import { NO_VERDICT, observeStage } from "../metrics";
@@ -39,8 +41,18 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** The run summary, with the model named as the catalog names it (the id when not in the catalog). */
-const summaryOf = (run: TestRun): TestRunSummary => toRunSummary(run, (model) => catalogModel(model)?.label ?? model);
+/** Run summaries, with the model named as the catalog names it (the id when not in it) and the owner by name. */
+export async function summariesOf(db: ApiDeps["db"], tenantId: string, runs: readonly TestRun[]): Promise<TestRunSummary[]> {
+  const names = await new UserRepository(db).namesById(
+    tenantId,
+    runs.flatMap((r) => (r.ownerUserId ? [r.ownerUserId] : [])),
+  );
+  return runs.map((run) => toRunSummary(run, (model) => catalogModel(model)?.label ?? model, (id) => names.get(id) ?? null));
+}
+
+export async function summaryOf(db: ApiDeps["db"], run: TestRun): Promise<TestRunSummary> {
+  return (await summariesOf(db, run.tenantId, [run]))[0]!;
+}
 
 function isUniqueViolation(err: unknown): boolean {
   let e: unknown = err;
@@ -66,13 +78,13 @@ export class TestRunService {
     return { runId: run.id, lifecycle: "QUEUED", eventsUrl: `/v1/test-runs/${run.id}/events` };
   }
 
-  async create(body: unknown, idempotencyKey: string | undefined): Promise<{ status: 202; body: CreateTestRunResponse }> {
+  async create(principal: Principal, body: unknown, idempotencyKey: string | undefined): Promise<{ status: 202; body: CreateTestRunResponse }> {
     const parsed = CreateTestRunRequestSchema.safeParse(body);
     if (!parsed.success) {
       throw new HttpError(400, "VALIDATION_FAILED", "Request validation failed", zodIssues(parsed.error));
     }
     const req = parsed.data;
-    const { tenantId } = { tenantId: this.deps.config.defaultTenantId };
+    const { tenantId } = principal;
 
     // HMAC, not a plain hash: the body contains secrets, which may be low-entropy.
     const requestHash = idempotencyKey
@@ -82,7 +94,7 @@ export class TestRunService {
       if (idempotencyKey.length > 200) throw new HttpError(400, "VALIDATION_FAILED", "Idempotency-Key too long");
       const existing = await this.runs.findByIdempotencyKey(tenantId, idempotencyKey);
       if (existing) {
-        const replayed = await this.replay(existing, requestHash!);
+        const replayed = await this.replay(existing, requestHash!, principal);
         if (replayed) return replayed;
       }
     }
@@ -133,6 +145,7 @@ export class TestRunService {
           request: stored,
           idempotencyKey: idempotencyKey ?? null,
           requestHash,
+          ownerUserId: actorId(principal),
         });
         await new SecretRepository(tx).insertMany(
           run.id,
@@ -157,7 +170,7 @@ export class TestRunService {
     } catch (err) {
       if (idempotencyKey && isUniqueViolation(err)) {
         const existing = await this.runs.findByIdempotencyKey(tenantId, idempotencyKey);
-        const replayed = existing && (await this.replay(existing, requestHash!));
+        const replayed = existing && (await this.replay(existing, requestHash!, principal));
         if (replayed) return replayed;
         throw new HttpError(409, "IDEMPOTENCY_CONFLICT", "A request with this Idempotency-Key is being processed");
       }
@@ -178,8 +191,9 @@ export class TestRunService {
    * Same key + same body → the original response. A run that failed to enqueue (the client got 503
    * and was told to retry) releases its key so the retry creates a fresh run; returns null then.
    */
-  private async replay(existing: TestRun, requestHash: string): Promise<{ status: 202; body: CreateTestRunResponse } | null> {
-    if (existing.requestHash !== requestHash) throw new IdempotencyConflictError(existing.id);
+  private async replay(existing: TestRun, requestHash: string, principal: Principal): Promise<{ status: 202; body: CreateTestRunResponse } | null> {
+    // Another user's key is never replayed to this caller: same outcome as a different body.
+    if (existing.requestHash !== requestHash || existing.ownerUserId !== actorId(principal)) throw new IdempotencyConflictError(existing.id);
     if (existing.lifecycle === "ERRORED" && existing.errorMessage === ENQUEUE_FAILED) {
       await this.runs.releaseIdempotencyKey(existing.id);
       return null;
@@ -208,22 +222,27 @@ export class TestRunService {
     }
   }
 
-  async get(runId: string): Promise<TestRunSummary> {
-    return summaryOf(await this.runs.getRequired(this.deps.config.defaultTenantId, runId));
+  async get(principal: Principal, runId: string): Promise<TestRunSummary> {
+    return summaryOf(this.deps.db, await this.runs.getRequired(runScope(principal), runId));
   }
 
-  async list(limit: number, cursor: string | null): Promise<{ items: TestRunSummary[]; nextCursor: string | null }> {
-    const page = await this.runs.list(this.deps.config.defaultTenantId, { limit, cursor });
-    return { items: page.items.map(summaryOf), nextCursor: page.nextCursor };
+  async list(
+    principal: Principal,
+    limit: number,
+    cursor: string | null,
+    owner?: "me" | "all",
+  ): Promise<{ items: TestRunSummary[]; nextCursor: string | null }> {
+    const page = await this.runs.list(listScope(principal, owner), { limit, cursor });
+    return { items: await summariesOf(this.deps.db, principal.tenantId, page.items), nextCursor: page.nextCursor };
   }
 
   /**
    * QUEUED / AWAITING_SELECTION / AWAITING_CONFIRMATION: cancelled immediately (no worker holds them).
    * Active: cancel requested + Redis signal; the worker stops at the next boundary.
    */
-  async cancel(runId: string): Promise<TestRunSummary> {
-    const tenantId = this.deps.config.defaultTenantId;
-    let run = await this.runs.getRequired(tenantId, runId);
+  async cancel(principal: Principal, runId: string): Promise<TestRunSummary> {
+    const scope = runScope(principal);
+    let run = await this.runs.getRequired(scope, runId);
     if (isTerminalLifecycle(run.lifecycle)) {
       throw new HttpError(409, "RUN_TERMINAL", `Run is already ${run.lifecycle}`);
     }
@@ -244,10 +263,10 @@ export class TestRunService {
           message: "Run cancelled by user",
           payload: { reason: "USER_REQUESTED" },
         });
-        return summaryOf(cancelled);
+        return summaryOf(this.deps.db, cancelled);
       } catch (err) {
         if (!(err instanceof StaleTransitionError)) throw err;
-        run = await this.runs.getRequired(tenantId, runId); // a worker picked it up; fall through
+        run = await this.runs.getRequired(scope, runId); // a worker picked it up; fall through
         if (isTerminalLifecycle(run.lifecycle)) throw new HttpError(409, "RUN_TERMINAL", `Run is already ${run.lifecycle}`);
       }
     }
@@ -255,6 +274,6 @@ export class TestRunService {
     const marked = await this.runs.requestCancel(run.id, "USER_REQUESTED");
     if (!marked) throw new HttpError(409, "RUN_TERMINAL", "Run already finished");
     await this.deps.cancelSignal.send(run.id);
-    return summaryOf(marked);
+    return summaryOf(this.deps.db, marked);
   }
 }

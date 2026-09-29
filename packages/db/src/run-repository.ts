@@ -33,8 +33,19 @@ export interface TestRun {
   finishedAt: Date | null;
   idempotencyKey: string | null;
   requestHash: string | null;
+  ownerUserId: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Which runs a caller may see (V1.1 F1): every run of the tenant, or only those one user owns. Other
+ * runs are indistinguishable from missing ones.
+ */
+export interface RunScope {
+  tenantId: string;
+  /** Set: only this user's runs. */
+  ownerUserId?: string | null;
 }
 
 export interface CreateRunInput {
@@ -44,6 +55,7 @@ export interface CreateRunInput {
   request: StoredTestRunRequest;
   idempotencyKey?: string | null;
   requestHash?: string | null;
+  ownerUserId?: string | null;
 }
 
 export interface TransitionPatch {
@@ -74,7 +86,11 @@ function toRun(row: Row): TestRun {
  * `modelLabel` names the run's model for display: the API passes the model catalog's labels (@platform/llm,
  * which db does not depend on); by default, the model id.
  */
-export function toRunSummary(run: TestRun, modelLabel: (model: string) => string = (model) => model): TestRunSummary {
+export function toRunSummary(
+  run: TestRun,
+  modelLabel: (model: string) => string = (model) => model,
+  ownerName: (userId: string) => string | null = () => null,
+): TestRunSummary {
   const llm = run.request.llm;
   return {
     runId: run.id,
@@ -90,7 +106,13 @@ export function toRunSummary(run: TestRun, modelLabel: (model: string) => string
     startedAt: run.startedAt?.toISOString() ?? null,
     finishedAt: run.finishedAt?.toISOString() ?? null,
     llm: llm ? { provider: llm.provider, model: llm.model, label: modelLabel(llm.model), reasoning: llm.reasoning } : null,
+    owner: run.ownerUserId ? { id: run.ownerUserId, name: ownerName(run.ownerUserId) ?? "Former user" } : null,
   };
+}
+
+function scopeWhere(scope: string | RunScope) {
+  const s = typeof scope === "string" ? { tenantId: scope } : scope;
+  return s.ownerUserId ? and(eq(testRuns.tenantId, s.tenantId), eq(testRuns.ownerUserId, s.ownerUserId))! : eq(testRuns.tenantId, s.tenantId);
 }
 
 function encodeCursor(run: TestRun): string {
@@ -128,6 +150,7 @@ export class RunRepository {
         requestJson: input.request,
         idempotencyKey: input.idempotencyKey ?? null,
         requestHash: input.requestHash ?? null,
+        ownerUserId: input.ownerUserId ?? null,
         // Millisecond precision (not Postgres' microseconds) so list cursors round-trip exactly.
         createdAt: new Date(),
       })
@@ -157,12 +180,15 @@ export class RunRepository {
     return run;
   }
 
-  /** Tenant-scoped; other tenants' runs are indistinguishable from missing ones. */
-  async getRequired(tenantId: string, runId: string): Promise<TestRun> {
+  /**
+   * Tenant-scoped (a string) or caller-scoped (a RunScope with an owner); runs outside the scope are
+   * indistinguishable from missing ones.
+   */
+  async getRequired(scope: string | RunScope, runId: string): Promise<TestRun> {
     const [row] = await this.db
       .select()
       .from(testRuns)
-      .where(and(eq(testRuns.id, runId), eq(testRuns.tenantId, tenantId)));
+      .where(and(eq(testRuns.id, runId), scopeWhere(scope)));
     if (!row) throw new NotFoundError("TestRun", runId);
     return toRun(row);
   }
@@ -175,9 +201,9 @@ export class RunRepository {
     return row ? toRun(row) : null;
   }
 
-  async list(tenantId: string, opts: { limit: number; cursor?: string | null }): Promise<Page<TestRun>> {
+  async list(scope: string | RunScope, opts: { limit: number; cursor?: string | null }): Promise<Page<TestRun>> {
     const limit = Math.max(1, Math.min(opts.limit, 100));
-    let where = eq(testRuns.tenantId, tenantId);
+    let where = scopeWhere(scope);
     if (opts.cursor) {
       const c = decodeCursor(opts.cursor);
       if (!c) throw new InvalidCursorError();

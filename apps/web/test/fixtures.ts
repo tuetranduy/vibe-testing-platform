@@ -70,6 +70,7 @@ export const summaryFixture = (patch: Partial<TestRunSummary> = {}): TestRunSumm
   startedAt: null,
   finishedAt: null,
   llm: null,
+  owner: null,
   ...patch,
 });
 

@@ -6,20 +6,17 @@ import {
   StaleTransitionError,
   SuggestionRepository,
   UnknownSuggestionError,
-  toRunSummary,
+  type RunScope,
 } from "@platform/db";
 import { createRunEventPublisher, type RunEventPublisher } from "@platform/event-bus";
-import { catalogModel } from "@platform/llm/catalog";
 import { redactByKey, redactFingerprintedSecrets } from "@platform/security";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 import { NO_VERDICT, observeStage } from "../metrics";
+import { summaryOf } from "./test-run-service";
 
 const ENQUEUE_FAILED = "Queue unavailable after selection";
 
-/** The run summary with the model named as B's `TestRunService` names it (the catalog's label, else the id). */
-const summaryOf = (run: Parameters<typeof toRunSummary>[0]): TestRunSummary =>
-  toRunSummary(run, (model) => catalogModel(model)?.label ?? model);
 
 const notAwaiting = (lifecycle: string) =>
   new HttpError(409, "RUN_NOT_AWAITING_SELECTION", `Run is ${lifecycle}; a suggested test can only be chosen while the run awaits a choice`);
@@ -48,8 +45,8 @@ export class SuggestionService {
     return createRunEventPublisher({ events: new EventRepository(this.deps.db), redis: this.deps.redis, redact: redactByKey });
   }
 
-  async get(runId: string): Promise<SuggestionSetResponse> {
-    const run = await this.runs.getRequired(this.deps.config.defaultTenantId, runId);
+  async get(scope: RunScope, runId: string): Promise<SuggestionSetResponse> {
+    const run = await this.runs.getRequired(scope, runId);
     const set = await this.suggestions.get(runId);
     if (!set) {
       if (run.request.requirement === "" && (run.lifecycle === "QUEUED" || run.lifecycle === "SURVEYING")) {
@@ -72,8 +69,8 @@ export class SuggestionService {
    * `suggestion.selected`, then the analyze-run job. A queue failure after the transition errors the
    * run, as confirm does.
    */
-  async select(runId: string, body: unknown): Promise<TestRunSummary> {
-    const run = await this.runs.getRequired(this.deps.config.defaultTenantId, runId);
+  async select(scope: RunScope, runId: string, body: unknown): Promise<TestRunSummary> {
+    const run = await this.runs.getRequired(scope, runId);
     const parsed = SelectSuggestionRequestSchema.safeParse(body);
     if (!parsed.success) throw new HttpError(400, "VALIDATION_FAILED", "Request validation failed", zodIssues(parsed.error));
     if (run.lifecycle !== "AWAITING_SELECTION") throw notAwaiting(run.lifecycle);
@@ -115,7 +112,7 @@ export class SuggestionService {
       await this.failEnqueue(runId, selected.run.lifecycleChangedAt);
       throw new HttpError(503, "QUEUE_UNAVAILABLE", "The run could not be queued; please retry");
     }
-    return summaryOf(selected.run);
+    return summaryOf(this.deps.db, selected.run);
   }
 
   private async failEnqueue(runId: string, analyzingAt: Date): Promise<void> {

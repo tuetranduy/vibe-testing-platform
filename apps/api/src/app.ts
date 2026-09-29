@@ -1,8 +1,10 @@
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import { createBearerAuth } from "./auth/bearer";
+import { createPrincipalResolver } from "./auth/principal";
 import type { ApiDeps } from "./deps";
 import { registerErrorHandler } from "./errors";
 import { artifactRoutes } from "./routes/artifacts";
+import { authRoutes } from "./routes/auth";
 import { llmSettingsRoutes } from "./routes/llm-settings";
 import { testRunCriteriaRoutes } from "./routes/test-run-criteria";
 import { testRunSuggestionRoutes } from "./routes/test-run-suggestions";
@@ -35,6 +37,8 @@ export async function buildApp(deps: ApiDeps, opts: FastifyServerOptions = {}): 
 
   await app.register(async (v1) => {
     v1.addHook("onRequest", createBearerAuth(deps.config.apiToken));
+    v1.addHook("onRequest", createPrincipalResolver(deps));
+    await authRoutes(v1, deps);
     await testRunRoutes(v1, deps);
     await testRunCriteriaRoutes(v1, deps);
     await testRunSuggestionRoutes(v1, deps);

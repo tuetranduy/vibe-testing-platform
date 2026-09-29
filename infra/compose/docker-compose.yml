@@ -24,6 +24,10 @@ x-app-env: &app-env
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   BROWSER_MODE: local
   API_TOKEN: ${API_TOKEN:-dev-api-token-change-me-please}
+  # The first administrator (created while there are no users). Local-only default: change it.
+  BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}
+  BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-admin-password-change-me}
+  SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
   API_PORT: "3001"
   API_URL: http://api:3001
   DEFAULT_TENANT_ID: t_default

@@ -264,3 +264,37 @@ describe("RunHistory", () => {
     expect(screen.getAllByText("Production · destructive")).toHaveLength(1);
   });
 });
+
+describe("RunHistory owners (V1.1)", () => {
+  it("names each run's owner", async () => {
+    listFetch({ [FIRST]: () => json(200, { items: [run(1, { owner: { id: "usr_1", name: "Ann" } }), run(2)], nextCursor: null }) });
+    render(<RunHistory />);
+    expect(await screen.findByText("by Ann")).toBeInTheDocument();
+    expect(screen.getAllByText(/^by /)).toHaveLength(1);
+  });
+
+  it("lets an admin switch to their own runs", async () => {
+    const { testMe, userFixture } = await import("../test/me");
+    testMe.current = userFixture({ role: "admin" });
+    const fetch = listFetch({
+      [FIRST]: () => json(200, { items: [run(1), run(2)], nextCursor: null }),
+      [`${FIRST}&owner=me`]: () => json(200, { items: [run(3)], nextCursor: null }),
+    });
+    render(<RunHistory />);
+    await screen.findByRole("link", { name: "Requirement number 1" });
+    await userEvent.click(screen.getByRole("button", { name: "My runs" }));
+    expect(await screen.findByRole("link", { name: "Requirement number 3" })).toBeInTheDocument();
+    expect(fetch).toHaveBeenLastCalledWith(`${FIRST}&owner=me`, expect.anything());
+    expect(screen.getByRole("button", { name: "My runs" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("offers no switch to members", async () => {
+    const { testMe, userFixture } = await import("../test/me");
+    testMe.current = userFixture({ role: "member" });
+    listFetch({ [FIRST]: () => json(200, { items: [run(1)], nextCursor: null }) });
+    render(<RunHistory />);
+    await screen.findByRole("link", { name: "Requirement number 1" });
+    expect(screen.queryByRole("button", { name: "My runs" })).not.toBeInTheDocument();
+    expect(screen.getByText("Your runs, their verdicts, and the evidence behind them.")).toBeInTheDocument();
+  });
+});

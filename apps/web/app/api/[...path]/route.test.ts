@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GET, POST, PUT } from "./route";
+import { DELETE, GET, PATCH, POST, PUT } from "./route";
 
 const TOKEN = "test-token-0123456789abcdef";
 const WEB = "http://web.test:3000";
@@ -18,8 +18,16 @@ function stubUpstream(respond: (u: Upstream) => Response | Promise<Response> = (
   return calls;
 }
 
-const req = (method: string, path: string, init: { headers?: Record<string, string>; body?: string } = {}) =>
-  new Request(`${WEB}${path}`, { method, headers: { host: "web.test:3000", ...init.headers }, body: init.body });
+const SESSION = "sess_0123456789abcdefABCDEF";
+/** A request from a signed-in browser (the session cookie is added to any cookie given), unless `session: false`. */
+const req = (method: string, path: string, init: { headers?: Record<string, string>; body?: string; session?: boolean } = {}) => {
+  const cookie = [init.headers?.cookie, init.session === false ? undefined : `platform_session=${SESSION}`].filter(Boolean).join("; ");
+  return new Request(`${WEB}${path}`, {
+    method,
+    headers: { host: "web.test:3000", ...init.headers, ...(cookie ? { cookie } : {}) },
+    body: init.body,
+  });
+};
 
 const sameOrigin = { origin: WEB, "content-type": "application/json" };
 
@@ -48,6 +56,13 @@ describe("API proxy allow-list", () => {
     ["PUT", "/api/v1/settings/llm/keys/gemini", PUT],
     ["GET", "/api/v1/test-runs/run_1/suggestions", GET],
     ["POST", "/api/v1/test-runs/run_1/suggestions/select", POST],
+    ["GET", "/api/v1/test-runs?owner=me", GET],
+    ["POST", "/api/v1/auth/logout", POST],
+    ["GET", "/api/v1/auth/me", GET],
+    ["PUT", "/api/v1/auth/password", PUT],
+    ["GET", "/api/v1/users", GET],
+    ["POST", "/api/v1/users", POST],
+    ["PATCH", "/api/v1/users/usr_1", PATCH],
   ] as const)("forwards %s %s", async (method, path, handler) => {
     const calls = stubUpstream();
     const res = await handler(req(method, path, method === "GET" ? {} : { headers: sameOrigin, body: "{}" }));
@@ -74,6 +89,10 @@ describe("API proxy allow-list", () => {
     ["GET", "/api/v1/settings", GET],
     ["GET", "/api/v1/test-runs/run_1/suggestions/select", GET],
     ["PUT", "/api/v1/test-runs/run_1/suggestions", PUT],
+    ["GET", "/api/v1/auth/login", GET],
+    ["PATCH", "/api/v1/users", PATCH],
+    ["DELETE", "/api/v1/users/usr_1", DELETE],
+    ["GET", "/api/v1/users/usr_1/sessions", GET],
   ] as const)("rejects %s %s with 404 and never forwards it", async (method, path, handler) => {
     const calls = stubUpstream();
     const res = await handler(req(method, path, method === "GET" ? {} : { headers: sameOrigin, body: "{}" }));
@@ -212,7 +231,7 @@ describe("API proxy host allow-list (DNS rebinding)", () => {
   const reqOn = (host: string | null, method: string, path: string, headers: Record<string, string> = {}, body?: string) =>
     new Request(`http://${host ?? "web.test:3000"}${path}`, {
       method,
-      headers: host === null ? headers : { host, ...headers },
+      headers: { ...(host === null ? {} : { host }), cookie: `platform_session=${SESSION}`, ...headers },
       body,
     });
 
@@ -355,9 +374,100 @@ describe("API proxy responses", () => {
   it("aborts the upstream request when the browser disconnects", async () => {
     const calls = stubUpstream(() => new Response(new ReadableStream(), { headers: { "content-type": "text/event-stream" } }));
     const controller = new AbortController();
-    const r = new Request(`${WEB}/api/v1/test-runs/run_1/events`, { headers: { host: "web.test:3000" }, signal: controller.signal });
+    const r = new Request(`${WEB}/api/v1/test-runs/run_1/events`, { headers: { host: "web.test:3000", cookie: `platform_session=${SESSION}` }, signal: controller.signal });
     await GET(r);
     controller.abort();
     expect(calls[0]!.init.signal?.aborted).toBe(true);
+  });
+});
+
+describe("API proxy sessions (V1.1)", () => {
+  it("forwards the session cookie as X-Session-Token, never as a cookie", async () => {
+    const calls = stubUpstream();
+    await GET(req("GET", "/api/v1/test-runs"));
+    const h = calls[0]!.init.headers;
+    expect(h.get("x-session-token")).toBe(SESSION);
+    expect(h.get("cookie")).toBeNull();
+  });
+
+  it("answers 401 without a session and forwards nothing", async () => {
+    const calls = stubUpstream();
+    for (const [handler, method, path] of [
+      [GET, "GET", "/api/v1/test-runs"],
+      [POST, "POST", "/api/v1/test-runs"],
+      [GET, "GET", "/api/v1/auth/me"],
+    ] as const) {
+      const res = await handler(req(method, path, { session: false, ...(method === "GET" ? {} : { headers: sameOrigin, body: "{}" }) }));
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ code: "SESSION_INVALID", message: "Sign in to continue" });
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("ignores a malformed session cookie", async () => {
+    const calls = stubUpstream();
+    const res = await GET(req("GET", "/api/v1/test-runs", { session: false, headers: { cookie: "platform_session=a b;c" } }));
+    expect(res.status).toBe(401);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("login: needs no session, never forwards one, moves the token into an httpOnly cookie and out of the body", async () => {
+    const expiresAt = "2030-01-01T00:00:00.000Z";
+    const user = { id: "usr_1", email: "a@example.com", name: "A", role: "admin", disabled: false, createdAt: expiresAt };
+    const calls = stubUpstream(() => Response.json({ token: "tok_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345", expiresAt, user }));
+    const res = await POST(req("POST", "/api/v1/auth/login", { headers: sameOrigin, body: '{"email":"a@example.com","password":"x"}' }));
+    expect(res.status).toBe(200);
+    expect(calls[0]!.init.headers.get("x-session-token")).toBeNull();
+    const cookie = res.headers.get("set-cookie")!;
+    expect(cookie).toContain("platform_session=tok_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
+    expect(cookie).toMatch(/HttpOnly/);
+    expect(cookie).toMatch(/SameSite=Lax/);
+    expect(cookie).toMatch(/Path=\//);
+    expect(cookie).toMatch(/Expires=Tue, 01 Jan 2030/);
+    expect(cookie).not.toMatch(/Secure/);
+    const body = await res.text();
+    expect(body).not.toContain("tok_");
+    expect(JSON.parse(body)).toEqual({ expiresAt, user });
+  });
+
+  it("login over https sets a Secure cookie", async () => {
+    vi.stubEnv("WEB_ALLOWED_HOSTS", "web.test:3000");
+    stubUpstream(() => Response.json({ token: "tok_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345", expiresAt: "2030-01-01T00:00:00.000Z", user: {} }));
+    const res = await POST(
+      req("POST", "/api/v1/auth/login", { headers: { origin: "https://web.test:3000", "content-type": "application/json" }, body: "{}" }),
+    );
+    expect(res.headers.get("set-cookie")).toMatch(/; Secure/);
+  });
+
+  it("login failures pass through without a cookie", async () => {
+    stubUpstream(() => Response.json({ code: "INVALID_CREDENTIALS", message: "nope" }, { status: 401 }));
+    const res = await POST(req("POST", "/api/v1/auth/login", { session: false, headers: sameOrigin, body: "{}" }));
+    expect(res.status).toBe(401);
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(await res.json()).toEqual({ code: "INVALID_CREDENTIALS", message: "nope" });
+  });
+
+  it("login still needs a same-origin Origin", async () => {
+    const calls = stubUpstream();
+    const res = await POST(req("POST", "/api/v1/auth/login", { session: false, headers: { "content-type": "application/json" }, body: "{}" }));
+    expect(res.status).toBe(403);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("logout and an ended session clear the cookie", async () => {
+    stubUpstream(() => new Response(null, { status: 204 }));
+    const out = await POST(req("POST", "/api/v1/auth/logout", { headers: sameOrigin }));
+    expect(out.headers.get("set-cookie")).toMatch(/^platform_session=; Path=\/; HttpOnly; SameSite=Lax; Expires=Thu, 01 Jan 1970/);
+
+    stubUpstream(() => Response.json({ code: "SESSION_INVALID", message: "ended" }, { status: 401 }));
+    const ended = await GET(req("GET", "/api/v1/test-runs"));
+    expect(ended.status).toBe(401);
+    expect(ended.headers.get("set-cookie")).toMatch(/^platform_session=;/);
+  });
+
+  it("forwards PATCH bodies and DELETE without a body", async () => {
+    const calls = stubUpstream();
+    await PATCH(req("PATCH", "/api/v1/users/usr_1", { headers: sameOrigin, body: '{"name":"B"}' }));
+    expect(new TextDecoder().decode(calls[0]!.init.body as ArrayBuffer)).toBe('{"name":"B"}');
   });
 });

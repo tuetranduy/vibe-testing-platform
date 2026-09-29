@@ -100,6 +100,11 @@ const EnvSchema = z
     SECRETS_ENCRYPTION_KEY: z.string().min(1),
     MAX_ACTIVE_RUNS_PER_TENANT: intWithDefault(3),
     CONFIRMATION_TTL_HOURS: intWithDefault(24),
+    /** A web session's fixed lifetime (V1.1 F1). */
+    SESSION_TTL_HOURS: intWithDefault(12, 1, 24 * 30),
+    /** The first administrator, created at API start while the tenant has no user (both or neither). */
+    BOOTSTRAP_ADMIN_EMAIL: emptyAsUnset(z.string().trim().min(3).max(254)),
+    BOOTSTRAP_ADMIN_PASSWORD: emptyAsUnset(z.string().min(10, "must be at least 10 characters").max(200)),
     ANALYSIS_TIMEOUT_SECONDS: intWithDefault(120),
     /** A blank requirement's survey (explore the site, suggest tests): its hard deadline. Page loading stops at 60 % of it. */
     SURVEY_TIMEOUT_SECONDS: intWithDefault(180),
@@ -151,6 +156,12 @@ const EnvSchema = z
     if (env.NODE_ENV === "production" && KNOWN_DEV_API_TOKENS.includes(env.API_TOKEN)) {
       ctx.addIssue({ code: "custom", path: ["API_TOKEN"], message: "is the development default; set a random token for production" });
     }
+    if ((env.BOOTSTRAP_ADMIN_EMAIL === undefined) !== (env.BOOTSTRAP_ADMIN_PASSWORD === undefined)) {
+      ctx.addIssue({ code: "custom", path: ["BOOTSTRAP_ADMIN_PASSWORD"], message: "set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD together" });
+    }
+    if (env.NODE_ENV === "production" && env.BOOTSTRAP_ADMIN_PASSWORD && KNOWN_DEV_PASSWORDS.includes(env.BOOTSTRAP_ADMIN_PASSWORD)) {
+      ctx.addIssue({ code: "custom", path: ["BOOTSTRAP_ADMIN_PASSWORD"], message: "is the development default; choose a password for production" });
+    }
     if (env.NODE_ENV === "production" && env.TARGET_PRIVATE_ALLOWLIST.length > 0) {
       ctx.addIssue({
         code: "custom",
@@ -178,6 +189,8 @@ export type LiveLlmEnv = Omit<z.output<typeof LlmEnvSchema>, "LLM_PROVIDER"> & {
 
 /** API tokens shipped in `.env.example` and the compose file: never valid in production. */
 export const KNOWN_DEV_API_TOKENS: readonly string[] = ["dev-api-token-change-me-please"];
+/** The bootstrap admin password in `.env.example` and the compose file: never valid in production. */
+export const KNOWN_DEV_PASSWORDS: readonly string[] = ["admin-password-change-me"];
 
 /**
  * A key that is not 32 random bytes: the all-zero example key, any repeated byte, or anything with
