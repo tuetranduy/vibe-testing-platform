@@ -17,8 +17,11 @@ metrics and alerts, logs, retention, and the release checks.
 The demo shop (`tests/fixtures/demo-shop`) is a development and test target only.
 
 Scale by adding workers: each takes `WORKER_CONCURRENCY` runs at a time. The maintenance jobs (the reaper every
-60 s, retention daily) are BullMQ job schedulers, so exactly one worker runs each tick however many are deployed.
-Retention has its own queue, so a slow artifact store never delays the reaper.
+30 s, retention daily) are BullMQ job schedulers, so exactly one process runs each tick however many are deployed.
+The reaper is consumed by the workers **and the API**, so it keeps running when every worker is down — which is when
+it matters: a run whose worker died stops heartbeating and is ended `ERRORED / WORKER_LOST` 60–90 s later, whether or
+not another worker is up. Retention runs in the workers only, on its own queue, so a slow artifact store never
+delays the reaper.
 
 The reaper also ends the two waiting states when nobody acts: a run awaiting criteria confirmation, or awaiting the
 choice of a suggested test ("Choose what to test", `AWAITING_SELECTION`), for longer than `CONFIRMATION_TTL_HOURS`
@@ -82,6 +85,11 @@ behind. There is no key id, so rotation is a drain, not a re-encryption:
    environment (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) need nothing.
 5. Reopen.
 
+With `NODE_ENV=production` the API and the worker refuse to start with a placeholder key (the all-zero example from
+`.env.example` and compose, or any key with fewer than 16 distinct byte values) or with the development `API_TOKEN`
+(`dev-api-token-change-me-please`). Generate the key with
+`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+
 A run still pending with secrets encrypted under the old key ends `ERRORED` ("Run could not be started by the
 worker") when a worker with the new key picks it up. It never runs with a wrong secret. Keep the key in a secret
 manager, never in compose files or images.
@@ -107,7 +115,7 @@ Settings to fall back to the environment's.
 | `stagehand_cache_hits_total` | — | worker | exploration steps served from Stagehand's cache (always 0 today: caching is Browserbase-only) |
 | `egress_blocked_total` | `reason` | worker | connections the egress proxies denied (Chromium's own background services excluded) |
 | `reconciliation_disagreements_total` | — | worker | criteria whose discovery result and rerun disagreed (`DISCOVERY_RERUN_DISAGREE`) |
-| `runs_reaped_total` | `reason` (`WORKER_LOST`, `TIMEOUT`, `NEVER_STARTED`, `CONFIRMATION_EXPIRED`, `SELECTION_EXPIRED`) | worker | runs the reaper ended |
+| `runs_reaped_total` | `reason` (`WORKER_LOST`, `TIMEOUT`, `NEVER_STARTED`, `CONFIRMATION_EXPIRED`, `SELECTION_EXPIRED`) | worker, API | runs the reaper ended (whichever process ran that tick) |
 | `artifact_upload_failures_total` | — | worker | failed artifact uploads |
 
 Both processes also export Node.js default metrics (heap, event loop lag, GC).
@@ -168,6 +176,13 @@ of silence. As a backstop, configure an S3 lifecycle rule that expires objects s
 (e.g. 45 days).
 
 ## Release checks
+
+CI (`.github/workflows/ci.yml`, GitHub Actions) runs typecheck, `pnpm test` (with the S3 tests), `pnpm
+test:integration` and `pnpm test:e2e` on every push and pull request; nightly, the live E2E suite on Gemini; on
+demand (`workflow_dispatch` with `live-gate`), the release gate. The live jobs need a `GEMINI_API_KEY` repository
+secret from a billing-enabled project. The runners are Ubuntu 24.04, whose AppArmor denies the unprivileged user
+namespaces Chromium's sandbox needs; the workflow lifts that (`kernel.apparmor_restrict_unprivileged_userns=0`).
+
 
 - `pnpm test`, `pnpm test:integration` and `pnpm test:e2e` (CI mode: scripted model and explorer, deterministic)
   on every change, with `pnpm infra:up` running.
