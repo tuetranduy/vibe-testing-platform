@@ -14,10 +14,21 @@ function currentLinks() {
 }
 
 describe("AppNav", () => {
+  it("links Test runs, Settings and New test, in that order", () => {
+    pathname = "/runs";
+    render(<AppNav />);
+    expect(screen.getAllByRole("link").map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+      ["Test runs", "/runs"],
+      ["Settings", "/settings"],
+      ["New test", "/runs/new"],
+    ]);
+  });
+
   it.each([
     ["/runs", ["Test runs"]],
     ["/runs/run_123", ["Test runs"]],
     ["/runs/new", ["New test"]],
+    ["/settings", ["Settings"]],
     ["/somewhere-else", []],
   ])("on %s marks %j as the current page", (path, expected) => {
     pathname = path;

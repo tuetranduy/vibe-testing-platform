@@ -42,6 +42,10 @@ describe("API proxy allow-list", () => {
     ["POST", "/api/v1/test-runs/run_1/cancel", POST],
     ["GET", "/api/v1/test-runs/run_1/report", GET],
     ["GET", "/api/v1/test-runs/run_1/artifacts/art_1/url?reveal=true", GET],
+    ["GET", "/api/v1/settings/llm", GET],
+    ["PUT", "/api/v1/settings/llm", PUT],
+    ["PUT", "/api/v1/settings/llm/keys/anthropic", PUT],
+    ["PUT", "/api/v1/settings/llm/keys/gemini", PUT],
   ] as const)("forwards %s %s", async (method, path, handler) => {
     const calls = stubUpstream();
     const res = await handler(req(method, path, method === "GET" ? {} : { headers: sameOrigin, body: "{}" }));
@@ -61,6 +65,11 @@ describe("API proxy allow-list", () => {
     ["GET", "/api/v1/test-runs/..%2F..%2Fadmin", GET],
     ["GET", "/api/v1/test-runs/run%2F1/report", GET],
     ["GET", "/api/v1/test-runs/run_1/artifacts/a/b/url", GET],
+    ["POST", "/api/v1/settings/llm", POST],
+    ["GET", "/api/v1/settings/llm/keys/anthropic", GET], // keys are write-only
+    ["PUT", "/api/v1/settings/llm/keys/openai", PUT],
+    ["PUT", "/api/v1/settings/llm/keys/anthropic/extra", PUT],
+    ["GET", "/api/v1/settings", GET],
   ] as const)("rejects %s %s with 404 and never forwards it", async (method, path, handler) => {
     const calls = stubUpstream();
     const res = await handler(req(method, path, method === "GET" ? {} : { headers: sameOrigin, body: "{}" }));

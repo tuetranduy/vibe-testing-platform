@@ -1,4 +1,12 @@
-import { TestReportSchema, type CriterionResult, type NormalizedRequirement, type TestReport, type TestRunSummary } from "@platform/contracts";
+import {
+  LlmSettingsViewSchema,
+  TestReportSchema,
+  type CriterionResult,
+  type LlmSettingsView,
+  type NormalizedRequirement,
+  type TestReport,
+  type TestRunSummary,
+} from "@platform/contracts";
 
 export const requirementFixture = (): NormalizedRequirement => ({
   runId: "run_1",
@@ -63,6 +71,28 @@ export const summaryFixture = (patch: Partial<TestRunSummary> = {}): TestRunSumm
   llm: null,
   ...patch,
 });
+
+/**
+ * `GET /v1/settings/llm` with nothing saved: LLM_PROVIDER=anthropic and ANTHROPIC_API_KEY on the server, no
+ * Gemini key, the fake engine offered (development).
+ */
+export const llmSettingsFixture = (patch: Partial<LlmSettingsView> = {}): LlmSettingsView =>
+  LlmSettingsViewSchema.parse({
+    defaults: { provider: "anthropic", model: "claude-sonnet-5", label: "Claude Sonnet 5", reasoning: "default", source: "environment", available: true },
+    providers: [
+      { provider: "anthropic", label: "Anthropic", key: { source: "environment", updatedAt: null } },
+      { provider: "gemini", label: "Google Gemini", key: { source: null, updatedAt: null } },
+    ],
+    models: [
+      { provider: "anthropic", id: "claude-opus-5-5", label: "Claude Opus 5.5", reasoningLevels: ["default", "low", "medium", "high"], defaultLevel: "medium", price: { inputUsdPerMTok: 4, outputUsdPerMTok: 20 }, available: true },
+      { provider: "anthropic", id: "claude-sonnet-5", label: "Claude Sonnet 5", reasoningLevels: ["default", "low", "medium", "high"], defaultLevel: "high", price: { inputUsdPerMTok: 2, outputUsdPerMTok: 10 }, available: true },
+      { provider: "anthropic", id: "claude-haiku-4-5", label: "Claude Haiku 4.5", reasoningLevels: ["default"], defaultLevel: null, price: { inputUsdPerMTok: 1, outputUsdPerMTok: 5 }, available: true },
+      { provider: "gemini", id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", reasoningLevels: ["default", "low", "medium", "high"], defaultLevel: "medium", price: { inputUsdPerMTok: 0.75, outputUsdPerMTok: 3.75 }, available: false },
+      { provider: "gemini", id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite", reasoningLevels: ["default", "minimal", "low", "medium", "high"], defaultLevel: "minimal", price: { inputUsdPerMTok: 0.3, outputUsdPerMTok: 2.5 }, available: false },
+      { provider: "fake", id: "fake", label: "Fake engine (development)", reasoningLevels: ["default"], defaultLevel: null, price: null, available: true },
+    ],
+    ...patch,
+  });
 
 export const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
