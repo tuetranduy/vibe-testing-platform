@@ -33,6 +33,10 @@ const ENDPOINTS: { method: Method; pattern: RegExp; query: readonly string[] }[]
   { method: "POST", pattern: new RegExp(`^/v1/test-runs/${ID}/cancel$`), query: [] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/report$`), query: [] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/artifacts/${ID}/url$`), query: ["reveal"] },
+  { method: "GET", pattern: /^\/v1\/settings\/llm$/, query: [] },
+  { method: "PUT", pattern: /^\/v1\/settings\/llm$/, query: [] },
+  // Keys are write-only: no GET on .../keys/... is allowed through.
+  { method: "PUT", pattern: /^\/v1\/settings\/llm\/keys\/(?:anthropic|gemini)$/, query: [] },
 ];
 
 const FORWARDED_REQUEST_HEADERS = ["content-type", "accept", "idempotency-key", "last-event-id"] as const;

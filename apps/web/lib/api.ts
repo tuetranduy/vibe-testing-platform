@@ -1,6 +1,7 @@
 import {
   ApiErrorSchema,
   CreateTestRunResponseSchema,
+  LlmSettingsViewSchema,
   NormalizedRequirementSchema,
   TestReportSchema,
   TestRunListResponseSchema,
@@ -8,6 +9,9 @@ import {
   type ApiError,
   type CreateTestRunRequestInput,
   type CreateTestRunResponse,
+  type LlmDefaultsInput,
+  type LlmKeyProvider,
+  type LlmSettingsView,
   type NormalizedRequirement,
   type TestReport,
   type TestRunListResponse,
@@ -104,6 +108,19 @@ export const updateCriteria = (runId: string, requirement: NormalizedRequirement
 
 export const confirmCriteria = (runId: string): Promise<ConfirmResult> =>
   request(ConfirmResultSchema, `${runPath(runId)}/criteria/confirm`, { method: "POST" });
+
+const SETTINGS = "/api/v1/settings/llm";
+
+/** Settings → AI providers and defaults: key statuses (never a key), the defaults, and the offered models. */
+export const getLlmSettings = (): Promise<LlmSettingsView> => request(LlmSettingsViewSchema, SETTINGS);
+
+/** Saves the defaults for new tests; 422 MODEL_NOT_AVAILABLE when the model or level can't be used. */
+export const saveLlmDefaults = (defaults: LlmDefaultsInput): Promise<LlmSettingsView> =>
+  request(LlmSettingsViewSchema, SETTINGS, { method: "PUT", body: { defaults } });
+
+/** Saves (or, with null, removes) a provider's API key. The answer never contains it. */
+export const saveProviderKey = (provider: LlmKeyProvider, apiKey: string | null): Promise<LlmSettingsView> =>
+  request(LlmSettingsViewSchema, `${SETTINGS}/keys/${provider}`, { method: "PUT", body: { apiKey } });
 
 /** Prefer `fetchArtifactUrl` (lib/artifacts.ts), which applies the reveal rule. */
 export const getArtifactUrl = (runId: string, artifactId: string, reveal: boolean): Promise<ArtifactUrl> =>
