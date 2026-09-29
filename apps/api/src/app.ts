@@ -5,6 +5,7 @@ import { registerErrorHandler } from "./errors";
 import { artifactRoutes } from "./routes/artifacts";
 import { llmSettingsRoutes } from "./routes/llm-settings";
 import { testRunCriteriaRoutes } from "./routes/test-run-criteria";
+import { testRunSuggestionRoutes } from "./routes/test-run-suggestions";
 import { testRunEventRoutes } from "./routes/test-run-events";
 import { testRunReportRoutes } from "./routes/test-run-report";
 import { testRunRoutes } from "./routes/test-runs";
@@ -36,6 +37,7 @@ export async function buildApp(deps: ApiDeps, opts: FastifyServerOptions = {}): 
     v1.addHook("onRequest", createBearerAuth(deps.config.apiToken));
     await testRunRoutes(v1, deps);
     await testRunCriteriaRoutes(v1, deps);
+    await testRunSuggestionRoutes(v1, deps);
     await testRunEventRoutes(v1, deps);
     await testRunReportRoutes(v1, deps);
     await artifactRoutes(v1, deps);
