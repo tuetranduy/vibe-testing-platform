@@ -19,7 +19,7 @@ The V1 release gate (live E2E suite green 3 times, KI-001) has not passed yet: i
 
 **Milestone E (Tasks 21–22, the V1 release candidate) is implemented.** **Task 21**: `pnpm test:e2e` runs an end-to-end acceptance suite (`tests/e2e/platform-*.spec.ts`) against the real platform. It creates a fresh database, Redis logical DB 14 and S3 bucket, starts the demo shop in-process, and runs the API (`apps/api/src/main.ts`) and a worker as local child processes (logs in a temp dir), or with `pnpm test:e2e:compose` as containers of the compose `api` and `worker` services. In **CI mode** (the default) the worker boots with a scripted model (`tests/e2e/support/scripted-llm.ts`, answers per requirement from `scenarios.ts`) and a `ScriptedExplorer` (`tests/e2e/scripted-explorer.ts`: a `BrowserExplorer` that drives the real sandboxed page with fixed selectors instead of Stagehand); everything else — sandbox, egress proxy, recorder, verifier, compiler, Playwright rerun, reconciliation, storage, queues — is real, and the suite is deterministic (~40 s). It covers PASS (rerun-confirmed, generated test typechecks), FAIL (`?bug=empty_cart`, with trace and screenshot), BLOCKED (missing secret; with the secret, its value — raw, URL-encoded, base64 or escaped — is absent from DB rows, events and logs, and every artifact is `SECRET_BEARING`), cancel (during exploration and during the Playwright rerun: within 10 s; browser, runner and its workspace gone; secrets purged), destructive actions (zero delete clicks, whether the planner blocks the step or, for a neutrally worded one, the executor's check of the element it resolves to), SSRF (redirect to the metadata address → `TARGET_BLOCKED_BY_POLICY`; `egress.blocked` on `/egress-probe`; `127.0.0.1` → 422) and confirmation (a check edited in review → revision 2 in the report; an unconfirmed run past the TTL → `CANCELLED / CONFIRMATION_EXPIRED`). **Live mode** (`pnpm test:e2e:live`, needs `ANTHROPIC_API_KEY`) runs the same specs with the real model and Stagehand (except the two CI-only cases that depend on the scripted plan: the neutrally worded destructive click and the cancel during the rerun), plus a prompt-injection spec; `./scripts/e2e-live-gate.sh` is the release gate (3 consecutive green runs). **The live gate has not been run yet** (no API key in the implementation environment). **Task 22**: Prometheus metrics (API `GET /metrics`; worker `WORKER_METRICS_PORT`, default 9464), JSON logs where every run line carries `runId`, `tenantId`, `stage`, `component` and is redacted by key and by the run's secret values (`createLogger` in `@platform/config`), and a daily retention job for expired artifacts. See [`docs/operations.md`](docs/operations.md) for topology, network policy, key rotation, metrics and alerts. Outstanding defects and open items are tracked in [`docs/known-issues.md`](docs/known-issues.md).
 
-**The browser only talks to the web app.** `apps/web/app/api/[...path]/route.ts` proxies an allow-list of the V1 endpoints to `API_URL` and adds `Authorization: Bearer $API_TOKEN` on the server (both read from the web server's environment at request time; the token never reaches the browser). It drops the browser's own `Authorization` / `Cookie` headers, forwards only `content-type`, `accept`, `idempotency-key` and `last-event-id`, streams SSE unbuffered, and rejects `POST` / `PUT` requests whose `Origin` isn't one of the web app's hosts. **V1 has no end-user authentication** (single tenant, D6): anyone who can reach the web app can create, confirm, cancel and view runs, and reveal secret-bearing screenshots. Only expose it to trusted users (a private network, VPN, or an authenticating reverse proxy in front of it).
+**The browser only talks to the web app.** `apps/web/app/api/[...path]/route.ts` proxies an allow-list of the V1 endpoints to `API_URL` and adds `Authorization: Bearer $API_TOKEN` on the server (both read from the web server's environment at request time; the token never reaches the browser). It drops the browser's own `Authorization` / `Cookie` headers, forwards only `content-type`, `accept`, `idempotency-key` and `last-event-id`, streams SSE unbuffered, and rejects mutating requests whose `Origin` isn't one of the web app's hosts. **Since V1.1 the web app requires sign-in**: the session lives in an httpOnly cookie that the proxy forwards as `X-Session-Token`; members see their own runs, administrators everyone's (see [V1.1](#v11-2026-09-29) and [`docs/operations.md`](docs/operations.md#users-and-sign-in-v11)). The API token itself still grants unrestricted service access, so keep the API on a private network.
 
 **`WEB_ALLOWED_HOSTS` (web server env, default `localhost:3000,127.0.0.1:3000`; compose sets the same).** A comma-separated list of the `host[:port]` names the UI is served on, exactly as browsers send them in `Host` (no port for 80/443). The proxy answers `403` to every request — reads included — whose `Host` isn't listed, and to every request marked `Sec-Fetch-Site: cross-site`; `POST` / `PUT` must also carry an `Origin` on a listed host. This is what stops DNS rebinding: a page on `evil.example:3000` whose name is re-pointed at your web app has a matching `Origin` and `Host`, but its `Host` isn't on the list. **Operators must list every hostname they serve the UI on** (e.g. `WEB_ALLOWED_HOSTS=testing.example.com`), and a reverse proxy in front of the web app must pass the original `Host` through (`X-Forwarded-Host` is ignored, since a page can set it).
 
@@ -28,6 +28,32 @@ The V1 release gate (live E2E suite green 3 times, KI-001) has not passed yet: i
 **Gemini provider (2026-09-27).** `LLM_PROVIDER=gemini` with `GEMINI_API_KEY` runs the real engine on the Gemini Developer API (`generateContent` with a JSON response schema; default model `gemini-3.8-flash`, optional `GEMINI_THINKING_LEVEL`), through the same client as Anthropic: redaction, retries, deadline, `llm_calls` records with Gemini prices (thinking tokens billed as output). The evals, `pnpm test:live` and the live E2E gate take `LLM_PROVIDER` too. **First live run 2026-09-27, on a free-tier key with `gemini-3.5-flash-lite`:** the evals score 23/25 and 12/14, the Stagehand smoke passes, and the live E2E suite passes 6 of 12 cases: five others were cut short by free-tier stalls and one by Flash-Lite's plan ([KI-018](docs/known-issues.md#ki-018--the-gemini-provider-has-only-been-run-live-on-a-free-tier-key)). The default model and the live gate still need a billing-enabled key.
 
 **Real exploration and the Playwright rerun run in the Docker worker, with Chromium's sandbox on** (2026-09-27, [KI-002](docs/known-issues.md#ki-002--chromiums-sandbox-cannot-start-in-the-compose-worker)). Chromium's sandbox needs Linux user namespaces, which Docker's default seccomp profile denies ("No usable sandbox!", runs `ERRORED / BROWSER_PROVIDER`). Of the options — a seccomp profile that permits user namespaces, `cap_add: SYS_ADMIN` (broad), or Chromium's `--no-sandbox` (the browser runs untrusted pages) — the compose `worker` uses the first: [`infra/seccomp/worker.json`](infra/seccomp/README.md) is Docker's default profile plus user, PID and network namespaces for `clone` / `unshare`, with no extra capability. Both exploration's Chromium and the rerun's (launched by `@playwright/test`, `chromiumSandbox: true`) start sandboxed in the container, and `pnpm test:e2e:compose` runs the E2E suite against the compose API and worker. A deployment elsewhere needs the same profile (a Kubernetes `Localhost` profile) and a host that allows unprivileged user namespaces; see the profile's README.
+
+### V1.1 (2026-09-29)
+
+Built on branch `feat/v1.1` from the plan's Section 7 backlog (spec
+[`docs/superpowers/specs/2026-09-29-v1.1-design.md`](docs/superpowers/specs/2026-09-29-v1.1-design.md)), before the V1
+live gate passed (it still applies; see the plan's Revision 3):
+
+- **Users and run ownership** — sign-in (`/login`), administrators and members, Settings → Users, `/account`; members
+  see and act on their own runs only. A bootstrap administrator comes from `BOOTSTRAP_ADMIN_EMAIL` / `_PASSWORD`.
+  `audit_events` records sign-ins, user and settings changes, credential use and every reveal of a secret-bearing
+  artifact with the user who did it (KI-028).
+- **Critical / non-critical criteria** — a "Critical" switch in criteria review; only critical criteria decide the
+  verdict, non-critical results are reported and tagged.
+- **Saved test data** (Settings → Test data) and **saved credentials** (Settings → Credentials, encrypted, write-only,
+  managed by administrators): the new-test form picks one of each; a run copies them when it is created.
+- **Manual rerun** — "Rerun the saved test" on a finished report starts a new run that reruns the generated
+  Playwright test in the sandbox with no exploration and no model call (`POST /v1/test-runs/:runId/rerun`); it asks
+  for the run's secrets again, and to confirm when the run allowed destructive actions.
+- **Report export** — "Download Markdown" (`GET /v1/test-runs/:runId/report.md`) and "Print or save as PDF"
+  (`/runs/<id>/print`, the browser's print dialog).
+- **Usage** (`/usage`, `GET /v1/usage`) — estimated model cost by day, model, stage and run.
+- **Exploration cache** — element lookups verified on earlier runs of the same page are reused without a model call
+  (after checking they still point at the same element); Settings shows and clears it; a new-test option turns it
+  off for one run.
+- **Several scenarios per run** — the planner may split the criteria into up to 5 scenarios, each run from a clean
+  session and compiled into its own Playwright test.
 
 **Suggested tests: the requirement is optional (2026-09-28, spec [`docs/superpowers/specs/2026-09-28-suggest-tests-design.md`](docs/superpowers/specs/2026-09-28-suggest-tests-design.md)).**
 Left empty ("Explore and suggest tests" on the new-test form), the run explores the website before any criteria
@@ -345,7 +371,7 @@ worker must share the `LLM_*` variables (see [`docs/operations.md`](docs/operati
 - **Engine error classes live in `@platform/contracts`** (re-exported by `@platform/testing-engine`) so `@platform/llm` can throw `ModelProviderError` / `ContractError` / `CancelledError` without depending on the engine.
 - **`analyze` returns a draft; the orchestrator persists revision 1** (the plan's `compileRequirement` signature returns the stored requirement).
 - **`docs/ai-testing-platform-architecture.md`** is referenced by the plan but wasn't in the repo, so it hasn't been updated.
-- **Stagehand caching is unavailable in this deployment.** Stagehand v4's action cache is Browserbase-only (Task 0 spike, Ruling R21); self-hosted Chromium has no equivalent, so `llm.cacheHit` is always `null` and every exploration step re-calls the model, even on a re-run of the same page.
+- **Stagehand caching is unavailable in this deployment.** Stagehand v4's action cache is Browserbase-only (Task 0 spike, Ruling R21). Since V1.1 the executor keeps its own cache of element lookups (`exploration_cache`, see V1.1 below); model extractions are never cached, and `llm.cacheHit` is `true` only on a step whose lookup came from that cache.
 - **Stagehand's OTel telemetry can't be disabled** (Task 0 spike caveat 3, Ruling R22): the egress proxy silently denies its fixed endpoint instead (no `egress.blocked` event, since it isn't caused by the site under test).
 - **Milestone C (Tasks 16–18):**
   - **No navigation guard in the rerun** (Ruling R31). Exploration's Chromium has a CDP navigation guard that keeps it on the target's hosts; the rerun's Chromium is launched by `@playwright/test` and has only its own egress proxy (same private allowlist as exploration). Off-domain navigation during a rerun is therefore limited only by the proxy's public/private address policy: a private address needs `TARGET_PRIVATE_ALLOWLIST`, but any public host is reachable.
@@ -379,3 +405,19 @@ worker must share the `LLM_*` variables (see [`docs/operations.md`](docs/operati
   - **Production refuses placeholder secrets**: the all-zero example `SECRETS_ENCRYPTION_KEY` and the development
     `API_TOKEN` fail start-up when `NODE_ENV=production`.
   - **CI**: `.github/workflows/ci.yml` (see [`docs/operations.md`](docs/operations.md#release-checks)).
+- **V1.1 (2026-09-29; spec [`docs/superpowers/specs/2026-09-29-v1.1-design.md`](docs/superpowers/specs/2026-09-29-v1.1-design.md)):**
+  - **Built before the V1 live gate passed** (Revision 3 said V1.1 starts after it): the gate is still open and
+    covers this code.
+  - **D6 amended — users.** API access still needs the service token; a session header makes the caller a user.
+    Calls without one (scripts, the E2E suite) act as the service, unrestricted. Every user belongs to the default
+    tenant (single tenant, as before).
+  - **D4 amended — weighting.** Section 2.4's precedence applies to the critical criteria only.
+  - **D7 amended — saved credentials.** At run creation, and only then, the API decrypts a saved profile and stores
+    its values as the run's own secrets (then encrypted, fingerprinted, redacted and purged like typed secrets).
+  - **D2 for rerun-only runs.** A manual rerun's statuses come from its own assertions: `PASSED` → PASS and
+    `ASSERTION_FAILED` → FAIL (both `PLAYWRIGHT_RERUN`), otherwise INCONCLUSIVE (`RERUN_NOT_REACHED`,
+    `NOT_IN_GENERATED_TEST`). New lifecycle edge `QUEUED → RUNNING_PLAYWRIGHT`.
+  - **D12 amended — scenarios.** 1–5 per plan; the planner's output format changed (`scenarios[]`), so its prompt
+    must be re-scored with `pnpm eval planner` on every offered model (KI-026).
+  - **PDF from the browser**, not a server PDF engine: a server engine would need fonts for every script a
+    requirement can be written in.
