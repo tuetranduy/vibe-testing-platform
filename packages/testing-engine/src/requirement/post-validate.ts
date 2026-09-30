@@ -22,7 +22,7 @@ export type PostValidation = { ok: true; draft: RequirementDraft } | { ok: false
  * returned for a correction round; the threshold rewrite is never a reason to retry.
  */
 export function postValidate(
-  output: CompilerOutput,
+  output: Pick<CompilerOutput, "criteria" | "facts">,
   source: { originalText: string; testData: Record<string, TestDataValue> },
 ): PostValidation {
   const assembled: RequirementDraft = {

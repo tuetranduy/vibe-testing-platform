@@ -450,3 +450,22 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
 - **What:** `/api/ext` allows 120 requests per token prefix and minute per web instance, counted in memory (reset on
   restart, multiplied by the number of instances). The API's limit (600 per token and hour, in Redis) is the real one.
 - **To close:** count in Redis from the web app too, or rely on the API's limit only.
+
+## KI-041 — The requirement compiler's prompt changed without an eval run
+- **Severity:** Medium (V1.3).
+- **Where:** `packages/testing-engine/src/requirement/prompts.ts`, `evals/requirement-compiler`.
+- **What:** the compile prompt gained the live-site section (pages, `siteChecks`, `testData`). The prompt tells the
+  model not to drop, add or weaken criteria because of the pages, but the eval baseline (`evals/BASELINE.md`) was
+  recorded before it, and the evals were not re-run (no model key in the implementation environment). The eval
+  suite still runs without pages, so it does not measure the live-site path either.
+- **To close:** re-run `pnpm eval requirement-compiler` with a key; add cases with recorded page inventories.
+
+## KI-042 — Exploration video and trace have not been recorded in a live run
+- **Severity:** Low (V1.3).
+- **Where:** `apps/worker/src/sandbox/session-recording.ts`.
+- **What:** the recorder is tested against a real Chromium over CDP, and in the integration explore test with the
+  real sandbox and Stagehand driving the same page against the demo shop (video + scrubbed trace stored), but not yet
+  in a live-model run or in the compose worker. The screencast follows the page's target: a navigation that swaps
+  renderer processes (e.g. to another site allowed by `additionalAllowedHosts`) could end the stream early (the video
+  then stops there; the trace is unaffected).
+- **To close:** a live E2E run with recordings on; if videos stop early, restart the screencast on `framenavigated`.

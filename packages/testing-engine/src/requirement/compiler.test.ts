@@ -303,6 +303,8 @@ function fakePorts() {
     saveSuggestions: async () => {
       throw new Error("not used by these tests");
     },
+    saveSiteAnalysis: async () => {},
+    applyTestData: async () => {},
   };
   return { ports, events, saved: () => saved, lifecycle: () => lifecycle };
 }

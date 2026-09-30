@@ -88,6 +88,61 @@ describe("NewTestForm", () => {
     });
   });
 
+  it("generates a fictional value from a test data key; never for a credential or a blank key (V1.3)", async () => {
+    const user = userEvent.setup();
+    const generate = () => screen.getByRole("button", { name: /^generate\s*a value for test data 1$/i });
+    const fetch = mockFetch(json(202, { runId: "run_42", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_42/events" }));
+    render(<NewTestForm />);
+    await fillValid(user);
+    await user.click(screen.getByText("Test data")); // open the collapsed section
+    await user.click(screen.getByRole("button", { name: /add test data/i }));
+    await user.click(generate());
+    expect(screen.getByLabelText(/test data 1 key/i)).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(/enter a key first/i)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/test data 1 key/i), "password");
+    await user.click(generate());
+    expect(screen.getByText(/looks like a credential/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/test data 1 value/i)).toHaveValue("");
+
+    await user.clear(screen.getByLabelText(/test data 1 key/i));
+    await user.type(screen.getByLabelText(/test data 1 key/i), "email");
+    await user.click(generate());
+    expect((screen.getByLabelText(/test data 1 value/i) as HTMLInputElement).value).toMatch(/^qa\.[a-z0-9]{6}@example\.com$/);
+    expect(screen.getByLabelText(/test data 1 key/i)).not.toHaveAttribute("aria-invalid");
+
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_42"));
+    expect(bodyOf(fetch).testData.email).toMatch(/@example\.com$/);
+  });
+
+  it("sends the V1.3 recording and live-site options only when turned off", async () => {
+    const user = userEvent.setup();
+    const fetch = mockFetch(
+      json(202, { runId: "run_1", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_1/events" }),
+      json(202, { runId: "run_2", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_2/events" }),
+    );
+    const first = render(<NewTestForm />);
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    await waitFor(() => expect(push).toHaveBeenCalled());
+    const defaults = bodyOf(fetch).options;
+    expect(defaults).not.toHaveProperty("recordVideo");
+    expect(defaults).not.toHaveProperty("recordTrace");
+    expect(defaults).not.toHaveProperty("analyzeLiveSite");
+    first.unmount();
+
+    render(<NewTestForm />);
+    await fillValid(user);
+    await user.click(screen.getByText("Advanced options"));
+    await user.click(screen.getByLabelText(/record a video/i));
+    await user.click(screen.getByLabelText(/record a playwright trace/i));
+    await user.click(screen.getByLabelText(/read the live website/i));
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(bodyOf(fetch, 1).options).toMatchObject({ recordVideo: false, recordTrace: false, analyzeLiveSite: false });
+  });
+
   it("validates test data keys with the contract's key rule", async () => {
     const user = userEvent.setup();
     const fetch = mockFetch();

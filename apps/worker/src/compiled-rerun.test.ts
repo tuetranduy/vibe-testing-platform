@@ -330,7 +330,7 @@ describe("compiled demo-shop flow, rerun by Playwright (real runner, egress prox
     expect(recording.facts.filter((f) => f.provenance !== "DOM_VERIFIED")).toEqual([]);
   });
 
-  it("healthy shop → the compiled test PASSES every compiled criterion; no evidence kept", async () => {
+  it("healthy shop → the compiled test PASSES every compiled criterion; its video and scrubbed trace are kept (V1.3), no screenshot", async () => {
     const test = compileRecorded(recording, `${shop.url}/login`);
     expect(test.compiledCriteria).toEqual(["AC-1", "AC-2", "AC-3"]);
     expect(test.notCompiled.map((n) => n.criterionId)).toEqual(["AC-4"]);
@@ -339,8 +339,13 @@ describe("compiled demo-shop flow, rerun by Playwright (real runner, egress prox
 
     const { result, artifacts } = await rerun(test);
     expect(result.errorText).toEqual({});
-    expect(result).toMatchObject({ status: "PASSED", perCriterion: { "AC-1": "PASSED", "AC-2": "PASSED", "AC-3": "PASSED" }, artifactIds: [] });
-    expect(artifacts).toEqual([]);
+    expect(result).toMatchObject({ status: "PASSED", perCriterion: { "AC-1": "PASSED", "AC-2": "PASSED", "AC-3": "PASSED" } });
+    // The run records video and trace (the V1.3 default): a passing rerun keeps both; a screenshot only on failure.
+    expect(artifacts.map((a) => a.type).sort()).toEqual(["TRACE", "VIDEO"]);
+    expect([...result.artifactIds].sort()).toEqual(artifacts.map((a) => a.id).sort());
+    const trace = artifacts.find((a) => a.type === "TRACE")!;
+    const text = Object.values(unzipSync(readFileSync(resolveLocalObjectPath(objects, trace.objectKey)))).map((b) => strFromU8(b, true)).join("\n");
+    expect(text).not.toContain(VALID_PASSWORD);
   }, 60_000);
 
   it("?bug=empty_cart → the cart-contents criterion ASSERTION_FAILED, the others PASSED; the stored trace has no password", async () => {

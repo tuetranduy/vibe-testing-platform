@@ -82,7 +82,8 @@ describe("rerunOnlyResults (V1.1 F5)", () => {
       critical: false,
       provisional: { status: "FAIL", reason: null },
     });
-    expect(results[0]).toMatchObject({ expected: "Cart count (at “after add”) equals 1.", evidenceArtifactIds: [], factRefs: [count] });
+    // V1.3: the rerun's recordings back a PASS too.
+    expect(results[0]).toMatchObject({ expected: "Cart count (at “after add”) equals 1.", evidenceArtifactIds: ["art_trace"], factRefs: [count] });
   });
 
   it("never a PASS the rerun did not assert: NOT_REACHED, a missing outcome and an ERRORED rerun are INCONCLUSIVE", () => {

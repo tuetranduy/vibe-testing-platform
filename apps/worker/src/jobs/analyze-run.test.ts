@@ -1,4 +1,4 @@
-import { RequirementRepository, RunRepository, SecretRepository, SuggestionRepository } from "@platform/db";
+import { RequirementRepository, RunRepository, SecretRepository, SiteAnalysisRepository, SuggestionRepository } from "@platform/db";
 import { ContractError, ModelProviderError, type EngineStages, type StageContext } from "@platform/testing-engine";
 import { encryptSecret } from "@platform/security";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -38,6 +38,40 @@ describe("analyze-run", () => {
     expect(h.queue.execute).toContain(run.id);
     expect((await new RequirementRepository(h.tdb.db).getLatest(run.id)).confirmedAt).not.toBeNull();
     expect((await eventsOf(h, run.id)).map((e) => e.type)).toContain("criteria.confirmed");
+  });
+
+  it("stores the live-site analysis; auto-confirmed criteria take its suggested test data into the run (V1.3)", async () => {
+    const run = await seedRun(h, { options: { autoConfirmCriteria: true } });
+    const fake = createFakeStages();
+    await analyzeRunJob(
+      h.deps({
+        ...fake,
+        analyze: async (ctx) => {
+          const analyzed = await fake.analyze(ctx);
+          return {
+            ...analyzed,
+            siteAnalysis: {
+              ...analyzed.siteAnalysis!,
+              testData: [{ key: "email", value: "qa.abc123@example.com", description: "Email to register with", source: "GENERATED" as const }],
+            },
+          };
+        },
+      }),
+      run.id,
+    );
+    const after = await new RunRepository(h.tdb.db).getById(run.id);
+    expect(after.lifecycle).toBe("PLANNING");
+    expect(after.request.testData).toMatchObject({ email: "qa.abc123@example.com" });
+    const analysis = await new SiteAnalysisRepository(h.tdb.db).get(run.id);
+    expect(analysis).toMatchObject({ status: "READ", appliedKeys: ["email"] });
+    expect(analysis!.checks.map((c) => c.criterionId)).toEqual(["AC-1", "AC-2"]);
+  });
+
+  it("criteria waiting for review: the suggested test data waits too", async () => {
+    const run = await seedRun(h);
+    await analyzeRunJob(h.deps(createFakeStages()), run.id);
+    expect(await new SiteAnalysisRepository(h.tdb.db).get(run.id)).toMatchObject({ status: "READ", appliedKeys: [] });
+    expect((await new RunRepository(h.tdb.db).getById(run.id)).request.testData).toEqual({});
   });
 
   it("skips runs that are no longer QUEUED (e.g. cancelled before pickup)", async () => {

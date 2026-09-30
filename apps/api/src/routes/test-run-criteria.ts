@@ -20,8 +20,15 @@ export async function testRunCriteriaRoutes(app: FastifyInstance, deps: ApiDeps)
     return service.update(runScope(req.principal), runId, req.body);
   });
 
+  // V1.3: an optional body `{ testData }` adds the accepted test data suggestions to the run first.
   app.post("/v1/test-runs/:runId/criteria/confirm", async (req, reply) => {
     const { runId } = parseOr400(RunParams, req.params);
-    return reply.status(202).send(await service.confirm(runScope(req.principal), runId));
+    return reply.status(202).send(await service.confirm(runScope(req.principal), runId, req.body ?? {}));
+  });
+
+  // V1.3: the requirement's analysis against the live site (pages read, per-criterion checks, suggested test data).
+  app.get("/v1/test-runs/:runId/site-analysis", async (req) => {
+    const { runId } = parseOr400(RunParams, req.params);
+    return service.siteAnalysis(runScope(req.principal), runId);
   });
 }

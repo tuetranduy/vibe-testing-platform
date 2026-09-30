@@ -1,5 +1,11 @@
-import { NormalizedRequirementSchema, type NormalizedRequirement } from "@platform/contracts";
-import { EventRepository, RequirementRepository, RunRepository, SecretRepository } from "@platform/db";
+import {
+  ConfirmCriteriaRequestSchema,
+  MAX_TEST_DATA_ENTRIES,
+  NormalizedRequirementSchema,
+  type NormalizedRequirement,
+  type SiteAnalysis,
+} from "@platform/contracts";
+import { EventRepository, RequirementRepository, RunRepository, SecretRepository, SiteAnalysisRepository } from "@platform/db";
 import { createRunEventPublisher, type RunEventPublisher } from "@platform/event-bus";
 import { containsFingerprintedSecret, redactByKey } from "@platform/security";
 import type { RunScope } from "@platform/db";
@@ -43,6 +49,14 @@ export class CriteriaService {
       throw new HttpError(409, "CRITERIA_NOT_READY", "Criteria have not been compiled for this run yet");
     }
     return requirement;
+  }
+
+  /** The requirement's analysis against the live site (V1.3); 404 NO_SITE_ANALYSIS until (or unless) there is one. */
+  async siteAnalysis(scope: RunScope, runId: string): Promise<SiteAnalysis> {
+    await this.runs.getRequired(scope, runId);
+    const analysis = await new SiteAnalysisRepository(this.deps.db).get(runId);
+    if (!analysis) throw new HttpError(404, "NO_SITE_ANALYSIS", "This run has no analysis of the live site");
+    return analysis;
   }
 
   /**
@@ -135,13 +149,16 @@ export class CriteriaService {
    * mirrors the worker's auto-confirm sequence: publish criteria.confirmed → transition to PLANNING
    * with heartbeatAt = now → enqueue execute-run. A queue failure after the transition errors the run.
    */
-  async confirm(scope: RunScope, runId: string): Promise<ConfirmResult> {
+  async confirm(scope: RunScope, runId: string, body: unknown = {}): Promise<ConfirmResult> {
+    const parsed = ConfirmCriteriaRequestSchema.safeParse(body ?? {});
+    if (!parsed.success) throw new HttpError(400, "VALIDATION_FAILED", "Request validation failed", zodIssues(parsed.error));
     const run = await this.runs.getRequired(scope, runId);
     if (run.lifecycle !== "AWAITING_CONFIRMATION") {
       throw new HttpError(409, "CONFLICT", `Run is ${run.lifecycle}; criteria cannot be confirmed`);
     }
 
     const latest = await this.requirements.getLatest(runId);
+    await this.addTestData(runId, run.request.testData, parsed.data.testData);
     const confirmed = await this.requirements.confirm(runId, latest.revision);
 
     const warnings = confirmed.criteria
@@ -167,6 +184,30 @@ export class CriteriaService {
     }
 
     return { revision: confirmed.revision, warnings };
+  }
+
+  /**
+   * V1.3: test data accepted with the confirmation (the suggested values, possibly edited) becomes the run's,
+   * before it is released into execution. A value that is one of the run's secret values is refused (it would
+   * be stored in the clear and typed where test data goes); so is going past the run's test data limit.
+   */
+  private async addTestData(runId: string, current: Record<string, unknown>, values: Record<string, string | number | boolean>): Promise<void> {
+    const keys = Object.keys(values);
+    if (keys.length === 0) return;
+    const total = new Set([...Object.keys(current), ...keys]).size;
+    if (total > MAX_TEST_DATA_ENTRIES) {
+      throw new HttpError(400, "VALIDATION_FAILED", `A run has at most ${MAX_TEST_DATA_ENTRIES} test data entries`, [
+        { path: ["testData"], message: `At most ${MAX_TEST_DATA_ENTRIES} test data entries in all` },
+      ]);
+    }
+    const leaked = await this.findSecretValue(runId, values);
+    if (leaked) {
+      throw new HttpError(400, "VALIDATION_FAILED", "Test data can't contain a value entered as a secret", [
+        { path: ["testData", ...leaked.slice(1)], message: "Contains a value entered as a secret; enter it as a secret instead" },
+      ]);
+    }
+    await this.runs.mergeTestData(runId, values);
+    await new SiteAnalysisRepository(this.deps.db).markApplied(runId, keys);
   }
 
   private async failEnqueue(runId: string, plannedAt: Date): Promise<void> {

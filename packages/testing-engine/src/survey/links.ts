@@ -81,14 +81,21 @@ export interface ChooseLinksInput {
   additionalAllowedHosts: readonly string[];
   /** Other URLs of the start page (where it redirected to): never chosen either. */
   startAliases?: readonly string[];
+  /** At most this many (default MAX_SURVEY_LINKS). */
+  max?: number;
+  /**
+   * Orders the candidates, higher first; ties keep the survey's order (V1.3: the requirement analysis ranks
+   * links by how many of the requirement's words they share). Default: the survey's order.
+   */
+  rank?: (link: SurveyLink) => number;
 }
 
 /**
  * The pages the survey loads after the start page (spec section 5, step 3): http(s) links on the
  * start URL's host or an additional allowed host, other than the start page, one per path
  * (fragment and query ignored), no downloads, and none whose text or URL reads as destructive or
- * as signing out. Navigation / header links first, then the rest, each in page order; at most
- * MAX_SURVEY_LINKS. The returned URLs keep their query (a page may need it) and drop the fragment.
+ * as signing out. Navigation / header links first, then the rest, each in page order (then by `rank`, when
+ * given); at most `max` (MAX_SURVEY_LINKS). The returned URLs keep their query (a page may need it) and drop the fragment.
  */
 export function chooseSurveyLinks(input: ChooseLinksInput): URL[] {
   const start = new URL(input.startUrl);
@@ -101,10 +108,14 @@ export function chooseSurveyLinks(input: ChooseLinksInput): URL[] {
     }
   }
   const additional = input.additionalAllowedHosts.map((h) => h.toLowerCase());
-  const ordered = [...input.links.filter((l) => l.area === "nav"), ...input.links.filter((l) => l.area !== "nav")];
+  const byArea = [...input.links.filter((l) => l.area === "nav"), ...input.links.filter((l) => l.area !== "nav")];
+  const rank = input.rank;
+  // Array.prototype.sort is stable: equal ranks keep the survey's order.
+  const ordered = rank ? byArea.map((l) => ({ l, r: rank(l) })).sort((a, b) => b.r - a.r).map((x) => x.l) : byArea;
+  const max = input.max ?? MAX_SURVEY_LINKS;
   const chosen: URL[] = [];
   for (const link of ordered) {
-    if (chosen.length >= MAX_SURVEY_LINKS) break;
+    if (chosen.length >= max) break;
     let url: URL;
     try {
       url = new URL(link.url);

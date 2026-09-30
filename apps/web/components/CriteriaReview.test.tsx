@@ -80,7 +80,7 @@ describe("CriteriaReview", () => {
     await user.click(within(cards[1]!).getByRole("button", { name: /discard/i }));
     expect(confirm).toBeEnabled();
     expect(screen.queryByText(/save or discard/i)).not.toBeInTheDocument();
-    expect(fetch).toHaveBeenCalledTimes(1); // nothing was sent
+    expect(fetch).toHaveBeenCalledTimes(2); // nothing was sent (the criteria and the site analysis, V1.3)
   });
 
   it("keeps another card's open check draft when a different criterion is saved", async () => {
@@ -168,7 +168,7 @@ describe("CriteriaReview", () => {
     await user.click(within(cards[1]!).getByRole("button", { name: /save check/i }));
     expect(within(cards[1]!).queryByRole("button", { name: /save check/i })).not.toBeInTheDocument();
     expect(within(cards[1]!).getByRole("button", { name: "Edit check AC-2" })).toBeInTheDocument();
-    expect(fetch).toHaveBeenCalledTimes(1); // only the initial GET
+    expect(fetch).toHaveBeenCalledTimes(2); // only the initial GET (the criteria and the site analysis, V1.3)
     expect(screen.getByRole("button", { name: /confirm and start/i })).toBeEnabled();
   });
 
@@ -297,7 +297,7 @@ describe("CriteriaReview", () => {
     await user.click(within(ask).getByRole("button", { name: /keep it/i }));
     expect(within(cards[2]!).queryByRole("group", { name: /remove AC-3\?/i })).not.toBeInTheDocument();
     expect(screen.getAllByRole("article")).toHaveLength(3);
-    expect(fetch).toHaveBeenCalledTimes(1); // only the initial GET
+    expect(fetch).toHaveBeenCalledTimes(2); // only the initial GET (the criteria and the site analysis, V1.3)
   });
 
   it("confirm shows the server warnings and hands them on; the button is disabled while pending", async () => {
@@ -349,7 +349,7 @@ describe("CriteriaReview", () => {
     await screen.findAllByRole("article");
     await user.click(screen.getByRole("button", { name: /start over with a revised requirement/i }));
     expect(screen.getByText(/test data and secrets must be entered again/i)).toBeInTheDocument();
-    expect(fetch).toHaveBeenCalledTimes(1); // nothing cancelled yet
+    expect(fetch).toHaveBeenCalledTimes(2); // nothing cancelled yet (the criteria and the site analysis, V1.3)
     await user.click(screen.getByRole("button", { name: /yes, start over/i }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/new?from=run_1"));
     expect(fetch.mock.calls.map(([u, i]) => `${i?.method ?? "GET"} ${String(u)}`)).toContain(`POST ${CANCEL}`);
@@ -380,5 +380,80 @@ describe("CriteriaReview", () => {
     await user.click(screen.getByRole("button", { name: /yes, start over/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Try again");
     expect(push).not.toHaveBeenCalled();
+  });
+});
+
+describe("CriteriaReview: the live-site analysis and suggested test data (V1.3)", () => {
+  const SITE = "/api/v1/test-runs/run_1/site-analysis";
+  const analysis = {
+    status: "READ",
+    reason: null,
+    pages: [
+      { url: "https://shop.example.com/", title: "Home", status: "READ" },
+      { url: "https://shop.example.com/cart", title: "", status: "SKIPPED" },
+    ],
+    checks: [
+      { criterionId: "AC-1", status: "FOUND", note: "The header shows a cart count badge" },
+      { criterionId: "AC-2", status: "NOT_FOUND", note: "No quantity selector on the pages read" },
+    ],
+    testData: [
+      { key: "email", value: "qa.abc123@example.com", description: "Email to register with", source: "GENERATED" },
+      { key: "productName", value: "iPhone 17 Pro", description: "A listed product", source: "SITE" },
+      { key: "quantity", value: 2, description: "How many to add", source: "GENERATED" },
+    ],
+    appliedKeys: [],
+  };
+
+  it("shows the pages read and what each criterion's check found on them", async () => {
+    routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()), [`GET ${SITE}`]: () => json(200, analysis) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    expect(await screen.findByText("Checked against the live site")).toBeInTheDocument();
+    expect(screen.getByText(/1 page read before the criteria were written/)).toBeInTheDocument();
+    expect(screen.getByText(/1 criterion checks something the pages read don/)).toBeInTheDocument();
+    const cards = screen.getAllByRole("article");
+    expect(within(cards[0]!).getByText(/seen on the site/i)).toBeInTheDocument();
+    expect(within(cards[0]!).getByText(/the header shows a cart count badge/i)).toBeInTheDocument();
+    expect(within(cards[1]!).getByText(/not found on the pages read/i)).toBeInTheDocument();
+    expect(within(cards[2]!).queryByText(/on the site|pages read/i)).not.toBeInTheDocument();
+  });
+
+  it("confirm sends the suggested test data that was kept, as edited", async () => {
+    const user = userEvent.setup();
+    const onConfirmed = vi.fn();
+    const fetch = routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`GET ${SITE}`]: () => json(200, analysis),
+      [`POST ${CONFIRM}`]: () => json(202, { revision: 1, warnings: [] }),
+    });
+    render(<CriteriaReview runId="run_1" onConfirmed={onConfirmed} />);
+    const email = await screen.findByLabelText("Value for email");
+    expect(email).toHaveValue("qa.abc123@example.com");
+    expect(screen.getByText("From the site")).toBeInTheDocument();
+    await user.clear(email);
+    await user.type(email, "me@example.com");
+    await user.click(screen.getByRole("checkbox", { name: /productName/ }));
+    expect(screen.getByLabelText("Value for productName")).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /confirm and start/i }));
+
+    await waitFor(() => expect(onConfirmed).toHaveBeenCalled());
+    const [, init] = fetch.mock.calls.find(([url, i]) => String(url) === CONFIRM && i?.method === "POST")!;
+    expect(JSON.parse(String(init!.body))).toEqual({ testData: { email: "me@example.com", quantity: 2 } });
+  });
+
+  it("a run without an analysis confirms as before, with no body", async () => {
+    const user = userEvent.setup();
+    const fetch = routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`GET ${SITE}`]: () => json(404, { code: "NO_SITE_ANALYSIS", message: "none" }),
+      [`POST ${CONFIRM}`]: () => json(202, { revision: 1, warnings: [] }),
+    });
+    const onConfirmed = vi.fn();
+    render(<CriteriaReview runId="run_1" onConfirmed={onConfirmed} />);
+    await screen.findAllByRole("article");
+    expect(screen.queryByText("Checked against the live site")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /confirm and start/i }));
+    await waitFor(() => expect(onConfirmed).toHaveBeenCalled());
+    const [, init] = fetch.mock.calls.find(([url]) => String(url) === CONFIRM)!;
+    expect(init!.body).toBeUndefined();
   });
 });

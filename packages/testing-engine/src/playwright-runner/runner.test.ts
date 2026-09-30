@@ -225,7 +225,7 @@ describe("buildPlaywrightConfig", () => {
         headless: true,
         proxy: { server: PROXY },
         trace: "retain-on-failure",
-        screenshot: "only-on-failure",
+        screenshot: { mode: "only-on-failure", fullPage: true },
         video: "retain-on-failure",
         actionTimeout: 10_000,
         navigationTimeout: 30_000,
@@ -241,6 +241,13 @@ describe("buildPlaywrightConfig", () => {
     // Chromium's own sandbox stays on: Playwright adds --no-sandbox unless chromiumSandbox is true.
     expect(config.use.launchOptions.chromiumSandbox).toBe(true);
     expect(JSON.stringify(config)).not.toContain("no-sandbox");
+  });
+
+  it("with record (V1.3), a passing test keeps its video and / or trace too", () => {
+    const both = load(buildPlaywrightConfig({ proxyUrl: PROXY, testTimeoutMs: 1000, actionTimeoutMs: 1000, record: { video: true, trace: true } }));
+    expect(both.use).toMatchObject({ trace: "on", video: "on", screenshot: { mode: "only-on-failure", fullPage: true } });
+    const videoOnly = load(buildPlaywrightConfig({ proxyUrl: PROXY, testTimeoutMs: 1000, actionTimeoutMs: 1000, record: { video: true, trace: false } }));
+    expect(videoOnly.use).toMatchObject({ trace: "retain-on-failure", video: "on" });
   });
 
   it.each(["http://localhost:1234", "https://127.0.0.1:1234", "http://10.0.0.1:3128", "http://127.0.0.1", "http://127.0.0.1:1234/x", "socks5://127.0.0.1:1080"])(
@@ -492,6 +499,8 @@ describe("createRunTestStage", () => {
     const ctx = {
       runId: "run_1",
       tenantId: "t_1",
+      // Only the options are read (V1.3: recordVideo / recordTrace, both on by default).
+      request: { options: {} },
       signal: opts.signal ?? new AbortController().signal,
       budgets: { explorationMs: 1_000, rerunMs: 60_000 },
       secrets: { names: ["password"], get: (n: string) => (n === "password" ? SECRET : undefined) },
