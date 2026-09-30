@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, pnpm workspaces, Next.js, React, Fastify, Zod 4, PostgreSQL, Prisma, Redis, BullMQ, Stagehand v4, Playwright Test, Vitest, Docker Compose, MinIO / S3, `ipaddr.js`.
 
-**Spec:** `docs/ai-testing-platform-architecture.md` *(never added to the repo; this plan with Revision 3 is the spec)*. Where the spec and this plan disagree on run states, verdict rules, reconciliation, or security controls, **this plan wins**; update the spec before Task 1.
+**Spec:** this plan, with Revision 3 (the separate architecture doc it once named was never written; KI-030). Where the spec and this plan disagree on run states, verdict rules, reconciliation, or security controls, **this plan wins**; update the spec before Task 1.
 
 ---
 
@@ -196,7 +196,6 @@ ai-testing-platform/
 │   └── runner/                   # Playwright runner image (Task 17)
 ├── spikes/                       # throwaway spike code (Task 0)
 └── docs/
-    ├── ai-testing-platform-architecture.md
     ├── ai-testing-platform-implementation-plan.md
     └── spikes/
 ```
