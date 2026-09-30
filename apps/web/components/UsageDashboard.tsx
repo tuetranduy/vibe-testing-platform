@@ -348,6 +348,12 @@ function DailyCostChart({ days }: { days: UsageReport["byDay"] }) {
   return (
     <div className="usage-chart" ref={box}>
       <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={summary} onMouseLeave={() => setHover(null)}>
+        <defs>
+          <linearGradient id="chart-bar-gradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" className="chart-stop-top" />
+            <stop offset="1" className="chart-stop-bottom" />
+          </linearGradient>
+        </defs>
         {ticks.map((v) => (
           <g key={v}>
             <line className="chart-grid" x1={PAD.left} x2={W - PAD.right} y1={y(v)} y2={y(v)} />
