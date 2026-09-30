@@ -132,19 +132,24 @@ describe("SuiteRunPage", () => {
                 status: "COMPLETED",
                 verdict: "FAILED",
                 counts: { total: 2, active: 0, passed: 1, failed: 1, blocked: 0, inconclusive: 0, noVerdict: 0 },
-                children: suiteRunFixture().children.map((c) => (c.runId === "run_b" ? { ...c, lifecycle: "COMPLETED", verdict: "FAILED" } : c)),
+                changes: { regressed: 1, fixed: 0 },
+                children: suiteRunFixture().children.map((c) =>
+                  c.runId === "run_b" ? { ...c, lifecycle: "COMPLETED", verdict: "FAILED", change: "regressed", baselineRunId: "run_prev_b" } : c,
+                ),
               }),
         );
       },
     });
     render(<SuiteRunPage suiteRunId="srn_1" pollMs={50} />);
     expect(await screen.findByText("2 tests: 1 passed, 1 still running")).toBeInTheDocument();
+    expect(within(screen.getByRole("link", { name: "Add to cart" }).closest("tr")!).getByText("Unchanged")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Add to cart" })).toHaveAttribute("href", "/runs/run_a");
     expect(screen.getByRole("button", { name: "Cancel suite run" })).toBeInTheDocument();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(60);
     });
     expect(await screen.findByText("2 tests: 1 passed, 1 failed")).toBeInTheDocument();
+    expect(screen.getByText(/1 test regressed/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancel suite run" })).not.toBeInTheDocument();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(500);

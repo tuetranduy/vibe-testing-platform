@@ -501,6 +501,7 @@ describe("@platform/testing-engine/reporting entry point (Ruling R36)", () => {
     expect([...seen].map((f) => path.relative(src, f)).sort()).toEqual([
       "orchestrator/stages.ts",
       "reconciliation/reconcile.ts",
+      "reporting/comparison.ts",
       "reporting/index.ts",
       "reporting/markdown.ts",
       "reporting/report-builder.ts",
