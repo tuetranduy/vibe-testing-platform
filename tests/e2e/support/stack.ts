@@ -119,7 +119,10 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
   const work = realpathSync(mkdtempSync(path.join(os.tmpdir(), "platform-e2e-")));
   const logDir = path.join(work, "logs");
   mkdirSync(logDir);
-  const stops: (() => Promise<void> | void)[] = [() => rmSync(work, { recursive: true, force: true })];
+  // E2E_KEEP_LOGS=1 keeps the stack's logs (and workspaces) after the suite, for a failure to be read.
+  const stops: (() => Promise<void> | void)[] = [
+    () => (process.env.E2E_KEEP_LOGS ? console.error(`[e2e] logs kept in ${logDir}`) : rmSync(work, { recursive: true, force: true })),
+  ];
   const stop = async () => {
     for (const fn of stops.splice(0).reverse()) await Promise.resolve().then(fn).catch(() => {});
   };
@@ -131,7 +134,7 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
     }
 
     const db: TestDatabase = await createTestDatabase();
-    stops.push(() => db.drop());
+    stops.push(() => (process.env.E2E_KEEP_LOGS ? console.error(`[e2e] database kept: ${db.url}`) : db.drop()));
 
     const redisUrl = process.env.E2E_REDIS_URL ?? "redis://localhost:6379/14";
     const redis = new Redis(redisUrl);
