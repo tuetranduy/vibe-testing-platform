@@ -8,11 +8,13 @@ const intWithDefault = (def: number, min = 1, max = 1_000_000) =>
 /** An optional variable that is unset when empty: compose passes an unset `${VAR:-}` as "" (Ruling R54). */
 const emptyAsUnset = <T extends z.ZodType>(schema: T) => z.preprocess((v) => (v === "" ? undefined : v), schema.optional());
 
-const LLM_PROVIDERS = ["fake", "anthropic", "gemini", "openai"] as const;
+const LLM_PROVIDERS = ["fake", "anthropic", "gemini", "deepseek", "openai"] as const;
 
-/** The model used when LLM_MODEL is unset: Gemini's for gemini, otherwise Claude's (the fake engine ignores it). */
+/** The model used when LLM_MODEL is unset: Gemini's for gemini, DeepSeek's for deepseek, otherwise Claude's (the fake engine ignores it). */
 export function defaultLlmModel(provider: (typeof LLM_PROVIDERS)[number]): string {
-  return provider === "gemini" ? "gemini-3.8-flash" : "claude-sonnet-5";
+  if (provider === "gemini") return "gemini-3.8-flash";
+  if (provider === "deepseek") return "deepseek-flash";
+  return "claude-sonnet-5";
 }
 
 /** The LLM settings: part of the full environment, and all that `loadLiveLlmEnv` reads. */
@@ -24,15 +26,22 @@ const LlmFields = z.object({
   GEMINI_API_KEY: z.string().optional(),
   /** Gemini's thinking level (thinking tokens count against a call's output limit); unset: the model's default. */
   GEMINI_THINKING_LEVEL: emptyAsUnset(z.enum(["minimal", "low", "medium", "high"])),
+  DEEPSEEK_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
 });
 type LlmFields = z.output<typeof LlmFields>;
 
-const PROVIDER_KEYS = { fake: null, anthropic: "ANTHROPIC_API_KEY", gemini: "GEMINI_API_KEY", openai: "OPENAI_API_KEY" } as const;
-/** The keys a run may use from the environment: its provider comes from its model choice, so either one. */
-const MODEL_PROVIDER_KEYS = ["ANTHROPIC_API_KEY", "GEMINI_API_KEY"] as const;
-/** Model ids of each real provider: the other's (e.g. a leftover LLM_MODEL) would fail at the first call. */
-const MODEL_PREFIXES = { anthropic: "claude-", gemini: "gemini-" } as const;
+const PROVIDER_KEYS = {
+  fake: null,
+  anthropic: "ANTHROPIC_API_KEY",
+  gemini: "GEMINI_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
+  openai: "OPENAI_API_KEY",
+} as const;
+/** The keys a run may use from the environment: its provider comes from its model choice, so any of them. */
+const MODEL_PROVIDER_KEYS = ["ANTHROPIC_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY"] as const;
+/** Model ids of each real provider: another's (e.g. a leftover LLM_MODEL) would fail at the first call. */
+const MODEL_PREFIXES = { anthropic: "claude-", gemini: "gemini-", deepseek: "deepseek-" } as const;
 
 /**
  * Provider keys are optional (Settings may hold them), but a key that is set must be usable as an HTTP
@@ -52,8 +61,7 @@ function checkLlmSettings(env: LlmFields, ctx: z.core.$RefinementCtx<LlmFields>)
     return;
   }
   if (env.LLM_PROVIDER === "fake") return;
-  const other = env.LLM_PROVIDER === "gemini" ? "anthropic" : "gemini";
-  if (env.LLM_MODEL?.startsWith(MODEL_PREFIXES[other])) {
+  if (Object.entries(MODEL_PREFIXES).some(([p, prefix]) => p !== env.LLM_PROVIDER && env.LLM_MODEL?.startsWith(prefix))) {
     ctx.addIssue({
       code: "custom",
       path: ["LLM_MODEL"],
@@ -187,7 +195,8 @@ export type Env = z.output<typeof EnvSchema>;
 
 const LlmEnvSchema = LlmFields.superRefine(checkLlmSettings).transform(withDefaultModel);
 
-export type LiveLlmEnv = Omit<z.output<typeof LlmEnvSchema>, "LLM_PROVIDER"> & { LLM_PROVIDER: "anthropic" | "gemini" };
+export type LiveLlmEnv = Omit<z.output<typeof LlmEnvSchema>, "LLM_PROVIDER"> & { LLM_PROVIDER: LiveLlmProvider };
+type LiveLlmProvider = "anthropic" | "gemini" | "deepseek";
 
 /** API tokens shipped in `.env.example` and the compose file: never valid in production. */
 export const KNOWN_DEV_API_TOKENS: readonly string[] = ["dev-api-token-change-me-please"];
@@ -231,18 +240,20 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 
 /**
  * The LLM settings of the tools that need a real model and no database (evals, `@live` tests, the
- * live E2E gate), validated as `loadEnv` does. LLM_PROVIDER picks anthropic or gemini; unset or
+ * live E2E gate), validated as `loadEnv` does. LLM_PROVIDER picks anthropic, gemini or deepseek; unset or
  * `fake` (a shell set up for the fake worker) means anthropic, as before Gemini existed. When the
  * provider's API key is unset, returns its variable instead (the tools explain or skip); any other
  * problem throws EnvValidationError.
  */
 export function loadLiveLlmEnv(
   source: Record<string, string | undefined> = process.env,
-): LiveLlmEnv | { missingKey: "ANTHROPIC_API_KEY" | "GEMINI_API_KEY" } {
+): LiveLlmEnv | { missingKey: (typeof PROVIDER_KEYS)[LiveLlmProvider] } {
   const requested = source.LLM_PROVIDER || "fake";
   const provider = requested === "fake" ? "anthropic" : requested;
-  if (provider !== "anthropic" && provider !== "gemini") {
-    throw new EnvValidationError([{ key: "LLM_PROVIDER", message: `must be anthropic or gemini here (unset or fake: anthropic), not ${requested}` }]);
+  if (provider !== "anthropic" && provider !== "gemini" && provider !== "deepseek") {
+    throw new EnvValidationError([
+      { key: "LLM_PROVIDER", message: `must be anthropic, gemini or deepseek here (unset or fake: anthropic), not ${requested}` },
+    ]);
   }
   const keyVar = PROVIDER_KEYS[provider];
   if (!source[keyVar]) return { missingKey: keyVar };

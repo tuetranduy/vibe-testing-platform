@@ -27,6 +27,8 @@ The V1 release gate (live E2E suite green 3 times, KI-001) has not passed yet: i
 
 **Gemini provider (2026-09-27).** `LLM_PROVIDER=gemini` with `GEMINI_API_KEY` runs the real engine on the Gemini Developer API (`generateContent` with a JSON response schema; default model `gemini-3.8-flash`, optional `GEMINI_THINKING_LEVEL`), through the same client as Anthropic: redaction, retries, deadline, `llm_calls` records with Gemini prices (thinking tokens billed as output). The evals, `pnpm test:live` and the live E2E gate take `LLM_PROVIDER` too. **First live run 2026-09-27, on a free-tier key with `gemini-3.5-flash-lite`:** the evals score 23/25 and 12/14, the Stagehand smoke passes, and the live E2E suite passes 6 of 12 cases: five others were cut short by free-tier stalls and one by Flash-Lite's plan ([KI-018](docs/known-issues.md#ki-018--the-gemini-provider-has-only-been-run-live-on-a-free-tier-key)). The default model and the live gate still need a billing-enabled key.
 
+**DeepSeek provider (2026-09-30).** `LLM_PROVIDER=deepseek` with `DEEPSEEK_API_KEY` (or a key saved in Settings) runs the real engine on DeepSeek's Chat Completions API (`deepseek-flash`, the default, or `deepseek-v4-pro`), by plain `fetch` like Gemini. DeepSeek's JSON Output takes no schema, so the schema goes into the system prompt and the client's validation and correction round enforce it. Reasoning levels: minimal turns thinking off; low and high are DeepSeek's efforts (the model's default is high). Prices follow DeepSeek's peak hours (01–04 and 06–10 UTC on weekdays cost double). **Not yet run against the live API** ([KI-043](docs/known-issues.md#ki-043--the-deepseek-provider-has-not-been-run-against-the-live-api)).
+
 **Real exploration and the Playwright rerun run in the Docker worker, with Chromium's sandbox on** (2026-09-27, [KI-002](docs/known-issues.md#ki-002--chromiums-sandbox-cannot-start-in-the-compose-worker)). Chromium's sandbox needs Linux user namespaces, which Docker's default seccomp profile denies ("No usable sandbox!", runs `ERRORED / BROWSER_PROVIDER`). Of the options — a seccomp profile that permits user namespaces, `cap_add: SYS_ADMIN` (broad), or Chromium's `--no-sandbox` (the browser runs untrusted pages) — the compose `worker` uses the first: [`infra/seccomp/worker.json`](infra/seccomp/README.md) is Docker's default profile plus user, PID and network namespaces for `clone` / `unshare`, with no extra capability. Both exploration's Chromium and the rerun's (launched by `@playwright/test`, `chromiumSandbox: true`) start sandboxed in the container, and `pnpm test:e2e:compose` runs the E2E suite against the compose API and worker. A deployment elsewhere needs the same profile (a Kubernetes `Localhost` profile) and a host that allows unprivileged user namespaces; see the profile's README.
 
 ### V1.3 (2026-09-30)
@@ -154,9 +156,9 @@ The compose stack's default model is the **fake** engine (`LLM_PROVIDER=fake`). 
 Chromium (matching the workspace's `playwright-core` pin) and its OS dependencies under `/ms-playwright`, and the
 `worker` service runs with the seccomp profile that lets Chromium's sandbox start (`infra/seccomp/worker.json`)
 and an init process that reaps the browsers' helpers. For the real engine, open **Settings**
-(http://localhost:3000/settings), save an Anthropic or Google Gemini API key and choose the default model (see
+(http://localhost:3000/settings), save an Anthropic, Google Gemini or DeepSeek API key and choose the default model (see
 [Settings](#settings-ai-providers-and-models)); or set `LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`, or
-`LLM_PROVIDER=gemini` and `GEMINI_API_KEY`, in `infra/compose/.env` — the `LLM_*` variables are the defaults while
+`LLM_PROVIDER=gemini` and `GEMINI_API_KEY`, or `LLM_PROVIDER=deepseek` and `DEEPSEEK_API_KEY`, in `infra/compose/.env` — the `LLM_*` variables are the defaults while
 Settings hold none.
 
 | Service | URL |
@@ -385,7 +387,7 @@ packages/db                  Drizzle schema, SQL migrations, repositories, state
 packages/security            URL/IP policy, redaction, secret vault, destructive-action policy
 packages/storage             artifact storage (local, S3)
 packages/event-bus           event publisher, Redis fan-out, queue names, the reaper (run by the workers and the API)
-packages/llm                 provider-neutral LLM client (redaction, retries, LlmCall records, reasoning level), Anthropic and Gemini adapters, the model catalog
+packages/llm                 provider-neutral LLM client (redaction, retries, LlmCall records, reasoning level), Anthropic, Gemini and DeepSeek adapters, the model catalog
 packages/stagehand-adapter    Stagehand v4 explorer, ClientLLM bridge, the runtime extension (Task 14)
 packages/testing-engine       orchestrator + engine stages: requirement compiler, planner, exploration, verifier (Tasks 10-15), test compiler, Playwright rerun + evidence, reconciliation + report (Tasks 16-18), survey (suggested tests for a blank requirement)
 evals                         `pnpm eval <suite>` harness and cases; BASELINE.md records scores
@@ -408,13 +410,13 @@ Each proposed criterion shows its wording and *what will be checked*. You can ad
 
 **Settings** in the header (`/settings`) holds, for the tenant, what the platform's tests run on:
 
-- **AI providers**: one API key per provider (Anthropic, Google Gemini), stored encrypted (AES-256-GCM with
+- **AI providers**: one API key per provider (Anthropic, Google Gemini, DeepSeek), stored encrypted (AES-256-GCM with
   `SECRETS_ENCRYPTION_KEY`) and never shown again: the page says only "Key saved · updated …", "Using the server's
   key (`ANTHROPIC_API_KEY`)" or "No key". A key saved here is used instead of the server's; "Remove saved key" falls
   back to it.
 - **Defaults for new tests**: the model (grouped by provider; a provider without a key has its models disabled,
   "add a key"), its reasoning level ("Model default (…)", or low / medium / high — and minimal on the Gemini Flash
-  models), and the selected model's price per million tokens.
+  models; DeepSeek models take minimal (thinking off), low and high), and the selected model's price per million tokens.
 
 A test can pick another model or level under the new-test form's Advanced options. Each run records the provider,
 model and reasoning level it was created with, in this order: the test's own choice, else the defaults saved in
@@ -423,7 +425,7 @@ Settings, else the environment (`LLM_PROVIDER`, `LLM_MODEL` or the provider's de
 run's model ("Claude Sonnet 5 · medium reasoning"). A test whose provider has no key, or whose model or level is not
 offered, is refused when it is submitted (`422 MODEL_NOT_AVAILABLE`, naming the fix). The fake engine ("Fake engine
 (development)") is offered only outside production. Over the API: `GET /v1/settings/llm`, `PUT /v1/settings/llm`
-with `{ "defaults": { "model", "reasoning" } }`, `PUT /v1/settings/llm/keys/{anthropic|gemini}` with
+with `{ "defaults": { "model", "reasoning" } }`, `PUT /v1/settings/llm/keys/{anthropic|gemini|deepseek}` with
 `{ "apiKey": "…" }` (`null` removes it), and `llm: { model?, reasoning? }` on `POST /v1/test-runs`. The API and the
 worker must share the `LLM_*` variables (see [`docs/operations.md`](docs/operations.md)).
 
@@ -432,7 +434,7 @@ worker must share the `LLM_*` variables (see [`docs/operations.md`](docs/operati
 - **Drizzle ORM instead of Prisma.** Prisma's CLI downloads a native engine from `binaries.prisma.sh`, which was unreachable in the build environments. Drizzle is pure TypeScript and gives the same Postgres tables, enums, and constraints. Migrations are plain SQL in `packages/db/migrations` (`pnpm --filter @platform/db db:generate` after editing `schema.ts`).
 - **rclone's S3 server instead of MinIO** in Docker Compose: MinIO images are no longer available on Docker Hub. Production can use any S3-compatible store.
 - **Zod pinned to 4.4.3** because Stagehand v4 pins it (Task 0 finding).
-- **Anthropic and Gemini are the V1 providers.** Gemini is reached through the Gemini Developer API with an API key (not Vertex AI), by plain `fetch` rather than Google's SDK, which would add 32 packages (google-auth-library among them) to the worker for one endpoint. `LLM_PROVIDER=openai` makes the worker fail at start-up. Each test's model comes from Settings or the new-test form; `LLM_MODEL` (default `claude-sonnet-5`, or `gemini-3.8-flash` for Gemini) is the default while Settings hold none.
+- **Anthropic, Gemini and DeepSeek are the providers** (DeepSeek since 2026-09-30, by plain `fetch` as well). Gemini is reached through the Gemini Developer API with an API key (not Vertex AI), by plain `fetch` rather than Google's SDK, which would add 32 packages (google-auth-library among them) to the worker for one endpoint. `LLM_PROVIDER=openai` makes the worker fail at start-up. Each test's model comes from Settings or the new-test form; `LLM_MODEL` (default `claude-sonnet-5`, `gemini-3.8-flash` for Gemini, `deepseek-flash` for DeepSeek) is the default while Settings hold none.
 - **Engine error classes live in `@platform/contracts`** (re-exported by `@platform/testing-engine`) so `@platform/llm` can throw `ModelProviderError` / `ContractError` / `CancelledError` without depending on the engine.
 - **`analyze` returns a draft; the orchestrator persists revision 1** (the plan's `compileRequirement` signature returns the stored requirement).
 - **`docs/ai-testing-platform-architecture.md`** is referenced by the plan but wasn't in the repo, so it hasn't been updated.

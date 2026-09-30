@@ -2,11 +2,11 @@ import { z } from "zod";
 import { IsoDateTime } from "./common";
 
 /** Model providers. `fake` is the deterministic fake engine (never in production). */
-export const LlmProviderSchema = z.enum(["anthropic", "gemini", "fake"]);
+export const LlmProviderSchema = z.enum(["anthropic", "gemini", "deepseek", "fake"]);
 export type LlmProvider = z.infer<typeof LlmProviderSchema>;
 
 /** The providers that take an API key (Settings → AI providers). */
-export const LlmKeyProviderSchema = z.enum(["anthropic", "gemini"]);
+export const LlmKeyProviderSchema = z.enum(["anthropic", "gemini", "deepseek"]);
 export type LlmKeyProvider = z.infer<typeof LlmKeyProviderSchema>;
 
 /** `default` sends no reasoning parameter: the model's own level (what every run did before). */

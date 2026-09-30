@@ -2,9 +2,9 @@ import type { LlmChoice } from "@platform/contracts";
 import { describe, expect, it } from "vitest";
 import { addKeyHint, checkModel, offeredModels, resolveRunLlm, type LlmAvailability } from "./llm-choice";
 
-const ALL_KEYS: LlmAvailability = { keys: { anthropic: true, gemini: true }, fakeAllowed: true };
-const ANTHROPIC_ONLY: LlmAvailability = { keys: { anthropic: true, gemini: false }, fakeAllowed: true };
-const NO_KEYS: LlmAvailability = { keys: { anthropic: false, gemini: false }, fakeAllowed: true };
+const ALL_KEYS: LlmAvailability = { keys: { anthropic: true, gemini: true, deepseek: true }, fakeAllowed: true };
+const ANTHROPIC_ONLY: LlmAvailability = { keys: { anthropic: true, gemini: false, deepseek: false }, fakeAllowed: true };
+const NO_KEYS: LlmAvailability = { keys: { anthropic: false, gemini: false, deepseek: false }, fakeAllowed: true };
 const ENV: LlmChoice = { provider: "anthropic", model: "claude-sonnet-5", reasoning: "default" };
 const resolve = (input: Partial<Parameters<typeof resolveRunLlm>[0]>) =>
   resolveRunLlm({ override: undefined, saved: null, env: ENV, availability: ANTHROPIC_ONLY, ...input });

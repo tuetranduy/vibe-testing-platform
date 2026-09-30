@@ -14,6 +14,8 @@ describe("MODEL_CATALOG", () => {
       ["gemini", "gemini-3.5-flash", "minimal,low,medium,high", "medium", false],
       ["gemini", "gemini-3.5-flash-lite", "minimal,low,medium,high", "minimal", false],
       ["gemini", "gemini-3.1-pro-preview", "low,medium,high", "high", false],
+      ["deepseek", "deepseek-flash", "minimal,low,high", "high", false],
+      ["deepseek", "deepseek-v4-pro", "minimal,low,high", "high", false],
       ["fake", "fake", "", null, false],
     ]);
   });
@@ -34,13 +36,14 @@ describe("MODEL_CATALOG", () => {
   it("offers the providers' default models (defaultLlmModel)", () => {
     expect(catalogModel("claude-sonnet-5")?.provider).toBe("anthropic");
     expect(catalogModel("gemini-3.8-flash")?.provider).toBe("gemini");
+    expect(catalogModel("deepseek-flash")?.provider).toBe("deepseek");
   });
 
   it("looks models up by exact id and names the providers", () => {
     expect(catalogModel("claude-opus-5-5")?.label).toBe("Claude Opus 5.5");
     expect(catalogModel("claude-opus-5-5-20260901")).toBeUndefined();
     expect(catalogModel("gpt-x")).toBeUndefined();
-    expect(PROVIDER_LABELS).toEqual({ anthropic: "Anthropic", gemini: "Google Gemini", fake: "Development" });
+    expect(PROVIDER_LABELS).toEqual({ anthropic: "Anthropic", gemini: "Google Gemini", deepseek: "DeepSeek", fake: "Development" });
   });
 
   it("the ./catalog and ./pricing entry points load no provider SDK (the API imports them)", () => {

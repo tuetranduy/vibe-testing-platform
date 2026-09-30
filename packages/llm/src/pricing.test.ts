@@ -38,4 +38,20 @@ describe("priceFor", () => {
     // A snapshot id follows its model's dates too.
     expect(estimateCostUsd("gemini-3.8-flash-001", 1000, 500, after)).toBe(0.00525);
   });
+  it("prices DeepSeek at double the off-peak price in its peak hours (01–04 and 06–10 UTC, Monday–Friday)", () => {
+    const offPeak = { inputUsdPerMTok: 0.15, outputUsdPerMTok: 0.6 };
+    const peak = { inputUsdPerMTok: 0.3, outputUsdPerMTok: 1.2 };
+    // Wednesday 2026-09-30.
+    expect(priceFor("deepseek-flash", new Date("2026-09-30T00:59:59Z"))).toEqual(offPeak);
+    expect(priceFor("deepseek-flash", new Date("2026-09-30T01:00:00Z"))).toEqual(peak);
+    expect(priceFor("deepseek-flash", new Date("2026-09-30T03:59:59Z"))).toEqual(peak);
+    expect(priceFor("deepseek-flash", new Date("2026-09-30T04:00:00Z"))).toEqual(offPeak);
+    expect(priceFor("deepseek-flash", new Date("2026-09-30T06:00:00Z"))).toEqual(peak);
+    expect(priceFor("deepseek-flash", new Date("2026-09-30T10:00:00Z"))).toEqual(offPeak);
+    // Weekends are off-peak all day (Saturday 2026-10-03, Sunday 2026-10-04).
+    expect(priceFor("deepseek-flash", new Date("2026-10-03T02:00:00Z"))).toEqual(offPeak);
+    expect(priceFor("deepseek-flash", new Date("2026-10-04T07:00:00Z"))).toEqual(offPeak);
+    expect(priceFor("deepseek-v4-pro", new Date("2026-09-30T12:00:00Z"))).toEqual({ inputUsdPerMTok: 0.66, outputUsdPerMTok: 1.98 });
+    expect(estimateCostUsd("deepseek-v4-pro", 1000, 500, new Date("2026-09-30T07:00:00Z"))).toBe(0.00330);
+  });
 });

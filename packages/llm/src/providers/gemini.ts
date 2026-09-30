@@ -1,6 +1,7 @@
 import { LlmTransportError, type LlmTransport, type LlmTransportRequest, type LlmTransportResponse } from "../transport";
 import type { LlmContentPart, LlmMessage } from "../types";
 import { toGeminiJsonSchema } from "./gemini-json-schema";
+import { messageWithCause, parseJson } from "./http";
 import { retryAfterMs } from "./retry-after";
 
 export interface GeminiTransportOptions {
@@ -166,22 +167,9 @@ function httpError(res: Response, text: string): LlmTransportError {
   });
 }
 
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-}
-
 /** `google.rpc.RetryInfo.retryDelay` (a protobuf Duration such as "23s" or "1.5s") in ms. */
 function retryInfoMs(details: NonNullable<GeminiErrorBody["error"]>["details"]): number | undefined {
   const delay = details?.find((d) => d["@type"]?.endsWith("google.rpc.RetryInfo"))?.retryDelay;
   const match = delay ? /^(\d+(?:\.\d+)?)s$/.exec(delay) : null;
   return match ? Math.round(Number(match[1]) * 1000) : undefined;
-}
-
-function messageWithCause(err: unknown): string {
-  const message = err instanceof Error ? err.message : String(err);
-  return err instanceof Error && err.cause instanceof Error ? `${message} (${err.cause.message})` : message;
 }

@@ -132,6 +132,11 @@ describe("loadEnv", () => {
     expect(loadEnv({ ...gemini, LLM_MODEL: "" }).LLM_MODEL).toBe("gemini-3.8-flash");
     expect(loadEnv({ ...gemini, LLM_MODEL: "gemini-3.1-pro-preview" }).LLM_MODEL).toBe("gemini-3.1-pro-preview");
     expect(loadEnv({ ...validEnv, LLM_MODEL: "claude-opus-5" }).LLM_MODEL).toBe("claude-opus-5");
+    const deepseek = { ...validEnv, LLM_PROVIDER: "deepseek", DEEPSEEK_API_KEY: "sk-ds-test" };
+    expect(loadEnv(deepseek).LLM_MODEL).toBe("deepseek-flash");
+    expect(loadEnv({ ...deepseek, LLM_MODEL: "deepseek-v4-pro" }).LLM_MODEL).toBe("deepseek-v4-pro");
+    // Optional, as for the other providers: Settings may hold it.
+    expect(loadEnv({ ...deepseek, DEEPSEEK_API_KEY: "" }).LLM_PROVIDER).toBe("deepseek");
   });
 
   it("rejects the other provider's model, e.g. a leftover LLM_MODEL=claude-… with LLM_PROVIDER=gemini", () => {
@@ -141,6 +146,8 @@ describe("loadEnv", () => {
     expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-test", LLM_MODEL: "gemini-3.8-flash" })).toThrow(
       /LLM_MODEL/,
     );
+    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "deepseek", LLM_MODEL: "gemini-3.8-flash" })).toThrow(/is not a deepseek model/);
+    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", LLM_MODEL: "deepseek-flash" })).toThrow(/is not a gemini model/);
     // The fake engine ignores the model.
     expect(loadEnv({ ...validEnv, LLM_PROVIDER: "fake", LLM_MODEL: "gemini-3.8-flash" }).LLM_MODEL).toBe("gemini-3.8-flash");
   });
@@ -169,6 +176,7 @@ describe("loadEnv", () => {
     expect(message).toMatch(/GEMINI_API_KEY/);
     expect(message).not.toContain("secret-value");
     expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test", ANTHROPIC_API_KEY: "sk ant" })).toThrow(/ANTHROPIC_API_KEY/);
+    expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "fake", DEEPSEEK_API_KEY: "sk ds" })).toThrow(/DEEPSEEK_API_KEY/);
   });
 
   it("GEMINI_THINKING_LEVEL is optional (empty means unset) and must be a Gemini level", () => {
@@ -203,7 +211,7 @@ describe("loadEnv", () => {
 });
 
 describe("loadLiveLlmEnv (evals, live tests and the live gate: a real provider, no database)", () => {
-  it("LLM_PROVIDER picks anthropic or gemini; unset or fake (a shell set up for the fake worker) means anthropic, as before", () => {
+  it("LLM_PROVIDER picks anthropic, gemini or deepseek; unset or fake (a shell set up for the fake worker) means anthropic, as before", () => {
     expect(loadLiveLlmEnv({ ANTHROPIC_API_KEY: "sk-test" })).toMatchObject({ LLM_PROVIDER: "anthropic", LLM_MODEL: "claude-sonnet-5" });
     expect(loadLiveLlmEnv({ LLM_PROVIDER: "", ANTHROPIC_API_KEY: "sk-test" })).toMatchObject({ LLM_PROVIDER: "anthropic" });
     expect(loadLiveLlmEnv({ LLM_PROVIDER: "fake", LLM_MODEL: "claude-opus-5", ANTHROPIC_API_KEY: "sk-test" })).toMatchObject({
@@ -216,6 +224,11 @@ describe("loadLiveLlmEnv (evals, live tests and the live gate: a real provider, 
       GEMINI_API_KEY: "gm-test",
       GEMINI_THINKING_LEVEL: "low",
     });
+    expect(loadLiveLlmEnv({ LLM_PROVIDER: "deepseek", DEEPSEEK_API_KEY: "sk-ds-test" })).toEqual({
+      LLM_PROVIDER: "deepseek",
+      LLM_MODEL: "deepseek-flash",
+      DEEPSEEK_API_KEY: "sk-ds-test",
+    });
     expect(() => loadLiveLlmEnv({ LLM_PROVIDER: "gemni", GEMINI_API_KEY: "gm-test" })).toThrow(/LLM_PROVIDER/);
     expect(() => loadLiveLlmEnv({ LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-test" })).toThrow(/LLM_PROVIDER/);
   });
@@ -223,6 +236,7 @@ describe("loadLiveLlmEnv (evals, live tests and the live gate: a real provider, 
   it("names the key to set when it is unset; any other problem throws, as loadEnv would", () => {
     expect(loadLiveLlmEnv({ LLM_PROVIDER: "fake" })).toEqual({ missingKey: "ANTHROPIC_API_KEY" });
     expect(loadLiveLlmEnv({ LLM_PROVIDER: "gemini", GEMINI_API_KEY: "", ANTHROPIC_API_KEY: "sk-test" })).toEqual({ missingKey: "GEMINI_API_KEY" });
+    expect(loadLiveLlmEnv({ LLM_PROVIDER: "deepseek" })).toEqual({ missingKey: "DEEPSEEK_API_KEY" });
     expect(() => loadLiveLlmEnv({ LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test", GEMINI_THINKING_LEVEL: "hi" })).toThrow(/GEMINI_THINKING_LEVEL/);
     expect(() => loadLiveLlmEnv({ LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test", LLM_MODEL: "claude-sonnet-5" })).toThrow(/LLM_MODEL/);
   });

@@ -14,8 +14,9 @@ describe("resolveEnvLlmChoice (the defaults when Settings hold none)", () => {
     expect(resolveEnvLlmChoice({ LLM_PROVIDER: "gemini", LLM_MODEL: "gemini-3.5-flash-lite" })).toEqual({ provider: "gemini", model: "gemini-3.5-flash-lite", reasoning: "default" });
   });
 
-  it("GEMINI_THINKING_LEVEL does not apply to anthropic", () => {
+  it("GEMINI_THINKING_LEVEL does not apply to anthropic or deepseek", () => {
     expect(resolveEnvLlmChoice({ LLM_PROVIDER: "anthropic", GEMINI_THINKING_LEVEL: "high" }).reasoning).toBe("default");
+    expect(resolveEnvLlmChoice({ LLM_PROVIDER: "deepseek", GEMINI_THINKING_LEVEL: "high" })).toEqual({ provider: "deepseek", model: "deepseek-flash", reasoning: "default" });
   });
 
   it("fake: the fake engine, whatever LLM_MODEL says", () => {

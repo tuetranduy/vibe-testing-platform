@@ -57,7 +57,7 @@ export function api(stack: E2EStack, session?: string) {
     artifactUrl: async (runId: string, artifactId: string, reveal = false): Promise<{ url: string }> =>
       (await call("GET", `/v1/test-runs/${runId}/artifacts/${artifactId}/url${reveal ? "?reveal=true" : ""}`)).json,
     llmSettings: () => call("GET", "/v1/settings/llm"),
-    putProviderKey: (provider: "anthropic" | "gemini", apiKey: string | null) => call("PUT", `/v1/settings/llm/keys/${provider}`, { apiKey }),
+    putProviderKey: (provider: "anthropic" | "gemini" | "deepseek", apiKey: string | null) => call("PUT", `/v1/settings/llm/keys/${provider}`, { apiKey }),
   };
   return self;
 }

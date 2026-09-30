@@ -19,7 +19,7 @@ export interface EnvLlmSettings {
 export function resolveEnvLlmChoice(env: EnvLlmSettings): LlmChoice {
   const provider = LlmProviderSchema.safeParse(env.LLM_PROVIDER);
   if (!provider.success) {
-    throw new Error(`LLM_PROVIDER=${env.LLM_PROVIDER} is not implemented in V1 (use anthropic, gemini or fake)`);
+    throw new Error(`LLM_PROVIDER=${env.LLM_PROVIDER} is not implemented in V1 (use anthropic, gemini, deepseek or fake)`);
   }
   if (provider.data === "fake") return { provider: "fake", model: "fake", reasoning: "default" };
   const reasoning = provider.data === "gemini" && env.GEMINI_THINKING_LEVEL ? ReasoningLevelSchema.parse(env.GEMINI_THINKING_LEVEL) : "default";

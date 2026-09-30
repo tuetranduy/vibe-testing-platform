@@ -80,7 +80,7 @@ function viaHost(url: string, host: string, port: number): string {
 }
 
 /**
- * E2E_MODE=live: the worker's real provider — LLM_PROVIDER=gemini, or anthropic when unset or fake —
+ * E2E_MODE=live: the worker's real provider — LLM_PROVIDER=gemini or deepseek, or anthropic when unset or fake —
  * with its model and settings, and only that provider's key. Throws naming what is missing or wrong.
  */
 function liveLlmEnv(): Record<string, string> {
@@ -93,6 +93,9 @@ function liveLlmEnv(): Record<string, string> {
       GEMINI_API_KEY: llm.GEMINI_API_KEY!,
       ...(llm.GEMINI_THINKING_LEVEL ? { GEMINI_THINKING_LEVEL: llm.GEMINI_THINKING_LEVEL } : {}),
     };
+  }
+  if (llm.LLM_PROVIDER === "deepseek") {
+    return { LLM_PROVIDER: "deepseek", LLM_MODEL: llm.LLM_MODEL, DEEPSEEK_API_KEY: llm.DEEPSEEK_API_KEY! };
   }
   return { LLM_PROVIDER: "anthropic", LLM_MODEL: llm.LLM_MODEL, ANTHROPIC_API_KEY: llm.ANTHROPIC_API_KEY! };
 }

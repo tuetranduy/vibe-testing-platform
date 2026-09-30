@@ -54,6 +54,7 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
 | KI-038 | Low | Admission | A suite run takes one slot but queues all of its tests at once | Open |
 | KI-039 | Low | Performance | Suite-run views compare every child with its previous run on each read | Open |
 | KI-040 | Low | Tokens | The web app's per-minute token limit is per instance and in memory | Open |
+| KI-043 | Medium | LLM | The DeepSeek provider has not been run against the live API | Open |
 
 ---
 
@@ -471,3 +472,15 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   renderer processes (e.g. to another site allowed by `additionalAllowedHosts`) could end the stream early (the video
   then stops there; the trace is unaffected).
 - **To close:** a live E2E run with recordings on; if videos stop early, restart the screencast on `framenavigated`.
+
+## KI-043 — The DeepSeek provider has not been run against the live API
+- **Severity:** Medium (no eval score or live E2E run on DeepSeek yet).
+- **Where:** `packages/llm/src/providers/deepseek.ts`, `packages/llm/src/pricing.ts`.
+- **What:** added 2026-09-30 from DeepSeek's API reference (checked that day) and tested against recorded response
+  shapes, without a key. DeepSeek's JSON Output takes no schema, so the schema is written into the system prompt and
+  only LlmClient's validation (and its one correction round) enforces it: expect more `INVALID_OUTPUT` records than on
+  Claude or Gemini, above all on the compiler's and planner's larger schemas. Costs are estimates: input is priced at
+  the cache-miss rate (cache hits cost about 2 % of it), and Chinese public holidays, billed off-peak, are priced at
+  peak. `deepseek-v4-pro` takes no images, so a screenshot Stagehand sends it is replaced by a note.
+- **To close:** `LLM_PROVIDER=deepseek pnpm eval …` on each suite (record the scores in `evals/BASELINE.md`), the
+  `@live` Stagehand smoke and the live E2E suite; check the 120 s request timeout against thinking-mode answer times.

@@ -15,7 +15,7 @@ afterAll(async () => t?.close());
 /** The environment: LLM_PROVIDER=anthropic, default model, and which keys it sets. */
 const env = (keys: Partial<ApiLlmConfig["envKeys"]> = {}, patch: Partial<ApiLlmConfig> = {}): ApiLlmConfig => ({
   envChoice: { provider: "anthropic", model: "claude-sonnet-5", reasoning: "default" },
-  envKeys: { anthropic: false, gemini: false, ...keys },
+  envKeys: { anthropic: false, gemini: false, deepseek: false, ...keys },
   fakeAllowed: true,
   ...patch,
 });
@@ -32,7 +32,7 @@ const putDefaults = (defaults: unknown) => t.app.inject({ method: "PUT", url: "/
 const putKey = (provider: string, apiKey: string | null) =>
   t.app.inject({ method: "PUT", url: `/v1/settings/llm/keys/${provider}`, headers: auth, payload: { apiKey } });
 const viewOf = (res: { json(): unknown }): LlmSettingsView => LlmSettingsViewSchema.parse(res.json());
-const storedKey = async (provider: "anthropic" | "gemini") => {
+const storedKey = async (provider: "anthropic" | "gemini" | "deepseek") => {
   const enc = await new ProviderKeyRepository(t.tdb.db).getEncrypted(TEST_TENANT_ID, provider);
   return enc && decryptProviderKey(enc, { tenantId: TEST_TENANT_ID, provider }, SECRETS_KEY);
 };
@@ -52,6 +52,7 @@ describe("GET /v1/settings/llm", () => {
     expect(view.providers).toEqual([
       { provider: "anthropic", label: "Anthropic", key: { source: "environment", updatedAt: null } },
       { provider: "gemini", label: "Google Gemini", key: { source: null, updatedAt: null } },
+      { provider: "deepseek", label: "DeepSeek", key: { source: null, updatedAt: null } },
     ]);
     expect(view.models.map((m) => m.id)).toEqual([
       "claude-fable-5-1",
@@ -62,6 +63,8 @@ describe("GET /v1/settings/llm", () => {
       "gemini-3.5-flash",
       "gemini-3.5-flash-lite",
       "gemini-3.1-pro-preview",
+      "deepseek-flash",
+      "deepseek-v4-pro",
       "fake",
     ]);
     expect(view.models.find((m) => m.id === "claude-opus-5-5")).toEqual({
@@ -102,6 +105,7 @@ describe("GET /v1/settings/llm", () => {
     expect(viewOf(res).providers).toEqual([
       { provider: "anthropic", label: "Anthropic", key: { source: "environment", updatedAt: null } },
       { provider: "gemini", label: "Google Gemini", key: { source: "settings", updatedAt: expect.any(String) } },
+      { provider: "deepseek", label: "DeepSeek", key: { source: null, updatedAt: null } },
     ]);
   });
 });
@@ -125,6 +129,14 @@ describe("PUT /v1/settings/llm/keys/:provider", () => {
       ["settings.llm.key_removed", "gemini"],
     ]);
     expect(JSON.stringify(t.audit)).not.toMatch(/AIza-/);
+  });
+
+  it("saves a DeepSeek key; its models become available", async () => {
+    expect(viewOf(await get()).models.find((m) => m.id === "deepseek-flash")!.available).toBe(false);
+    const view = viewOf(await putKey("deepseek", "sk-ds-Saved-Key-0042"));
+    expect(view.providers[2]).toEqual({ provider: "deepseek", label: "DeepSeek", key: { source: "settings", updatedAt: expect.any(String) } });
+    expect(view.models.find((m) => m.id === "deepseek-flash")!.available).toBe(true);
+    expect(await storedKey("deepseek")).toBe("sk-ds-Saved-Key-0042");
   });
 
   it("removing the saved key falls back to the environment's: the defaults stay usable", async () => {
