@@ -1,5 +1,5 @@
 {
-  "name": "ai-testing-platform",
+  "name": "vibe-testing-platform",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.0",
