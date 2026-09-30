@@ -1,6 +1,6 @@
 import type { CriterionResult, CriterionStatus } from "@platform/contracts";
 import { RequirementRepository, ResultRepository, RunRepository } from "@platform/db";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { auth, confirmedRequirement, createTestApi, finishedRunWithTest, signInMember, type TestApi } from "../test-support";
 
 let t: TestApi;
@@ -122,6 +122,14 @@ describe("GET /v1/test-runs/:runId/comparison (V1.2 F2)", () => {
       changes: { regressed: 1, fixed: 0 },
       children: [{ change: "regressed", baselineRunId: first.runIds[0] }],
     });
+    // A settled child's change is kept (KI-039): polling the suite run again doesn't recompare it.
+    const lookups = vi.spyOn(RunRepository.prototype, "findPreviousComparable");
+    try {
+      expect((await call(`/v1/suite-runs/${second.suiteRunId}`)).json().children[0]).toMatchObject({ change: "regressed" });
+      expect(lookups).not.toHaveBeenCalled();
+    } finally {
+      lookups.mockRestore();
+    }
   });
 });
 
