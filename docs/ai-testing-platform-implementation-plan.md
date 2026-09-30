@@ -79,6 +79,11 @@ Test suites on 2026-09-29: typecheck clean; `pnpm test` ≈ 2,000 passing; `pnpm
 | A21 | Reporting | Markdown download; PDF through the browser's print dialog | spec F6 |
 | A22 | Exploration | The executor's own cache of verified element lookups (Stagehand's is Browserbase-only, A3) | spec F8, KI-032 |
 | A23 | D12 | 1–5 scenarios per plan, each from a clean session, one Playwright test each; planner output format changed | spec F9, KI-031 |
+| A24 | Sequencing | V1.2 built (branch `feat/v1.2`, 2026-09-30) while items 1–3 below still wait for a paid model key; no V1.2 feature changes a prompt | `specs/2026-09-30-v1.2-design.md` |
+| A25 | D2, admission | Suites and suite runs: a suite run reruns each saved test as its own run and takes one active-run slot; its verdict is FAILED > BLOCKED > INCONCLUSIVE (incl. errored / cancelled) > PASSED | spec F1, KI-038 |
+| A26 | Reporting | Runs of the same test share a comparison key (URL + requirement); a completed run is compared with the previous one, criterion by criterion | spec F2, KI-039 |
+| A27 | Jobs (2.5) | Suite schedules: BullMQ job schedulers mirrored from `suite_schedules`, consumed by the API; a firing runs as the schedule's creator with the suite's saved credentials | spec F3, KI-037 |
+| A28 | D6 | User-owned, scoped API tokens through the web app's `/api/ext` path; JUnit XML, a GitHub Action and a CLI | spec F4–F5, KI-036, KI-040 |
 
 ### Outstanding tasks
 
@@ -101,7 +106,8 @@ In priority order. None blocks development; items 1–3 block the V1 release gat
 8. **Housekeeping** (KI-030): the stale copy of this plan in `Claude outputs/`; the missing architecture doc
    (Section 8); the S3 storage tests are opt-in locally (`S3_TEST_ENDPOINT`), always on in CI.
 
-V1.1 (Section 7) is built (A15–A23); the planner's new prompt joins item 2 (KI-031).
+V1.1 (Section 7) is built (A15–A23); the planner's new prompt joins item 2 (KI-031). V1.2 is built (A24–A28); its
+GitHub Action joins item 4 (KI-036: it needs the remote).
 
 ---
 
@@ -2159,6 +2165,9 @@ Implement only after the V1 gates pass.
 - multi-user login and per-user run ownership.
 
 ### V1.2
+
+**Built 2026-09-30** (branch `feat/v1.2`, spec `docs/superpowers/specs/2026-09-30-v1.2-design.md`, amendments A24–A28).
+Scheduled runs run saved suites only (no model call).
 
 - scheduled runs;
 - API token management for external triggers;

@@ -9,7 +9,8 @@ operability gap a user or operator will hit; **Low** is polish, test hygiene or 
 KI-002 to KI-017 were resolved on 2026-09-27 (branch `fix/known-issues`); each entry names its commit. KI-001 and KI-018
 are open: both need a paid model key. KI-019 and KI-020 were resolved on 2026-09-28. KI-021 to KI-030 came from the
 audit of 2026-09-29 against the plan; the plan's Revision 3 lists what is outstanding in priority order. KI-028 was
-resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to KI-035.
+resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to KI-035. V1.2 (branch `feat/v1.2`,
+2026-09-30) recorded KI-036 to KI-040.
 
 | ID | Severity | Area | Summary | Status |
 |---|---|---|---|---|
@@ -48,6 +49,11 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
 | KI-033 | Low | Secrets | Saved credential profiles are decrypted by the API at run creation | Open (by design) |
 | KI-034 | Low | Users | Sessions: no list, no "sign out everywhere" short of a password change | Open |
 | KI-035 | Low | Users | Users exist only in the default tenant | Open |
+| KI-036 | Medium | CI | The GitHub Action has never run on GitHub | Open (needs KI-025's remote) |
+| KI-037 | Low | Schedules | Schedules fire only while an API process is up; a missed firing runs late, once | Open (by design) |
+| KI-038 | Low | Admission | A suite run takes one slot but queues all of its tests at once | Open |
+| KI-039 | Low | Performance | Suite-run views compare every child with its previous run on each read | Open |
+| KI-040 | Low | Tokens | The web app's per-minute token limit is per instance and in memory | Open |
 
 ---
 
@@ -404,3 +410,43 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   all act on the default tenant. A second tenant would need a way to choose the tenant at sign-in.
 - **To close:** with multi-tenancy (V2), together with KI-027.
 
+## KI-036 — The GitHub Action has never run on GitHub
+- **Severity:** Medium (V1.2 F5).
+- **Where:** `.github/actions/run-suite/`, `integrations/platform-client/`.
+- **What:** the action and the CLI are tested with a fake platform (unit tests) and the client's core against the E2E
+  stack (the web app's `/api/ext` path emulated by the test), but the action has never run inside GitHub Actions: the
+  repository has no remote (KI-025). Input names, `$GITHUB_OUTPUT` / `$GITHUB_STEP_SUMMARY` handling and the
+  `node24` runtime follow GitHub's documentation, unverified.
+- **To close:** with KI-025's remote, run the example workflow in `integrations/README.md` against a deployed web app.
+
+## KI-037 — Schedules fire only while an API process is up
+- **Severity:** Low (by design, V1.2 F3).
+- **Where:** `apps/api/src/services/schedule-worker.ts`.
+- **What:** BullMQ's job schedulers produce the firings, but the API consumes them (a firing creates its suite run
+  like the endpoint does). With no API process running, nothing fires; BullMQ keeps the next firing as a delayed job, so
+  when an API comes back that one firing runs late and the missed ones in between are not made up.
+- **To close (if needed):** record `nextRunAt` and skip firings older than a grace period, or let the worker fire.
+
+## KI-038 — A suite run takes one slot but queues all of its tests at once
+- **Severity:** Low (V1.2 F1, admission amended).
+- **Where:** `apps/api/src/services/suite-run-service.ts`, `packages/db/src/run-repository.ts` (`countActive`).
+- **What:** the active-run cap counts a running suite run once, whatever its size, and its children not at all; all of
+  its tests are enqueued together. Worker concurrency still bounds how many run at once, but a 50-test suite puts 50 jobs
+  ahead of anything queued after it. Each child's `QUEUED` wait also counts towards the reaper's "never picked up"
+  check only while its job is gone, so long queues are safe.
+- **To close:** enqueue a suite run's children a few at a time (e.g. as each one finishes).
+
+## KI-039 — Suite-run views compare every child with its previous run on each read
+- **Severity:** Low (V1.2 F2).
+- **Where:** `apps/api/src/services/comparison-service.ts` (`changesOf`).
+- **What:** `GET /v1/suite-runs/:id` compares each completed child with its previous run from the stored results
+  (about four queries per child), and the suite-run page polls every 3 s while it runs: a 50-test suite costs ~200 small
+  queries per poll.
+- **To close:** store each child's change when it completes (the worker knows), or cache per settled child.
+
+## KI-040 — The web app's per-minute token limit is per instance and in memory
+- **Severity:** Low (V1.2 F4).
+- **Where:** `apps/web/lib/ext-proxy.ts`.
+- **What:** `/api/ext` allows 120 requests per token prefix and minute per web instance, counted in memory (reset on
+  restart, multiplied by the number of instances). The API's limit (600 per token and hour, in Redis) is the real one.
+- **To close:** count in Redis from the web app too, or rely on the API's limit only.
