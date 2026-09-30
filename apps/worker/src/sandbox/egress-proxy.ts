@@ -153,11 +153,16 @@ export async function startEgressProxy(opts: EgressProxyOptions): Promise<Egress
   const connectTimeoutMs = opts.connectTimeoutMs ?? 10_000;
   const sockets = new Set<net.Socket>();
   const clients = opts.listen ? new Set(opts.listen.allowedClients.map(plainAddress)) : null;
-  const track = (s: net.Socket) => {
+  /** Incoming connections only: a client that is not allowed is dropped unread. */
+  const accept = (s: net.Socket) => {
     if (clients && !clients.has(plainAddress(s.remoteAddress))) {
       s.destroy();
       return;
     }
+    track(s);
+  };
+  /** Every socket (clients and upstreams), destroyed on close. */
+  const track = (s: net.Socket) => {
     sockets.add(s);
     s.once("close", () => sockets.delete(s));
   };
@@ -231,7 +236,7 @@ export async function startEgressProxy(opts: EgressProxyOptions): Promise<Egress
   }
 
   const server = http.createServer();
-  server.on("connection", track);
+  server.on("connection", accept);
 
   // Plain-HTTP forward requests (absolute-form request target).
   server.on("request", (req: http.IncomingMessage, res: http.ServerResponse) => {

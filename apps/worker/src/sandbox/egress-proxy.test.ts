@@ -322,6 +322,37 @@ describe("egress proxy", () => {
     });
   });
 
+  describe("listening for the runner container (KI-029)", () => {
+    it("serves only the allowed clients, and never applies that list to its own upstream connections", async () => {
+      // An upstream on IPv6 loopback: its address (::1) is not an allowed client, as a real site's never is.
+      const v6 = http.createServer((req, res) => res.end(`hello over v6 ${req.url}`));
+      await new Promise<void>((r) => v6.listen(0, "::1", r));
+      const v6Port = (v6.address() as net.AddressInfo).port;
+      try {
+        proxy = await startEgressProxy({
+          resolve: fakeResolver({}),
+          privateAllowlist: [`[::1]:${v6Port}`],
+          onBlock: (e) => blocks.push(e),
+          listen: { host: "127.0.0.1", allowedClients: ["127.0.0.1"] },
+        });
+        const ok = await forward(proxy, `http://[::1]:${v6Port}/x`);
+        expect(ok.status).toBe(200);
+        expect(ok.body).toBe("hello over v6 /x");
+        await proxy.close();
+
+        proxy = await startEgressProxy({
+          resolve: fakeResolver({}),
+          privateAllowlist: [`[::1]:${v6Port}`],
+          onBlock: (e) => blocks.push(e),
+          listen: { host: "127.0.0.1", allowedClients: ["10.9.9.9"] },
+        });
+        await expect(forward(proxy, `http://[::1]:${v6Port}/x`)).rejects.toThrow();
+      } finally {
+        await new Promise((r) => v6.close(r));
+      }
+    });
+  });
+
   describe("private allowlist", () => {
     it("admits an allowlisted host:port (dialling its resolved address) but not the same host on another port", async () => {
       const resolve = fakeResolver({ "demo-shop": ["172.18.0.5"] });
