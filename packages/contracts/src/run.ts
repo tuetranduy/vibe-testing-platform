@@ -205,6 +205,11 @@ export type StoredTestRunRequest = Omit<CreateTestRunRequest, "secrets" | "llm" 
    */
   rerunOf?: string;
   /**
+   * Credentials and test data taken from the requirement text itself (V1.3.1, extractInlineInputs): the test data
+   * keys and secret names they are stored under. Absent: none (or a run created before it).
+   */
+  inlineInputs?: { kind: "testData" | "secret"; name: string }[];
+  /**
    * The model the run uses, resolved when it was created (request override → Settings → environment).
    * Absent on runs created before model choice existed: they use the environment's (resolveEnvLlmChoice).
    */

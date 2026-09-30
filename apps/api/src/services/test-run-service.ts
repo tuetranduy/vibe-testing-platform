@@ -1,6 +1,7 @@
 import {
   CreateTestRunRequestSchema,
   MAX_SECRETS,
+  extractInlineInputs,
   MAX_TEST_DATA_ENTRIES,
   isTerminalLifecycle,
   type CreateTestRunResponse,
@@ -156,9 +157,16 @@ export class TestRunService {
       }
     }
 
+    // Credentials written in the requirement itself (V1.3.1) are used, not ignored: emails and usernames become
+    // test data, passwords become secrets (encrypted like typed ones) and leave the text. What the user entered
+    // explicitly wins; nothing is added past the limits.
+    const inline = extractInlineInputs(req.requirement, { testData, secrets, maxSecrets: MAX_SECRETS, maxTestData: MAX_TEST_DATA_ENTRIES });
+    testData = { ...inline.testData, ...testData };
+    secrets = { ...inline.secrets, ...secrets };
+
     // `llm` is stored as the resolved choice, not the override the request sent.
     const { secrets: _typed, llm: _override, testDataSetId: _set, credentialProfileId: _profile, ...requested } = req;
-    const rest = { ...requested, testData };
+    const rest = { ...requested, requirement: inline.text, testData };
     const redact = createRunRedactor(Object.values(secrets));
     // Secret values can also appear in the requirement text or test data: redact them by key and
     // value before anything is persisted (D7). The worker only ever sees this redacted copy.
@@ -168,6 +176,7 @@ export class TestRunService {
       llm: resolved.choice,
       ...(testDataSet ? { testDataSet } : {}),
       ...(credentialProfile ? { credentialProfile } : {}),
+      ...(inline.found.length > 0 ? { inlineInputs: inline.found } : {}),
     };
     const publisher = this.publisher(redact);
     const runId = newId("run");

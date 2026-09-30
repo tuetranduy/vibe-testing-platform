@@ -1,5 +1,6 @@
 import { SuggestionSetResponseSchema, TestRunSummarySchema, type SuggestionSetDraft } from "@platform/contracts";
-import { EventRepository, RunRepository, SecretRepository, SuggestionRepository } from "@platform/db";
+import { EventRepository, RunRepository, SecretRepository, SuggestionRepository, schema } from "@platform/db";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { auth, createTestApi, validBody, type TestApi } from "../test-support";
 
@@ -96,6 +97,19 @@ describe("GET /v1/test-runs/:runId/suggestions", () => {
 });
 
 describe("POST /v1/test-runs/:runId/suggestions/select", () => {
+  it("credentials typed into the edited test are used (V1.3.1): a new encrypted secret and test data, the password out of the text", async () => {
+    const runId = await blankRun();
+    const res = await select(runId, { suggestionId: "S-2", requirement: "Sign in with qa@demo.test / Qa-Pass#77 and the account page opens." });
+    expect(res.statusCode).toBe(202);
+    const run = await new RunRepository(t.tdb.db).getById(runId);
+    expect(run.request.requirement).toBe("Sign in with qa@demo.test / [secret: password] and the account page opens.");
+    expect(run.request.testData).toEqual({ email: "qa@demo.test" });
+    expect(run.request.secretNames).toEqual(["password"]);
+    expect(await new SecretRepository(t.tdb.db).listNames(runId)).toEqual(["password"]);
+    const [row] = await t.tdb.db.select().from(schema.testRuns).where(eq(schema.testRuns.id, runId));
+    expect(JSON.stringify(row)).not.toContain("Qa-Pass#77");
+  });
+
   it("202: the run is ANALYZING_REQUIREMENT, its requirement the suggestion's text; analysis queued; suggestion.selected without the text", async () => {
     const runId = await blankRun();
     const res = await select(runId, { suggestionId: "S-2" });
