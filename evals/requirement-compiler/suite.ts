@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TestDataValueSchema } from "@platform/contracts";
 import type { LlmClient } from "@platform/llm";
-import { compileRequirement } from "@platform/testing-engine";
+import { PageInventorySchema, compileRequirement } from "@platform/testing-engine";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { describeError, report, type CaseResult, type UsageMeter } from "../usage";
@@ -28,6 +28,12 @@ export const EvalCaseSchema = z.object({
    */
   testData: z.record(z.string(), TestDataValueSchema).default({}),
   secretNames: z.array(z.string()).default([]),
+  /**
+   * Pages of the live site as the analysis reads them (V1.3, KI-041), e.g. recorded from the demo shop: the compile
+   * then sees them like a real run does. The criteria must be the same as without them — pages never add, drop or
+   * weaken one.
+   */
+  pages: z.array(z.object({ url: z.string().url(), inventory: PageInventorySchema })).default([]),
   expect: z.object({
     criteriaCount: z.object({ min: z.number().int().min(1), max: z.number().int().min(1) }),
     /** Each entry must be matched by at least one criterion; a list entry means "any of these kinds". */
@@ -103,6 +109,7 @@ export async function runRequirementCompilerSuite(llm: LlmClient, cases: EvalCas
         signal: AbortSignal.timeout(180_000),
         deadlineAt: null,
         redact: (v) => v,
+        ...(c.pages.length > 0 ? { site: { pages: c.pages, screenshot: null } } : {}),
       });
       failures = scoreCase(c, draft.criteria);
     } catch (err) {
