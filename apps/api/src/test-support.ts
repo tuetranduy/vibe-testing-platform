@@ -1,4 +1,7 @@
+import type { GeneratedTest, NormalizedRequirement } from "@platform/contracts";
+import { GeneratedTestRepository, RequirementRepository, RunRepository, UserRepository } from "@platform/db";
 import { TEST_TENANT_ID, createTestDatabase, type TestDatabase } from "@platform/db/testing";
+import { hashPassword } from "@platform/security";
 import { RunEventHub, type RunQueue } from "@platform/event-bus";
 import type { Resolver } from "@platform/security";
 import type { ArtifactStorage } from "@platform/storage";
@@ -150,3 +153,71 @@ export const validBody = (overrides: Record<string, unknown> = {}) => ({
   requirement: "Verify that a user can add a product to the cart.",
   ...overrides,
 });
+
+/** A new member of the test tenant, signed in: their request headers (bearer + session) and id. */
+export async function signInMember(t: TestApi, role: "member" | "admin" = "member"): Promise<{ headers: Record<string, string>; userId: string }> {
+  const email = `m-${Date.now()}-${Math.random()}@example.com`;
+  const user = await new UserRepository(t.tdb.db).create({
+    tenantId: TEST_TENANT_ID,
+    email,
+    name: `Member ${email.slice(2, 8)}`,
+    role,
+    passwordHash: await hashPassword("member password", { N: 1024 }),
+  });
+  const res = await t.app.inject({ method: "POST", url: "/v1/auth/login", headers: auth, payload: { email, password: "member password" } });
+  return { headers: { ...auth, "x-session-token": res.json().token as string }, userId: user.id };
+}
+
+export const SAVED_REQUIREMENT = "Verify that a user can add a product to the cart.";
+
+export const confirmedRequirement = (runId: string): NormalizedRequirement => ({
+  runId,
+  revision: 1,
+  originalText: SAVED_REQUIREMENT,
+  criteria: [
+    {
+      id: "AC-1",
+      sourceText: "add a product to the cart",
+      statement: "The cart count is 1",
+      expectedOutcome: { kind: "numeric_compare", left: { key: "cartCount", checkpoint: "after_add" }, operator: "eq", right: 1 },
+      preconditions: [],
+      critical: true,
+      ambiguity: null,
+    },
+  ],
+  facts: [{ key: "cartCount", checkpoint: "after_add", description: "Cart count", valueType: "number" }],
+  confirmedAt: "2026-09-29T10:00:00.000Z",
+});
+
+export const savedTest: GeneratedTest = {
+  id: "gt_src",
+  source: "// the saved test",
+  helpersSource: "",
+  dataJson: "{}",
+  compiledCriteria: ["AC-1"],
+  notCompiled: [],
+  notes: [],
+};
+
+/**
+ * A finished (CANCELLED) run created through the API, with a confirmed requirement and a generated test: something
+ * a rerun or a suite can rerun. `test: null` leaves the test out.
+ */
+export async function finishedRunWithTest(
+  t: TestApi,
+  body: Record<string, unknown> = {},
+  opts: { headers?: Record<string, string>; test?: GeneratedTest | null } = {},
+): Promise<string> {
+  const res = await t.app.inject({
+    method: "POST",
+    url: "/v1/test-runs",
+    headers: opts.headers ?? auth,
+    payload: validBody({ requirement: SAVED_REQUIREMENT, ...body }),
+  });
+  const { runId } = res.json() as { runId: string };
+  if (!runId) throw new Error(`run not created: ${res.body}`);
+  await new RequirementRepository(t.tdb.db).copyConfirmed(runId, confirmedRequirement(runId));
+  if (opts.test !== null) await new GeneratedTestRepository(t.tdb.db).save(runId, { ...(opts.test ?? savedTest), id: `gt_${runId}` });
+  await new RunRepository(t.tdb.db).transition(runId, "QUEUED", "CANCELLED", { cancelReason: "USER_REQUESTED" });
+  return runId;
+}

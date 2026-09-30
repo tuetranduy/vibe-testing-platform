@@ -6,12 +6,16 @@ import {
   ErrorCategorySchema,
   ReasoningLevelSchema,
   RunLifecycleSchema,
+  SuiteRunStatusSchema,
+  SuiteRunTriggerSchema,
   UserRoleSchema,
   RunVerdictSchema,
 } from "@platform/contracts";
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
+  boolean,
   check,
   customType,
   doublePrecision,
@@ -37,6 +41,8 @@ export const artifactTypeEnum = pgEnum("artifact_type", values(ArtifactTypeSchem
 export const artifactSensitivityEnum = pgEnum("artifact_sensitivity", values(ArtifactSensitivitySchema.options));
 export const reasoningLevelEnum = pgEnum("reasoning_level", values(ReasoningLevelSchema.options));
 export const userRoleEnum = pgEnum("user_role", values(UserRoleSchema.options));
+export const suiteRunTriggerEnum = pgEnum("suite_run_trigger", values(SuiteRunTriggerSchema.options));
+export const suiteRunStatusEnum = pgEnum("suite_run_status", values(SuiteRunStatusSchema.options));
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
@@ -202,11 +208,14 @@ export const testRuns = pgTable(
     requestHash: text("request_hash"),
     /** The user who created the run (V1.1); null for the service token and runs created before users existed. */
     ownerUserId: text("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** The suite run this run is part of (V1.2 F1); null for a run started on its own. */
+    suiteRunId: text("suite_run_id").references((): AnyPgColumn => suiteRuns.id),
     createdAt: createdAt(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
   },
   (t) => [
     index("test_runs_tenant_owner_created").on(t.tenantId, t.ownerUserId, t.createdAt),
+    index("test_runs_suite_run").on(t.suiteRunId),
     uniqueIndex("test_runs_tenant_idempotency_key").on(t.tenantId, t.idempotencyKey),
     index("test_runs_tenant_created").on(t.tenantId, t.createdAt),
     index("test_runs_lifecycle_heartbeat").on(t.lifecycle, t.heartbeatAt),
@@ -428,5 +437,76 @@ export const llmProviderKeys = pgTable(
   (t) => [
     primaryKey({ columns: [t.tenantId, t.provider] }),
     check("llm_provider_keys_provider", sql`${t.provider} IN ('anthropic', 'gemini')`),
+  ],
+);
+
+/**
+ * Suites (V1.2 F1): a named list of saved Playwright tests that run together. Each entry pins the finished run
+ * whose generated test it reruns (runs are never deleted).
+ */
+export const testSuites = pgTable(
+  "test_suites",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    credentialProfileId: text("credential_profile_id").references(() => credentialProfiles.id, { onDelete: "set null" }),
+    /** Members see and manage their own suites; null: created by the service. */
+    ownerUserId: text("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("test_suites_tenant_name").on(t.tenantId, sql`lower(${t.name})`)],
+);
+
+export const testSuiteEntries = pgTable(
+  "test_suite_entries",
+  {
+    suiteId: text("suite_id")
+      .notNull()
+      .references(() => testSuites.id, { onDelete: "cascade" }),
+    sourceRunId: text("source_run_id")
+      .notNull()
+      .references(() => testRuns.id),
+    position: integer("position").notNull(),
+    /** The source allowed destructive actions and whoever added it confirmed that every suite run repeats them. */
+    confirmDestructive: boolean("confirm_destructive").notNull().default(false),
+    addedBy: text("added_by").references(() => users.id, { onDelete: "set null" }),
+    addedAt: ts("added_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.suiteId, t.sourceRunId] })],
+);
+
+/** One run of a suite: a child run per entry (`test_runs.suite_run_id`), settled once they have all finished. */
+export const suiteRuns = pgTable(
+  "suite_runs",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    /** Not a foreign key: a suite run outlives its suite. */
+    suiteId: text("suite_id").notNull(),
+    suiteName: text("suite_name").notNull(),
+    trigger: suiteRunTriggerEnum("trigger").notNull(),
+    scheduleId: text("schedule_id"),
+    ownerUserId: text("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Who or what started it (CI metadata, the API token); shown, never trusted. */
+    context: jsonb("context").notNull().default({}),
+    status: suiteRunStatusEnum("status").notNull().default("RUNNING"),
+    verdict: runVerdictEnum("verdict"),
+    idempotencyKey: text("idempotency_key"),
+    requestHash: text("request_hash"),
+    createdAt: createdAt(),
+    finishedAt: ts("finished_at"),
+  },
+  (t) => [
+    index("suite_runs_suite_created").on(t.tenantId, t.suiteId, t.createdAt),
+    index("suite_runs_status").on(t.status),
+    uniqueIndex("suite_runs_tenant_idempotency_key").on(t.tenantId, t.idempotencyKey),
+    check("suite_runs_verdict_iff_completed", sql`(${t.verdict} IS NOT NULL) = (${t.status} = 'COMPLETED')`),
   ],
 );

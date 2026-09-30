@@ -1,4 +1,4 @@
-import { RunRepository } from "@platform/db";
+import { RunRepository, SuiteRunRepository } from "@platform/db";
 import { runRerunOnly } from "@platform/testing-engine";
 import type { WorkerDeps } from "../deps";
 import { createRunContext } from "../run-context";
@@ -49,5 +49,17 @@ export async function rerunRunJob(deps: WorkerDeps, runId: string): Promise<void
     }
   } finally {
     deps.metrics?.activeRuns.dec();
+    await settleSuiteRun(deps, run.suiteRunId);
+  }
+}
+
+/** A suite run (V1.2 F1) completes when its last child ends; the reaper's sweep covers a failure here. */
+async function settleSuiteRun(deps: WorkerDeps, suiteRunId: string | null): Promise<void> {
+  if (!suiteRunId) return;
+  try {
+    const settled = await new SuiteRunRepository(deps.db).settle(suiteRunId);
+    if (settled) deps.logger.info({ suiteRunId, verdict: settled.verdict }, "suite run completed");
+  } catch (err) {
+    deps.logger.warn({ err, suiteRunId }, "suite run could not be settled; the reaper will");
   }
 }

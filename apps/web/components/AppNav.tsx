@@ -11,11 +11,12 @@ function isCurrent(href: string, pathname: string): boolean {
   if (href === "/runs/new") return pathname === "/runs/new";
   if (href === "/settings") return pathname === "/settings" || pathname.startsWith("/settings/");
   if (href === "/usage") return pathname === "/usage";
+  if (href === "/suites") return pathname === "/suites" || pathname.startsWith("/suites/") || pathname.startsWith("/suite-runs/");
   return pathname === "/runs" || (pathname.startsWith("/runs/") && pathname !== "/runs/new");
 }
 
 /**
- * The header's navigation: the run history, usage, Settings, the signed-in user (their account and
+ * The header's navigation: the run history, suites, usage, Settings, the signed-in user (their account and
  * "Sign out"), and "New test" as the one call to action at its far end. Nothing on the sign-in page.
  */
 export function AppNav({ navigate = (url: string) => window.location.assign(url) }: { navigate?: (url: string) => void }) {
@@ -37,6 +38,9 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
     <nav aria-label="Main" className="app-nav">
       <a className="nav-link" href="/runs" aria-current={current("/runs")}>
         Test runs
+      </a>
+      <a className="nav-link" href="/suites" aria-current={current("/suites")}>
+        Suites
       </a>
       <a className="nav-link" href="/usage" aria-current={current("/usage")}>
         Usage
