@@ -516,3 +516,29 @@ export const suiteRuns = pgTable(
     check("suite_runs_verdict_iff_completed", sql`(${t.verdict} IS NOT NULL) = (${t.status} = 'COMPLETED')`),
   ],
 );
+
+/** Schedules (V1.2 F3): when a suite runs by itself. The table is the truth; BullMQ job schedulers follow it. */
+export const suiteSchedules = pgTable(
+  "suite_schedules",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    suiteId: text("suite_id")
+      .notNull()
+      .references(() => testSuites.id, { onDelete: "cascade" }),
+    cron: text("cron").notNull(),
+    timezone: text("timezone").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    /** The schedule's runs belong to its creator; a schedule whose creator is gone or disabled does not fire. */
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    lastFiredAt: ts("last_fired_at"),
+    lastOutcome: text("last_outcome"),
+    lastError: text("last_error"),
+    lastSuiteRunId: text("last_suite_run_id"),
+    createdAt: createdAt(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("suite_schedules_suite").on(t.suiteId), index("suite_schedules_tenant").on(t.tenantId)],
+);

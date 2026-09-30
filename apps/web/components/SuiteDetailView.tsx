@@ -1,7 +1,7 @@
 "use client";
 
 import type { CredentialProfile, SuiteDetail, SuiteEntryView, SuiteRunBrief } from "@platform/contracts";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ApiRequestError,
   deleteSuite,
@@ -18,6 +18,7 @@ import { Icon } from "./Icon";
 import { LIFECYCLE_LABEL } from "./format";
 import { displayUrl, formatWhen, plural } from "./report-format";
 import { VerdictBadge } from "./StatusBadge";
+import { SuiteSchedules } from "./SuiteSchedules";
 import { SuiteRunOutcome, TRIGGER_LABEL, messageOf } from "./Suites";
 
 type State =
@@ -28,15 +29,13 @@ type State =
 interface Props {
   suiteId: string;
   navigate?: (url: string) => void;
-  /** Extra sections below the tests (the schedules). */
-  children?: (suite: SuiteDetail) => ReactNode;
 }
 
 /**
  * One suite (V1.2 F1): its tests in run order (move, remove), its saved credentials, "Run suite" (asking only for
- * the secrets nothing saved provides) and its recent runs.
+ * the secrets nothing saved provides), its schedules (F3) and its recent runs.
  */
-export function SuiteDetailView({ suiteId, navigate = (url) => window.location.assign(url), children }: Props) {
+export function SuiteDetailView({ suiteId, navigate = (url) => window.location.assign(url) }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
 
@@ -100,7 +99,7 @@ export function SuiteDetailView({ suiteId, navigate = (url) => window.location.a
 
       <RunSuiteCard suite={suite} profiles={profiles} navigate={navigate} />
       <EntriesCard suite={suite} onChange={changed} />
-      {children?.(suite)}
+      <SuiteSchedules suite={suite} />
       <RecentRuns runs={runs} />
       <SuiteSettings suite={suite} profiles={profiles} onChange={changed} onDeleted={() => navigate("/suites")} />
     </div>

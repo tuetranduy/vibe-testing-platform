@@ -64,6 +64,7 @@ describe("SuiteDetailView", () => {
     "GET /api/v1/suites/ste_1": () => json(200, suite),
     "GET /api/v1/suites/ste_1/runs?limit=20": () => json(200, { items: [] }),
     "GET /api/v1/credential-profiles": () => json(200, { items: [] }),
+    "GET /api/v1/suites/ste_1/schedules": () => json(200, { items: [] }),
     ...extra,
   });
 

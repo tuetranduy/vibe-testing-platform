@@ -183,3 +183,63 @@ export function suiteRunCounts(children: readonly { lifecycle: RunLifecycle; ver
   }
   return counts;
 }
+
+/**
+ * Schedules (V1.2 F3): a suite run at the times a five-field cron expression names, in a time zone. A scheduled
+ * run can only use the suite's saved credentials, so a schedule is refused while they don't cover every secret.
+ */
+export const MAX_SCHEDULES_PER_SUITE = 5;
+export const MAX_SCHEDULES_PER_TENANT = 50;
+
+/** Five fields (minute hour day-of-month month day-of-week): no seconds field. */
+export const CronSchema = z
+  .string()
+  .trim()
+  .max(100)
+  .refine((v) => v.split(/\s+/).length === 5, "Use five fields: minute hour day-of-month month day-of-week");
+
+export const TimeZoneSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .refine((tz) => {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: tz });
+      return true;
+    } catch {
+      return false;
+    }
+  }, "Unknown time zone");
+
+export const ScheduleInputSchema = z.object({
+  cron: CronSchema,
+  timezone: TimeZoneSchema.default("UTC"),
+  enabled: z.boolean().default(true),
+});
+export type ScheduleInput = z.input<typeof ScheduleInputSchema>;
+
+/** What happened the last time a schedule fired. */
+export const ScheduleOutcomeSchema = z.enum(["started", "skipped_running", "failed"]);
+export type ScheduleOutcome = z.infer<typeof ScheduleOutcomeSchema>;
+
+export const ScheduleViewSchema = z.object({
+  id: z.string(),
+  suiteId: z.string(),
+  cron: z.string(),
+  timezone: z.string(),
+  enabled: z.boolean(),
+  /** Null while disabled. */
+  nextRunAt: IsoDateTime.nullable(),
+  lastFiredAt: IsoDateTime.nullable(),
+  lastOutcome: ScheduleOutcomeSchema.nullable(),
+  /** Why the last firing failed (an API error code). */
+  lastError: z.string().nullable(),
+  lastSuiteRunId: z.string().nullable(),
+  createdBy: RunOwnerSchema.nullable(),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ScheduleView = z.infer<typeof ScheduleViewSchema>;
+
+export const ScheduleListSchema = z.object({ items: z.array(ScheduleViewSchema) });
