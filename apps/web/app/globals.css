@@ -339,8 +339,9 @@ a:hover {
   margin: 0 auto;
   padding: 0 var(--gutter);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 36px;
+  gap: 0 36px;
 }
 
 .brand {
@@ -393,9 +394,13 @@ a:hover {
   background: var(--surface-muted);
   font-weight: 600;
 }
-/* "New test": the header's one action, at the far end of the nav. */
-.nav-cta {
+/* The account and "New test", the header's one action, at its far end. */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   margin-left: auto;
+  min-width: 0;
 }
 .nav-cta[aria-current="page"] {
   background: var(--surface-muted);
@@ -676,6 +681,13 @@ a:hover {
 .button-danger-quiet:not(:disabled):hover {
   background: var(--danger-bg);
   border-color: var(--danger-border);
+}
+.button-quiet-danger {
+  color: var(--danger);
+}
+.button-quiet-danger:not(:disabled):hover {
+  color: var(--danger);
+  background: var(--danger-bg);
 }
 .button-lg {
   min-height: 50px;
@@ -1655,7 +1667,7 @@ a.running-card:hover {
   padding: 10px 20px;
   text-align: left;
   color: var(--text-subtle);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -2577,7 +2589,7 @@ a.running-card:hover {
 }
 .criterion-check-title {
   color: var(--text-subtle);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2980,7 +2992,7 @@ a.running-card:hover {
 .detail-section > h4 {
   margin: 0;
   color: var(--text-subtle);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -3304,6 +3316,33 @@ a.running-card:hover {
 
 /* ---------- Narrow screens ---------- */
 
+/* Below the desktop width the links take a row of their own under the brand, the account and "New test";
+   if it ever outgrows the screen it scrolls sideways rather than widening the page. */
+@media (max-width: 900px) {
+  :root {
+    --header-h: 104px;
+  }
+  .app-header-inner {
+    min-height: 0;
+    padding-top: 10px;
+    column-gap: 16px;
+  }
+  .app-nav {
+    order: 3;
+    flex: 0 0 calc(100% + 2 * var(--gutter));
+    margin: 6px calc(-1 * var(--gutter)) 0;
+    /* The first link's text lines up with the brand mark. */
+    padding: 0 var(--gutter) 8px calc(var(--gutter) - 12px);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .app-nav::-webkit-scrollbar {
+    display: none;
+  }  .app-nav .nav-link {
+    padding-inline: 12px;
+  }
+}
+
 @media (max-width: 1023px) {
   .result-detail {
     padding-left: 24px;
@@ -3338,7 +3377,6 @@ a.running-card:hover {
 
 @media (max-width: 560px) {
   :root {
-    --header-h: 56px;
     --gutter: 16px;
   }
   .app-header-inner {
@@ -3576,7 +3614,6 @@ a.running-card:hover {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-left: auto;
   min-width: 0;
 }
 .nav-user .nav-link {
@@ -3915,7 +3952,7 @@ fieldset.stack-tight {
 }
 .chart-axis {
   fill: var(--text-subtle);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 .chart-tooltip {
@@ -3944,17 +3981,6 @@ fieldset.stack-tight {
   .nav-signout {
     display: none;
   }
-  .nav-cta-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
-  .nav-cta {
-    padding-inline: 10px;
-  }
   .nav-user .nav-link {
     padding-inline: 8px;
   }
@@ -3967,6 +3993,33 @@ fieldset.stack-tight {
 }
 
 /* V1.2: suites — the ordered tests of a suite, its recent runs, a suite run's table */
+.suite-card {
+  position: relative;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.suite-card:hover {
+  border-color: var(--border-strong);
+}
+.suite-card-title {
+  font-size: 1.0625rem;
+  font-weight: 620;
+}
+/* The whole card opens the suite; the link itself stays the only focus stop. */
+.card-link {
+  color: var(--text);
+  text-decoration: none;
+}
+.card-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.suite-card:hover .card-link,
+.card-link:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+}
 .suite-entries {
   display: grid;
   gap: 0;
@@ -3991,8 +4044,18 @@ fieldset.stack-tight {
   min-width: 0;
 }
 .suite-entry-title {
+  color: var(--text);
   font-weight: 560;
+  text-decoration: none;
   overflow-wrap: anywhere;
+}
+.suite-entry-title:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+/* A destructive action kept apart from the form's own submit. */
+.actions-end {
+  margin-left: auto;
 }
 .suite-entry-actions {
   gap: 4px;
@@ -4040,16 +4103,24 @@ fieldset.stack-tight {
 }
 .comparison-list {
   display: grid;
-  gap: 10px;
+  /* One set of columns for every row, so the badges and the before → after statuses line up. */
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  gap: 12px 14px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 .comparison-row {
+  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 8px 14px;
+}
+.comparison-row > .sbadge {
+  justify-self: start;
+}
+.comparison-baseline select {
+  max-width: 420px;
 }
 .comparison-text {
   overflow-wrap: anywhere;
@@ -4060,8 +4131,11 @@ fieldset.stack-tight {
   gap: 6px;
 }
 @media (max-width: 720px) {
-  .comparison-row {
+  .comparison-list {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .comparison-row {
+    gap: 6px;
   }
 }
 .schedule-row {

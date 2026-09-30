@@ -34,35 +34,41 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
     navigate("/login");
   }
 
+  // Two groups, so that below the desktop width the links can take a row of their own while the account and
+  // "New test" stay beside the brand, instead of pushing them off-screen.
   return (
-    <nav aria-label="Main" className="app-nav">
-      <a className="nav-link" href="/runs" aria-current={current("/runs")}>
-        Test runs
-      </a>
-      <a className="nav-link" href="/suites" aria-current={current("/suites")}>
-        Suites
-      </a>
-      <a className="nav-link" href="/usage" aria-current={current("/usage")}>
-        Usage
-      </a>
-      <a className="nav-link" href="/settings" aria-current={current("/settings")}>
-        Settings
-      </a>
-      {me && (
-        <span className="nav-user">
-          <a className="nav-link" href="/account" aria-current={pathname === "/account" ? "page" : undefined} title={me.email}>
-            <Icon name="user" />
-            <span>{me.name}</span> <span className="visually-hidden">(your account)</span>
-          </a>
-          <button type="button" className="button button-quiet nav-signout" onClick={() => void signOut()} disabled={signingOut}>
-            Sign out
-          </button>
-        </span>
-      )}
-      <a className="button button-primary nav-cta" href="/runs/new" aria-current={current("/runs/new")}>
-        <Icon name="plus" />
-        <span className="nav-cta-label">New test</span>
-      </a>
-    </nav>
+    <>
+      <nav aria-label="Main" className="app-nav">
+        <a className="nav-link" href="/runs" aria-current={current("/runs")}>
+          Test runs
+        </a>
+        <a className="nav-link" href="/suites" aria-current={current("/suites")}>
+          Suites
+        </a>
+        <a className="nav-link" href="/usage" aria-current={current("/usage")}>
+          Usage
+        </a>
+        <a className="nav-link" href="/settings" aria-current={current("/settings")}>
+          Settings
+        </a>
+      </nav>
+      <div className="header-actions">
+        {me && (
+          <span className="nav-user">
+            <a className="nav-link" href="/account" aria-current={pathname === "/account" ? "page" : undefined} title={me.email}>
+              <Icon name="user" />
+              <span>{me.name}</span> <span className="visually-hidden">(your account)</span>
+            </a>
+            <button type="button" className="button button-quiet nav-signout" onClick={() => void signOut()} disabled={signingOut}>
+              Sign out
+            </button>
+          </span>
+        )}
+        <a className="button button-primary nav-cta" href="/runs/new" aria-current={current("/runs/new")}>
+          <Icon name="plus" />
+          <span className="nav-cta-label">New test</span>
+        </a>
+      </div>
+    </>
   );
 }
