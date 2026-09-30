@@ -4072,3 +4072,11 @@ fieldset.stack-tight {
 .schedule-row:first-child {
   border-top: 0;
 }
+.token-value {
+  display: block;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  overflow-wrap: anywhere;
+  user-select: all;
+}

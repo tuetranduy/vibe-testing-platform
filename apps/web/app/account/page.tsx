@@ -9,6 +9,9 @@ export default function AccountPage() {
       <div className="title-block">
         <p className="eyebrow">Account</p>
         <h1 className="page-title">Your account</h1>
+        <p className="page-lede">
+          <a href="/account/tokens">API tokens</a> let CI jobs and scripts run your suites.
+        </p>
       </div>
       <AccountSettings />
     </div>

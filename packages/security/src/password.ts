@@ -67,3 +67,11 @@ export function newSessionToken(): string {
 export function sessionTokenHash(token: string): Buffer {
   return createHash("sha256").update(token, "utf8").digest();
 }
+
+/** A new API token (V1.2 F4): `tap_` and 32 random bytes, base64url. Only its hash is stored. */
+export function newApiToken(): string {
+  return `tap_${randomBytes(32).toString("base64url")}`;
+}
+
+/** SHA-256 of an API token (the stored lookup key). */
+export const apiTokenHash = sessionTokenHash;

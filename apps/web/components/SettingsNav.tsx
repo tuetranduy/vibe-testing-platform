@@ -8,9 +8,10 @@ const ALL = [
   { href: "/settings/credentials", label: "Credentials", admin: false },
   { href: "/settings/test-data", label: "Test data", admin: false },
   { href: "/settings/users", label: "Users", admin: true },
+  { href: "/settings/tokens", label: "API tokens", admin: true },
 ] as const;
 
-/** Settings' sections. Users is shown to administrators only. */
+/** Settings' sections. Users and API tokens are shown to administrators only. */
 export function SettingsNav() {
   const pathname = usePathname() ?? "";
   const me = useMe();

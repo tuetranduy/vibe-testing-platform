@@ -23,6 +23,12 @@ import {
   SuiteRunListSchema,
   SuiteRunViewSchema,
   ScheduleListSchema,
+  ApiTokenListSchema,
+  ApiTokenViewSchema,
+  CreatedApiTokenSchema,
+  type ApiTokenView,
+  type CreateApiTokenRequest,
+  type CreatedApiToken,
   ScheduleViewSchema,
   type ScheduleInput,
   type ScheduleView,
@@ -329,3 +335,15 @@ export const updateSchedule = (scheduleId: string, body: ScheduleInput): Promise
 export const deleteSchedule = async (scheduleId: string): Promise<void> => {
   await request(NoContentSchema, `/api/v1/suite-schedules/${seg(scheduleId)}`, { method: "DELETE" });
 };
+
+const TOKENS = "/api/v1/api-tokens";
+
+/** API tokens (V1.2): yours, or (administrators) everyone's. */
+export const listApiTokens = async (all = false): Promise<ApiTokenView[]> =>
+  (await request(ApiTokenListSchema, `${TOKENS}${all ? "?user=all" : ""}`)).items;
+
+/** The answer holds the token itself: the only time it is shown. */
+export const createApiToken = (body: CreateApiTokenRequest): Promise<CreatedApiToken> =>
+  request(CreatedApiTokenSchema, TOKENS, { method: "POST", body });
+
+export const revokeApiToken = (id: string): Promise<ApiTokenView> => request(ApiTokenViewSchema, `${TOKENS}/${seg(id)}`, { method: "DELETE" });

@@ -16,6 +16,7 @@ import { credentialProfileRoutes } from "./routes/credential-profiles";
 import { usageRoutes } from "./routes/usage";
 import { explorationCacheRoutes } from "./routes/exploration-cache";
 import { suiteRoutes } from "./routes/suites";
+import { apiTokenRoutes } from "./routes/api-tokens";
 
 export async function buildApp(deps: ApiDeps, opts: FastifyServerOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({ bodyLimit: 1_000_000, ...opts });
@@ -56,6 +57,7 @@ export async function buildApp(deps: ApiDeps, opts: FastifyServerOptions = {}): 
     await usageRoutes(v1, deps);
     await explorationCacheRoutes(v1, deps);
     await suiteRoutes(v1, deps);
+    await apiTokenRoutes(v1, deps);
   });
   return app;
 }
