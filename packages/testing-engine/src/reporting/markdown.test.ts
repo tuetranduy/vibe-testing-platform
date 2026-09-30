@@ -170,3 +170,26 @@ describe("renderReportMarkdown (V1.1 F6)", () => {
     expect(partial).toContain("- **Error:** TIMEOUT — Hard deadline");
   });
 });
+
+describe("renderReportMarkdown — compared with the previous run (V1.2 F2)", () => {
+  it("names the previous run, the verdict change and every changed criterion; nothing without a baseline", () => {
+    const md = renderReportMarkdown(report(), {
+      baselineRunId: "run_0",
+      comparison: {
+        verdict: { before: "PASSED", after: "FAILED" },
+        criteria: [
+          { id: "AC-1", description: "Cart | count", critical: true, before: "PASS", after: "FAIL", change: "regressed" },
+          { id: "AC-2", description: "Same", critical: true, before: "PASS", after: "PASS", change: "unchanged" },
+        ],
+        counts: { regressed: 1, fixed: 0, changed: 0, unchanged: 1, added: 0, removed: 0 },
+        durationMs: { before: 1, after: 2 },
+        costUsd: { before: 0, after: 0 },
+      },
+    });
+    expect(md).toContain("## Compared with the previous run\n\n- **Previous run:** run\\_0\n- **Result:** Passed → Failed\n");
+    expect(md).toContain("| AC-1 — Cart \\| count | PASS | FAIL | Regressed |");
+    expect(md).not.toContain("| AC-2 — Same");
+    expect(md.indexOf("## Compared with the previous run")).toBeLessThan(md.indexOf("## Criteria"));
+    expect(renderReportMarkdown(report())).not.toContain("Compared with the previous run");
+  });
+});

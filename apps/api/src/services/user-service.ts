@@ -6,7 +6,7 @@ import {
   type LoginResponse,
   type UserView,
 } from "@platform/contracts";
-import { EmailTakenError, SessionRepository, UserRepository, toUserView, type User } from "@platform/db";
+import { ApiTokenRepository, EmailTakenError, SessionRepository, UserRepository, toUserView, type User } from "@platform/db";
 import { hashPassword, newSessionToken, sessionTokenHash, verifyPassword } from "@platform/security";
 import { createHash } from "node:crypto";
 import { requireUser, type Principal } from "../auth/principal";
@@ -191,6 +191,8 @@ export class UserService {
       const keep = principal.kind === "user" && principal.userId === userId ? principal.sessionId : undefined;
       await this.sessions.revokeAllForUser(userId, keep);
     }
+    // A disabled person's API tokens stop working for good (V1.2 F4); enabling them again doesn't bring them back.
+    if (patch.disabled === true) await new ApiTokenRepository(this.deps.db).revokeAllForUser(userId);
     return toUserView(updated!);
   }
 

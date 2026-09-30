@@ -29,6 +29,26 @@ The V1 release gate (live E2E suite green 3 times, KI-001) has not passed yet: i
 
 **Real exploration and the Playwright rerun run in the Docker worker, with Chromium's sandbox on** (2026-09-27, [KI-002](docs/known-issues.md#ki-002--chromiums-sandbox-cannot-start-in-the-compose-worker)). Chromium's sandbox needs Linux user namespaces, which Docker's default seccomp profile denies ("No usable sandbox!", runs `ERRORED / BROWSER_PROVIDER`). Of the options — a seccomp profile that permits user namespaces, `cap_add: SYS_ADMIN` (broad), or Chromium's `--no-sandbox` (the browser runs untrusted pages) — the compose `worker` uses the first: [`infra/seccomp/worker.json`](infra/seccomp/README.md) is Docker's default profile plus user, PID and network namespaces for `clone` / `unshare`, with no extra capability. Both exploration's Chromium and the rerun's (launched by `@playwright/test`, `chromiumSandbox: true`) start sandboxed in the container, and `pnpm test:e2e:compose` runs the E2E suite against the compose API and worker. A deployment elsewhere needs the same profile (a Kubernetes `Localhost` profile) and a host that allows unprivileged user namespaces; see the profile's README.
 
+### V1.2 (2026-09-30)
+
+Built on branch `feat/v1.2` from the plan's Section 7 backlog (spec
+[`docs/superpowers/specs/2026-09-30-v1.2-design.md`](docs/superpowers/specs/2026-09-30-v1.2-design.md)), like V1.1
+before the V1 live gate passed (it still applies). Nothing here calls a model:
+
+- **Suites** (`/suites`) — named lists of saved Playwright tests ("Add to suite" on a finished run's report). "Run
+  suite" reruns each as its own run and settles one verdict for all; it asks only for the secrets the suite's saved
+  credentials don't provide. A running suite run takes one active-run slot.
+- **Compared with the previous run** — a completed run's report shows how each criterion changed since the previous
+  run of the same test (same URL and requirement, or a rerun of it), or since a chosen run; the Markdown report too.
+  Suite runs mark each test regressed, fixed, changed, unchanged or first run.
+- **Schedules** — a suite can run by itself (presets or cron, in a time zone), as whoever scheduled it, with the
+  suite's saved credentials.
+- **API tokens** (Account → API tokens) — for CI and scripts, scoped to running suites and reading results, used
+  through the web app's `/api/ext/v1/…` path (the API stays private).
+- **CI** — a GitHub Action and a CLI that run a suite, wait, write a job summary and a JUnit file
+  (`GET /v1/suite-runs/:id/junit.xml`), and fail on the verdicts you choose: see
+  [`integrations/README.md`](integrations/README.md).
+
 ### V1.1 (2026-09-29)
 
 Built on branch `feat/v1.1` from the plan's Section 7 backlog (spec
@@ -421,3 +441,17 @@ worker must share the `LLM_*` variables (see [`docs/operations.md`](docs/operati
     must be re-scored with `pnpm eval planner` on every offered model (KI-026).
   - **PDF from the browser**, not a server PDF engine: a server engine would need fonts for every script a
     requirement can be written in.
+- **V1.2 (2026-09-30; spec [`docs/superpowers/specs/2026-09-30-v1.2-design.md`](docs/superpowers/specs/2026-09-30-v1.2-design.md)):**
+  - **Built before the V1 live gate passed**, like V1.1; no V1.2 feature changes a model prompt, so no eval needs
+    re-scoring.
+  - **Admission amended.** A running suite run counts as one active run whatever its size; its tests don't count
+    (KI-038).
+  - **D6 amended — API tokens.** Besides a session, an `X-Api-Token` makes the caller a user, limited to one table of
+    routes and the token's scopes. The web app's `/api/ext` path is the only way in from outside.
+  - **Schedules fire in the API** (the plan's jobs run in workers): a firing creates its suite run exactly like the
+    endpoint, as the schedule's creator (KI-037). A schedule needs a signed-in creator; the service token cannot
+    create one.
+  - **Comparison keys** hash the target URL and requirement text: runs are "the same test" only when both match
+    exactly (whitespace aside); another run can always be chosen as the baseline.
+  - **The GitHub Action lives in this repository** (`.github/actions/run-suite`) and has not run on GitHub yet
+    (KI-036).

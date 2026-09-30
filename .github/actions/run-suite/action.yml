@@ -1,0 +1,36 @@
+name: Run a platform suite
+description: >-
+  Runs a suite of saved Playwright tests on the AI testing platform (no AI), waits for the result, writes a job
+  summary and a JUnit file, and fails the job when the verdict is one of fail-on.
+inputs:
+  platform-url:
+    description: The platform's web address, e.g. https://tests.example.com (API calls go to its /api/ext path).
+    required: true
+  api-token:
+    description: An API token (tap_…) with the "Run suites" and "Read results" permissions. Keep it in a secret.
+    required: true
+  suite:
+    description: The suite's name (exact, any case) or its id (ste_…).
+    required: true
+  wait:
+    description: Wait for the result (true) or only start the run (false).
+    default: "true"
+  timeout-minutes:
+    description: How long to wait before giving up (the run goes on in the platform).
+    default: "30"
+  fail-on:
+    description: Verdicts that fail the job, comma-separated (FAILED, BLOCKED, INCONCLUSIVE).
+    default: FAILED
+  junit-path:
+    description: Where to write the JUnit XML report (optional).
+    default: ""
+outputs:
+  suite-run-id:
+    description: The suite run's id.
+  verdict:
+    description: PASSED, FAILED, BLOCKED or INCONCLUSIVE (empty when not waited for).
+  url:
+    description: The suite run's page on the platform.
+runs:
+  using: node24
+  main: index.mjs

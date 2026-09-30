@@ -5,6 +5,8 @@ import {
   type LlmSettingsView,
   type NormalizedRequirement,
   type SuggestionSetResponse,
+  type SuiteDetail,
+  type SuiteRunView,
   type TestReport,
   type TestRunSummary,
 } from "@platform/contracts";
@@ -77,6 +79,7 @@ export const summaryFixture = (patch: Partial<TestRunSummary> = {}): TestRunSumm
   kind: "discovery",
   sourceRunId: null,
   secretNames: [],
+  suiteRunId: null,
   ...patch,
 });
 
@@ -101,6 +104,57 @@ export const llmSettingsFixture = (patch: Partial<LlmSettingsView> = {}): LlmSet
     ],
     ...patch,
   });
+
+/** A suite (V1.2) with one test, never run. */
+export const suiteFixture = (patch: Partial<SuiteDetail> = {}): SuiteDetail => ({
+  id: "ste_1",
+  name: "Checkout smoke",
+  description: "",
+  credentialProfile: null,
+  owner: { id: "usr_1", name: "Ann" },
+  entryCount: 1,
+  secretNames: [],
+  missingSecretNames: [],
+  lastRun: null,
+  createdAt: "2026-09-30T10:00:00.000Z",
+  updatedAt: "2026-09-30T10:00:00.000Z",
+  entries: [
+    {
+      sourceRunId: "run_src",
+      position: 1,
+      title: "Add a product to the cart",
+      targetUrl: "https://shop.example.com/",
+      environment: "staging",
+      secretNames: [],
+      destructive: false,
+      compiledCriteria: 2,
+      lastResult: null,
+      addedAt: "2026-09-30T10:00:00.000Z",
+    },
+  ],
+  ...patch,
+});
+
+export const suiteRunFixture = (patch: Partial<SuiteRunView> = {}): SuiteRunView => ({
+  id: "srn_1",
+  suiteId: "ste_1",
+  suiteName: "Checkout smoke",
+  trigger: "manual",
+  status: "RUNNING",
+  verdict: null,
+  owner: { id: "usr_1", name: "Ann" },
+  createdAt: "2026-09-30T10:00:00.000Z",
+  finishedAt: null,
+  counts: { total: 2, active: 1, passed: 1, failed: 0, blocked: 0, inconclusive: 0, noVerdict: 0 },
+  changes: { regressed: 0, fixed: 0 },
+  ci: null,
+  startedWithToken: null,
+  children: [
+    { runId: "run_a", sourceRunId: "run_src_a", title: "Add to cart", targetUrl: "https://shop.example.com/", lifecycle: "COMPLETED", verdict: "PASSED", finishedAt: "2026-09-30T10:01:00.000Z", change: "unchanged", baselineRunId: "run_prev_a" },
+    { runId: "run_b", sourceRunId: "run_src_b", title: "Checkout", targetUrl: "https://shop.example.com/", lifecycle: "RUNNING_PLAYWRIGHT", verdict: null, finishedAt: null, change: null, baselineRunId: null },
+  ],
+  ...patch,
+});
 
 export const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });

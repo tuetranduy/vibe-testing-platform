@@ -57,7 +57,30 @@ const ENDPOINTS: { method: Method; pattern: RegExp; query: readonly string[] }[]
   { method: "POST", pattern: new RegExp(`^/v1/test-runs/${ID}/rerun$`), query: [] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/report$`), query: [] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/report\\.md$`), query: [] },
+  { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/comparison$`), query: ["baseline"] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/artifacts/${ID}/url$`), query: ["reveal"] },
+  // Suites and suite runs (V1.2).
+  { method: "GET", pattern: /^\/v1\/suites$/, query: ["name"] },
+  { method: "POST", pattern: /^\/v1\/suites$/, query: [] },
+  { method: "GET", pattern: new RegExp(`^/v1/suites/${ID}$`), query: [] },
+  { method: "PUT", pattern: new RegExp(`^/v1/suites/${ID}$`), query: [] },
+  { method: "DELETE", pattern: new RegExp(`^/v1/suites/${ID}$`), query: [] },
+  { method: "POST", pattern: new RegExp(`^/v1/suites/${ID}/entries$`), query: [] },
+  { method: "PUT", pattern: new RegExp(`^/v1/suites/${ID}/entries/order$`), query: [] },
+  { method: "DELETE", pattern: new RegExp(`^/v1/suites/${ID}/entries/${ID}$`), query: [] },
+  { method: "POST", pattern: new RegExp(`^/v1/suites/${ID}/runs$`), query: [] },
+  { method: "GET", pattern: new RegExp(`^/v1/suites/${ID}/runs$`), query: ["limit"] },
+  { method: "GET", pattern: new RegExp(`^/v1/suites/${ID}/schedules$`), query: [] },
+  { method: "POST", pattern: new RegExp(`^/v1/suites/${ID}/schedules$`), query: [] },
+  { method: "PUT", pattern: new RegExp(`^/v1/suite-schedules/${ID}$`), query: [] },
+  { method: "DELETE", pattern: new RegExp(`^/v1/suite-schedules/${ID}$`), query: [] },
+  { method: "GET", pattern: new RegExp(`^/v1/suite-runs/${ID}$`), query: [] },
+  { method: "POST", pattern: new RegExp(`^/v1/suite-runs/${ID}/cancel$`), query: [] },
+  { method: "GET", pattern: new RegExp(`^/v1/suite-runs/${ID}/junit\\.xml$`), query: [] },
+  // API tokens (V1.2): managed from a signed-in session; the token itself only comes back from the create.
+  { method: "GET", pattern: /^\/v1\/api-tokens$/, query: ["user"] },
+  { method: "POST", pattern: /^\/v1\/api-tokens$/, query: [] },
+  { method: "DELETE", pattern: new RegExp(`^/v1/api-tokens/${ID}$`), query: [] },
   { method: "GET", pattern: /^\/v1\/usage$/, query: ["from", "to", "owner"] },
   { method: "GET", pattern: /^\/v1\/exploration-cache$/, query: [] },
   { method: "DELETE", pattern: /^\/v1\/exploration-cache$/, query: [] },
@@ -81,7 +104,7 @@ const error = (status: number, code: string, message: string) =>
 const DEFAULT_ALLOWED_HOSTS = "localhost:3000,127.0.0.1:3000";
 
 /** WEB_ALLOWED_HOSTS: comma-separated host[:port] the UI is served on (server env, read per request). */
-function allowedHosts(): Set<string> {
+export function allowedHosts(): Set<string> {
   const raw = process.env.WEB_ALLOWED_HOSTS || DEFAULT_ALLOWED_HOSTS;
   return new Set(
     raw

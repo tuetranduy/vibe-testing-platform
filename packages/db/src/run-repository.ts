@@ -8,11 +8,11 @@ import {
   type StoredTestRunRequest,
   type TestRunSummary,
 } from "@platform/contracts";
-import { and, count, desc, eq, inArray, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import type { Executor } from "./client";
 import { NotFoundError, RunInvariantError, StaleTransitionError } from "./errors";
-import { newId } from "./ids";
-import { testRuns } from "./schema";
+import { comparisonKeyOf, newId } from "./ids";
+import { suiteRuns, testRuns } from "./schema";
 import { ACTIVE_LIFECYCLES, TERMINAL_LIFECYCLES, assertTransition } from "./state-machine";
 
 export interface TestRun {
@@ -34,6 +34,10 @@ export interface TestRun {
   idempotencyKey: string | null;
   requestHash: string | null;
   ownerUserId: string | null;
+  /** The suite run this run is part of (V1.2 F1). */
+  suiteRunId: string | null;
+  /** Shared by runs of the same test (V1.2 F2): comparisonKeyOf, or the rerun source's. */
+  comparisonKey: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -56,6 +60,9 @@ export interface CreateRunInput {
   idempotencyKey?: string | null;
   requestHash?: string | null;
   ownerUserId?: string | null;
+  suiteRunId?: string | null;
+  /** A rerun passes its source's; otherwise derived from the target URL and requirement. */
+  comparisonKey?: string | null;
 }
 
 export interface TransitionPatch {
@@ -110,6 +117,7 @@ export function toRunSummary(
     kind: run.request.rerunOf ? "rerun" : "discovery",
     sourceRunId: run.request.rerunOf ?? null,
     secretNames: run.request.secretNames,
+    suiteRunId: run.suiteRunId,
   };
 }
 
@@ -154,6 +162,13 @@ export class RunRepository {
         idempotencyKey: input.idempotencyKey ?? null,
         requestHash: input.requestHash ?? null,
         ownerUserId: input.ownerUserId ?? null,
+        suiteRunId: input.suiteRunId ?? null,
+        comparisonKey:
+          input.comparisonKey !== undefined
+            ? input.comparisonKey
+            : input.request.rerunOf
+              ? null
+              : comparisonKeyOf(input.targetUrl, input.request.requirement),
         // Millisecond precision (not Postgres' microseconds) so list cursors round-trip exactly.
         createdAt: new Date(),
       })
@@ -174,6 +189,16 @@ export class RunRepository {
   async findById(runId: string): Promise<TestRun | null> {
     const [row] = await this.db.select().from(testRuns).where(eq(testRuns.id, runId));
     return row ? toRun(row) : null;
+  }
+
+  /** Runs of the tenant by id (missing ones are left out). */
+  async findByIds(tenantId: string, runIds: readonly string[]): Promise<Map<string, TestRun>> {
+    if (runIds.length === 0) return new Map();
+    const rows = await this.db
+      .select()
+      .from(testRuns)
+      .where(and(eq(testRuns.tenantId, tenantId), inArray(testRuns.id, [...new Set(runIds)])));
+    return new Map(rows.map((r) => [r.id, toRun(r)]));
   }
 
   /** Worker-side lookup (no tenant scope). */
@@ -268,9 +293,52 @@ export class RunRepository {
       .update(testRuns)
       .set({
         requestJson: sql`jsonb_set(${testRuns.requestJson}, '{requirement}', to_jsonb(${requirement}::text))`,
+        // The first text the run gets names its test (the chosen suggestion); a later redaction never changes it.
+        comparisonKey: sql`coalesce(${testRuns.comparisonKey}, ${comparisonKeyOf((await this.getById(runId)).targetUrl, requirement)})`,
         updatedAt: new Date(),
       })
       .where(eq(testRuns.id, runId));
+  }
+
+  /**
+   * The run `run` is compared with by default (V1.2 F2): the latest COMPLETED run of the same test (comparison key)
+   * created before it, within the caller's scope; null when there is none.
+   */
+  async findPreviousComparable(scope: RunScope, run: TestRun): Promise<TestRun | null> {
+    if (!run.comparisonKey) return null;
+    const [row] = await this.db
+      .select()
+      .from(testRuns)
+      .where(
+        and(
+          scopeWhere(scope),
+          eq(testRuns.comparisonKey, run.comparisonKey),
+          eq(testRuns.lifecycle, "COMPLETED"),
+          or(lt(testRuns.createdAt, run.createdAt), and(eq(testRuns.createdAt, run.createdAt), lt(testRuns.id, run.id))),
+        ),
+      )
+      .orderBy(desc(testRuns.createdAt), desc(testRuns.id))
+      .limit(1);
+    return row ? toRun(row) : null;
+  }
+
+  /** COMPLETED runs of the same test other than `run`, newest first (the baselines a user may choose). */
+  async listComparable(scope: RunScope, run: TestRun, limit = 20): Promise<TestRun[]> {
+    if (!run.comparisonKey) return [];
+    const rows = await this.db
+      .select()
+      .from(testRuns)
+      .where(
+        and(
+          scopeWhere(scope),
+          eq(testRuns.comparisonKey, run.comparisonKey),
+          eq(testRuns.lifecycle, "COMPLETED"),
+          sql`${testRuns.id} <> ${run.id}`,
+        ),
+      )
+      .orderBy(desc(testRuns.createdAt), desc(testRuns.id))
+      .limit(Math.max(1, Math.min(limit, 100)));
+    return rows.map(toRun);
   }
 
   /** Marks a cancel request on a non-terminal run. Returns null if the run is already terminal. */
@@ -365,11 +433,21 @@ export class RunRepository {
     return rows.map(toRun);
   }
 
+  /**
+   * What the admission cap counts: active runs started on their own, plus running suite runs — one each,
+   * whatever their size (V1.2 F1); a suite run's children don't count.
+   */
   async countActive(tenantId: string): Promise<number> {
     const [row] = await this.db
       .select({ n: count() })
       .from(testRuns)
-      .where(and(eq(testRuns.tenantId, tenantId), notInArray(testRuns.lifecycle, [...TERMINAL_LIFECYCLES])));
-    return Number(row?.n ?? 0);
+      .where(
+        and(eq(testRuns.tenantId, tenantId), notInArray(testRuns.lifecycle, [...TERMINAL_LIFECYCLES]), isNull(testRuns.suiteRunId)),
+      );
+    const [suites] = await this.db
+      .select({ n: count() })
+      .from(suiteRuns)
+      .where(and(eq(suiteRuns.tenantId, tenantId), eq(suiteRuns.status, "RUNNING")));
+    return Number(row?.n ?? 0) + Number(suites?.n ?? 0);
   }
 }

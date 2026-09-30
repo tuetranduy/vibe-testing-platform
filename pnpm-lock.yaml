@@ -98,6 +98,9 @@ importers:
       bullmq:
         specifier: ^6.3.8
         version: 6.3.8(ioredis@6.0.0)(pg@8.23.0)
+      cron-parser:
+        specifier: ^5.10.1
+        version: 5.10.1
       fastify:
         specifier: ^5.12.5
         version: 5.12.5
@@ -212,6 +215,8 @@ importers:
       fflate:
         specifier: 0.8.2
         version: 0.8.2
+
+  integrations/platform-client: {}
 
   packages/config:
     dependencies:

@@ -254,6 +254,12 @@ export function RunView({ runId }: { runId: string }) {
                   Rerun of an earlier run
                 </a>
               )}
+              {summary.suiteRunId && (
+                <a className="meta-chip" href={`/suite-runs/${encodeURIComponent(summary.suiteRunId)}`}>
+                  <Icon name="layers" />
+                  Part of a suite run
+                </a>
+              )}
               {summary.allowDestructiveActions && (
                 <span className={`meta-chip ${summary.environment === "production" ? "meta-chip-danger" : "meta-chip-warning"}`}>
                   <Icon name="warning" />

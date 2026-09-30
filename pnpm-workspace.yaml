@@ -2,6 +2,7 @@ packages:
   - "apps/*"
   - "packages/*"
   - "tests/fixtures/*"
+  - "integrations/*"
 onlyBuiltDependencies:
   - esbuild
   - msgpackr-extract
