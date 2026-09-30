@@ -27,7 +27,7 @@ export function postValidate(
 ): PostValidation {
   const assembled: RequirementDraft = {
     originalText: source.originalText,
-    criteria: output.criteria.map((c, i) => ({ ...c, id: `AC-${i + 1}` })),
+    criteria: output.criteria.map((c, i) => ({ ...c, id: `AC-${i + 1}`, critical: true })),
     facts: output.facts,
   };
   const draft = replaceUnstatedThresholds(assembled, statedNumbers(source.originalText, source.testData));

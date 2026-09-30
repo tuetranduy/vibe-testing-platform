@@ -19,6 +19,8 @@ export interface RunLlmFactory {
    * provider has no key or its saved key can't be decrypted.
    */
   forRun(run: TestRun): Promise<RunLlm>;
+  /** The run's recorded choice (or the environment's), without building a client. */
+  choiceOf(run: TestRun): LlmChoice;
 }
 
 /** The LLM_* environment: the choice for runs that recorded none, and the server's provider keys. */
@@ -66,6 +68,7 @@ export function createRunLlmFactory(deps: RunLlmFactoryDeps): RunLlmFactory {
   }
 
   return {
+    choiceOf: (run) => run.request.llm ?? environment,
     async forRun(run) {
       const choice = run.request.llm ?? environment;
       if (choice.provider === "fake") return { choice, llm: null };

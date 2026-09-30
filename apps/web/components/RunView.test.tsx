@@ -53,7 +53,7 @@ const partialReport = (lifecycle: "ERRORED" | "CANCELLED") =>
     verdict: null,
     partial: true,
     error: null,
-    summary: { totalCriteria: 0, passed: 0, failed: 0, blocked: 0, inconclusive: 0, confirmedByRerun: 0 },
+    summary: { totalCriteria: 0, passed: 0, failed: 0, blocked: 0, inconclusive: 0, confirmedByRerun: 0, nonCritical: { total: 0, notPassed: 0 } },
     criteria: [],
     generatedTest: null,
     playwright: null,
@@ -148,6 +148,12 @@ describe("RunView", () => {
     await user.click(within(dialog).getByRole("button", { name: /yes, cancel/i }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(`${RUN}/cancel`, expect.objectContaining({ method: "POST" })));
     expect(await screen.findByRole("heading", { name: /run cancelled/i })).toBeInTheDocument();
+  });
+
+  it("a manual rerun links the run it reruns (V1.1)", async () => {
+    routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "RUNNING_PLAYWRIGHT", kind: "rerun", sourceRunId: "run_src" })) });
+    render(<RunView runId="run_1" />);
+    expect(await screen.findByRole("link", { name: "Rerun of an earlier run" })).toHaveAttribute("href", "/runs/run_src");
   });
 
   it("a QUEUED blank-requirement run already lists the survey stage", async () => {

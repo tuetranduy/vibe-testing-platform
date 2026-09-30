@@ -7,6 +7,7 @@ import { Redis } from "ioredis";
 import { buildApp } from "./app";
 import { createApiMetrics } from "./metrics";
 import { createCancelSignal } from "./services/cancel-signal";
+import { UserService, redisLoginThrottle } from "./services/user-service";
 
 const env = loadEnvOrExit();
 const log = createLogger({ component: "api", level: env.LOG_LEVEL });
@@ -28,6 +29,15 @@ if (process.env.RUN_MIGRATIONS_ON_START !== "false") await runMigrations(handle.
 await ensureTenant(handle.db, env.DEFAULT_TENANT_ID);
 
 const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 3 });
+
+if (env.BOOTSTRAP_ADMIN_EMAIL && env.BOOTSTRAP_ADMIN_PASSWORD) {
+  const created = await new UserService({ db: handle.db, config: { auth: { sessionTtlHours: env.SESSION_TTL_HOURS } } }).bootstrapAdmin(
+    env.DEFAULT_TENANT_ID,
+    env.BOOTSTRAP_ADMIN_EMAIL,
+    env.BOOTSTRAP_ADMIN_PASSWORD,
+  );
+  if (created) log.info({ tenantId: env.DEFAULT_TENANT_ID }, "bootstrap administrator created");
+}
 const subscriber = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 const queueConnection = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 const queue = createRunQueue(queueConnection);
@@ -52,7 +62,9 @@ const app = await buildApp(
         envKeys: { anthropic: Boolean(env.ANTHROPIC_API_KEY?.trim()), gemini: Boolean(env.GEMINI_API_KEY?.trim()) },
         fakeAllowed: env.NODE_ENV !== "production",
       },
+      auth: { sessionTtlHours: env.SESSION_TTL_HOURS },
     },
+    loginThrottle: redisLoginThrottle(redis),
     db: handle.db,
     redis,
     hub: new RunEventHub(subscriber),

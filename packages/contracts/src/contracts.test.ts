@@ -13,6 +13,8 @@ import {
   TEST_EVENT_TYPES,
   TestEventSchema,
   TestPlanSchema,
+  scenarioOfCriterion,
+  stepScenario,
   TestReportSchema,
   TestRunSummarySchema,
   isTerminalEvent,
@@ -184,6 +186,19 @@ function requirement(overrides: Partial<NormalizedRequirement> = {}): unknown {
 }
 
 describe("NormalizedRequirementSchema", () => {
+  it("marks every criterion critical by default, and needs at least one critical criterion (V1.1)", () => {
+    const parsed = NormalizedRequirementSchema.parse(requirement());
+    expect(parsed.criteria.every((c) => c.critical)).toBe(true);
+    const none = requirement() as NormalizedRequirement;
+    none.criteria = none.criteria.map((c) => ({ ...c, critical: false }));
+    const r = NormalizedRequirementSchema.safeParse(none);
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.map((i) => i.path.join("."))).toContain("criteria");
+    const one = requirement() as NormalizedRequirement;
+    one.criteria = one.criteria.map((c, i) => ({ ...c, critical: i === 0 }));
+    expect(NormalizedRequirementSchema.safeParse(one).success).toBe(true);
+  });
+
   it("accepts a well-formed requirement, including the reserved url fact at a declared checkpoint", () => {
     const r = NormalizedRequirementSchema.safeParse(requirement());
     expect(r.error?.issues).toBeUndefined();
@@ -345,7 +360,17 @@ describe("TestRunSummarySchema", () => {
     createdAt: "2026-09-28T10:00:00.000Z",
     startedAt: null,
     finishedAt: null,
+    owner: null,
+    kind: "discovery",
+    sourceRunId: null,
+    secretNames: [],
   };
+
+  it("names the run's owner (V1.1), or null for the service token and older runs", () => {
+    expect(TestRunSummarySchema.safeParse({ ...summary, llm: null, owner: { id: "usr_1", name: "Ann" } }).success).toBe(true);
+    const { owner: _owner, ...withoutOwner } = summary;
+    expect(TestRunSummarySchema.safeParse({ ...withoutOwner, llm: null }).success).toBe(false);
+  });
 
   it("carries the run's model choice with its catalog label, or null for runs created before model choice", () => {
     const llm = { provider: "anthropic", model: "claude-sonnet-5", label: "Claude Sonnet 5", reasoning: "medium" };
@@ -465,5 +490,37 @@ describe("destructiveActionsAllowed", () => {
     ["production", true, "SHOP.example.com", true],
   ] as const)("%s, allowDestructiveActions=%s, confirmProductionHost=%s → %s", (environment, allow, host, expected) => {
     expect(destructiveActionsAllowed(req(environment, allow, host))).toBe(expected);
+  });
+});
+
+describe("TestPlanSchema with several scenarios (V1.1 F9)", () => {
+  const stepOf = (id: string) => ({ id, kind: "navigate" as const, description: "Open the home page", criterionIds: [], destructive: false });
+  const plan = (scenarios: { id: string; criterionIds: string[]; steps: string[] }[]) => ({
+    runId: "run_1",
+    requirementRevision: 1,
+    scenarios: scenarios.map((s) => ({ id: s.id, title: s.id, criterionIds: s.criterionIds, steps: s.steps.map(stepOf) })),
+    blockedCriteria: [],
+    stopConditions: [],
+  });
+
+  it("accepts 1–5 scenarios numbered in order, with plan-unique step ids and one scenario per criterion", () => {
+    expect(TestPlanSchema.safeParse(plan([{ id: "SC-1", criterionIds: ["AC-1"], steps: ["PS-1"] }, { id: "SC-2", criterionIds: ["AC-2"], steps: ["PS-2"] }])).success).toBe(true);
+  });
+
+  it.each([
+    ["out-of-order ids", [{ id: "SC-2", criterionIds: ["AC-1"], steps: ["PS-1"] }]],
+    ["a duplicate step id", [{ id: "SC-1", criterionIds: ["AC-1"], steps: ["PS-1"] }, { id: "SC-2", criterionIds: ["AC-2"], steps: ["PS-1"] }]],
+    ["a criterion in two scenarios", [{ id: "SC-1", criterionIds: ["AC-1"], steps: ["PS-1"] }, { id: "SC-2", criterionIds: ["AC-1"], steps: ["PS-2"] }]],
+    ["six scenarios", Array.from({ length: 6 }, (_, i) => ({ id: `SC-${i + 1}`, criterionIds: [`AC-${i + 1}`], steps: [`PS-${i + 1}`] }))],
+  ])("rejects %s", (_label, scenarios) => {
+    expect(TestPlanSchema.safeParse(plan(scenarios)).success).toBe(false);
+  });
+
+  it("finds a criterion's scenario, and a step's (SC-1 for steps before V1.1)", () => {
+    const p = TestPlanSchema.parse(plan([{ id: "SC-1", criterionIds: ["AC-1"], steps: ["PS-1"] }, { id: "SC-2", criterionIds: ["AC-2"], steps: ["PS-2"] }]));
+    expect(scenarioOfCriterion(p, "AC-2").id).toBe("SC-2");
+    expect(scenarioOfCriterion(p, "AC-9").id).toBe("SC-1");
+    expect(stepScenario({})).toBe("SC-1");
+    expect(stepScenario({ scenarioId: "SC-3" })).toBe("SC-3");
   });
 });

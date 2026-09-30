@@ -2,6 +2,7 @@ import { NormalizedRequirementSchema, type NormalizedRequirement } from "@platfo
 import { EventRepository, RequirementRepository, RunRepository, SecretRepository } from "@platform/db";
 import { createRunEventPublisher, type RunEventPublisher } from "@platform/event-bus";
 import { containsFingerprintedSecret, redactByKey } from "@platform/security";
+import type { RunScope } from "@platform/db";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 import { applyCriteriaEdit } from "./criteria-edit";
@@ -35,9 +36,8 @@ export class CriteriaService {
     return createRunEventPublisher({ events: new EventRepository(this.deps.db), redis: this.deps.redis, redact: redactByKey });
   }
 
-  async get(runId: string): Promise<NormalizedRequirement> {
-    const tenantId = this.deps.config.defaultTenantId;
-    await this.runs.getRequired(tenantId, runId);
+  async get(scope: RunScope, runId: string): Promise<NormalizedRequirement> {
+    await this.runs.getRequired(scope, runId);
     const requirement = await this.requirements.findLatest(runId);
     if (!requirement) {
       throw new HttpError(409, "CRITERIA_NOT_READY", "Criteria have not been compiled for this run yet");
@@ -52,9 +52,8 @@ export class CriteriaService {
    * of every edited criterion (applyCriteriaEdit), anything else is 400. Outside
    * AWAITING_CONFIRMATION (or before any revision exists) it is 409.
    */
-  async update(runId: string, body: unknown): Promise<NormalizedRequirement> {
-    const tenantId = this.deps.config.defaultTenantId;
-    const run = await this.runs.getRequired(tenantId, runId);
+  async update(scope: RunScope, runId: string, body: unknown): Promise<NormalizedRequirement> {
+    const run = await this.runs.getRequired(scope, runId);
 
     const parsed = NormalizedRequirementSchema.safeParse(body);
     if (!parsed.success) {
@@ -136,9 +135,8 @@ export class CriteriaService {
    * mirrors the worker's auto-confirm sequence: publish criteria.confirmed → transition to PLANNING
    * with heartbeatAt = now → enqueue execute-run. A queue failure after the transition errors the run.
    */
-  async confirm(runId: string): Promise<ConfirmResult> {
-    const tenantId = this.deps.config.defaultTenantId;
-    const run = await this.runs.getRequired(tenantId, runId);
+  async confirm(scope: RunScope, runId: string): Promise<ConfirmResult> {
+    const run = await this.runs.getRequired(scope, runId);
     if (run.lifecycle !== "AWAITING_CONFIRMATION") {
       throw new HttpError(409, "CONFLICT", `Run is ${run.lifecycle}; criteria cannot be confirmed`);
     }

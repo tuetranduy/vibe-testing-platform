@@ -28,3 +28,20 @@ describe("aggregateVerdict (Section 2.4)", () => {
     expect(() => aggregateVerdict([])).toThrow();
   });
 });
+
+describe("aggregateVerdict with weights (V1.1, D4 amended)", () => {
+  it("decides from the critical criteria only", () => {
+    expect(aggregateVerdict([{ status: "PASS" }, { status: "FAIL", critical: false }])).toBe("PASSED");
+    expect(aggregateVerdict([{ status: "INCONCLUSIVE", critical: true }, { status: "FAIL", critical: false }])).toBe("INCONCLUSIVE");
+    expect(aggregateVerdict([{ status: "PASS", critical: true }, { status: "BLOCKED", critical: false }])).toBe("PASSED");
+    expect(aggregateVerdict([{ status: "FAIL", critical: true }, { status: "PASS", critical: false }])).toBe("FAILED");
+  });
+
+  it("treats a result without a weight as critical (results before V1.1)", () => {
+    expect(aggregateVerdict([{ status: "FAIL" }, { status: "PASS", critical: false }])).toBe("FAILED");
+  });
+
+  it("falls back to every result when none is critical (the contract forbids it)", () => {
+    expect(aggregateVerdict([{ status: "FAIL", critical: false }])).toBe("FAILED");
+  });
+});

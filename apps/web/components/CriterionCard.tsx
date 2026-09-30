@@ -15,6 +15,12 @@ interface Props {
   /** Saves an edited check; resolves to null when saved, or the error to show in the editor. */
   onSave: (outcome: ExpectedOutcome) => Promise<string | null>;
   onRemove: () => void;
+  /**
+   * Marks the criterion critical or not (V1.1); resolves to null when saved, or the error to show. Absent: no
+   * switch. `canMakeNonCritical: false` (the last critical criterion) keeps it on.
+   */
+  onCriticalChange?: (critical: boolean) => Promise<string | null>;
+  canMakeNonCritical?: boolean;
   /** The editor opened (true) or closed (false); also false when the card goes away. */
   onEditingChange?: (editing: boolean) => void;
 }
@@ -38,8 +44,19 @@ const PRECONDITION: Record<AcceptanceCriterion["preconditions"][number]["kind"],
   secret: "Needs a secret",
 };
 
-export function CriterionCard({ criterion: c, facts, busy, canRemove, onSave, onRemove, onEditingChange }: Props) {
+export function CriterionCard({
+  criterion: c,
+  facts,
+  busy,
+  canRemove,
+  onSave,
+  onRemove,
+  onCriticalChange,
+  canMakeNonCritical = true,
+  onEditingChange,
+}: Props) {
   const [editing, setEditing] = useState(false);
+  const [weightError, setWeightError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
   // When the editor closes, its buttons disappear: give focus back to "Edit check".
@@ -128,6 +145,33 @@ export function CriterionCard({ criterion: c, facts, busy, canRemove, onSave, on
         <p className="criterion-source">
           From your requirement: <q>{c.sourceText}</q>
         </p>
+
+        {onCriticalChange && (
+          <div className="weight-field">
+            <label className="choice">
+              <input
+                type="checkbox"
+                checked={c.critical}
+                disabled={busy || (c.critical && !canMakeNonCritical)}
+                aria-describedby={`${c.id}-weight-hint`}
+                onChange={async (e) => setWeightError(await onCriticalChange(e.target.checked))}
+              />
+              <span>Critical</span>
+            </label>
+            <p id={`${c.id}-weight-hint`} className="hint">
+              {c.critical
+                ? canMakeNonCritical
+                  ? "Decides the verdict. Untick for a nice-to-have that is reported but never fails the run."
+                  : "Decides the verdict. At least one criterion must stay critical."
+                : "Non-critical: reported with its result, but the verdict ignores it."}
+            </p>
+            {weightError && (
+              <p role="alert" className="field-error">
+                <Icon name="error" /> {weightError}
+              </p>
+            )}
+          </div>
+        )}
 
         {c.preconditions.length > 0 && (
           <ul className="criterion-needs">

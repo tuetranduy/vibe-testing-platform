@@ -49,6 +49,38 @@ describe("RunReport", () => {
     expect(screen.getByText("The site loaded slowly on the first visit.")).toBeInTheDocument();
   });
 
+  it("tags non-critical results and says the verdict ignores the ones that did not pass (V1.1)", async () => {
+    const base = reportFixture();
+    const criteria = base.criteria.map((c) => (c.criterionId === "AC-2" ? { ...c, critical: false } : c));
+    reportFetch(() => json(200, { ...base, criteria, summary: { ...base.summary, nonCritical: { total: 1, notPassed: 1 } } }));
+    renderReport();
+    expect(await screen.findByText("1 non-critical criterion did not pass; the verdict ignores it.")).toBeInTheDocument();
+    const row = screen.getByRole("button", { name: /^AC-2\b/ }).closest("li")!;
+    expect(within(row).getByText("Non-critical")).toBeInTheDocument();
+    expect(screen.getAllByText("Non-critical")).toHaveLength(1);
+  });
+
+  it("links the Markdown download and the printable report (V1.1)", async () => {
+    reportFetch(() => json(200, reportFixture()));
+    renderReport();
+    const md = await screen.findByRole("link", { name: "Download Markdown" });
+    expect(md).toHaveAttribute("href", "/api/v1/test-runs/run_1/report.md");
+    expect(md).toHaveAttribute("download");
+    expect(screen.getByRole("link", { name: "Print or save as PDF" })).toHaveAttribute("href", "/runs/run_1/print");
+  });
+
+  it("offers a rerun of the saved test only when told the run's secrets and the test checks something (V1.1)", async () => {
+    reportFetch(() => json(200, reportFixture()));
+    const { unmount } = render(<RunReport runId="run_1" artifacts={[]} steps={[]} secretNames={["password"]} />);
+    expect(await screen.findByRole("heading", { name: "Rerun the saved test" })).toBeInTheDocument();
+    expect(screen.getByText(/It checks 3 criteria/)).toBeInTheDocument();
+    unmount();
+    reportFetch(() => json(200, reportFixture()));
+    renderReport();
+    await screen.findByRole("heading", { name: /verdict/i });
+    expect(screen.queryByRole("heading", { name: "Rerun the saved test" })).not.toBeInTheDocument();
+  });
+
   it("shows a partial report for an errored run: lifecycle, error category and message, and what exists", async () => {
     reportFetch(() =>
       json(
@@ -58,7 +90,7 @@ describe("RunReport", () => {
           verdict: null,
           partial: true,
           error: { category: "BROWSER_PROVIDER", message: "chromium: No usable sandbox!" },
-          summary: { totalCriteria: 1, passed: 0, failed: 0, blocked: 0, inconclusive: 1, confirmedByRerun: 0 },
+          summary: { totalCriteria: 1, passed: 0, failed: 0, blocked: 0, inconclusive: 1, confirmedByRerun: 0, nonCritical: { total: 0, notPassed: 0 } },
           criteria: [resultFixture({ criterionId: "AC-1", status: "INCONCLUSIVE", reason: "FACT_NOT_OBSERVED" })],
           generatedTest: null,
           playwright: null,
@@ -93,7 +125,7 @@ describe("RunReport", () => {
           partial: true,
           error: null,
           requirement: null,
-          summary: { totalCriteria: 0, passed: 0, failed: 0, blocked: 0, inconclusive: 0, confirmedByRerun: 0 },
+          summary: { totalCriteria: 0, passed: 0, failed: 0, blocked: 0, inconclusive: 0, confirmedByRerun: 0, nonCritical: { total: 0, notPassed: 0 } },
           criteria: [],
           generatedTest: null,
           playwright: null,

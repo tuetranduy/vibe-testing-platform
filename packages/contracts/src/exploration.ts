@@ -52,8 +52,13 @@ export const ExplorationStepSchema = z.object({
   durationMs: z.number().int().min(0),
   artifactIds: z.array(z.string()),
   llm: LlmStepUsageSchema.nullable(),
+  /** The scenario the step ran in (V1.1 F9); absent on steps recorded before V1.1: SC-1. */
+  scenarioId: z.string().regex(/^SC-[1-5]$/).optional(),
 });
 export type ExplorationStep = z.infer<typeof ExplorationStepSchema>;
+
+/** A step's scenario (SC-1 for steps recorded before V1.1). */
+export const stepScenario = (step: Pick<ExplorationStep, "scenarioId">): string => step.scenarioId ?? "SC-1";
 
 export const FactValueSchema = z.union([z.boolean(), z.number(), z.string(), z.array(z.string()), z.null()]);
 export type FactValue = z.infer<typeof FactValueSchema>;
@@ -79,3 +84,16 @@ export const ObservedFactSchema = z
     path: ["read"],
   });
 export type ObservedFact = z.infer<typeof ObservedFactSchema>;
+
+/**
+ * An element lookup verified on an earlier run (V1.1 F8): the selector the explorer found, and the locator
+ * the recorder chose for it then. Reused only when the selector still matches exactly one element whose
+ * chosen locator is the same.
+ */
+export const CachedElementSchema = z.object({
+  selector: z.string().min(1).max(2000),
+  description: z.string().max(1000),
+  method: z.string().max(40).nullable(),
+  element: ElementRefSchema,
+});
+export type CachedElement = z.infer<typeof CachedElementSchema>;

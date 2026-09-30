@@ -8,12 +8,19 @@ import type { E2EStack } from "./stack";
 
 const TERMINAL = ["COMPLETED", "ERRORED", "CANCELLED"];
 
-/** The V1 API as the web app's server calls it (bearer token). */
-export function api(stack: E2EStack) {
+/**
+ * The API as the web app's server calls it (bearer token). With `session`, as a signed-in user (the web
+ * server forwards the session as X-Session-Token); without, as the service (unrestricted).
+ */
+export function api(stack: E2EStack, session?: string) {
   const call = async (method: string, url: string, body?: unknown) => {
     const res = await fetch(`${stack.apiUrl}${url}`, {
       method,
-      headers: { authorization: `Bearer ${stack.apiToken}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+      headers: {
+        authorization: `Bearer ${stack.apiToken}`,
+        ...(session ? { "x-session-token": session } : {}),
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text();

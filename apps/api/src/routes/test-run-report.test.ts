@@ -53,6 +53,7 @@ const draft: Omit<NormalizedRequirement, "runId" | "revision" | "confirmedAt"> =
       statement: "The cart count increases",
       expectedOutcome: { kind: "numeric_compare", left: after, operator: "gt", right: before },
       preconditions: [],
+      critical: true,
       ambiguity: null,
     },
     {
@@ -61,6 +62,7 @@ const draft: Omit<NormalizedRequirement, "runId" | "revision" | "confirmedAt"> =
       statement: "The cart lists the product",
       expectedOutcome: { kind: "collection_contains", collection: items, item: "iPhone", match: "contains" },
       preconditions: [],
+      critical: true,
       ambiguity: null,
     },
   ],
@@ -186,6 +188,7 @@ describe("GET /v1/test-runs/:runId/report", () => {
         evidenceArtifactIds: ["art_trace", "art_s1"],
         relatedStepIds: [steps[1]!.id],
         aiNote: null,
+        critical: true,
       },
       {
         ...provisional("AC-2", "INCONCLUSIVE", [items]),
@@ -197,6 +200,7 @@ describe("GET /v1/test-runs/:runId/report", () => {
         evidenceArtifactIds: ["art_s2"],
         relatedStepIds: [steps[2]!.id],
         aiNote: null,
+        critical: true,
       },
     ];
     for (const r of final) await new ResultRepository(t.tdb.db).upsert(run.id, r);
@@ -320,5 +324,26 @@ describe("GET /v1/test-runs/:runId/report", () => {
   it("requires the bearer token", async () => {
     const run = await runAt("COMPLETED");
     expect((await t.app.inject({ method: "GET", url: `/v1/test-runs/${run.id}/report` })).statusCode).toBe(401);
+  });
+});
+
+describe("GET /v1/test-runs/:runId/report.md (V1.1 F6)", () => {
+  const getMarkdown = (runId: string) => t.app.inject({ method: "GET", url: `/v1/test-runs/${runId}/report.md`, headers: auth });
+
+  it("downloads the report as Markdown", async () => {
+    const run = await runAt("CANCELLED");
+    const res = await getMarkdown(run.id);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toBe("text/markdown; charset=utf-8");
+    expect(res.headers["content-disposition"]).toBe(`attachment; filename="report-${run.id}.md"`);
+    expect(res.body.startsWith("# Test report\n")).toBe(true);
+    expect(res.body).toContain("- **Partial report:**");
+  });
+
+  it("follows the JSON report's rules: 409 while running, 404 outside the caller's scope", async () => {
+    const running = await runAt("RUNNING_PLAYWRIGHT");
+    expect((await getMarkdown(running.id)).statusCode).toBe(409);
+    const other = await runAt("COMPLETED", OTHER_TENANT_ID);
+    expect((await getMarkdown(other.id)).statusCode).toBe(404);
   });
 });

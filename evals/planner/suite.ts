@@ -79,7 +79,8 @@ export function loadPlannerCases(dir = CASES_DIR): PlannerEvalCase[] {
 /** Score one plan against a case's expectations. */
 export function scorePlan(c: PlannerEvalCase, plan: TestPlan): string[] {
   const failures: string[] = [];
-  const steps = plan.scenarios[0]!.steps;
+  // Every scenario's steps (V1.1 F9): the golden cases need one; a second one is scored as extra steps.
+  const steps = plan.scenarios.flatMap((s) => s.steps);
   const kinds = new Set(steps.map((s) => s.kind));
   for (const k of c.expect.requiredStepKinds) if (!kinds.has(k)) failures.push(`no ${k} step (got ${[...kinds].join(", ")})`);
   if (steps.length > c.expect.maxSteps) failures.push(`${steps.length} steps > max ${c.expect.maxSteps}`);

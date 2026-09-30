@@ -120,6 +120,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
   const { criteria } = requirement;
   const unclear = criteria.filter((c) => c.ambiguity !== null).length;
   const aiJudged = criteria.filter((c) => c.expectedOutcome.kind === "semantic").length;
+  const nonCritical = criteria.filter((c) => !c.critical).length;
   const openEdits = criteria.map((c) => c.id).filter((id) => editing.has(id));
 
   return (
@@ -163,6 +164,8 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
                 )
               }
               onRemove={() => void save(criteria.filter((x) => x.id !== c.id)).then((err) => err && setError(err))}
+              onCriticalChange={(critical) => save(criteria.map((x) => (x.id === c.id ? { ...x, critical } : x)))}
+              canMakeNonCritical={criteria.filter((x) => x.critical).length > 1}
               onEditingChange={(open) => editingChange(c.id, open)}
             />
           ))}
@@ -191,6 +194,12 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
               <div className="count-info">
                 <dt>Judged by a model only</dt>
                 <dd>{aiJudged}</dd>
+              </div>
+            )}
+            {nonCritical > 0 && (
+              <div>
+                <dt>Non-critical</dt>
+                <dd>{nonCritical}</dd>
               </div>
             )}
           </dl>

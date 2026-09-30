@@ -1,4 +1,4 @@
-import { ArtifactRepository, type Database } from "@platform/db";
+import { ArtifactRepository, ExplorationCacheRepository, type Database } from "@platform/db";
 import type { ArtifactStorage } from "@platform/storage";
 import type { WorkerLogger } from "../deps";
 
@@ -82,4 +82,13 @@ function stopEarly(deps: RetentionDeps, result: RetentionResult): RetentionResul
   result.stoppedEarly = true;
   deps.logger.warn({ deleted: result.deleted, failed: result.failed }, "retention pass reached its time limit; the rest waits for the next pass");
   return result;
+}
+
+/** Exploration cache entries unused for this long are deleted by the daily pass (V1.1 F8). */
+export const EXPLORATION_CACHE_MAX_IDLE_DAYS = 30;
+
+/** Daily (V1.1 F8): deletes exploration cache entries no run has reused for 30 days. Returns how many. */
+export async function pruneExplorationCache(deps: Pick<RetentionDeps, "db" | "now">): Promise<number> {
+  const now = (deps.now ?? (() => new Date()))();
+  return new ExplorationCacheRepository(deps.db).deleteUnusedSince(new Date(now.getTime() - EXPLORATION_CACHE_MAX_IDLE_DAYS * 86_400_000));
 }

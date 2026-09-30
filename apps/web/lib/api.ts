@@ -4,12 +4,31 @@ import {
   LlmSettingsViewSchema,
   SuggestionSetResponseSchema,
   NormalizedRequirementSchema,
+  SessionViewSchema,
+  CredentialProfileListSchema,
+  CredentialProfileSchema,
+  TestDataSetListSchema,
+  UsageReportSchema,
+  TestDataSetSchema,
+  UserListResponseSchema,
+  UserViewSchema,
   TestReportSchema,
   TestRunListResponseSchema,
   TestRunSummarySchema,
   type ApiError,
   type CreateTestRunRequestInput,
   type CreateTestRunResponse,
+  type RerunRequestInput,
+  type CreateUserRequestInput,
+  type SessionView,
+  type CreateCredentialProfileRequestInput,
+  type CredentialProfile,
+  type UpdateCredentialProfileRequest,
+  type TestDataSet,
+  type UsageReport,
+  type TestDataSetInput,
+  type UpdateUserRequest,
+  type UserView,
   type LlmDefaultsInput,
   type LlmKeyProvider,
   type LlmSettingsView,
@@ -49,10 +68,22 @@ const seg = (s: string) => encodeURIComponent(s);
 export const runPath = (runId: string) => `${BASE}/${seg(runId)}`;
 export const runEventsPath = (runId: string) => `${runPath(runId)}/events`;
 
+/**
+ * The session ended (signed out elsewhere, expired, the account disabled): the proxy has cleared the
+ * cookie, so the page goes to sign-in and comes back here afterwards.
+ */
+function onSessionEnded(): void {
+  if (typeof window === "undefined" || window.location.pathname === "/login") return;
+  const next = `${window.location.pathname}${window.location.search}`;
+  window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+}
+
+type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
 async function request<T>(
   schema: z.ZodType<T>,
   path: string,
-  init: { method?: "GET" | "POST" | "PUT"; body?: unknown; headers?: Record<string, string> } = {},
+  init: { method?: Method; body?: unknown; headers?: Record<string, string> } = {},
 ): Promise<T> {
   const headers: Record<string, string> = { accept: "application/json", ...init.headers };
   if (init.body !== undefined) headers["content-type"] = "application/json";
@@ -76,6 +107,7 @@ async function request<T>(
   }
   if (!res.ok) {
     const err = ApiErrorSchema.safeParse(data);
+    if (res.status === 401 && err.success && err.data.code === "SESSION_INVALID") onSessionEnded();
     if (err.success) throw new ApiRequestError(res.status, err.data.code, err.data.message, err.data.issues);
     throw new ApiRequestError(res.status, `HTTP_${res.status}`, `The server answered ${res.status}.`);
   }
@@ -87,17 +119,28 @@ async function request<T>(
 export const createRun = (body: CreateTestRunRequestInput, idempotencyKey: string): Promise<CreateTestRunResponse> =>
   request(CreateTestRunResponseSchema, BASE, { method: "POST", body, headers: { "idempotency-key": idempotencyKey } });
 
-/** The history, newest first; pass the previous page's `nextCursor` for the next page. */
-export const listRuns = (cursor: string | null = null, limit = 50): Promise<TestRunListResponse> => {
+/**
+ * The history, newest first; pass the previous page's `nextCursor` for the next page. `owner`: an
+ * admin's "My runs" (`me`) or everyone's (`all`, the default); members always get their own.
+ */
+export const listRuns = (cursor: string | null = null, limit = 50, owner?: "me" | "all"): Promise<TestRunListResponse> => {
   const q = new URLSearchParams({ limit: String(limit) });
   if (cursor) q.set("cursor", cursor);
+  if (owner) q.set("owner", owner);
   return request(TestRunListResponseSchema, `${BASE}?${q}`);
 };
+
+/** The report as a Markdown file, downloaded by the browser through this app's proxy (V1.1). */
+export const reportMarkdownPath = (runId: string) => `${runPath(runId)}/report.md`;
 
 /** The final report (COMPLETED) or a partial one (ERRORED / CANCELLED); 409 while the run is still going. */
 export const getReport = (runId: string): Promise<TestReport> => request(TestReportSchema, `${runPath(runId)}/report`);
 
 export const getRun = (runId: string): Promise<TestRunSummary> => request(TestRunSummarySchema, runPath(runId));
+
+/** A manual rerun of a finished run's saved Playwright test (V1.1): a new run, no model call. */
+export const rerunRun = (runId: string, body: RerunRequestInput, idempotencyKey: string): Promise<CreateTestRunResponse> =>
+  request(CreateTestRunResponseSchema, `${runPath(runId)}/rerun`, { method: "POST", body, headers: { "idempotency-key": idempotencyKey } });
 
 export const cancelRun = (runId: string): Promise<TestRunSummary> =>
   request(TestRunSummarySchema, `${runPath(runId)}/cancel`, { method: "POST" });
@@ -119,6 +162,81 @@ export const selectSuggestion = (runId: string, body: SelectSuggestionRequest): 
 
 export const confirmCriteria = (runId: string): Promise<ConfirmResult> =>
   request(ConfirmResultSchema, `${runPath(runId)}/criteria/confirm`, { method: "POST" });
+
+const AUTH = "/api/v1/auth";
+const NoContentSchema = z.unknown();
+
+/** Signs in: the session goes into an httpOnly cookie (set by this app's proxy); the answer names the user. */
+export const login = (email: string, password: string): Promise<SessionView> =>
+  request(SessionViewSchema, `${AUTH}/login`, { method: "POST", body: { email, password } });
+
+export const logout = async (): Promise<void> => {
+  await request(NoContentSchema, `${AUTH}/logout`, { method: "POST" });
+};
+
+/** The signed-in user. */
+export const getMe = (): Promise<UserView> => request(UserViewSchema, `${AUTH}/me`);
+
+export const changePassword = async (currentPassword: string, newPassword: string): Promise<void> => {
+  await request(NoContentSchema, `${AUTH}/password`, { method: "PUT", body: { currentPassword, newPassword } });
+};
+
+const USERS = "/api/v1/users";
+
+/** Admin: every user of the tenant. */
+export const listUsers = async (): Promise<UserView[]> => (await request(UserListResponseSchema, USERS)).items;
+
+export const createUser = (body: CreateUserRequestInput): Promise<UserView> => request(UserViewSchema, USERS, { method: "POST", body });
+
+export const updateUser = (userId: string, body: UpdateUserRequest): Promise<UserView> =>
+  request(UserViewSchema, `${USERS}/${seg(userId)}`, { method: "PATCH", body });
+
+const SETS = "/api/v1/test-data-sets";
+
+/** Saved test data sets (V1.1 F3), by name. */
+export const listTestDataSets = async (): Promise<TestDataSet[]> => (await request(TestDataSetListSchema, SETS)).items;
+
+export const createTestDataSet = (body: TestDataSetInput): Promise<TestDataSet> => request(TestDataSetSchema, SETS, { method: "POST", body });
+
+export const updateTestDataSet = (id: string, body: TestDataSetInput): Promise<TestDataSet> =>
+  request(TestDataSetSchema, `${SETS}/${seg(id)}`, { method: "PUT", body });
+
+export const deleteTestDataSet = async (id: string): Promise<void> => {
+  await request(NoContentSchema, `${SETS}/${seg(id)}`, { method: "DELETE" });
+};
+
+const PROFILES = "/api/v1/credential-profiles";
+
+/** Saved credentials (V1.1 F4): names only, never a value. */
+export const listCredentialProfiles = async (): Promise<CredentialProfile[]> => (await request(CredentialProfileListSchema, PROFILES)).items;
+
+export const createCredentialProfile = (body: CreateCredentialProfileRequestInput): Promise<CredentialProfile> =>
+  request(CredentialProfileSchema, PROFILES, { method: "POST", body });
+
+/** A value replaces the secret, null removes it, an omitted name is kept. */
+export const updateCredentialProfile = (id: string, body: UpdateCredentialProfileRequest): Promise<CredentialProfile> =>
+  request(CredentialProfileSchema, `${PROFILES}/${seg(id)}`, { method: "PUT", body });
+
+export const deleteCredentialProfile = async (id: string): Promise<void> => {
+  await request(NoContentSchema, `${PROFILES}/${seg(id)}`, { method: "DELETE" });
+};
+
+/** Model spend over whole UTC days (V1.1): the last 30 by default; `owner` as for the run list. */
+export const getUsage = (range: { from?: string; to?: string; owner?: "me" | "all" } = {}): Promise<UsageReport> => {
+  const q = new URLSearchParams(Object.entries(range).filter((e): e is [string, string] => typeof e[1] === "string"));
+  return request(UsageReportSchema, `/api/v1/usage${q.size > 0 ? `?${q}` : ""}`);
+};
+
+const ExplorationCacheStatsSchema = z.object({ entries: z.number(), hits: z.number(), lastUsedAt: z.string().nullable() });
+export type ExplorationCacheStats = z.infer<typeof ExplorationCacheStatsSchema>;
+const CACHE = "/api/v1/exploration-cache";
+
+/** The tenant's exploration cache (V1.1): entries and reuse. */
+export const getExplorationCache = (): Promise<ExplorationCacheStats> => request(ExplorationCacheStatsSchema, CACHE);
+
+/** Admin: empties the tenant's exploration cache. */
+export const clearExplorationCache = (): Promise<{ deleted: number }> =>
+  request(z.object({ deleted: z.number() }), CACHE, { method: "DELETE" });
 
 const SETTINGS = "/api/v1/settings/llm";
 

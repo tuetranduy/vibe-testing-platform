@@ -56,6 +56,11 @@ export const AcceptanceCriterionSchema = z.object({
   statement: z.string().min(3).max(1000),
   expectedOutcome: ExpectedOutcomeSchema,
   preconditions: z.array(PreconditionSchema).default([]),
+  /**
+   * V1.1 (D4 amended): only critical criteria decide the run's verdict; a non-critical one is reported with its
+   * status and never changes the verdict. Always true from the model; the user changes it in review.
+   */
+  critical: z.boolean().default(true),
   ambiguity: z
     .object({
       reason: z.string().max(500),
@@ -101,6 +106,11 @@ export const NormalizedRequirementSchema = z
     confirmedAt: IsoDateTime.nullable(),
   })
   .superRefine((req, ctx) => {
+    // 0. the verdict needs something to decide it (V1.1)
+    if (!req.criteria.some((c) => c.critical)) {
+      ctx.addIssue({ code: "custom", path: ["criteria"], message: "Keep at least one critical criterion: only critical criteria decide the verdict" });
+    }
+
     // 1. unique criterion ids
     const seenIds = new Set<string>();
     req.criteria.forEach((c, i) => {

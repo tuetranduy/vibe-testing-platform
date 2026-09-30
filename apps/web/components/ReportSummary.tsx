@@ -87,6 +87,12 @@ function Headline({ report, cancelReason, titleId }: Props & { titleId: string }
             <p className="hero-lede">
               {passed} of {plural(totalCriteria, "criterion", "criteria")} passed. {VERDICT_EXPLAIN[report.verdict]}
             </p>
+            {report.summary.nonCritical.notPassed > 0 && (
+              <p className="hero-detail">
+                {plural(report.summary.nonCritical.notPassed, "non-critical criterion", "non-critical criteria")} did not pass; the
+                verdict ignores {report.summary.nonCritical.notPassed === 1 ? "it" : "them"}.
+              </p>
+            )}
           </div>
         </div>
         <CriteriaMix summary={report.summary} />

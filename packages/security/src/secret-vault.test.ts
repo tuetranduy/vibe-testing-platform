@@ -1,6 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { decryptProviderKey, decryptSecret, encryptProviderKey, encryptSecret, type EncryptedSecret } from "./secret-vault";
+import {
+  decryptProfileSecret,
+  decryptProviderKey,
+  decryptSecret,
+  encryptProfileSecret,
+  encryptProviderKey,
+  encryptSecret,
+  type EncryptedSecret,
+} from "./secret-vault";
 
 const key = randomBytes(32);
 const aad = { runId: "run_123", name: "PASSWORD" };
@@ -107,5 +115,25 @@ describe("provider key vault (Settings → AI providers)", () => {
   it("fails after SECRETS_ENCRYPTION_KEY is rotated", () => {
     const enc = encryptProviderKey(apiKey, owner, key);
     expect(() => decryptProviderKey(enc, owner, randomBytes(32))).toThrow();
+  });
+});
+
+describe("credential profile secrets (V1.1)", () => {
+  const key = Buffer.alloc(32, 7);
+  const aad = { tenantId: "t_1", profileId: "cp_1", name: "password" };
+
+  it("round-trips and binds the value to tenant, profile and name", () => {
+    const enc = encryptProfileSecret("hunter2-long", aad, key);
+    expect(decryptProfileSecret(enc, aad, key)).toBe("hunter2-long");
+    expect(() => decryptProfileSecret(enc, { ...aad, tenantId: "t_2" }, key)).toThrow();
+    expect(() => decryptProfileSecret(enc, { ...aad, profileId: "cp_2" }, key)).toThrow();
+    expect(() => decryptProfileSecret(enc, { ...aad, name: "pin" }, key)).toThrow();
+  });
+
+  it("cannot be opened as a run secret (or the other way round)", () => {
+    const enc = encryptProfileSecret("hunter2-long", aad, key);
+    expect(() => decryptSecret(enc, { runId: "cp_1", name: "password" }, key)).toThrow();
+    const run = encryptSecret("hunter2-long", { runId: "cp_1", name: "password" }, key);
+    expect(() => decryptProfileSecret(run, aad, key)).toThrow();
   });
 });

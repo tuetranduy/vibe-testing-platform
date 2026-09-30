@@ -7,6 +7,7 @@ import {
   type ExplorationStopReason,
   type FactRef,
   type FactValue,
+  type NormalizedRequirement,
   type ObservedFact,
   type PlannedStep,
   type ProvisionalResult,
@@ -113,6 +114,7 @@ const criterion = (expectedOutcome: ExpectedOutcome, extra: Partial<AcceptanceCr
   statement: "The cart count increases after adding a product",
   expectedOutcome,
   preconditions: [],
+  critical: true,
   ambiguity: null,
   ...extra,
 });
@@ -611,5 +613,48 @@ describe("provenance and output", () => {
     const snapshot = JSON.stringify(input);
     expect(verifyCriterion(input)).toEqual(verifyCriterion(input));
     expect(JSON.stringify(input)).toBe(snapshot);
+  });
+});
+
+describe("verifyStage with several scenarios (V1.1 F9)", () => {
+  it("judges each criterion on its own scenario's stop reason and steps", async () => {
+    const { verifyStage } = await import("./verify-stage");
+    const shown = (key: string, checkpoint: string) => ({ kind: "visible" as const, fact: { key, checkpoint }, expected: true });
+    const requirement: NormalizedRequirement = {
+      runId: "run_1",
+      revision: 1,
+      originalText: "The banner shows. The orders show.",
+      criteria: [
+        { ...criterion(shown("banner", "home")), id: "AC-1", sourceText: "The banner shows." },
+        { ...criterion(shown("orders", "orders_page")), id: "AC-2", sourceText: "The orders show." },
+      ],
+      facts: [
+        { key: "banner", checkpoint: "home", description: "Banner", valueType: "boolean" },
+        { key: "orders", checkpoint: "orders_page", description: "Orders", valueType: "boolean" },
+      ],
+      confirmedAt: "2026-09-29T10:00:00.000Z",
+    };
+    const plan: TestPlan = {
+      runId: "run_1",
+      requirementRevision: 1,
+      scenarios: [
+        { id: "SC-1", title: "a", criterionIds: ["AC-1"], steps: [{ id: "PS-1", kind: "capture_checkpoint", description: "Capture home", checkpoint: "home", criterionIds: ["AC-1"], destructive: false }] },
+        { id: "SC-2", title: "b", criterionIds: ["AC-2"], steps: [{ id: "PS-2", kind: "capture_checkpoint", description: "Capture orders", checkpoint: "orders_page", criterionIds: ["AC-2"], destructive: false }] },
+      ],
+      blockedCriteria: [],
+      stopConditions: [],
+    };
+    const bannerFact: ObservedFact = { key: "banner", checkpoint: "home", value: true, provenance: "DOM_VERIFIED", read: { element: { candidates: [{ strategy: "testId", value: "b" }], chosenIndex: 0, framePath: [] }, mode: "visible" }, stepId: "s1" };
+    const ctx = { redact: (v: unknown) => v } as unknown as Parameters<typeof verifyStage>[0];
+    const results = verifyStage(ctx, requirement, plan, {
+      steps: [],
+      facts: [bannerFact],
+      stopReason: "BLOCKED_BY_POLICY",
+      scenarioStops: { "SC-1": "COMPLETED", "SC-2": "EXPLORATION_BUDGET_EXHAUSTED" },
+    });
+    expect(results.map((r) => [r.criterionId, r.status, r.reason])).toEqual([
+      ["AC-1", "PASS", null],
+      ["AC-2", "INCONCLUSIVE", "EXPLORATION_BUDGET_EXHAUSTED"],
+    ]);
   });
 });

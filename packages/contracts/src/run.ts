@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DataKeySchema, HostnameSchema, HttpUrlSchema, IsoDateTime, SecretNameSchema } from "./common";
 import { LlmOverrideSchema, LlmProviderSchema, ReasoningLevelSchema, type LlmChoice } from "./llm";
+import { RunOwnerSchema } from "./users";
 
 export const RunLifecycleSchema = z.enum([
   "QUEUED",
@@ -66,11 +67,37 @@ export const InconclusiveReasonSchema = z.enum([
   "DISCOVERY_RERUN_DISAGREE",
   "AI_JUDGED_ONLY",
   "AMBIGUOUS_CRITERION",
+  // A rerun-only run (V1.1 F5): the saved test did not reach the criterion's assertion, or does not have one.
+  "RERUN_NOT_REACHED",
+  "NOT_IN_GENERATED_TEST",
 ]);
 export type InconclusiveReason = z.infer<typeof InconclusiveReasonSchema>;
 
 export const TestDataValueSchema = z.union([z.string().max(2000), z.number(), z.boolean(), z.null()]);
 export type TestDataValue = z.infer<typeof TestDataValueSchema>;
+
+/** At most this many test data entries per run (the run's own plus a saved set's, merged). */
+export const MAX_TEST_DATA_ENTRIES = 50;
+
+/** A run's test data, or a saved set's (V1.1 F3): same keys, values and limit. */
+export const TestDataRecordSchema = z
+  .record(DataKeySchema, TestDataValueSchema)
+  .refine((o) => Object.keys(o).length <= MAX_TEST_DATA_ENTRIES, `At most ${MAX_TEST_DATA_ENTRIES} test data entries`);
+
+/** A saved resource a run was created from, as its stored request records it (V1.1 F3, F4). */
+export const SavedRefSchema = z.object({ id: z.string(), name: z.string() });
+export type SavedRef = z.infer<typeof SavedRefSchema>;
+
+const SavedIdSchema = z.string().trim().min(1).max(100);
+
+/** At most this many secrets per run (the run's own plus a saved profile's, merged). */
+export const MAX_SECRETS = 10;
+/** A secret's value: 4–4096 characters. No message quotes it. */
+export const SecretValueSchema = z.string().min(4, "Enter at least 4 characters").max(4096);
+/** Secrets by name: a run's, or a saved profile's (V1.1 F4). */
+export const SecretRecordSchema = z
+  .record(SecretNameSchema, SecretValueSchema)
+  .refine((o) => Object.keys(o).length <= MAX_SECRETS, `At most ${MAX_SECRETS} secrets`);
 
 export const EnvironmentSchema = z.enum(["staging", "production"]);
 export type Environment = z.infer<typeof EnvironmentSchema>;
@@ -87,6 +114,12 @@ export const RunOptionsSchema = z
     /** Production only: the target URL's host, typed as the confirmation that destructive actions may run there. */
     confirmProductionHost: z.string().trim().min(1).max(255).optional(),
     additionalAllowedHosts: z.array(HostnameSchema).max(10).default([]),
+    /**
+     * Reuse element lookups verified on earlier runs of the same page (V1.1 F8): a lookup that still matches
+     * exactly the element it found before skips the model. Absent (the default, and every run created before
+     * V1.1): on — read it with `explorationCacheOn`.
+     */
+    useExplorationCache: z.boolean().optional(),
   })
   .transform(({ rerunGeneratedTest, ...options }) => ({
     ...options,
@@ -106,15 +139,16 @@ export const CreateTestRunRequestSchema = z
       .refine((r) => r.length === 0 || r.length >= 10, "Describe the requirement in at least 10 characters, or leave it empty for suggestions."),
     environment: EnvironmentSchema.default("staging"),
     browser: z.literal("chromium").default("chromium"),
-    testData: z
-      .record(DataKeySchema, TestDataValueSchema)
-      .refine((o) => Object.keys(o).length <= 50, "At most 50 test data entries")
-      .default({}),
+    testData: TestDataRecordSchema.default({}),
+    /** A saved test data set (V1.1 F3): its values are merged under `testData` (the request's own win). */
+    testDataSetId: SavedIdSchema.optional(),
     /** Write-only. Never returned, logged, or sent to a model. */
-    secrets: z
-      .record(SecretNameSchema, z.string().min(4).max(4096))
-      .refine((o) => Object.keys(o).length <= 10, "At most 10 secrets")
-      .default({}),
+    secrets: SecretRecordSchema.default({}),
+    /**
+     * Saved credentials (V1.1 F4): the profile's values become this run's secrets at creation (the request's
+     * own win on a name), 10 at most together.
+     */
+    credentialProfileId: SavedIdSchema.optional(),
     // .prefault({}) — Zod 4 .default() short-circuits and would skip nested defaults.
     options: RunOptionsSchema.prefault({}),
     /** This run's model and/or reasoning level; omitted: the defaults (Settings, else the environment). */
@@ -140,9 +174,20 @@ export const CreateTestRunRequestSchema = z
   });
 export type CreateTestRunRequestInput = z.input<typeof CreateTestRunRequestSchema>;
 export type CreateTestRunRequest = z.output<typeof CreateTestRunRequestSchema>;
-/** The request as persisted: never contains secret values, only their names. */
-export type StoredTestRunRequest = Omit<CreateTestRunRequest, "secrets" | "llm"> & {
+/**
+ * The request as persisted: never contains secret values, only their names. `testData` is the merged map; the
+ * saved set it came from is named by `testDataSet` (its later edits never change this run).
+ */
+export type StoredTestRunRequest = Omit<CreateTestRunRequest, "secrets" | "llm" | "testDataSetId" | "credentialProfileId"> & {
   secretNames: string[];
+  testDataSet?: SavedRef;
+  /** The saved credential profile whose values were copied into this run's secrets (V1.1 F4). */
+  credentialProfile?: SavedRef;
+  /**
+   * A manual rerun (V1.1 F5): the run whose saved Playwright test this run reruns, with no exploration and no
+   * model call. Its requirement and generated test are copies of that run's.
+   */
+  rerunOf?: string;
   /**
    * The model the run uses, resolved when it was created (request override → Settings → environment).
    * Absent on runs created before model choice existed: they use the environment's (resolveEnvLlmChoice).
@@ -159,6 +204,10 @@ export function destructiveActionsAllowed(request: Pick<StoredTestRunRequest, "t
   if (!request.options.allowDestructiveActions) return false;
   return request.environment !== "production" || hostConfirmed(request.targetUrl, request.options.confirmProductionHost);
 }
+
+/** Whether a run reuses cached element lookups (V1.1 F8): on unless it says `useExplorationCache: false`. */
+export const explorationCacheOn = (request: Pick<StoredTestRunRequest, "options">): boolean =>
+  request.options.useExplorationCache !== false;
 
 /** The URL's host as the confirmation names it (lowercase, a non-default port included), or null if it doesn't parse. */
 function hostOf(url: string): string | null {
@@ -193,6 +242,13 @@ export const TestRunSummarySchema = z.object({
   llm: z
     .object({ provider: LlmProviderSchema, model: z.string(), label: z.string(), reasoning: ReasoningLevelSchema })
     .nullable(),
+  /** Who created the run (V1.1); null: the service token, or created before users existed. */
+  owner: RunOwnerSchema.nullable(),
+  /** `rerun`: a manual rerun of `sourceRunId`'s saved test (V1.1 F5); `discovery`: every other run. */
+  kind: z.enum(["discovery", "rerun"]),
+  sourceRunId: z.string().nullable(),
+  /** The secret names the run uses (never values): what a manual rerun must be given again. */
+  secretNames: z.array(z.string()),
 });
 export type TestRunSummary = z.infer<typeof TestRunSummarySchema>;
 
@@ -201,6 +257,21 @@ export const TestRunListResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 export type TestRunListResponse = z.infer<typeof TestRunListResponseSchema>;
+
+/**
+ * `POST /v1/test-runs/:runId/rerun` (V1.1 F5): every secret the source run had must be given again (its
+ * values were purged when it ended), typed here or through saved credentials.
+ */
+export const RerunRequestSchema = z.object({
+  secrets: SecretRecordSchema.default({}),
+  credentialProfileId: SavedIdSchema.optional(),
+  /**
+   * Required (true) when the source run allowed destructive actions: the saved test repeats every action it
+   * recorded, deletions and payments included (the reason such runs skip the automatic rerun, D9 amended).
+   */
+  confirmDestructiveActions: z.boolean().optional(),
+});
+export type RerunRequestInput = z.input<typeof RerunRequestSchema>;
 
 export const CreateTestRunResponseSchema = z.object({
   runId: z.string(),

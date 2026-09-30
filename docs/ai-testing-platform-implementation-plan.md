@@ -70,6 +70,15 @@ Test suites on 2026-09-29: typecheck clean; `pnpm test` ≈ 2,000 passing; `pnpm
 | A12 | Jobs (2.5) | The reaper runs in the API as well as the workers, every 30 s (was 60 s in the workers only): lost runs end within ≈ 90 s even with no worker up | KI-024 |
 | A13 | Config (Task 1) | `NODE_ENV=production` refuses the example `SECRETS_ENCRYPTION_KEY` and the development `API_TOKEN` | KI-023 |
 | A14 | Delivery | GitHub Actions CI: typecheck, unit, integration and CI-mode E2E on every push; live suite nightly; release gate on demand | KI-025, `docs/operations.md` "Release checks" |
+| A15 | Sequencing | V1.1 built (branch `feat/v1.1`, 2026-09-29) while items 1–3 below wait for a paid model key; the V1 release gate still applies to it | `specs/2026-09-29-v1.1-design.md` |
+| A16 | D6 | Users (admin / member) and sessions; members see their own runs; calls without a session act as the service; durable `audit_events` | spec F1, KI-028 resolved |
+| A17 | D4, 2.4 | Critical / non-critical criteria: the verdict is decided by the critical ones | spec F2 |
+| A18 | Inputs | Saved test data sets, copied into a run at creation | spec F3 |
+| A19 | D7 | Saved credential profiles: the API decrypts one at run creation to store its values as the run's secrets | spec F4, KI-033 |
+| A20 | D2, 2.1 | Manual rerun: a new run (`QUEUED → RUNNING_PLAYWRIGHT`) whose statuses come from the saved test alone; destructive runs need confirmation | spec F5 |
+| A21 | Reporting | Markdown download; PDF through the browser's print dialog | spec F6 |
+| A22 | Exploration | The executor's own cache of verified element lookups (Stagehand's is Browserbase-only, A3) | spec F8, KI-032 |
+| A23 | D12 | 1–5 scenarios per plan, each from a clean session, one Playwright test each; planner output format changed | spec F9, KI-031 |
 
 ### Outstanding tasks
 
@@ -92,7 +101,7 @@ In priority order. None blocks development; items 1–3 block the V1 release gat
 8. **Housekeeping** (KI-030): the stale copy of this plan in `Claude outputs/`; the missing architecture doc
    (Section 8); the S3 storage tests are opt-in locally (`S3_TEST_ENDPOINT`), always on in CI.
 
-The post-V1 backlog (Section 7) is unchanged; V1.1 starts after items 1–3.
+V1.1 (Section 7) is built (A15–A23); the planner's new prompt joins item 2 (KI-031).
 
 ---
 
@@ -109,7 +118,7 @@ The post-V1 backlog (Section 7) is unchanged; V1.1 starts after items 1–3.
 - **D9 — Destructive actions.** Blocked by default. Always blocked when `environment = production`. **(R3, A8)** Production allows them only with the target host typed as confirmation.
 - **D10 — No job retries.** BullMQ `attempts: 1`. Lost work is detected by heartbeat and marked `ERRORED / WORKER_LOST`.
 - **D11 — No runtime values in generated source.** Values live in `run-data.json`; secrets in `process.env.SECRET_*`.
-- **D12 — One scenario per run in V1.** Multi-scenario runs are V1.1.
+- **D12 — One scenario per run in V1.** Multi-scenario runs are V1.1. **(R3, A23)** Built: 1–5 scenarios.
 
 ---
 
@@ -2136,6 +2145,8 @@ The engineering system is successful when:
 Implement only after the V1 gates pass.
 
 ### V1.1
+
+**Built 2026-09-29** (branch `feat/v1.1`, spec `docs/superpowers/specs/2026-09-29-v1.1-design.md`, amendments A15–A23).
 
 - critical / non-critical criterion weighting;
 - saved credential profiles;

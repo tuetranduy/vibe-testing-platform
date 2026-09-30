@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { ExplorationCacheCard } from "../../components/ExplorationCacheCard";
 import { LlmSettings } from "../../components/LlmSettings";
+import { SettingsNav } from "../../components/SettingsNav";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -14,7 +16,9 @@ export default function SettingsPage() {
           The keys the platform uses to reach each AI provider, and the model new tests run on. Changes apply to new tests only.
         </p>
       </div>
+      <SettingsNav />
       <LlmSettings />
+      <ExplorationCacheCard />
     </div>
   );
 }

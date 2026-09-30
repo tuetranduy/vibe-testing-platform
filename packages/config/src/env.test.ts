@@ -54,6 +54,21 @@ describe("loadEnv", () => {
     expect(() => loadEnv({ ...validEnv, SECRETS_ENCRYPTION_KEY: allZero, API_TOKEN: "dev-api-token-change-me-please" })).not.toThrow();
   });
 
+  it("sessions and the bootstrap admin (V1.1): defaults, both-or-neither, no dev password in production", () => {
+    expect(loadEnv(validEnv).SESSION_TTL_HOURS).toBe(12);
+    expect(loadEnv(validEnv).BOOTSTRAP_ADMIN_EMAIL).toBeUndefined();
+    expect(loadEnv({ ...validEnv, BOOTSTRAP_ADMIN_EMAIL: "", BOOTSTRAP_ADMIN_PASSWORD: "" }).BOOTSTRAP_ADMIN_EMAIL).toBeUndefined();
+    expect(() => loadEnv({ ...validEnv, BOOTSTRAP_ADMIN_EMAIL: "a@example.com" })).toThrow(/BOOTSTRAP_ADMIN_PASSWORD: set BOOTSTRAP_ADMIN_EMAIL and/);
+    expect(() => loadEnv({ ...validEnv, BOOTSTRAP_ADMIN_EMAIL: "a@example.com", BOOTSTRAP_ADMIN_PASSWORD: "short" })).toThrow(/at least 10/);
+    const dev = { ...validEnv, BOOTSTRAP_ADMIN_EMAIL: "admin@example.com", BOOTSTRAP_ADMIN_PASSWORD: "admin-password-change-me" };
+    expect(() => loadEnv(dev)).not.toThrow();
+    const strongKey = Buffer.from(Array.from({ length: 32 }, (_, i) => (i * 37 + 11) % 256)).toString("base64");
+    const prod = { ...dev, NODE_ENV: "production", LLM_PROVIDER: "gemini", GEMINI_API_KEY: "k", SECRETS_ENCRYPTION_KEY: strongKey };
+    expect(() => loadEnv(prod)).toThrow(/BOOTSTRAP_ADMIN_PASSWORD: is the development default/);
+    expect(() => loadEnv({ ...prod, BOOTSTRAP_ADMIN_PASSWORD: "a real long passphrase" })).not.toThrow();
+    expect(() => loadEnv({ ...validEnv, SESSION_TTL_HOURS: "0" })).toThrow(/SESSION_TTL_HOURS/);
+  });
+
   it("rejects TARGET_PRIVATE_ALLOWLIST in production", () => {
     expect(() =>
       loadEnv({ ...validEnv, NODE_ENV: "production", TARGET_PRIVATE_ALLOWLIST: "demo-shop:4000" }),

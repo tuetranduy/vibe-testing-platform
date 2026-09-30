@@ -8,7 +8,8 @@ operability gap a user or operator will hit; **Low** is polish, test hygiene or 
 
 KI-002 to KI-017 were resolved on 2026-09-27 (branch `fix/known-issues`); each entry names its commit. KI-001 and KI-018
 are open: both need a paid model key. KI-019 and KI-020 were resolved on 2026-09-28. KI-021 to KI-030 came from the
-audit of 2026-09-29 against the plan; the plan's Revision 3 lists what is outstanding in priority order.
+audit of 2026-09-29 against the plan; the plan's Revision 3 lists what is outstanding in priority order. KI-028 was
+resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to KI-035.
 
 | ID | Severity | Area | Summary | Status |
 |---|---|---|---|---|
@@ -39,9 +40,14 @@ audit of 2026-09-29 against the plan; the plan's Revision 3 lists what is outsta
 | KI-025 | Medium | Process | No CI; the repository has no remote | CI added; remote open |
 | KI-026 | Medium | LLM quality | Most models offered in Settings have never been evaluated | Open (needs paid keys) |
 | KI-027 | Low | Data model | D6: only 4 tables carry `tenant_id`; child rows rely on `run_id` | Open |
-| KI-028 | Low | Audit | Revealing a secret-bearing artifact is only a log line | Open |
+| KI-028 | Low | Audit | Revealing a secret-bearing artifact is only a log line | Resolved `6026592` (V1.1) |
 | KI-029 | Low | Isolation | The rerun runner is a worker child process; its image was never built | Open |
 | KI-030 | Low | Docs | Stale plan copy in `Claude outputs/`; architecture doc never added | Open |
+| KI-031 | Medium | LLM quality | The planner's multi-scenario prompt (V1.1) has never run against a real model | Open (needs paid keys) |
+| KI-032 | Low | Exploration | The exploration cache trusts a lookup whose locator still matches | Open |
+| KI-033 | Low | Secrets | Saved credential profiles are decrypted by the API at run creation | Open (by design) |
+| KI-034 | Low | Users | Sessions: no list, no "sign out everywhere" short of a password change | Open |
+| KI-035 | Low | Users | Users exist only in the default tenant | Open |
 
 ---
 
@@ -335,6 +341,8 @@ audit of 2026-09-29 against the plan; the plan's Revision 3 lists what is outsta
   no user identity to record.
 - **To close:** persist reveals (an `artifact.revealed` run event, or an audit table) when user authentication
   arrives (V1.1 multi-user login).
+- **Resolved (V1.1, `6026592`):** every reveal writes an `audit_events` row (`artifact.reveal`, the run, the
+  artifact and its type) with the user who revealed it.
 
 ## KI-029 — The rerun runner is a worker child process; its image was never built
 - **Severity:** Low (the generated source is compiler-emitted and passes the AST guard).
@@ -351,3 +359,48 @@ audit of 2026-09-29 against the plan; the plan's Revision 3 lists what is outsta
   unticked, no Revision 3); `docs/ai-testing-platform-architecture.md`, which the plan names as its spec, never
   existed (the plan with Revision 3 serves as the spec).
 - **To close:** delete the copy; either write the architecture doc from Section 2 or drop the reference.
+
+## KI-031 — The planner's multi-scenario prompt has never run against a real model
+- **Severity:** Medium.
+- **Where:** `packages/testing-engine/src/planner/prompts.ts`, `model-output.ts` (V1.1 F9).
+- **What:** the planner now answers `{ scenarios: [{ title, steps }], stopConditions }` and is told to split criteria
+  into scenarios only when they need different starting states. Unit tests, the scripted E2E run and a real
+  two-scenario rerun pass, but no real model has produced a plan with this prompt: it may split too eagerly (costing
+  time) or never.
+- **To close:** `pnpm eval planner` on every offered model (with KI-026), plus a golden case that needs two scenarios.
+
+## KI-032 — The exploration cache trusts a lookup whose locator still matches
+- **Severity:** Low.
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`fromCache`), `exploration_cache`.
+- **What:** a cached lookup is reused when its selector resolves to an element whose chosen locator (role + name,
+  test id, …) equals the one recorded. A page that keeps the locator but changes what the element does is not
+  noticed; a lookup a prompt-injected page steered the model to can be cached once its step succeeded. The action
+  policy still checks every element, and entries hold page-derived text (accessible names) for up to 30 days per
+  tenant.
+- **To close:** optionally re-run `observe` on a sample of hits and compare; or bind entries to a page fingerprint.
+  Administrators can clear the cache (Settings) after a redesign or an incident.
+
+## KI-033 — Saved credential profiles are decrypted by the API at run creation
+- **Severity:** Low (by design, V1.1 F4; D7 amended).
+- **Where:** `apps/api/src/services/credential-profile-service.ts` (`secretsFor`).
+- **What:** D7 kept secret plaintext out of the API after a run is created. A saved profile's values are decrypted in
+  the API when a run (or a rerun) uses it, to store them as the run's own secrets, and they stay at rest (encrypted)
+  for as long as the profile exists. A compromised API process can therefore read profile values.
+- **To close (if the risk matters):** let the worker decrypt profile values itself, with run-scoped copies made
+  there.
+
+## KI-034 — Sessions: no list, no "sign out everywhere" short of a password change
+- **Severity:** Low.
+- **Where:** `apps/api/src/services/user-service.ts`, `user_sessions`.
+- **What:** a user cannot see or end their other sessions except by changing their password; an administrator ends a
+  user's sessions by resetting the password or disabling the account. Sessions have a fixed lifetime
+  (`SESSION_TTL_HOURS`), not an idle timeout.
+- **To close:** a sessions list on `/account` with "sign out other sessions".
+
+## KI-035 — Users exist only in the default tenant
+- **Severity:** Low (single tenant, D6).
+- **Where:** `apps/api/src/routes/auth.ts` (login looks users up in `DEFAULT_TENANT_ID`).
+- **What:** accounts are tenant-scoped in the schema, but sign-in, the bootstrap administrator and user management
+  all act on the default tenant. A second tenant would need a way to choose the tenant at sign-in.
+- **To close:** with multi-tenancy (V2), together with KI-027.
+
