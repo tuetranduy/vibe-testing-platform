@@ -19,7 +19,7 @@ export const auth = { authorization: `Bearer ${API_TOKEN}` };
 
 export const FAKE_LLM: ApiLlmConfig = {
   envChoice: { provider: "fake", model: "fake", reasoning: "default" },
-  envKeys: { anthropic: false, gemini: false },
+  envKeys: { anthropic: false, gemini: false, deepseek: false },
   fakeAllowed: true,
 };
 

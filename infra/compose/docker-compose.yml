@@ -16,11 +16,12 @@ x-app-env: &app-env
   S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-s3admin-secret}
   S3_FORCE_PATH_STYLE: "true"
   LLM_PROVIDER: ${LLM_PROVIDER:-fake}
-  # Empty: the provider's default model (claude-sonnet-5 / gemini-3.8-flash).
+  # Empty: the provider's default model (claude-sonnet-5 / gemini-3.8-flash / deepseek-flash).
   LLM_MODEL: ${LLM_MODEL:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
   GEMINI_THINKING_LEVEL: ${GEMINI_THINKING_LEVEL:-}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   BROWSER_MODE: local
   API_TOKEN: ${API_TOKEN:-dev-api-token-change-me-please}

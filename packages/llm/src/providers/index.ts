@@ -1,6 +1,7 @@
 import type { LlmProvider } from "@platform/contracts";
 import type { LlmTransport } from "../transport";
 import { AnthropicTransport } from "./anthropic";
+import { DeepSeekTransport } from "./deepseek";
 import { FakeTransport } from "./fake";
 import { GeminiTransport } from "./gemini";
 
@@ -22,11 +23,15 @@ export function createTransport(config: TransportConfig): LlmTransport {
     case "gemini":
       if (!config.apiKey) throw new Error("An API key is required for the gemini provider");
       return new GeminiTransport({ apiKey: config.apiKey });
+    case "deepseek":
+      if (!config.apiKey) throw new Error("An API key is required for the deepseek provider");
+      return new DeepSeekTransport({ apiKey: config.apiKey });
     case "fake":
       return new FakeTransport();
   }
 }
 
 export { AnthropicTransport, type AnthropicTransportOptions } from "./anthropic";
+export { DeepSeekTransport, type DeepSeekTransportOptions } from "./deepseek";
 export { FakeTransport, type FakeReply } from "./fake";
 export { GeminiTransport, type GeminiTransportOptions } from "./gemini";

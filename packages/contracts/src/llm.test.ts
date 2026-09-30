@@ -15,8 +15,8 @@ import {
 
 describe("LLM choice contracts", () => {
   it("names the providers, the providers that take a key, and the reasoning levels", () => {
-    expect(LlmProviderSchema.options).toEqual(["anthropic", "gemini", "fake"]);
-    expect(LlmKeyProviderSchema.options).toEqual(["anthropic", "gemini"]);
+    expect(LlmProviderSchema.options).toEqual(["anthropic", "gemini", "deepseek", "fake"]);
+    expect(LlmKeyProviderSchema.options).toEqual(["anthropic", "gemini", "deepseek"]);
     expect(ReasoningLevelSchema.options).toEqual(["default", "minimal", "low", "medium", "high"]);
   });
 

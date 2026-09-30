@@ -453,7 +453,7 @@ export const llmProviderKeys = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.tenantId, t.provider] }),
-    check("llm_provider_keys_provider", sql`${t.provider} IN ('anthropic', 'gemini')`),
+    check("llm_provider_keys_provider", sql`${t.provider} IN ('anthropic', 'gemini', 'deepseek')`),
   ],
 );
 

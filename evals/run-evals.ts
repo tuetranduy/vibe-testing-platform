@@ -1,5 +1,5 @@
 /**
- * `pnpm eval <suite>` — runs an eval suite against the real LLM provider (LLM_PROVIDER=gemini, or
+ * `pnpm eval <suite>` — runs an eval suite against the real LLM provider (LLM_PROVIDER=gemini or deepseek, or
  * anthropic when unset or fake; LLM_MODEL and GEMINI_THINKING_LEVEL as for the worker) and prints
  * per-case PASS/FAIL plus totals. Always exits 0 once the suite ran: scores are tracked in
  * evals/BASELINE.md, not enforced. Without the provider's API key it validates the cases and explains
@@ -55,7 +55,8 @@ async function main(): Promise<number> {
       `${env.missingKey} is not set, so the eval was not run. Set the provider's API key and re-run, e.g.:\n` +
         `  ANTHROPIC_API_KEY=sk-ant-... pnpm eval ${name}\n` +
         `  LLM_PROVIDER=gemini GEMINI_API_KEY=... pnpm eval ${name}\n` +
-        `LLM_MODEL overrides the provider's default model (anthropic: ${defaultLlmModel("anthropic")}, gemini: ${defaultLlmModel("gemini")}).`,
+        `  LLM_PROVIDER=deepseek DEEPSEEK_API_KEY=... pnpm eval ${name}\n` +
+        `LLM_MODEL overrides the provider's default model (anthropic: ${defaultLlmModel("anthropic")}, gemini: ${defaultLlmModel("gemini")}, deepseek: ${defaultLlmModel("deepseek")}).`,
     );
     return 0;
   }
@@ -64,7 +65,8 @@ async function main(): Promise<number> {
   const meter = createUsageMeter();
   // GEMINI_THINKING_LEVEL is the client's reasoning level (gemini only), as for a run on the environment's defaults.
   const choice = resolveEnvLlmChoice(env);
-  const transport = createTransport({ provider: choice.provider, apiKey: env.LLM_PROVIDER === "gemini" ? env.GEMINI_API_KEY : env.ANTHROPIC_API_KEY });
+  const apiKey = { anthropic: env.ANTHROPIC_API_KEY, gemini: env.GEMINI_API_KEY, deepseek: env.DEEPSEEK_API_KEY }[env.LLM_PROVIDER];
+  const transport = createTransport({ provider: choice.provider, apiKey });
   const llm = new LlmClient({ transport, model: choice.model, reasoning: choice.reasoning, recordCall: meter.sink });
   const thinking = choice.provider === "gemini" ? `, thinking: ${choice.reasoning === "default" ? "model default" : choice.reasoning}` : "";
   console.log(`provider: ${env.LLM_PROVIDER}, model: ${env.LLM_MODEL}${thinking}\n`);

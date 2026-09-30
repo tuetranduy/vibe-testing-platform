@@ -30,10 +30,11 @@ export function priceText(price: CatalogEntry["price"]): string {
 const GROUPS: readonly (readonly [LlmProvider, string])[] = [
   ["anthropic", "Anthropic"],
   ["gemini", "Google Gemini"],
+  ["deepseek", "DeepSeek"],
   ["fake", "Development"],
 ];
 
-/** The offered models by provider, in catalog order: Anthropic, Google Gemini, then Development (the fake engine) when offered. */
+/** The offered models by provider, in catalog order: Anthropic, Google Gemini, DeepSeek, then Development (the fake engine) when offered. */
 export function modelGroups(models: readonly CatalogEntry[]): { provider: LlmProvider; label: string; models: CatalogEntry[] }[] {
   return GROUPS.map(([provider, label]) => ({ provider, label, models: models.filter((m) => m.provider === provider) })).filter((g) => g.models.length > 0);
 }

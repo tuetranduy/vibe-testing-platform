@@ -9,7 +9,7 @@ metrics and alerts, logs, retention, and the release checks.
 |---|---|---|
 | `web` (Next.js) | `api` only, over `API_URL`, with the API token added server-side | 3000 |
 | `api` (Fastify) | PostgreSQL, Redis, S3 | 3001: `/healthz`, `/metrics`, `/v1/*` |
-| `worker` × N | PostgreSQL, Redis, S3, the model providers (Anthropic, Gemini); runs each run's sandboxed Chromium and Playwright runner as child processes | 9464: `/metrics` (`WORKER_METRICS_PORT`, `0` disables it) |
+| `worker` × N | PostgreSQL, Redis, S3, the model providers (Anthropic, Gemini, DeepSeek); runs each run's sandboxed Chromium and Playwright runner as child processes | 9464: `/metrics` (`WORKER_METRICS_PORT`, `0` disables it) |
 | PostgreSQL | — | runs, events, criteria, results, artifacts metadata, encrypted run secrets, and the model settings: default model and the provider API keys saved in Settings (encrypted, long-lived) |
 | Redis | — | BullMQ queues `runs`, `maintenance` (reaper) and `retention`; pub/sub for live events and cancel signals |
 | S3-compatible storage | — | screenshots, traces, videos (compose uses rclone's S3 server; any S3 store works) |
@@ -129,8 +129,8 @@ guard also keeps top-level navigation on the target's hosts.
 Enforce the same boundary in the network (defense in depth — it catches anything that bypasses the proxy):
 
 - **Allow** the worker to reach: its PostgreSQL, Redis and S3 endpoints; the model providers its tests use
-  (`api.anthropic.com:443` for Claude models, `generativelanguage.googleapis.com:443` for Gemini models — each test
-  picks its model in Settings or the new-test form, so allow both unless one provider is never used); DNS; and
+  (`api.anthropic.com:443` for Claude models, `generativelanguage.googleapis.com:443` for Gemini models, `api.deepseek.com:443` for
+  DeepSeek models — each test picks its model in Settings or the new-test form, so allow every provider in use); DNS; and
   public internet on TCP 80/443 for targets.
 - For Gemini models, use an API key (Settings or `GEMINI_API_KEY`) from a billing-enabled Google project: on the
   Gemini API's free tier, Google may use prompts and responses (here: redacted page content and screenshots) to
@@ -163,7 +163,7 @@ behind. There is no key id, so rotation is a drain, not a re-encryption:
 
 3. Deploy the new key to the API **and** every worker at the same time.
 4. Enter again every provider key saved in Settings → AI providers ("Save key"). Keys that come from the
-   environment (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) need nothing.
+   environment (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`) need nothing.
 5. Reopen.
 
 With `NODE_ENV=production` the API and the worker refuse to start with a placeholder key (the all-zero example from
@@ -178,7 +178,7 @@ manager, never in compose files or images.
 Provider API keys saved in Settings are encrypted with the same key but are long-lived, so a drain does not clear
 them. Until one is entered again, every test on that provider ends `ERRORED / MODEL_PROVIDER` with "The saved
 Anthropic key can't be read (was SECRETS_ENCRYPTION_KEY rotated?): enter it again in Settings" (Gemini: "Google
-Gemini"), even when the environment also holds a key for it: a saved key takes precedence, so remove it in
+Gemini"; DeepSeek: "DeepSeek"), even when the environment also holds a key for it: a saved key takes precedence, so remove it in
 Settings to fall back to the environment's.
 
 ## Metrics
@@ -278,4 +278,5 @@ namespaces Chromium's sandbox needs; the workflow lifts that (`kernel.apparmor_r
 - `pnpm test`, `pnpm test:integration` and `pnpm test:e2e` (CI mode: scripted model and explorer, deterministic)
   on every change, with `pnpm infra:up` running.
 - `./scripts/e2e-live-gate.sh` before a release: the E2E suite against the real model and Stagehand, green three
-  times in a row (needs `ANTHROPIC_API_KEY`, or `LLM_PROVIDER=gemini` with `GEMINI_API_KEY`; the calls are billed).
+  times in a row (needs `ANTHROPIC_API_KEY`, `LLM_PROVIDER=gemini` with `GEMINI_API_KEY`, or `LLM_PROVIDER=deepseek` with
+  `DEEPSEEK_API_KEY`; the calls are billed).

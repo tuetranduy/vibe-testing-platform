@@ -5,7 +5,7 @@
 #
 # Preconditions (see README "Real engine (Milestone B)" and "Milestone C demo"):
 #   - the API is reachable at $API and a worker with the REAL engine consumes its queue:
-#     LLM_PROVIDER=anthropic + ANTHROPIC_API_KEY, or gemini + GEMINI_API_KEY (LLM_MODEL optional);
+#     LLM_PROVIDER=anthropic + ANTHROPIC_API_KEY, gemini + GEMINI_API_KEY, or deepseek + DEEPSEEK_API_KEY (LLM_MODEL optional);
 #   - no worker on the fake engine (LLM_PROVIDER=fake, the compose default) is consuming the same
 #     queue — e.g. `docker compose -f infra/compose/docker-compose.yml stop api worker` first;
 #   - that worker can launch its sandboxed Chromium for exploration AND for the Playwright rerun

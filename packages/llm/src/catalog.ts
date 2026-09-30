@@ -3,7 +3,9 @@ import type { LlmProvider, ReasoningLevel } from "@platform/contracts";
 /**
  * The models the Settings page and the new-test form offer (spec 2026-09-28-llm-settings-design.md,
  * section 2). Plain data next to pricing.ts: every entry but the fake engine has a price (catalog.test.ts).
- * Levels are the providers' own (Anthropic effort levels; Google's thinking-level table, checked 2026-09-28).
+ * Levels are the providers' own (Anthropic effort levels; Google's thinking-level table, checked 2026-09-28;
+ * DeepSeek's reasoning efforts, checked 2026-09-30: `minimal` turns thinking off, `medium` is not offered since
+ * DeepSeek runs it as `high`).
  * Importable as `@platform/llm/catalog` without loading a provider SDK (the API uses it).
  */
 export interface CatalogModel {
@@ -27,6 +29,8 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
   { provider: "gemini", id: "gemini-3.5-flash", label: "Gemini 3.5 Flash", reasoningLevels: ["default", "minimal", "low", "medium", "high"], defaultLevel: "medium", refusalFallback: false },
   { provider: "gemini", id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite", reasoningLevels: ["default", "minimal", "low", "medium", "high"], defaultLevel: "minimal", refusalFallback: false },
   { provider: "gemini", id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro (preview)", reasoningLevels: ["default", "low", "medium", "high"], defaultLevel: "high", refusalFallback: false },
+  { provider: "deepseek", id: "deepseek-flash", label: "DeepSeek Flash", reasoningLevels: ["default", "minimal", "low", "high"], defaultLevel: "high", refusalFallback: false },
+  { provider: "deepseek", id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", reasoningLevels: ["default", "minimal", "low", "high"], defaultLevel: "high", refusalFallback: false },
   { provider: "fake", id: "fake", label: "Fake engine (development)", reasoningLevels: ["default"], defaultLevel: null, refusalFallback: false },
 ];
 
@@ -34,6 +38,7 @@ export const MODEL_CATALOG: readonly CatalogModel[] = [
 export const PROVIDER_LABELS: Readonly<Record<LlmProvider, string>> = {
   anthropic: "Anthropic",
   gemini: "Google Gemini",
+  deepseek: "DeepSeek",
   fake: "Development",
 };
 

@@ -238,7 +238,7 @@ describe("POST /v1/test-runs: the run's model (request → Settings → environm
   /** LLM_PROVIDER=anthropic with ANTHROPIC_API_KEY set, no Gemini key. */
   const ANTHROPIC_ENV: ApiLlmConfig = {
     envChoice: { provider: "anthropic", model: "claude-sonnet-5", reasoning: "default" },
-    envKeys: { anthropic: true, gemini: false },
+    envKeys: { anthropic: true, gemini: false, deepseek: false },
     fakeAllowed: true,
   };
   const saveGeminiKey = () =>
@@ -294,7 +294,7 @@ describe("POST /v1/test-runs: the run's model (request → Settings → environm
   });
 
   it("defaults whose provider has no key → 422 at [\"llm\"], naming the fix; also after the key behind saved defaults is removed", async () => {
-    t.deps.config.llm = { ...ANTHROPIC_ENV, envKeys: { anthropic: false, gemini: false } };
+    t.deps.config.llm = { ...ANTHROPIC_ENV, envKeys: { anthropic: false, gemini: false, deepseek: false } };
     const env = await post(validBody());
     expect(env.statusCode).toBe(422);
     expect(env.json()).toMatchObject({ code: "MODEL_NOT_AVAILABLE", message: expect.stringContaining("Add an Anthropic API key in Settings"), issues: [{ path: ["llm"] }] });

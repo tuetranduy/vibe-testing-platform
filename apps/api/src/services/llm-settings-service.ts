@@ -14,7 +14,7 @@ import type { ApiDeps } from "../deps";
 import { HttpError } from "../errors";
 import { checkModel, offeredModels, providerAvailable, resolveRunLlm, type ChoiceIssue, type LlmAvailability } from "./llm-choice";
 
-const KEY_PROVIDERS: readonly LlmKeyProvider[] = ["anthropic", "gemini"];
+const KEY_PROVIDERS: readonly LlmKeyProvider[] = ["anthropic", "gemini", "deepseek"];
 
 /** What decides which models a tenant's new runs may use: the saved defaults and keys, and the environment's. */
 export interface LlmSettingsState {
@@ -31,7 +31,10 @@ export function modelNotAvailable(issue: ChoiceIssue): HttpError {
 
 /** A saved model's provider: the catalog's (a model that left the catalog: by its id's prefix, for display). */
 function providerOf(model: string): LlmProvider {
-  return catalogModel(model)?.provider ?? (model.startsWith("gemini-") ? "gemini" : "anthropic");
+  const known = catalogModel(model)?.provider;
+  if (known) return known;
+  if (model.startsWith("gemini-")) return "gemini";
+  return model.startsWith("deepseek-") ? "deepseek" : "anthropic";
 }
 
 /**
@@ -49,7 +52,7 @@ export class LlmSettingsService {
     const savedKeys = new Map(keys.map((k) => [k.provider, k.updatedAt]));
     const { envKeys, fakeAllowed } = this.deps.config.llm;
     const keyed = (p: LlmKeyProvider) => savedKeys.has(p) || envKeys[p];
-    return { saved, savedKeys, availability: { keys: { anthropic: keyed("anthropic"), gemini: keyed("gemini") }, fakeAllowed } };
+    return { saved, savedKeys, availability: { keys: { anthropic: keyed("anthropic"), gemini: keyed("gemini"), deepseek: keyed("deepseek") }, fakeAllowed } };
   }
 
   async view(tenantId: string): Promise<LlmSettingsView> {

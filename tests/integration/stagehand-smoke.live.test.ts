@@ -1,5 +1,5 @@
 /**
- * @live — real model (LLM_PROVIDER=gemini, or anthropic when unset or fake) + real Stagehand + real
+ * @live — real model (LLM_PROVIDER=gemini or deepseek, or anthropic when unset or fake) + real Stagehand + real
  * sandbox, against the in-process demo shop only (reached as `shop.test`; nothing else is reachable
  * through the egress proxy).
  *
@@ -30,7 +30,7 @@ const silent = { info() {}, warn() {}, error() {} };
 
 if (SKIP) {
   process.stderr.write(
-    `[stagehand-smoke] SKIPPED: ${SKIP} (run: ANTHROPIC_API_KEY=… or LLM_PROVIDER=gemini GEMINI_API_KEY=… pnpm test:live -- stagehand-smoke)\n`,
+    `[stagehand-smoke] SKIPPED: ${SKIP} (run: ANTHROPIC_API_KEY=…, LLM_PROVIDER=gemini GEMINI_API_KEY=… or LLM_PROVIDER=deepseek DEEPSEEK_API_KEY=… pnpm test:live -- stagehand-smoke)\n`,
   );
 }
 
@@ -72,7 +72,7 @@ describe("@live Stagehand smoke against the demo shop", () => {
     const env = LLM!;
     const choice = resolveEnvLlmChoice(env);
     const llm = new LlmClient({
-      transport: createTransport({ provider: choice.provider, apiKey: env.LLM_PROVIDER === "gemini" ? env.GEMINI_API_KEY : env.ANTHROPIC_API_KEY }),
+      transport: createTransport({ provider: choice.provider, apiKey: { anthropic: env.ANTHROPIC_API_KEY, gemini: env.GEMINI_API_KEY, deepseek: env.DEEPSEEK_API_KEY }[env.LLM_PROVIDER] }),
       model: choice.model,
       reasoning: choice.reasoning,
       logger: silent,

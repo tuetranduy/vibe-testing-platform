@@ -24,7 +24,7 @@ export interface RunLlmFactory {
 }
 
 /** The LLM_* environment: the choice for runs that recorded none, and the server's provider keys. */
-export type RunLlmEnv = Pick<Env, "LLM_PROVIDER" | "LLM_MODEL"> & Partial<Pick<Env, "GEMINI_THINKING_LEVEL" | "ANTHROPIC_API_KEY" | "GEMINI_API_KEY">>;
+export type RunLlmEnv = Pick<Env, "LLM_PROVIDER" | "LLM_MODEL"> & Partial<Pick<Env, "GEMINI_THINKING_LEVEL" | "ANTHROPIC_API_KEY" | "GEMINI_API_KEY" | "DEEPSEEK_API_KEY">>;
 
 export interface RunLlmFactoryDeps {
   db: Database;
@@ -37,7 +37,7 @@ export interface RunLlmFactoryDeps {
   transport?: LlmTransport;
 }
 
-const ENV_KEYS = { anthropic: "ANTHROPIC_API_KEY", gemini: "GEMINI_API_KEY" } as const;
+const ENV_KEYS = { anthropic: "ANTHROPIC_API_KEY", gemini: "GEMINI_API_KEY", deepseek: "DEEPSEEK_API_KEY" } as const;
 
 /**
  * One model client per run, from its recorded choice (`request.llm`); a run created before model choice uses

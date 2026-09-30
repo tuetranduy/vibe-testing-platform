@@ -62,7 +62,11 @@ const deps: ApiDeps = {
     sseHeartbeatMs: 20_000,
     llm: {
       envChoice: resolveEnvLlmChoice(env),
-      envKeys: { anthropic: Boolean(env.ANTHROPIC_API_KEY?.trim()), gemini: Boolean(env.GEMINI_API_KEY?.trim()) },
+      envKeys: {
+        anthropic: Boolean(env.ANTHROPIC_API_KEY?.trim()),
+        gemini: Boolean(env.GEMINI_API_KEY?.trim()),
+        deepseek: Boolean(env.DEEPSEEK_API_KEY?.trim()),
+      },
       fakeAllowed: env.NODE_ENV !== "production",
     },
     auth: { sessionTtlHours: env.SESSION_TTL_HOURS },

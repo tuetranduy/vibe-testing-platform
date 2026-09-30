@@ -1,0 +1,2 @@
+ALTER TABLE "llm_provider_keys" DROP CONSTRAINT "llm_provider_keys_provider";--> statement-breakpoint
+ALTER TABLE "llm_provider_keys" ADD CONSTRAINT "llm_provider_keys_provider" CHECK ("llm_provider_keys"."provider" IN ('anthropic', 'gemini', 'deepseek'));

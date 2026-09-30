@@ -12,7 +12,7 @@ type State = { status: "loading" } | { status: "ready"; view: LlmSettingsView } 
 type ProviderView = LlmSettingsView["providers"][number];
 
 /** The server's environment variable for each provider's key. */
-const ENV_VAR: Record<LlmKeyProvider, string> = { anthropic: "ANTHROPIC_API_KEY", gemini: "GEMINI_API_KEY" };
+const ENV_VAR: Record<LlmKeyProvider, string> = { anthropic: "ANTHROPIC_API_KEY", gemini: "GEMINI_API_KEY", deepseek: "DEEPSEEK_API_KEY" };
 
 const messageOf = (err: unknown, fallback: string) =>
   err instanceof ApiRequestError ? (err.issues?.[0]?.message ?? err.message) : err instanceof Error ? err.message : fallback;
