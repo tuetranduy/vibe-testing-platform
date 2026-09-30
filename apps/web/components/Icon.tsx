@@ -39,7 +39,16 @@ export type IconName =
   | "chart"
   | "print"
   | "layers"
-  | "clock";
+  | "clock"
+  | "menu"
+  | "sidebar"
+  | "sun"
+  | "moon"
+  | "monitor"
+  | "activity"
+  | "gear"
+  | "logout"
+  | "command";
 
 const PATHS: Record<IconName, ReactNode> = {
   check: <path d="M4 10.5l4 4 8-9" />,
@@ -197,6 +206,37 @@ const PATHS: Record<IconName, ReactNode> = {
       <circle cx="10" cy="10" r="7" />
       <path d="M10 6.5V10l2.5 1.5" />
     </>
+  ),
+  menu: <path d="M3.5 6h13M3.5 10h13M3.5 14h13" />,
+  sidebar: (
+    <>
+      <rect x="3" y="3.5" width="14" height="13" rx="2" />
+      <path d="M8 3.5v13M5.5 7h0M11.5 8.5L10 10l1.5 1.5" />
+    </>
+  ),
+  sun: (
+    <>
+      <circle cx="10" cy="10" r="3.2" />
+      <path d="M10 2.5v1.6M10 15.9v1.6M2.5 10h1.6M15.9 10h1.6M4.7 4.7l1.1 1.1M14.2 14.2l1.1 1.1M4.7 15.3l1.1-1.1M14.2 5.8l1.1-1.1" />
+    </>
+  ),
+  moon: <path d="M16 12.2A6.5 6.5 0 0 1 7.8 4a6.5 6.5 0 1 0 8.2 8.2z" />,
+  monitor: (
+    <>
+      <rect x="2.5" y="3.5" width="15" height="10" rx="1.5" />
+      <path d="M7 17h6M10 13.5V17" />
+    </>
+  ),
+  activity: <path d="M2.5 10h3l2-5 4 10 2-5h4" />,
+  gear: (
+    <>
+      <circle cx="10" cy="10" r="2.5" />
+      <path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" />
+    </>
+  ),
+  logout: <path d="M8 3.5H5A1.5 1.5 0 0 0 3.5 5v10A1.5 1.5 0 0 0 5 16.5h3M12.5 13.5L16 10l-3.5-3.5M16 10H7.5" />,
+  command: (
+    <path d="M7.5 7.5h5v5h-5zM7.5 7.5V5.8a2.2 2.2 0 1 0-2.2 2.2h2.2M12.5 7.5V5.8a2.2 2.2 0 1 1 2.2 2.2h-2.2M7.5 12.5v1.7a2.2 2.2 0 1 1-2.2-2.2h2.2M12.5 12.5v1.7a2.2 2.2 0 1 0 2.2-2.2h-2.2" />
   ),
 };
 

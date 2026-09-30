@@ -57,7 +57,7 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
   const statementOf = new Map((report.requirement?.criteria ?? []).map((c) => [c.id, c.statement]));
   const s = report.summary;
   return (
-    <article className="print-report">
+    <article className="print-report theme-light">
       <div className="print-toolbar no-print">
         <button type="button" className="button button-primary" onClick={() => window.print()}>
           Print or save as PDF
