@@ -82,7 +82,8 @@ sweep (every 30 s), so a crash between never leaves one `RUNNING`.
 - Each enabled schedule has a BullMQ job scheduler on the `suite-schedules` queue, keyed by the schedule's id. The
   table is the truth: the API resyncs every scheduler when it starts ("suite schedules synced" in the log) and
   removes the ones whose schedule is gone or disabled. **The API processes consume the queue**, so schedules fire
-  only while an API is up (KI-037).
+  only while an API is up. A firing taken more than 15 minutes after it was due (no API was up then) is skipped
+  (`skipped_late`), not run late; the next one runs on time.
 - A firing runs as the schedule's creator with the suite's saved credentials only. It is skipped while that
   schedule's previous suite run is going and fails (without running) when the creator is disabled or gone, a secret
   is missing, or the tenant is at its cap. Each outcome is on the schedule (`lastOutcome`, `lastError`) and in

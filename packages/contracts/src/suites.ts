@@ -238,7 +238,9 @@ export const ScheduleInputSchema = z.object({
 export type ScheduleInput = z.input<typeof ScheduleInputSchema>;
 
 /** What happened the last time a schedule fired. */
-export const ScheduleOutcomeSchema = z.enum(["started", "skipped_running", "failed"]);
+/** `skipped_late`: the firing was due more than SCHEDULE_GRACE_MINUTES ago (no API was up to take it; KI-037). */
+export const ScheduleOutcomeSchema = z.enum(["started", "skipped_running", "skipped_late", "failed"]);
+export const SCHEDULE_GRACE_MINUTES = 15;
 export type ScheduleOutcome = z.infer<typeof ScheduleOutcomeSchema>;
 
 export const ScheduleViewSchema = z.object({
