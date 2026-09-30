@@ -20,12 +20,17 @@ const messageOf = (err: unknown): string => {
   return "Couldn't sign in. Please try again.";
 };
 
-/** The sign-in form (V1.1 F1). The session lands in an httpOnly cookie; this page never sees it. */
+/**
+ * The sign-in form (V1.1 F1). The session lands in an httpOnly cookie; this page never sees it. `tenant`: the
+ * organization named by `/login?org=…` (KI-035); absent, the platform's default one.
+ */
 export function LoginForm({
   next,
+  tenant,
   navigate = (url) => window.location.assign(url),
 }: {
   next?: string | null;
+  tenant?: string | null;
   navigate?: (url: string) => void;
 }) {
   const [email, setEmail] = useState("");
@@ -43,7 +48,7 @@ export function LoginForm({
     setPending(true);
     setError(null);
     try {
-      await login(email.trim(), password);
+      await login(email.trim(), password, tenant);
       resetMe();
       navigate(safeNext(next));
     } catch (err) {
@@ -59,7 +64,16 @@ export function LoginForm({
         <h1 id="login-title" className="page-title">
           Sign in
         </h1>
-        <p className="muted">Use the account your administrator created for you.</p>
+        <p className="muted">
+          Use the account your administrator created for you
+          {tenant ? (
+            <>
+              {" "}
+              in <strong className="mono">{tenant}</strong>
+            </>
+          ) : null}
+          .
+        </p>
       </div>
       {error && (
         <div role="alert" className="banner banner-error">

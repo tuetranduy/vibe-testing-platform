@@ -1,4 +1,6 @@
 import type { FastifyInstance } from "fastify";
+import { TenantIdSchema } from "@platform/contracts";
+import { tenantExists } from "@platform/db";
 import { z } from "zod";
 import { requireAdmin } from "../auth/principal";
 import type { ApiDeps } from "../deps";
@@ -18,7 +20,15 @@ export async function authRoutes(app: FastifyInstance, deps: ApiDeps): Promise<v
   const service = new UserService(deps);
 
   app.post("/v1/auth/login", async (req, reply) => {
-    const tenantId = deps.config.defaultTenantId;
+    // The organization to sign in to (KI-035). An unknown one fails like a wrong password, and is audited in the
+    // default tenant (its audit rows need an existing tenant).
+    const named = TenantIdSchema.safeParse((req.body as { tenant?: unknown } | undefined)?.tenant);
+    const tenantId = named.success ? named.data : deps.config.defaultTenantId;
+    if (named.success && named.data !== deps.config.defaultTenantId && !(await tenantExists(deps.db, named.data))) {
+      await audit(deps, req, { action: "auth.login_failed", detail: { reason: "unknown_tenant" } });
+      throw new HttpError(401, "INVALID_CREDENTIALS", "The e-mail address or password is not correct");
+    }
+    req.principal = { kind: "service", tenantId };
     const userAgent = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : undefined;
     const outcome = await service.login(tenantId, req.body, userAgent);
     if (!outcome.ok) {

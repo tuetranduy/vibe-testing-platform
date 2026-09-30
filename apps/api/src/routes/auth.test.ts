@@ -1,7 +1,8 @@
 import { AuditRepository, ArtifactRepository, RunRepository, UserRepository } from "@platform/db";
-import { TEST_TENANT_ID, storedRequest } from "@platform/db/testing";
+import { OTHER_TENANT_ID, TEST_TENANT_ID, storedRequest } from "@platform/db/testing";
 import { hashPassword } from "@platform/security";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTenantWithAdmin } from "../services/tenant-setup";
 import { memoryLoginThrottle } from "../services/user-service";
 import { auth, createTestApi, validBody, type TestApi } from "../test-support";
 
@@ -75,6 +76,53 @@ describe("POST /v1/auth/login", () => {
     expect(res.statusCode).toBe(429);
     expect(res.json().code).toBe("TOO_MANY_ATTEMPTS");
     expect(res.headers["retry-after"]).toBe("900");
+  });
+
+  it("signs in to the organization the request names; an unknown one fails like a wrong password (KI-035)", async () => {
+    const email = `other-${Date.now()}@example.com`;
+    const other = await new UserRepository(t.tdb.db).create({
+      tenantId: OTHER_TENANT_ID,
+      email,
+      name: "Olga",
+      role: "admin",
+      passwordHash: await hashPassword(PASSWORD, { N: 1024 }),
+    });
+    const signIn = (tenant?: string) =>
+      t.app.inject({ method: "POST", url: "/v1/auth/login", headers: auth, payload: { email, password: PASSWORD, ...(tenant ? { tenant } : {}) } });
+
+    // Without a tenant: the default one, where this e-mail has no account.
+    expect((await signIn()).statusCode).toBe(401);
+    const unknown = await signIn("no-such-org");
+    expect(unknown.statusCode).toBe(401);
+    expect(unknown.json().code).toBe("INVALID_CREDENTIALS");
+
+    const ok = await signIn(OTHER_TENANT_ID);
+    expect(ok.statusCode).toBe(200);
+    const headers = { ...auth, "x-session-token": ok.json().token as string };
+    expect((await t.app.inject({ method: "GET", url: "/v1/auth/me", headers })).json()).toMatchObject({ id: other.id, email });
+    // Everything the session reaches is that tenant's: no default-tenant runs, and the runs it creates are its own.
+    const mine = await new RunRepository(t.tdb.db).create({ tenantId: TEST_TENANT_ID, targetUrl: "https://x.com", request: storedRequest() });
+    const listed = (await t.app.inject({ method: "GET", url: "/v1/test-runs?owner=all", headers })).json().items as { runId: string }[];
+    expect(listed.map((r) => r.runId)).not.toContain(mine.id);
+    expect((await t.app.inject({ method: "GET", url: `/v1/test-runs/${mine.id}`, headers })).statusCode).toBe(404);
+    const audited = await new AuditRepository(t.tdb.db).listByTenant(OTHER_TENANT_ID, 1000);
+    expect(audited.some((e) => e.action === "auth.login" && e.userId === other.id)).toBe(true);
+  });
+
+  it("create-tenant adds a tenant with its first administrator, who signs in to it; never twice (KI-035)", async () => {
+    const id = `acme-${Date.now()}`;
+    const input = { id, name: "Acme", adminEmail: "Boss@Acme.example", adminPassword: "a long admin password" };
+    await createTenantWithAdmin(t.deps, input);
+    await expect(createTenantWithAdmin(t.deps, input)).rejects.toMatchObject({ code: "TENANT_EXISTS" });
+    await expect(createTenantWithAdmin(t.deps, { ...input, id: "no spaces" })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    const res = await t.app.inject({
+      method: "POST",
+      url: "/v1/auth/login",
+      headers: auth,
+      payload: { email: "boss@acme.example", password: "a long admin password", tenant: id },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user).toMatchObject({ role: "admin", email: "boss@acme.example" });
   });
 
   it("still requires the service bearer token", async () => {

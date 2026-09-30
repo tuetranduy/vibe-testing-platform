@@ -205,8 +205,8 @@ const AUTH = "/api/v1/auth";
 const NoContentSchema = z.unknown();
 
 /** Signs in: the session goes into an httpOnly cookie (set by this app's proxy); the answer names the user. */
-export const login = (email: string, password: string): Promise<SessionView> =>
-  request(SessionViewSchema, `${AUTH}/login`, { method: "POST", body: { email, password } });
+export const login = (email: string, password: string, tenant?: string | null): Promise<SessionView> =>
+  request(SessionViewSchema, `${AUTH}/login`, { method: "POST", body: { email, password, ...(tenant ? { tenant } : {}) } });
 
 export const logout = async (): Promise<void> => {
   await request(NoContentSchema, `${AUTH}/logout`, { method: "POST" });

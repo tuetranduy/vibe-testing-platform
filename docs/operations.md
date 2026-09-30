@@ -51,7 +51,14 @@ https) and forwards to the API as `X-Session-Token`. Only a SHA-256 of the token
   runs, and manage users, AI model settings, saved credentials and the exploration cache. The tenant always keeps
   one enabled administrator.
 - **Sessions.** `SESSION_TTL_HOURS` (default 12) from sign-in, not sliding. Signing out, a password change (the
-  user's other sessions), a reset by an administrator and disabling an account end sessions at once.
+  user's other sessions), a reset by an administrator and disabling an account end sessions at once. Each person
+  sees their live sessions (browser, sign-in and last-active times) on `/account` and can sign out one of them or
+  every other one.
+- **More organizations (tenants).** `/login` signs in to `DEFAULT_TENANT_ID`; `/login?org=<id>` to another tenant.
+  Add one, with its first administrator, with
+  `TENANT_ADMIN_PASSWORD=… pnpm --filter @platform/api create-tenant <id> "<name>" <admin e-mail>`; that administrator
+  adds the others. A tenant's people, runs, suites, settings and keys are its own; every run's child rows carry the
+  tenant too (D6).
 - **Failed sign-ins.** 10 per e-mail address in 15 minutes, then `429` for the rest of the window (a Redis counter,
   shared by every API instance).
 - **The service token.** `API_TOKEN` still authenticates every API call (the web server holds it). A call with

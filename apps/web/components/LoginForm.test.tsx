@@ -39,6 +39,25 @@ describe("LoginForm", () => {
     expect(navigate).toHaveBeenCalledWith("/runs/run_9");
   });
 
+  it("signs in to the organization named by the link (KI-035)", async () => {
+    const fetch = vi.fn(async () =>
+      json(200, {
+        expiresAt: "2030-01-01T00:00:00.000Z",
+        user: { id: "u", email: "a@example.com", name: "A", role: "member", disabled: false, createdAt: "2026-09-29T00:00:00.000Z" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    render(<LoginForm tenant="acme" navigate={vi.fn()} />);
+    expect(screen.getByText("acme")).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("E-mail address"), "a@example.com");
+    await userEvent.type(screen.getByLabelText("Password"), "correct horse battery");
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/auth/login",
+      expect.objectContaining({ body: JSON.stringify({ email: "a@example.com", password: "correct horse battery", tenant: "acme" }) }),
+    );
+  });
+
   it("shows a wrong password plainly and clears the field", async () => {
     vi.stubGlobal(
       "fetch",

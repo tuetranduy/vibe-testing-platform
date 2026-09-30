@@ -32,10 +32,17 @@ export const UserViewSchema = z.object({
 });
 export type UserView = z.infer<typeof UserViewSchema>;
 
-/** `POST /v1/auth/login`. The password is not length-checked here: a wrong one is just wrong. */
+/** A tenant id, as a sign-in names it (KI-035). */
+export const TenantIdSchema = z.string().trim().regex(/^[A-Za-z0-9_-]{1,100}$/, "Enter an organization id");
+
+/**
+ * `POST /v1/auth/login`. The password is not length-checked here: a wrong one is just wrong. `tenant`: the
+ * organization to sign in to (KI-035); absent, the default tenant. An unknown one is just a failed sign-in.
+ */
 export const LoginRequestSchema = z.object({
   email: z.string().trim().toLowerCase().min(1, "Enter your e-mail address").max(254),
   password: z.string().min(1, "Enter your password").max(200),
+  tenant: TenantIdSchema.optional(),
 });
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 
