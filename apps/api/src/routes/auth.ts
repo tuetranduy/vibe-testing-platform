@@ -8,6 +8,7 @@ import { UserService, emailHash } from "../services/user-service";
 import { parseOr400 } from "./test-runs";
 
 const UserParams = z.object({ userId: z.string().min(1).max(100) });
+const SessionParams = z.object({ sessionId: z.string().min(1).max(100) });
 
 /**
  * Sign-in and accounts (V1.1 F1). `POST /v1/auth/login` needs no session; everything else takes the
@@ -18,7 +19,8 @@ export async function authRoutes(app: FastifyInstance, deps: ApiDeps): Promise<v
 
   app.post("/v1/auth/login", async (req, reply) => {
     const tenantId = deps.config.defaultTenantId;
-    const outcome = await service.login(tenantId, req.body);
+    const userAgent = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : undefined;
+    const outcome = await service.login(tenantId, req.body, userAgent);
     if (!outcome.ok) {
       const email = typeof (req.body as { email?: unknown } | undefined)?.email === "string" ? (req.body as { email: string }).email : "";
       await audit(deps, req, { action: "auth.login_failed", detail: { emailHash: emailHash(email), reason: outcome.reason } });
@@ -52,6 +54,22 @@ export async function authRoutes(app: FastifyInstance, deps: ApiDeps): Promise<v
   app.put("/v1/auth/password", async (req, reply) => {
     await service.changePassword(req.principal, req.body);
     await audit(deps, req, { action: "auth.password_changed" });
+    return reply.status(204).send();
+  });
+
+  // The caller's own sessions (KI-034): see them, end one, or end every other one.
+  app.get("/v1/auth/sessions", async (req) => ({ items: await service.sessionsOf(req.principal) }));
+
+  app.post("/v1/auth/sessions/revoke-others", async (req) => {
+    const revoked = await service.revokeOtherSessions(req.principal);
+    await audit(deps, req, { action: "auth.sessions_revoked", detail: { revoked } });
+    return { revoked };
+  });
+
+  app.delete("/v1/auth/sessions/:sessionId", async (req, reply) => {
+    const { sessionId } = parseOr400(SessionParams, req.params);
+    await service.revokeSession(req.principal, sessionId);
+    await audit(deps, req, { action: "auth.session_revoked", detail: { sessionId } });
     return reply.status(204).send();
   });
 

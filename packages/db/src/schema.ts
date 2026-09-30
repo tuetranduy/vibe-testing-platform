@@ -86,6 +86,8 @@ export const userSessions = pgTable(
     expiresAt: ts("expires_at").notNull(),
     lastSeenAt: ts("last_seen_at").notNull().defaultNow(),
     revokedAt: ts("revoked_at"),
+    /** The browser's User-Agent at sign-in (at most 300 characters), shown in the sessions list (KI-034). */
+    userAgent: text("user_agent"),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("user_sessions_token_hash").on(t.tokenHash), index("user_sessions_user").on(t.userId)],

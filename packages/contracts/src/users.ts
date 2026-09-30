@@ -58,6 +58,23 @@ export const ChangePasswordRequestSchema = z.object({
 });
 export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;
 
+/** One of the signed-in user's live sessions (`GET /v1/auth/sessions`, KI-034). Never the token. */
+export const SessionInfoSchema = z.object({
+  id: z.string(),
+  createdAt: IsoDateTime,
+  lastSeenAt: IsoDateTime,
+  expiresAt: IsoDateTime,
+  userAgent: z.string().nullable(),
+  /** The session this request came from. */
+  current: z.boolean(),
+});
+export type SessionInfo = z.infer<typeof SessionInfoSchema>;
+
+export const SessionListResponseSchema = z.object({ items: z.array(SessionInfoSchema) });
+
+/** `POST /v1/auth/sessions/revoke-others`: how many sessions ended. */
+export const RevokeSessionsResponseSchema = z.object({ revoked: z.number().int().nonnegative() });
+
 /** `POST /v1/users` (admin). */
 export const CreateUserRequestSchema = z.object({
   email: EmailSchema,

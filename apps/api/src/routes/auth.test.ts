@@ -131,6 +131,38 @@ describe("sessions", () => {
     );
     expect((await login(s.email, "a brand new passphrase")).statusCode).toBe(200);
   });
+
+  it("lists one's live sessions with their browser, ends one, then every other (KI-034)", async () => {
+    const s = await session();
+    const phone = (
+      await t.app.inject({ method: "POST", url: "/v1/auth/login", headers: { ...auth, "user-agent": "Phone Browser/1.0" }, payload: { email: s.email, password: PASSWORD } })
+    ).json().token as string;
+    const laptop = (await login(s.email)).json().token as string;
+    const someoneElse = await session();
+    const list = async (headers = s.headers) => (await t.app.inject({ method: "GET", url: "/v1/auth/sessions", headers })).json().items as Record<string, unknown>[];
+
+    const mine = await list();
+    expect(mine).toHaveLength(3);
+    expect(mine.filter((x) => x.current)).toHaveLength(1);
+    expect(mine.some((x) => x.userAgent === "Phone Browser/1.0")).toBe(true);
+    expect(JSON.stringify(mine)).not.toContain(phone);
+
+    // Another user's session is not found, and a session id of one's own ends just that session.
+    const theirs = (await list(someoneElse.headers))[0]!.id as string;
+    expect((await t.app.inject({ method: "DELETE", url: `/v1/auth/sessions/${theirs}`, headers: s.headers })).statusCode).toBe(404);
+    const phoneId = mine.find((x) => x.userAgent === "Phone Browser/1.0")!.id as string;
+    expect((await t.app.inject({ method: "DELETE", url: `/v1/auth/sessions/${phoneId}`, headers: s.headers })).statusCode).toBe(204);
+    expect((await t.app.inject({ method: "GET", url: "/v1/auth/me", headers: { ...auth, "x-session-token": phone } })).statusCode).toBe(401);
+    expect(await list()).toHaveLength(2);
+
+    const others = await t.app.inject({ method: "POST", url: "/v1/auth/sessions/revoke-others", headers: s.headers });
+    expect(others.json()).toEqual({ revoked: 1 });
+    expect((await t.app.inject({ method: "GET", url: "/v1/auth/me", headers: { ...auth, "x-session-token": laptop } })).statusCode).toBe(401);
+    expect(await list()).toEqual([expect.objectContaining({ current: true })]);
+    expect(await list(someoneElse.headers)).toHaveLength(1);
+    // The service has no sessions.
+    expect((await t.app.inject({ method: "GET", url: "/v1/auth/sessions", headers: auth })).statusCode).toBe(400);
+  });
 });
 
 describe("user management", () => {

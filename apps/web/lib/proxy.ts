@@ -31,6 +31,9 @@ const ENDPOINTS: { method: Method; pattern: RegExp; query: readonly string[] }[]
   { method: "POST", pattern: /^\/v1\/auth\/logout$/, query: [] },
   { method: "GET", pattern: /^\/v1\/auth\/me$/, query: [] },
   { method: "PUT", pattern: /^\/v1\/auth\/password$/, query: [] },
+  { method: "GET", pattern: /^\/v1\/auth\/sessions$/, query: [] },
+  { method: "POST", pattern: /^\/v1\/auth\/sessions\/revoke-others$/, query: [] },
+  { method: "DELETE", pattern: new RegExp(`^/v1/auth/sessions/${ID}$`), query: [] },
   { method: "GET", pattern: /^\/v1\/users$/, query: [] },
   { method: "POST", pattern: /^\/v1\/users$/, query: [] },
   { method: "PATCH", pattern: new RegExp(`^/v1/users/${ID}$`), query: [] },
@@ -91,7 +94,8 @@ const ENDPOINTS: { method: Method; pattern: RegExp; query: readonly string[] }[]
   { method: "PUT", pattern: /^\/v1\/settings\/llm\/keys\/(?:anthropic|gemini|deepseek)$/, query: [] },
 ];
 
-const FORWARDED_REQUEST_HEADERS = ["content-type", "accept", "idempotency-key", "last-event-id"] as const;
+// user-agent: recorded with a new session, for the sessions list on /account (KI-034).
+const FORWARDED_REQUEST_HEADERS = ["content-type", "accept", "idempotency-key", "last-event-id", "user-agent"] as const;
 const FORWARDED_RESPONSE_HEADERS = ["content-type", "retry-after", "content-disposition"] as const;
 const MAX_BODY_BYTES = 1_000_000;
 const PREFIX = "/api";
