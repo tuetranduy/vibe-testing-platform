@@ -11,7 +11,7 @@ import {
 import { and, count, desc, eq, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import type { Executor } from "./client";
 import { NotFoundError, RunInvariantError, StaleTransitionError } from "./errors";
-import { newId } from "./ids";
+import { comparisonKeyOf, newId } from "./ids";
 import { suiteRuns, testRuns } from "./schema";
 import { ACTIVE_LIFECYCLES, TERMINAL_LIFECYCLES, assertTransition } from "./state-machine";
 
@@ -36,6 +36,8 @@ export interface TestRun {
   ownerUserId: string | null;
   /** The suite run this run is part of (V1.2 F1). */
   suiteRunId: string | null;
+  /** Shared by runs of the same test (V1.2 F2): comparisonKeyOf, or the rerun source's. */
+  comparisonKey: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -59,6 +61,8 @@ export interface CreateRunInput {
   requestHash?: string | null;
   ownerUserId?: string | null;
   suiteRunId?: string | null;
+  /** A rerun passes its source's; otherwise derived from the target URL and requirement. */
+  comparisonKey?: string | null;
 }
 
 export interface TransitionPatch {
@@ -159,6 +163,12 @@ export class RunRepository {
         requestHash: input.requestHash ?? null,
         ownerUserId: input.ownerUserId ?? null,
         suiteRunId: input.suiteRunId ?? null,
+        comparisonKey:
+          input.comparisonKey !== undefined
+            ? input.comparisonKey
+            : input.request.rerunOf
+              ? null
+              : comparisonKeyOf(input.targetUrl, input.request.requirement),
         // Millisecond precision (not Postgres' microseconds) so list cursors round-trip exactly.
         createdAt: new Date(),
       })
@@ -283,9 +293,52 @@ export class RunRepository {
       .update(testRuns)
       .set({
         requestJson: sql`jsonb_set(${testRuns.requestJson}, '{requirement}', to_jsonb(${requirement}::text))`,
+        // The first text the run gets names its test (the chosen suggestion); a later redaction never changes it.
+        comparisonKey: sql`coalesce(${testRuns.comparisonKey}, ${comparisonKeyOf((await this.getById(runId)).targetUrl, requirement)})`,
         updatedAt: new Date(),
       })
       .where(eq(testRuns.id, runId));
+  }
+
+  /**
+   * The run `run` is compared with by default (V1.2 F2): the latest COMPLETED run of the same test (comparison key)
+   * created before it, within the caller's scope; null when there is none.
+   */
+  async findPreviousComparable(scope: RunScope, run: TestRun): Promise<TestRun | null> {
+    if (!run.comparisonKey) return null;
+    const [row] = await this.db
+      .select()
+      .from(testRuns)
+      .where(
+        and(
+          scopeWhere(scope),
+          eq(testRuns.comparisonKey, run.comparisonKey),
+          eq(testRuns.lifecycle, "COMPLETED"),
+          or(lt(testRuns.createdAt, run.createdAt), and(eq(testRuns.createdAt, run.createdAt), lt(testRuns.id, run.id))),
+        ),
+      )
+      .orderBy(desc(testRuns.createdAt), desc(testRuns.id))
+      .limit(1);
+    return row ? toRun(row) : null;
+  }
+
+  /** COMPLETED runs of the same test other than `run`, newest first (the baselines a user may choose). */
+  async listComparable(scope: RunScope, run: TestRun, limit = 20): Promise<TestRun[]> {
+    if (!run.comparisonKey) return [];
+    const rows = await this.db
+      .select()
+      .from(testRuns)
+      .where(
+        and(
+          scopeWhere(scope),
+          eq(testRuns.comparisonKey, run.comparisonKey),
+          eq(testRuns.lifecycle, "COMPLETED"),
+          sql`${testRuns.id} <> ${run.id}`,
+        ),
+      )
+      .orderBy(desc(testRuns.createdAt), desc(testRuns.id))
+      .limit(Math.max(1, Math.min(limit, 100)));
+    return rows.map(toRun);
   }
 
   /** Marks a cancel request on a non-terminal run. Returns null if the run is already terminal. */

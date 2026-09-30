@@ -210,12 +210,18 @@ export const testRuns = pgTable(
     ownerUserId: text("owner_user_id").references(() => users.id, { onDelete: "set null" }),
     /** The suite run this run is part of (V1.2 F1); null for a run started on its own. */
     suiteRunId: text("suite_run_id").references((): AnyPgColumn => suiteRuns.id),
+    /**
+     * Runs of the same test share it (V1.2 F2): the target URL and requirement text, hashed; a rerun inherits its
+     * source's. Null for a blank requirement until a suggestion is chosen.
+     */
+    comparisonKey: text("comparison_key"),
     createdAt: createdAt(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
   },
   (t) => [
     index("test_runs_tenant_owner_created").on(t.tenantId, t.ownerUserId, t.createdAt),
     index("test_runs_suite_run").on(t.suiteRunId),
+    index("test_runs_tenant_comparison_created").on(t.tenantId, t.comparisonKey, t.createdAt),
     uniqueIndex("test_runs_tenant_idempotency_key").on(t.tenantId, t.idempotencyKey),
     index("test_runs_tenant_created").on(t.tenantId, t.createdAt),
     index("test_runs_lifecycle_heartbeat").on(t.lifecycle, t.heartbeatAt),

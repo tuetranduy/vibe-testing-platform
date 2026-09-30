@@ -3,6 +3,7 @@
 import type { SuiteRunView } from "@platform/contracts";
 import { useEffect, useState } from "react";
 import { cancelSuiteRun, getSuiteRun } from "../lib/api";
+import { ChangeBadge, RUN_CHANGE_UI } from "./ComparisonPanel";
 import { Icon } from "./Icon";
 import { LIFECYCLE_LABEL } from "./format";
 import { displayUrl, formatWhen, plural } from "./report-format";
@@ -123,6 +124,15 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
         <p role="status" aria-live="polite">
           {countsText(run)}
         </p>
+        {(run.changes.regressed > 0 || run.changes.fixed > 0) && (
+          <p className={run.changes.regressed > 0 ? "field-error" : "muted"}>
+            <Icon name={run.changes.regressed > 0 ? "warning" : "check"} />{" "}
+            {[run.changes.regressed > 0 && `${plural(run.changes.regressed, "test")} regressed`, run.changes.fixed > 0 && `${plural(run.changes.fixed, "test")} fixed`]
+              .filter(Boolean)
+              .join(", ")}{" "}
+            since their previous run.
+          </p>
+        )}
         {run.status === "RUNNING" && (
           <div className="actions">
             <button type="button" className="button button-secondary" onClick={() => void cancel()} disabled={cancelling}>
@@ -147,6 +157,7 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
             <tr>
               <th scope="col">Test</th>
               <th scope="col">Result</th>
+              <th scope="col">Since the previous run</th>
             </tr>
           </thead>
           <tbody>
@@ -165,6 +176,7 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
                     <span className={`status status-${c.lifecycle.toLowerCase()}`}>{LIFECYCLE_LABEL[c.lifecycle]}</span>
                   )}
                 </td>
+                <td className="history-result">{c.change ? <ChangeBadge ui={RUN_CHANGE_UI[c.change]} /> : <span className="muted">—</span>}</td>
               </tr>
             ))}
           </tbody>

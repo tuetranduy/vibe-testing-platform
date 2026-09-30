@@ -7,12 +7,22 @@ import {
   type SuiteRunTrigger,
   type SuiteRunView,
 } from "@platform/contracts";
-import { RunRepository, SuiteRepository, SuiteRunRepository, UserRepository, newId, type SuiteRunRow, type TestRun } from "@platform/db";
+import {
+  RunRepository,
+  SuiteRepository,
+  SuiteRunRepository,
+  UserRepository,
+  newId,
+  type RunScope,
+  type SuiteRunRow,
+  type TestRun,
+} from "@platform/db";
 import { createRunRedactor } from "@platform/security";
 import { createHmac } from "node:crypto";
 import { actorId, runScope, type Principal } from "../auth/principal";
 import type { ApiDeps } from "../deps";
 import { HttpError } from "../errors";
+import { ComparisonService } from "./comparison-service";
 import { CredentialProfileService } from "./credential-profile-service";
 import { RerunService, secretsRequired, type CreatedRun, type SavedTest } from "./rerun-service";
 import { parseBody, suiteRunBrief, SuiteService } from "./suite-service";
@@ -171,11 +181,12 @@ export class SuiteRunService {
     let row = await this.require(p, suiteRunId);
     // Settled on read too, so a result is never shown RUNNING after its last child ended.
     if (row.status === "RUNNING") row = (await this.suiteRuns.settle(row.id)) ?? row;
-    return this.view(row);
+    return this.view(row, runScope(p));
   }
 
-  async view(row: SuiteRunRow): Promise<SuiteRunView> {
+  async view(row: SuiteRunRow, scope: RunScope = { tenantId: row.tenantId }): Promise<SuiteRunView> {
     const children = await this.suiteRuns.children(row.id);
+    const changes = await new ComparisonService(this.deps).changesOf(scope, children);
     const owner = row.ownerUserId ? await new UserRepository(this.deps.db).namesById(row.tenantId, [row.ownerUserId]) : new Map<string, string>();
     return {
       ...suiteRunBrief(row),
@@ -183,7 +194,13 @@ export class SuiteRunService {
       suiteName: row.suiteName,
       owner: row.ownerUserId ? { id: row.ownerUserId, name: owner.get(row.ownerUserId) ?? "Former user" } : null,
       counts: suiteRunCounts(children),
+      changes: {
+        regressed: [...changes.values()].filter((c) => c.change === "regressed").length,
+        fixed: [...changes.values()].filter((c) => c.change === "fixed").length,
+      },
       children: children.map((c) => ({
+        change: changes.get(c.id)?.change ?? null,
+        baselineRunId: changes.get(c.id)?.baselineRunId ?? null,
         runId: c.id,
         sourceRunId: c.request.rerunOf ?? c.id,
         title: c.request.requirement.slice(0, 200),

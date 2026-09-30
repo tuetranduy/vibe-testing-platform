@@ -11,6 +11,7 @@ import { FailureDiagnostics } from "./FailureDiagnostics";
 import { GeneratedTestViewer } from "./GeneratedTestViewer";
 import { Icon } from "./Icon";
 import { AddToSuitePanel } from "./AddToSuitePanel";
+import { ComparisonPanel } from "./ComparisonPanel";
 import { RerunPanel } from "./RerunPanel";
 import { ReportSummary } from "./ReportSummary";
 
@@ -99,6 +100,7 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
           Print or save as PDF
         </a>
       </div>
+      {report.lifecycle === "COMPLETED" && <ComparisonPanel runId={runId} />}
       <CriteriaResults
         runId={runId}
         criteria={report.criteria}

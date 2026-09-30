@@ -11,6 +11,7 @@ import {
   type RunLifecycle,
   type RunVerdict,
 } from "./run";
+import { RunChangeSchema } from "./comparison";
 import { RunOwnerSchema } from "./users";
 
 /**
@@ -121,6 +122,10 @@ export const SuiteRunChildSchema = ChildResultSchema.extend({
   sourceRunId: z.string(),
   title: z.string(),
   targetUrl: z.string(),
+  /** Against this test's previous finished run (V1.2 F2); null while the child is running. */
+  change: RunChangeSchema.nullable().default(null),
+  /** The run it was compared with. */
+  baselineRunId: z.string().nullable().default(null),
 });
 export type SuiteRunChild = z.infer<typeof SuiteRunChildSchema>;
 
@@ -141,6 +146,8 @@ export const SuiteRunViewSchema = SuiteRunBriefSchema.extend({
   suiteName: z.string(),
   owner: RunOwnerSchema.nullable(),
   counts: SuiteRunCountsSchema,
+  /** Children that got worse / better than their previous run (V1.2 F2). */
+  changes: z.object({ regressed: z.number().int(), fixed: z.number().int() }).default({ regressed: 0, fixed: 0 }),
   children: z.array(SuiteRunChildSchema),
 });
 export type SuiteRunView = z.infer<typeof SuiteRunViewSchema>;

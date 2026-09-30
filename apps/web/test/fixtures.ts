@@ -146,9 +146,10 @@ export const suiteRunFixture = (patch: Partial<SuiteRunView> = {}): SuiteRunView
   createdAt: "2026-09-30T10:00:00.000Z",
   finishedAt: null,
   counts: { total: 2, active: 1, passed: 1, failed: 0, blocked: 0, inconclusive: 0, noVerdict: 0 },
+  changes: { regressed: 0, fixed: 0 },
   children: [
-    { runId: "run_a", sourceRunId: "run_src_a", title: "Add to cart", targetUrl: "https://shop.example.com/", lifecycle: "COMPLETED", verdict: "PASSED", finishedAt: "2026-09-30T10:01:00.000Z" },
-    { runId: "run_b", sourceRunId: "run_src_b", title: "Checkout", targetUrl: "https://shop.example.com/", lifecycle: "RUNNING_PLAYWRIGHT", verdict: null, finishedAt: null },
+    { runId: "run_a", sourceRunId: "run_src_a", title: "Add to cart", targetUrl: "https://shop.example.com/", lifecycle: "COMPLETED", verdict: "PASSED", finishedAt: "2026-09-30T10:01:00.000Z", change: "unchanged", baselineRunId: "run_prev_a" },
+    { runId: "run_b", sourceRunId: "run_src_b", title: "Checkout", targetUrl: "https://shop.example.com/", lifecycle: "RUNNING_PLAYWRIGHT", verdict: null, finishedAt: null, change: null, baselineRunId: null },
   ],
   ...patch,
 });

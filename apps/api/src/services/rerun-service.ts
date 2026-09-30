@@ -120,6 +120,8 @@ export class RerunService {
       requestHash: input.requestHash ?? null,
       ownerUserId: input.ownerUserId,
       suiteRunId: input.suiteRunId ?? null,
+      // Every rerun of a test is compared with that test's earlier runs (V1.2 F2).
+      comparisonKey: input.source.comparisonKey,
     });
     await new SecretRepository(tx).insertMany(
       run.id,

@@ -4025,3 +4025,42 @@ fieldset.stack-tight {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* V1.2: a run compared with its previous run */
+.comparison-verdicts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+.comparison-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.comparison-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.comparison-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 14px;
+}
+.comparison-text {
+  overflow-wrap: anywhere;
+}
+.comparison-statuses {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 720px) {
+  .comparison-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

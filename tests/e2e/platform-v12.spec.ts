@@ -50,3 +50,25 @@ describe("V1.2 F1 — suites", () => {
     }
   });
 });
+
+describe("V1.2 F2 — compare with the previous run", () => {
+  it("a rerun is compared with its test's previous run; a broken cart regresses against a chosen passing run", async () => {
+    const passing = await passingRun({ requirement: REQUIREMENTS.cart });
+    const rerun = await service.call("POST", `/v1/test-runs/${passing}/rerun`, {});
+    expect(await service.finished(rerun.json.runId)).toMatchObject({ verdict: "PASSED" });
+    const same = await service.call("GET", `/v1/test-runs/${rerun.json.runId}/comparison`);
+    expect(same.json).toMatchObject({ baseline: { runId: passing }, verdict: { before: "PASSED", after: "PASSED" }, counts: { regressed: 0 } });
+
+    const broken = await service.create({
+      targetUrl: `${stack.targetUrl}/?bug=empty_cart`,
+      requirement: REQUIREMENTS.cart,
+      options: { autoConfirmCriteria: true },
+    });
+    expect(await service.finished(broken)).toMatchObject({ verdict: "FAILED" });
+    const compared = await service.call("GET", `/v1/test-runs/${broken}/comparison?baseline=${passing}`);
+    expect(compared.json).toMatchObject({ chosenBaseline: true, verdict: { before: "PASSED", after: "FAILED" } });
+    expect(compared.json.counts.regressed).toBeGreaterThan(0);
+    const md = await fetch(`${stack.apiUrl}/v1/test-runs/${rerun.json.runId}/report.md`, { headers: { authorization: `Bearer ${stack.apiToken}` } });
+    expect(await md.text()).toContain("## Compared with the previous run");
+  });
+});
