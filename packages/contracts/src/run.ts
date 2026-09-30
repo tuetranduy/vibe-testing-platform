@@ -120,6 +120,22 @@ export const RunOptionsSchema = z
      * V1.1): on — read it with `explorationCacheOn`.
      */
     useExplorationCache: z.boolean().optional(),
+    /**
+     * Record a video of the exploration and of the Playwright rerun (V1.3). Absent (the default, and every run
+     * created before V1.3): on — read it with `videoRecordingOn`. Off: the rerun keeps its video on failure only.
+     */
+    recordVideo: z.boolean().optional(),
+    /**
+     * Record a Playwright trace of the exploration and of the rerun (V1.3), scrubbed of every secret value
+     * before upload. Absent: on — read it with `traceRecordingOn`. Off: the rerun keeps its trace on failure only.
+     */
+    recordTrace: z.boolean().optional(),
+    /**
+     * Read the live website while analyzing the requirement (V1.3): the start page and a few pages it links to,
+     * read-only, so the criteria and the suggested test data are checked against what the site shows. Absent:
+     * on — read it with `liveSiteAnalysisOn`.
+     */
+    analyzeLiveSite: z.boolean().optional(),
   })
   .transform(({ rerunGeneratedTest, ...options }) => ({
     ...options,
@@ -208,6 +224,16 @@ export function destructiveActionsAllowed(request: Pick<StoredTestRunRequest, "t
 /** Whether a run reuses cached element lookups (V1.1 F8): on unless it says `useExplorationCache: false`. */
 export const explorationCacheOn = (request: Pick<StoredTestRunRequest, "options">): boolean =>
   request.options.useExplorationCache !== false;
+
+/** Whether a run records video of its exploration and rerun (V1.3): on unless it says `recordVideo: false`. */
+export const videoRecordingOn = (request: Pick<StoredTestRunRequest, "options">): boolean => request.options.recordVideo !== false;
+
+/** Whether a run records Playwright traces of its exploration and rerun (V1.3): on unless `recordTrace: false`. */
+export const traceRecordingOn = (request: Pick<StoredTestRunRequest, "options">): boolean => request.options.recordTrace !== false;
+
+/** Whether the requirement analysis reads the live website first (V1.3): on unless `analyzeLiveSite: false`. */
+export const liveSiteAnalysisOn = (request: Pick<StoredTestRunRequest, "options">): boolean =>
+  request.options.analyzeLiveSite !== false;
 
 /** The URL's host as the confirmation names it (lowercase, a non-default port included), or null if it doesn't parse. */
 function hostOf(url: string): string | null {

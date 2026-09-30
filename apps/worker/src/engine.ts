@@ -7,6 +7,7 @@ import type { ArtifactStorage } from "@platform/storage";
 import {
   createFakeStages,
   createRealStages,
+  type AnalyzeStageDeps,
   type EngineStages,
   type ExploreStageDeps,
   type FakeEngineOptions,
@@ -14,7 +15,7 @@ import {
   type WorkspaceConfig,
 } from "@platform/testing-engine";
 import type { WorkerLogger } from "./deps";
-import { createExplorationDeps } from "./exploration";
+import { createExplorationDeps, createExplorationStore } from "./exploration";
 import { createGenerateTestDeps } from "./generated-test";
 import type { WorkerMetrics } from "./metrics";
 import { createReportDeps } from "./report";
@@ -54,6 +55,8 @@ export interface EngineDeps {
   rerun?: Partial<RunTestStageDeps>;
   /** Prometheus metrics (sandbox sessions, egress blocks, artifact uploads). */
   metrics?: WorkerMetrics;
+  /** Test seam for the real analyze stage (V1.3: its live-site read); default: the survey's sandbox and store. */
+  analyze?: AnalyzeStageDeps;
 }
 
 /**
@@ -99,6 +102,20 @@ export function createEngines(config: EngineConfig, deps: EngineDeps): Engines {
     metrics: deps.metrics,
     config: { privateAllowlist, ...retention },
   });
-  const real = createRealStages({ survey, exploration, generateTest: createGenerateTestDeps(deps.db, deps.logger), runTest, report });
+  const real = createRealStages({
+    survey,
+    exploration,
+    generateTest: createGenerateTestDeps(deps.db, deps.logger),
+    runTest,
+    report,
+    // V1.3: the requirement is analyzed against the live site, read like the survey reads it (no Stagehand).
+    analyze: deps.analyze ?? { site: { openSandbox: survey.openSandbox, store: survey.store, logger: deps.logger } },
+    // V1.3: a run whose every criterion is blocked still gets a full-page screenshot of the start page.
+    captureEvidence: {
+      openSandbox: survey.openSandbox,
+      store: (ctx) => createExplorationStore({ db: deps.db, storage: deps.storage, config: retention, metrics: deps.metrics }, ctx),
+      logger: deps.logger,
+    },
+  });
   return { fake, real, for: (choice) => (choice.provider === "fake" ? fake : real) };
 }

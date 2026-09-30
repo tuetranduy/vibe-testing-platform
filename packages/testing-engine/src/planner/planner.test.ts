@@ -668,6 +668,8 @@ function executionPorts(requirement: NormalizedRequirement) {
     saveSuggestions: async () => {
       throw new Error("not used by these tests");
     },
+    saveSiteAnalysis: async () => {},
+    applyTestData: async () => {},
   };
   return { ports, events, transitions, saved: () => saved, results: () => results };
 }

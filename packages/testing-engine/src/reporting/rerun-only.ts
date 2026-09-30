@@ -56,7 +56,7 @@ export function rerunOnlyResults(requirement: NormalizedRequirement, test: Gener
       verdictSource: decided ? "PLAYWRIGHT_RERUN" : null,
       rerunOutcome: outcome,
       provisional: { status, reason },
-      evidenceArtifactIds: status === "PASS" || !compiled.has(c.id) ? [] : rerun.artifactIds,
+      evidenceArtifactIds: compiled.has(c.id) ? rerun.artifactIds : [],
       relatedStepIds: [],
       aiNote: null,
       critical: c.critical,

@@ -251,8 +251,14 @@ describe("report stage: summary and verdict", () => {
     // Related: the step that produced its fact (st_3) + golden-path steps planned for it (st_1, not the abandoned st_2).
     expect(failed.relatedStepIds).toEqual(["st_1", "st_3"]);
     expect(failed.evidenceArtifactIds).toEqual(["art_trace", "art_video", "art_shot_1", "art_shot_3"]);
-    // A rerun-confirmed PASS keeps only its screenshots: the rerun retains trace/video only on failure.
-    expect(report.criteria.find((c) => c.criterionId === "AC-1")!.evidenceArtifactIds).toEqual(["art_shot_0", "art_shot_1", "art_shot_3"]);
+    // A rerun-confirmed PASS is backed by the rerun's recordings too (V1.3: trace and video are kept on success).
+    expect(report.criteria.find((c) => c.criterionId === "AC-1")!.evidenceArtifactIds).toEqual([
+      "art_trace",
+      "art_video",
+      "art_shot_0",
+      "art_shot_1",
+      "art_shot_3",
+    ]);
     expect(JSON.stringify(report)).not.toContain(SECRET);
   });
 

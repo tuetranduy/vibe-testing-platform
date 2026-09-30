@@ -18,6 +18,8 @@ import {
   CriterionResultSchema,
   ProvisionalResultSchema,
   TestReportSchema,
+  scenarioOfCriterion,
+  stepScenario,
   type CriterionResult,
   type ErrorCategory,
   type ExplorationStep,
@@ -66,6 +68,8 @@ export interface ReconcileCriteriaInput {
   rerun: ReconcileRerun | null;
   /** The run redactor, for the rerun's error text (Playwright messages can quote the page). */
   redact?: (text: string) => string;
+  /** The exploration's own recordings (V1.3: video, trace): run-wide evidence, listed last for every criterion. */
+  recordingArtifactIds?: readonly string[];
 }
 
 export type ReconcileRerun = Pick<RerunResult, "perCriterion"> & Partial<Pick<RerunResult, "errorText" | "artifactIds">>;
@@ -82,8 +86,11 @@ const refKey = (r: { key: string; checkpoint: string }) => `${r.key}@${r.checkpo
  * - relatedStepIds: the exploration steps that recorded the criterion's facts (`fact.stepId`, the
  *   last reading of each key@checkpoint — the one the verifier used) plus the golden-path steps whose
  *   planned step lists the criterion; in step order.
- * - evidenceArtifactIds: the rerun's evidence when the criterion's assertion failed or was not reached
- *   (the rerun keeps trace/screenshot/video only on failure), then the related steps' screenshots.
+ * - evidenceArtifactIds: the rerun's evidence whenever the rerun reached a verdict on the criterion (its
+ *   trace and video are kept on success too since V1.3, its failure screenshot on failure), then the related
+ *   steps' screenshots; for a BLOCKED criterion, also the screenshots taken where exploration was blocked in
+ *   its scenario and the start page's (`screenshot` steps, V1.3: a blocked run still has evidence); last, the
+ *   exploration's recordings.
  */
 export function reconcileCriteria(input: ReconcileCriteriaInput): CriterionResult[] {
   const order = new Map((input.requirement?.criteria ?? []).map((c, i) => [c.id, i]));
@@ -107,8 +114,11 @@ export function reconcileCriteria(input: ReconcileCriteriaInput): CriterionResul
     const related = steps.filter(
       (s) => factSteps.has(s.id) || (s.onGoldenPath && s.plannedStepId !== null && plannedFor.has(s.plannedStepId)),
     );
-    const rerunEvidence = outcome === "ASSERTION_FAILED" || outcome === "NOT_REACHED" ? (input.rerun?.artifactIds ?? []) : [];
-    const evidence = [...new Set([...rerunEvidence, ...related.flatMap((s) => s.artifactIds)])];
+    const rerunEvidence = outcome !== "UNAVAILABLE" ? (input.rerun?.artifactIds ?? []) : [];
+    const blockedEvidence = p.status === "BLOCKED" ? blockedStepsFor(p.criterionId, steps, input.plan).flatMap((s) => s.artifactIds) : [];
+    const evidence = [
+      ...new Set([...rerunEvidence, ...related.flatMap((s) => s.artifactIds), ...blockedEvidence, ...(input.recordingArtifactIds ?? [])]),
+    ];
 
     const result = reconcile(p, outcome, input.facts, {
       evidenceArtifactIds: evidence,
@@ -121,6 +131,17 @@ export function reconcileCriteria(input: ReconcileCriteriaInput): CriterionResul
     const actual = `${result.actual ?? "Not observed"} | Rerun: ${errorText}`;
     return CriterionResultSchema.parse({ ...result, actual: clip(redact(actual)) });
   });
+}
+
+/**
+ * The steps that show where a blocked criterion stopped (V1.3): the steps blocked by policy in its scenario,
+ * and the start page's `screenshot` steps (recorded when every criterion was blocked before exploration).
+ */
+function blockedStepsFor(criterionId: string, steps: readonly ExplorationStep[], plan: TestPlan | null): ExplorationStep[] {
+  const scenario = plan && plan.scenarios.length > 0 ? scenarioOfCriterion(plan, criterionId).id : "SC-1";
+  return steps.filter(
+    (s) => (s.outcome === "BLOCKED_BY_POLICY" && stepScenario(s) === scenario) || (s.kind === "screenshot" && s.plannedStepId === null),
+  );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -387,6 +408,7 @@ export function createReportStage(deps: ReportStageDeps): EngineStages["report"]
       results: input.provisional,
       rerun: input.rerun,
       redact: (s) => String(ctx.redact(s)),
+      recordingArtifactIds: input.exploration?.artifactIds ?? [],
     });
     const summary = summarize(decided);
     const verdict = aggregateVerdict(decided);

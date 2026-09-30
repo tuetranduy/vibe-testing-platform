@@ -1,6 +1,6 @@
 "use client";
 
-import { describeExpectedOutcome, type AcceptanceCriterion, type ExpectedOutcome, type FactRequest } from "@platform/contracts";
+import { describeExpectedOutcome, type AcceptanceCriterion, type ExpectedOutcome, type FactRequest, type SiteCheck } from "@platform/contracts";
 import { useEffect, useRef, useState } from "react";
 import { CheckEditor } from "./CheckEditor";
 import { Icon } from "./Icon";
@@ -23,7 +23,15 @@ interface Props {
   canMakeNonCritical?: boolean;
   /** The editor opened (true) or closed (false); also false when the card goes away. */
   onEditingChange?: (editing: boolean) => void;
+  /** What the live site showed for this criterion (V1.3); absent: no pages were read. */
+  siteCheck?: SiteCheck | undefined;
 }
+
+const SITE_CHECK: Record<SiteCheck["status"], { label: string; className: string; icon: "check" | "warning" | "info" }> = {
+  FOUND: { label: "Seen on the site", className: "site-check site-check-found", icon: "check" },
+  NOT_FOUND: { label: "Not found on the pages read", className: "site-check site-check-missing", icon: "warning" },
+  UNCLEAR: { label: "Unclear from the pages read", className: "site-check", icon: "info" },
+};
 
 /** JSON with object keys sorted (and JSON's number form: 1.0 → 1, -0 → 0), to tell whether a check changed. */
 function canonical(value: unknown): string {
@@ -54,6 +62,7 @@ export function CriterionCard({
   onCriticalChange,
   canMakeNonCritical = true,
   onEditingChange,
+  siteCheck,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [weightError, setWeightError] = useState<string | null>(null);
@@ -116,6 +125,15 @@ export function CriterionCard({
           </p>
           <p>{describeExpectedOutcome(c.expectedOutcome, facts)}</p>
         </div>
+
+        {siteCheck && (
+          <p className={SITE_CHECK[siteCheck.status].className}>
+            <Icon name={SITE_CHECK[siteCheck.status].icon} />
+            <span>
+              <strong>{SITE_CHECK[siteCheck.status].label}:</strong> {siteCheck.note}
+            </span>
+          </p>
+        )}
 
         {editing && c.expectedOutcome.kind !== "semantic" && (
           <CheckEditor

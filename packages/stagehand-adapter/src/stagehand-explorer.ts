@@ -402,8 +402,8 @@ class StagehandExplorerSession implements ExplorerSession {
     });
   }
 
-  screenshot(): Promise<Buffer> {
-    return this.run("screenshot", async () => Buffer.from(await this.page.screenshot({ type: "png" })));
+  screenshot(options: { fullPage?: boolean } = {}): Promise<Buffer> {
+    return this.run("screenshot", async () => Buffer.from(await this.page.screenshot({ type: "png", fullPage: options.fullPage === true })));
   }
 
   close(): Promise<void> {

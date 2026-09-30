@@ -3,6 +3,8 @@ import {
   CreateTestRunResponseSchema,
   LlmSettingsViewSchema,
   SuggestionSetResponseSchema,
+  SiteAnalysisSchema,
+  type SiteAnalysis,
   NormalizedRequirementSchema,
   SessionViewSchema,
   CredentialProfileListSchema,
@@ -189,8 +191,12 @@ export const getSuggestions = (runId: string): Promise<SuggestionSetResponse> =>
 export const selectSuggestion = (runId: string, body: SelectSuggestionRequest): Promise<TestRunSummary> =>
   request(TestRunSummarySchema, `${runPath(runId)}/suggestions/select`, { method: "POST", body });
 
-export const confirmCriteria = (runId: string): Promise<ConfirmResult> =>
-  request(ConfirmResultSchema, `${runPath(runId)}/criteria/confirm`, { method: "POST" });
+/** Confirms the criteria; `testData` (V1.3: the accepted suggestions) becomes the run's before it starts. */
+export const confirmCriteria = (runId: string, testData: Record<string, string | number | boolean> = {}): Promise<ConfirmResult> =>
+  request(ConfirmResultSchema, `${runPath(runId)}/criteria/confirm`, Object.keys(testData).length > 0 ? { method: "POST", body: { testData } } : { method: "POST" });
+
+/** The requirement's analysis against the live site (V1.3); 404 NO_SITE_ANALYSIS when the run has none. */
+export const getSiteAnalysis = (runId: string): Promise<SiteAnalysis> => request(SiteAnalysisSchema, `${runPath(runId)}/site-analysis`);
 
 const AUTH = "/api/v1/auth";
 const NoContentSchema = z.unknown();

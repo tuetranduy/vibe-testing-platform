@@ -56,6 +56,8 @@ export const ExplorationOutcomeSchema = z.object({
   stopReason: ExplorationStopReasonSchema,
   /** Each scenario's own stop reason (V1.1 F9); absent on outcomes before V1.1 (one scenario: `stopReason`). */
   scenarioStops: z.record(z.string(), ExplorationStopReasonSchema).optional(),
+  /** The exploration's own recordings — video and scrubbed trace (V1.3) — as artifact ids; run-wide evidence. */
+  artifactIds: z.array(z.string()).optional(),
 });
 export type ExplorationOutcome = z.infer<typeof ExplorationOutcomeSchema>;
 

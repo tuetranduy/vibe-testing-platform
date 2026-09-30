@@ -14,6 +14,7 @@ export * from "./exploration-cache-repository";
 export * from "./event-repository";
 export * from "./requirement-repository";
 export * from "./suggestion-repository";
+export * from "./site-analysis-repository";
 export * from "./secret-repository";
 export * from "./artifact-repository";
 export * from "./result-repository";

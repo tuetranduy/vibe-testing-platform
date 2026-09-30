@@ -4903,3 +4903,76 @@ body:has(.print-report)::before {
   width: 100%;
   min-height: 42px;
 }
+
+/* ---------- V1.3: live-site analysis, suggested test data, full-page screenshots ---------- */
+
+.badge-neutral {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.site-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+.site-check-found {
+  color: var(--success);
+}
+.site-check-missing {
+  color: var(--warning);
+}
+
+.site-analysis,
+.suggested-data {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.site-analysis-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1rem;
+}
+.site-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+.suggested-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.suggested-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.suggested-item .choice {
+  flex-wrap: wrap;
+}
+.suggested-item input:not([type="checkbox"]) {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Full-page screenshots can be very tall: scroll inside a frame instead of stretching the page. */
+.evidence-figure img,
+.artifact-image {
+  max-height: 70vh;
+  object-fit: contain;
+  object-position: top;
+}

@@ -45,6 +45,8 @@ export interface CollectEvidenceOptions {
   store: EvidenceStore;
   /** The run's secret values: removed from traces; any secret makes the evidence SECRET_BEARING. */
   secretValues: string[];
+  /** What produced the files, for the event messages (default "Rerun"; V1.3: "Exploration" recordings). */
+  origin?: "Rerun" | "Exploration";
 }
 
 const LABEL: Record<LocalArtifact["type"], string> = { TRACE: "trace", SCREENSHOT: "screenshot", VIDEO: "video" };
@@ -56,8 +58,9 @@ export async function collectEvidence(
 ): Promise<string[]> {
   const aborted = () => ctx.signal?.aborted === true;
   const sensitivity: ArtifactSensitivity = opts.secretValues.length > 0 ? "SECRET_BEARING" : "STANDARD";
+  const origin = opts.origin ?? "Rerun";
   const omitted = async (type: LocalArtifact["type"], reason: string) => {
-    if (!aborted()) await ctx.publish({ type: "artifact.omitted", message: `Rerun ${LABEL[type]} omitted`, payload: { type, reason } });
+    if (!aborted()) await ctx.publish({ type: "artifact.omitted", message: `${origin} ${LABEL[type]} omitted`, payload: { type, reason } });
   };
 
   const ids: string[] = [];
@@ -69,7 +72,7 @@ export async function collectEvidence(
       if (!(await lstat(artifact.path)).isFile()) throw new Error("not a regular file");
       body = await readFile(artifact.path);
     } catch {
-      await omitted(artifact.type, "The rerun did not leave this file behind");
+      await omitted(artifact.type, `The ${origin.toLowerCase()} did not leave this file behind`);
       continue;
     }
     if (artifact.type === "TRACE") {
@@ -95,7 +98,7 @@ export async function collectEvidence(
     if (aborted()) break;
     await ctx.publish({
       type: "artifact.created",
-      message: `Rerun ${LABEL[artifact.type]} stored`,
+      message: `${origin} ${LABEL[artifact.type]} stored`,
       payload: { artifactId, type: artifact.type, sensitivity },
     });
   }

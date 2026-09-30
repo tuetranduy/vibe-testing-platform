@@ -51,6 +51,7 @@ const ENDPOINTS: { method: Method; pattern: RegExp; query: readonly string[] }[]
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/criteria$`), query: [] },
   { method: "PUT", pattern: new RegExp(`^/v1/test-runs/${ID}/criteria$`), query: [] },
   { method: "POST", pattern: new RegExp(`^/v1/test-runs/${ID}/criteria/confirm$`), query: [] },
+  { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/site-analysis$`), query: [] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/suggestions$`), query: [] },
   { method: "POST", pattern: new RegExp(`^/v1/test-runs/${ID}/suggestions/select$`), query: [] },
   { method: "POST", pattern: new RegExp(`^/v1/test-runs/${ID}/cancel$`), query: [] },

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { CompilerOutput } from "./model-output";
+import type { CompilerOutput as FullCompilerOutput } from "./model-output";
+
+/** The criteria and facts: all postValidate reads (the advisory fields are validated apart, V1.3). */
+type CompilerOutput = Pick<FullCompilerOutput, "criteria" | "facts">;
 import { THRESHOLD_NOT_STATED, numbersInText, postValidate, statedNumbers } from "./post-validate";
 
 describe("statedNumbers / numbersInText", () => {

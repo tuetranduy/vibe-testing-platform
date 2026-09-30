@@ -241,10 +241,10 @@ describe("survey stage", () => {
     expect(shots).toHaveLength(4);
     expect(new Set(shots.map((s) => s.sensitivity))).toEqual(new Set(["SECRET_BEARING"]));
     expect(events.filter((e) => e.type === "artifact.created").map((e) => e.message)).toEqual([
-      "Screenshot saved for /",
-      "Screenshot saved for /products",
-      "Screenshot saved for /cart",
-      "Screenshot saved for /reset",
+      "Full-page screenshot saved for /",
+      "Full-page screenshot saved for /products",
+      "Full-page screenshot saved for /cart",
+      "Full-page screenshot saved for /reset",
     ]);
     const image = (transport.requests[0]!.messages[0]!.content as { type: string; data?: string }[]).find((p) => p.type === "image");
     expect(image?.data).toBe(Buffer.from(`PNG ${ORIGIN}/`).toString("base64"));

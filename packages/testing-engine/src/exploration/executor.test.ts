@@ -97,8 +97,8 @@ class FakeSession implements ExplorerSession {
     return { data, llm: USAGE };
   }
 
-  async screenshot() {
-    this.calls.push({ op: "screenshot", arg: null });
+  async screenshot(options?: { fullPage?: boolean }) {
+    this.calls.push({ op: "screenshot", arg: options ?? null });
     return Buffer.from("\x89PNG fake");
   }
 
@@ -320,7 +320,8 @@ describe("runExploration (fake explorer)", () => {
     ]);
     expect(captures[0]).toMatchObject({ key: "cartCount", modelValue: 1, mode: "number" });
     expect(mem.facts).toEqual(outcome.facts);
-    expect(mem.screenshots).toMatchObject([{ sensitivity: "STANDARD" }]);
+    expect(mem.screenshots).toMatchObject([{ sensitivity: "STANDARD", fileName: "after_add.png" }]);
+    expect(session.calls.filter((c) => c.op === "screenshot").map((c) => c.arg)).toEqual([{ fullPage: true }]); // V1.3: the whole page
 
     // Events: one step.recorded per step, fact.observed per fact (no value), artifact.created (no URL).
     expect(events.filter((e) => e.type === "step.recorded")).toHaveLength(8);
@@ -441,6 +442,32 @@ describe("runExploration (fake explorer)", () => {
     expect(everything).toContain("[REDACTED]");
   });
 
+  it("a full-page screenshot that fails falls back to the viewport; neither → artifact.omitted, the step still recorded", async () => {
+    const { ctx, events } = fakeCtx();
+    const plan = planOf(step("navigate", "Open the login page"), step("fill", "Fill the password field", { inputRef: { source: "secret", key: "password" } }));
+    const run = async (fail: (o?: { fullPage?: boolean }) => boolean) => {
+      const session = new FakeSession();
+      const shoot = session.screenshot.bind(session);
+      session.screenshot = async (o) => {
+        const png = await shoot(o);
+        if (fail(o)) throw new Error("Protocol error: Page.captureScreenshot");
+        return png;
+      };
+      const mem = memoryStore();
+      const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder().recorder });
+      return { outcome, mem, session };
+    };
+
+    const fallback = await run((o) => o?.fullPage === true);
+    expect(fallback.session.calls.filter((c) => c.op === "screenshot").map((c) => c.arg)).toEqual([{ fullPage: true }, { fullPage: false }]);
+    expect(fallback.outcome.steps.at(-1)!.artifactIds).toEqual(["art_1"]);
+
+    const none = await run(() => true);
+    expect(none.outcome.steps.at(-1)).toMatchObject({ outcome: "BLOCKED_BY_POLICY", artifactIds: [] });
+    expect(none.mem.screenshots).toEqual([]);
+    expect(events.filter((e) => e.type === "artifact.omitted").at(-1)?.message).toBe("Screenshot where exploration was blocked could not be taken");
+  });
+
   it.each([
     ["secret", "MISSING_SECRET"],
     ["testData", "MISSING_TEST_DATA"],
@@ -453,12 +480,17 @@ describe("runExploration (fake explorer)", () => {
       step("fill", "Fill the password field", { inputRef: { source, key: "password" } }),
       step("login", "Click Log in"),
     );
-    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    const mem = memoryStore();
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder });
 
     expect(outcome.stopReason).toBe("BLOCKED_BY_POLICY");
     expect(outcome.steps.at(-1)).toMatchObject({ kind: "fill", plannedStepId: "PS-2", outcome: "BLOCKED_BY_POLICY", blockReason: reason, onGoldenPath: false });
     expect(fills).toEqual([]);
-    expect(session.ops()).toEqual(["navigate", "close"]);
+    // V1.3: where it was blocked is kept as evidence — a full-page screenshot on the blocked step.
+    expect(session.ops()).toEqual(["navigate", "screenshot", "close"]);
+    expect(session.calls.find((c) => c.op === "screenshot")?.arg).toEqual({ fullPage: true });
+    expect(outcome.steps.at(-1)!.artifactIds).toEqual(["art_1"]);
+    expect(mem.screenshots.map((s) => s.fileName)).toEqual(["blocked-step-2.png"]);
   });
 
   it("a failed fill with an empty value keeps the error text readable (no [REDACTED] between characters)", async () => {
@@ -496,7 +528,7 @@ describe("runExploration (fake explorer)", () => {
       [2, "act", "PS-2", "BLOCKED_BY_POLICY", false],
     ]);
     expect(outcome.steps[2]).toMatchObject({ blockReason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED", element: { chosenIndex: 0 } });
-    expect(session.ops()).toEqual(["navigate", "observe", "close"]); // never acted, never extracted
+    expect(session.ops()).toEqual(["navigate", "observe", "screenshot", "close"]); // never acted, never extracted
     expect(events.filter((e) => e.type === "step.recorded").at(-1)?.payload).toMatchObject({ outcome: "BLOCKED_BY_POLICY", blockReason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED" });
   });
 
@@ -590,7 +622,7 @@ describe("runExploration (fake explorer)", () => {
     const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
     expect(outcome.stopReason).toBe("BLOCKED_BY_POLICY");
     expect(outcome.steps.at(-1)).toMatchObject({ kind: "navigate", plannedStepId: "PS-2", outcome: "BLOCKED_BY_POLICY", blockReason: "OFF_DOMAIN_NAVIGATION" });
-    expect(session.ops()).toEqual(["navigate", "navigate", "close"]);
+    expect(session.ops()).toEqual(["navigate", "navigate", "screenshot", "close"]);
   });
 
   it("an action whose navigation the guard blocked → BLOCKED_BY_POLICY", async () => {

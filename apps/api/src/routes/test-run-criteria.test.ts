@@ -1,5 +1,5 @@
 import type { NormalizedRequirement } from "@platform/contracts";
-import { EventRepository, RequirementRepository, RunRepository } from "@platform/db";
+import { EventRepository, RequirementRepository, RunRepository, SiteAnalysisRepository } from "@platform/db";
 import { OTHER_TENANT_ID } from "@platform/db/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { auth, createTestApi, validBody, type TestApi } from "../test-support";
@@ -425,3 +425,61 @@ describe("POST /v1/test-runs/:runId/criteria/confirm", () => {
 function getCriteriaBody(res: { json(): unknown }): NormalizedRequirement {
   return res.json() as NormalizedRequirement;
 }
+
+describe("V1.3: the live-site analysis and suggested test data", () => {
+  const confirmWith = (runId: string, payload: unknown) =>
+    t.app.inject({ method: "POST", url: `/v1/test-runs/${runId}/criteria/confirm`, headers: auth, payload: payload as object });
+  const getAnalysis = (runId: string) => t.app.inject({ method: "GET", url: `/v1/test-runs/${runId}/site-analysis`, headers: auth });
+  const analysis = {
+    status: "READ" as const,
+    reason: null,
+    pages: [{ url: "https://shop.example.com/", title: "Home", status: "READ" as const }],
+    checks: [{ criterionId: "AC-1", status: "FOUND" as const, note: "The header shows a cart count" }],
+    testData: [
+      { key: "email", value: "qa.abc123@example.com", description: "Email to register with", source: "GENERATED" as const },
+      { key: "productName", value: "iPhone 17 Pro", description: "A listed product", source: "SITE" as const },
+    ],
+  };
+
+  it("GET site-analysis: 404 NO_SITE_ANALYSIS before one exists, then the stored analysis", async () => {
+    const runId = await setupAwaitingConfirmation();
+    const missing = await getAnalysis(runId);
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json().code).toBe("NO_SITE_ANALYSIS");
+    await new SiteAnalysisRepository(t.tdb.db).save(runId, analysis);
+    const res = await getAnalysis(runId);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ...analysis, appliedKeys: [] });
+  });
+
+  it("confirm with test data: the values become the run's (over its own) and the suggested keys are marked applied", async () => {
+    const runId = await setupAwaitingConfirmation(baseRequirement(), { testData: { city: "Oslo" } });
+    await new SiteAnalysisRepository(t.tdb.db).save(runId, analysis);
+    const res = await confirmWith(runId, { testData: { email: "edited@example.com", quantity: 2 } });
+    expect(res.statusCode).toBe(202);
+    const run = await new RunRepository(t.tdb.db).getById(runId);
+    expect(run.lifecycle).toBe("PLANNING");
+    expect(run.request.testData).toEqual({ city: "Oslo", email: "edited@example.com", quantity: 2 });
+    expect((await new SiteAnalysisRepository(t.tdb.db).get(runId))!.appliedKeys).toEqual(["email"]);
+  });
+
+  it("confirm refuses invalid test data, and a value entered as a secret, without confirming", async () => {
+    const runId = await setupAwaitingConfirmation(baseRequirement(), { secrets: { password: "pw-Secret-9911" } });
+    const invalid = await confirmWith(runId, { testData: { "bad key": "x" } });
+    expect(invalid.statusCode).toBe(400);
+    const leaked = await confirmWith(runId, { testData: { email: "pw-Secret-9911" } });
+    expect(leaked.statusCode).toBe(400);
+    expect(leaked.json().issues[0].path).toEqual(["testData", "email"]);
+    const run = await new RunRepository(t.tdb.db).getById(runId);
+    expect(run.lifecycle).toBe("AWAITING_CONFIRMATION");
+    expect(run.request.testData).toEqual({});
+  });
+
+  it("confirm refuses going past 50 test data entries", async () => {
+    const own = Object.fromEntries(Array.from({ length: 49 }, (_, i) => [`k${i}`, i]));
+    const runId = await setupAwaitingConfirmation(baseRequirement(), { testData: own });
+    const res = await confirmWith(runId, { testData: { a: 1, b: 2 } });
+    expect(res.statusCode).toBe(400);
+    expect((await new RunRepository(t.tdb.db).getById(runId)).lifecycle).toBe("AWAITING_CONFIRMATION");
+  });
+});

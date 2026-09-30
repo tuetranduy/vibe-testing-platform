@@ -1,3 +1,4 @@
+import { traceRecordingOn, videoRecordingOn } from "@platform/contracts";
 import { ExplorationCacheRepository, ExplorationStepRepository, ObservedFactRepository, type Database } from "@platform/db";
 import { StagehandExplorer, resolveStagehandExtensionDir } from "@platform/stagehand-adapter";
 import type { ArtifactStorage } from "@platform/storage";
@@ -5,8 +6,10 @@ import type { ExplorationStore, ExploreStageDeps, ObserveCache, StageContext } f
 import { storeArtifact } from "./artifacts";
 import type { WorkerLogger } from "./deps";
 import { countEgressBlock, type WorkerMetrics } from "./metrics";
+import { createRerunEvidenceStore } from "./rerun";
 import { computeExtensionId, type BrowserExtension } from "./sandbox/browser-launcher";
 import { openRunSandbox } from "./sandbox/run-sandbox";
+import { startSessionRecording } from "./sandbox/session-recording";
 
 export interface ExplorationConfig {
   /** TARGET_PRIVATE_ALLOWLIST (non-production only; see @platform/config). */
@@ -108,6 +111,12 @@ export function createExplorationDeps(input: ExplorationDepsInput): ExploreStage
     cache: overrides.cache ?? ((ctx) => createObserveCache(db, ctx.tenantId)),
     // Start-up failures (e.g. Chromium's stderr tail) are logged here; the run records a template message.
     logger: overrides.logger ?? logger,
+    // V1.3: the exploration's video and trace, per the run's options, stored like the rerun's evidence.
+    startRecording:
+      overrides.startRecording ??
+      ((ctx, sandbox) =>
+        startSessionRecording(ctx, sandbox.page, { video: videoRecordingOn(ctx.request), trace: traceRecordingOn(ctx.request), logger })),
+    recordingStore: overrides.recordingStore ?? ((ctx) => createRerunEvidenceStore({ db, storage, config, metrics: input.metrics }, ctx)),
     ...(overrides.recorder ? { recorder: overrides.recorder } : {}),
     ...(overrides.pollIntervalMs !== undefined ? { pollIntervalMs: overrides.pollIntervalMs } : {}),
   };

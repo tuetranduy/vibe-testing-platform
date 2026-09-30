@@ -10,10 +10,12 @@ import { LlmClient, type LlmCallRecord } from "@platform/llm";
 import { createRunRedactor } from "@platform/security";
 import { StagehandExplorer, resolveStagehandExtensionDir } from "@platform/stagehand-adapter";
 import { createLocalStorage } from "@platform/storage";
-import { createExploreStage, type EventDraft, type StageContext } from "@platform/testing-engine";
+import { createExploreStage, type EventDraft, type ExplorationSandbox, type StageContext } from "@platform/testing-engine";
 import { chromium } from "playwright-core";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createExplorationStore } from "../../apps/worker/src/exploration";
+import { createRerunEvidenceStore } from "../../apps/worker/src/rerun";
+import { startSessionRecording } from "../../apps/worker/src/sandbox/session-recording";
 import { computeExtensionId } from "../../apps/worker/src/sandbox/browser-launcher";
 import { openRunSandbox } from "../../apps/worker/src/sandbox/run-sandbox";
 import { ScriptedTransport, type ScriptTarget } from "./support/scripted-llm";
@@ -119,7 +121,7 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
     expect(left).toEqual({ processes: [], profiles: [] });
   }, 60_000);
 
-  async function setup(opts: { targetPath: string; testData?: Record<string, string>; secrets?: Record<string, string> }) {
+  async function setup(opts: { targetPath: string; testData?: Record<string, string>; secrets?: Record<string, string>; record?: boolean }) {
     const target = `http://shop.test:${shop.port}${opts.targetPath}`;
     const secrets = opts.secrets ?? {};
     const request: StoredTestRunRequest = {
@@ -176,9 +178,46 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
       openSandbox: (c) => openRunSandbox(c, { resolve: resolver, privateAllowlist: [`shop.test:${shop.port}`], logger: silent, extensions: [extension] }),
       explorer: new StagehandExplorer({ connectTimeoutMs: 90_000, extensionId: extension.id }),
       store: (c) => createExplorationStore({ db: tdb.db, storage, config: { artifactRetentionDays: 30, secretArtifactRetentionDays: 7 } }, c),
+      // V1.3: the worker's recorder (video + trace), with Stagehand attached to the same page.
+      ...(opts.record
+        ? {
+            startRecording: (c: StageContext, sandbox: ExplorationSandbox) => startSessionRecording(c, sandbox.page, { video: true, trace: true }),
+            recordingStore: (c: StageContext) =>
+              createRerunEvidenceStore({ db: tdb.db, storage, config: { artifactRetentionDays: 30, secretArtifactRetentionDays: 7 } }, c),
+          }
+        : {}),
     });
-    return { run, ctx, events, transport, records, explore, target };
+    return { run, ctx, events, transport, records, explore, target, storage };
   }
+
+  it(
+    "records a video and a scrubbed trace of the exploration while Stagehand drives the same page (V1.3)",
+    async () => {
+      const { run, ctx, explore, events } = await setup({ targetPath: "/products/1", record: true });
+      const plan = planOf(run.id, [
+        planned(1, "navigate", "Open the iPhone 17 Pro product page"),
+        planned(2, "click", "Click the Add to cart button", { criterionIds: ["AC-1"] }),
+        planned(3, "navigate", "Open /cart"),
+      ]);
+
+      const outcome = await explore(ctx, plan, addToCartRequirement(run.id));
+
+      expect(outcome.stopReason).toBe("COMPLETED");
+      const artifacts = await new ArtifactRepository(tdb.db).listByRun(run.id);
+      const recordings = artifacts.filter((a) => a.type === "VIDEO" || a.type === "TRACE");
+      expect(recordings.map((a) => [a.type, a.contentType]).sort()).toEqual([
+        ["TRACE", "application/zip"],
+        ["VIDEO", "video/webm"],
+      ]);
+      expect(outcome.artifactIds).toEqual(expect.arrayContaining(recordings.map((a) => a.id)));
+      expect(recordings.every((a) => a.bytes > 1000)).toBe(true);
+      expect(events.filter((e) => e.type === "artifact.created").map((e) => e.message)).toEqual(
+        expect.arrayContaining(["Exploration video stored", "Exploration trace stored"]),
+      );
+      expect(events.some((e) => e.type === "artifact.omitted")).toBe(false);
+    },
+    180_000,
+  );
 
   it(
     "add iPhone 17 Pro to the cart: steps recorded in order with golden-path flags, DOM_VERIFIED cart count before/after, screenshots persisted",

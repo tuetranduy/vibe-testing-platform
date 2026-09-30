@@ -653,27 +653,7 @@ class ExplorationRun {
     await this.reserve();
     const startedAt = this.ctx.now();
     const urlBefore = this.url();
-    const artifactIds: string[] = [];
-    let png: Buffer | null = null;
-    try {
-      png = await this.session.screenshot();
-    } catch (err) {
-      this.rethrowIfFatal(err);
-      await this.ctx.publish({
-        type: "artifact.omitted",
-        message: `Screenshot at checkpoint ${checkpoint} could not be taken`,
-        payload: { type: "SCREENSHOT", reason: "The browser could not take the screenshot" },
-      });
-    }
-    if (png) {
-      const { artifactId } = await this.deps.store.saveScreenshot({ png, fileName: `${checkpoint}.png`, sensitivity: this.sensitivity });
-      artifactIds.push(artifactId);
-      await this.ctx.publish({
-        type: "artifact.created",
-        message: `Screenshot saved at checkpoint ${checkpoint}`,
-        payload: { artifactId, type: "SCREENSHOT", sensitivity: this.sensitivity },
-      });
-    }
+    const artifactIds = await this.screenshot(`${checkpoint}.png`, `at checkpoint ${checkpoint}`);
     await this.record({
       id: stepId,
       plannedStepId: step.id,
@@ -888,7 +868,44 @@ class ExplorationRun {
     }
   }
 
+  /**
+   * A full-page screenshot of the current page (V1.3; the viewport when the full page cannot be taken), stored
+   * and announced; [] with `artifact.omitted` when neither can be taken. Cancel, the budget and infrastructure
+   * errors propagate.
+   */
+  private async screenshot(fileName: string, where: string): Promise<string[]> {
+    let png: Buffer | null = null;
+    for (const fullPage of [true, false]) {
+      try {
+        png = await this.session.screenshot({ fullPage });
+        break;
+      } catch (err) {
+        this.rethrowIfFatal(err);
+      }
+    }
+    if (!png) {
+      await this.ctx.publish({
+        type: "artifact.omitted",
+        message: `Screenshot ${where} could not be taken`,
+        payload: { type: "SCREENSHOT", reason: "The browser could not take the screenshot" },
+      });
+      return [];
+    }
+    const { artifactId } = await this.deps.store.saveScreenshot({ png, fileName, sensitivity: this.sensitivity });
+    await this.ctx.publish({
+      type: "artifact.created",
+      message: `Screenshot saved ${where}`,
+      payload: { artifactId, type: "SCREENSHOT", sensitivity: this.sensitivity },
+    });
+    return [artifactId];
+  }
+
   private async record(draft: StepDraft): Promise<ExplorationStep> {
+    // A step blocked by policy keeps what the page showed when it was stopped (V1.3): the blocked criteria's
+    // evidence. Never for a stop caused by the budget or a cancel (those throw before a step is recorded).
+    if (draft.outcome === "BLOCKED_BY_POLICY" && !draft.artifactIds?.length) {
+      draft = { ...draft, artifactIds: await this.screenshot(`blocked-step-${this.recordedCount() + 1}.png`, "where exploration was blocked") };
+    }
     const step = this.build(draft);
     if (this.held) {
       this.held.push(step);
