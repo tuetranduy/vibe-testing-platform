@@ -84,25 +84,22 @@ function readDom(el: Element): DomFacts {
  */
 export async function elementAction(page: Page, target: ElementTarget, opts: RecorderOptions = {}): Promise<string> {
   const handle = await resolveHandle(page, target, opts);
+  // No named inner functions: tsx's keepNames would wrap them in a `__name(...)` call the page doesn't define.
   return handle.evaluate((el: Element) => {
-    const where = (raw: string | null | undefined) => {
-      if (!raw) return "";
-      try {
-        const u = new URL(raw, document.baseURI);
-        return u.protocol === "http:" || u.protocol === "https:" ? `${u.origin}${u.pathname}` : u.protocol;
-      } catch {
-        return "?";
-      }
-    };
     const form = (el as HTMLButtonElement).form ?? el.closest("form");
-    const parts = [
-      el.localName,
-      el.getAttribute("type") ?? "",
-      where(el.getAttribute("href")),
-      form ? where(el.getAttribute("formaction") ?? form.getAttribute("action") ?? document.baseURI) : "",
-      form ? (el.getAttribute("formmethod") ?? form.getAttribute("method") ?? "get").toLowerCase() : "",
-    ];
-    return parts.join("|");
+    const [href, posts] = [el.getAttribute("href"), form ? (el.getAttribute("formaction") ?? form.getAttribute("action") ?? document.baseURI) : null].map(
+      (raw) => {
+        if (!raw) return "";
+        try {
+          const u = new URL(raw, document.baseURI);
+          return u.protocol === "http:" || u.protocol === "https:" ? `${u.origin}${u.pathname}` : u.protocol;
+        } catch {
+          return "?";
+        }
+      },
+    );
+    const method = form ? (el.getAttribute("formmethod") ?? form.getAttribute("method") ?? "get").toLowerCase() : "";
+    return [el.localName, el.getAttribute("type") ?? "", href, posts, method].join("|");
   });
 }
 
