@@ -1,5 +1,6 @@
 import { VALID_EMAIL, VALID_PASSWORD } from "@platform/demo-shop";
 import { afterAll, describe, expect, inject, it } from "vitest";
+import { createClient, runSuiteAndWait } from "../../integrations/platform-client/client.mjs";
 import { api, db } from "./support/client";
 import { REQUIREMENTS } from "./support/scenarios";
 
@@ -136,5 +137,41 @@ describe("V1.2 F4 — API tokens", () => {
     expect((await withToken("GET", "/v1/api-tokens")).json.code).toBe("TOKEN_SCOPE");
     await admin.call("DELETE", `/v1/api-tokens/${created.json.id}`);
     expect((await withToken("GET", "/v1/suites")).json.code).toBe("TOKEN_INVALID");
+  });
+});
+
+describe("V1.2 F5 — CI: the client, the action's core, JUnit", () => {
+  it("runs a suite by name with a token, waits for it and gets its JUnit XML", async () => {
+    const admin = await signIn(stack.admin.email, stack.admin.password);
+    const cart = await passingRun({ requirement: REQUIREMENTS.cart });
+    const suite = (await admin.call("POST", "/v1/suites", { name: "CI smoke" })).json;
+    await admin.call("POST", `/v1/suites/${suite.id}/entries`, { sourceRunId: cart });
+    const { token } = (await admin.call("POST", "/v1/api-tokens", { name: "CI", scopes: ["suites:run", "results:read"] })).json;
+
+    // What the web app's /api/ext path does (lib/ext-proxy.ts, tested on its own): the token as X-Api-Token.
+    const web = "https://tests.example.com";
+    const viaExt: typeof fetch = async (input, init = {}) => {
+      const url = String(input).replace(`${web}/api/ext`, stack.apiUrl);
+      const headers = new Headers(init.headers);
+      headers.set("x-api-token", headers.get("authorization")!.replace(/^Bearer /, ""));
+      headers.set("authorization", `Bearer ${stack.apiToken}`);
+      return fetch(url, { ...init, headers });
+    };
+    const files = new Map<string, string>();
+    const result = await runSuiteAndWait({
+      client: createClient({ url: web, token, fetch: viaExt }),
+      suite: "ci SMOKE",
+      intervalMs: 500,
+      junitPath: "junit.xml",
+      writeFile: async (p, t) => void files.set(p, t),
+      context: { repository: "acme/shop", sha: "abc123", runUrl: "https://github.com/acme/shop/actions/runs/1" },
+    });
+    expect(result).toMatchObject({ exitCode: 0, verdict: "PASSED", url: `${web}/suite-runs/${result.suiteRunId}` });
+    expect(files.get("junit.xml")).toMatch(/<testsuites name="CI smoke" id="srn_[^"]+" tests="\d+" failures="0"/);
+    expect((await admin.call("GET", `/v1/suite-runs/${result.suiteRunId}`)).json).toMatchObject({
+      trigger: "api",
+      ci: { repository: "acme/shop", sha: "abc123" },
+      startedWithToken: { name: "CI" },
+    });
   });
 });

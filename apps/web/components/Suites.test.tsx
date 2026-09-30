@@ -119,6 +119,21 @@ describe("SuiteDetailView", () => {
 });
 
 describe("SuiteRunPage", () => {
+  it("shows the CI job and the API token that started it", async () => {
+    api({
+      "GET /api/v1/suite-runs/srn_1": () =>
+        json(200, suiteRunFixture({
+          trigger: "api",
+          startedWithToken: { id: "tok_1", name: "Deploy" },
+          ci: { repository: "acme/shop", ref: "refs/heads/main", sha: "abcdef1234", runUrl: "https://github.com/acme/shop/actions/runs/9" },
+        })),
+    });
+    render(<SuiteRunPage suiteRunId="srn_1" pollMs={60_000} />);
+    expect(await screen.findByRole("link", { name: /CI job/ })).toHaveAttribute("href", "https://github.com/acme/shop/actions/runs/9");
+    expect(screen.getByText(/With the API token “Deploy”/)).toBeInTheDocument();
+    expect(screen.getByText(/for acme\/shop · main/)).toBeInTheDocument();
+  });
+
   it("shows each test's result and refreshes until the suite run has settled", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let calls = 0;
@@ -151,6 +166,7 @@ describe("SuiteRunPage", () => {
     });
     expect(await screen.findByText("2 tests: 1 passed, 1 failed")).toBeInTheDocument();
     expect(screen.getByText(/1 test regressed/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Download JUnit XML/ })).toHaveAttribute("href", "/api/v1/suite-runs/srn_1/junit.xml");
     expect(screen.queryByRole("button", { name: "Cancel suite run" })).not.toBeInTheDocument();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(500);

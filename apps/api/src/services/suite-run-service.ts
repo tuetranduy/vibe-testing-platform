@@ -1,4 +1,5 @@
 import {
+  CiContextSchema,
   RunSuiteRequestSchema,
   isTerminalLifecycle,
   suiteRunCounts,
@@ -8,6 +9,8 @@ import {
   type SuiteRunView,
 } from "@platform/contracts";
 import {
+  RequirementRepository,
+  ResultRepository,
   RunRepository,
   SuiteRepository,
   SuiteRunRepository,
@@ -19,6 +22,8 @@ import {
 } from "@platform/db";
 import { createRunRedactor } from "@platform/security";
 import { createHmac } from "node:crypto";
+import { z } from "zod";
+import { renderJunit, type JunitChild } from "@platform/testing-engine/reporting";
 import { actorId, runScope, type Principal } from "../auth/principal";
 import type { ApiDeps } from "../deps";
 import { HttpError } from "../errors";
@@ -118,7 +123,7 @@ export class SuiteRunService {
           trigger: opts.trigger,
           scheduleId: opts.scheduleId ?? null,
           ownerUserId: actorId(principal),
-          context: opts.context ?? {},
+          context: { ...opts.context, ...(req.context ? { ci: req.context } : {}) },
           idempotencyKey: idempotencyKey ?? null,
           requestHash,
         });
@@ -193,6 +198,8 @@ export class SuiteRunService {
       suiteId: row.suiteId,
       suiteName: row.suiteName,
       owner: row.ownerUserId ? { id: row.ownerUserId, name: owner.get(row.ownerUserId) ?? "Former user" } : null,
+      ci: CiContextSchema.nullable().catch(null).parse(row.context.ci ?? null),
+      startedWithToken: z.object({ id: z.string(), name: z.string() }).nullable().catch(null).parse(row.context.token ?? null),
       counts: suiteRunCounts(children),
       changes: {
         regressed: [...changes.values()].filter((c) => c.change === "regressed").length,
@@ -215,6 +222,41 @@ export class SuiteRunService {
   async listForSuite(p: Principal, suiteId: string, limit: number) {
     const suite = await new SuiteService(this.deps).require(p, suiteId);
     return { items: (await this.suiteRuns.listForSuite(runScope(p), suite.id, limit)).map(suiteRunBrief) };
+  }
+
+  /**
+   * A settled suite run as JUnit XML (V1.2 F5): each child's criteria with their wording, status, expected and
+   * actual values. `409 SUITE_RUN_NOT_FINISHED` while it is going.
+   */
+  async junit(p: Principal, suiteRunId: string): Promise<string> {
+    let row = await this.require(p, suiteRunId);
+    if (row.status === "RUNNING") row = (await this.suiteRuns.settle(row.id)) ?? row;
+    if (row.status !== "COMPLETED") throw new HttpError(409, "SUITE_RUN_NOT_FINISHED", "The JUnit report is available once every test has finished");
+    const children: JunitChild[] = [];
+    for (const c of await this.suiteRuns.children(row.id)) {
+      const [results, requirement] = await Promise.all([
+        new ResultRepository(this.deps.db).listByRun(c.id),
+        new RequirementRepository(this.deps.db).findLatest(c.id),
+      ]);
+      const statements = new Map((requirement?.criteria ?? []).map((x) => [x.id, x.statement]));
+      children.push({
+        runId: c.id,
+        title: c.request.requirement.slice(0, 200),
+        lifecycle: c.lifecycle,
+        durationMs: c.startedAt && c.finishedAt ? c.finishedAt.getTime() - c.startedAt.getTime() : null,
+        error: c.errorCategory ? { category: c.errorCategory, message: c.errorMessage } : null,
+        criteria: results.map((r) => ({
+          id: r.criterionId,
+          description: statements.get(r.criterionId) ?? r.criterionId,
+          critical: "critical" in r ? r.critical !== false : true,
+          status: r.status,
+          expected: r.expected,
+          actual: r.actual,
+          reason: r.reason,
+        })),
+      });
+    }
+    return renderJunit({ suiteName: row.suiteName, suiteRunId: row.id, children });
   }
 
   /** Cancels every child still active (each like `POST /v1/test-runs/:id/cancel`); the suite run settles once they end. */

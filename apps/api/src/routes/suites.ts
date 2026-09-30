@@ -99,6 +99,16 @@ export async function suiteRoutes(app: FastifyInstance, deps: ApiDeps): Promise<
 
   app.get("/v1/suite-runs/:suiteRunId", async (req) => suiteRuns.get(req.principal, parseOr400(SuiteRunParams, req.params).suiteRunId));
 
+  // For CI systems (V1.2 F5).
+  app.get("/v1/suite-runs/:suiteRunId/junit.xml", async (req, reply) => {
+    const { suiteRunId } = parseOr400(SuiteRunParams, req.params);
+    const xml = await suiteRuns.junit(req.principal, suiteRunId);
+    return reply
+      .type("application/xml; charset=utf-8")
+      .header("content-disposition", `attachment; filename="junit-${suiteRunId.replace(/[^A-Za-z0-9_-]/g, "")}.xml"`)
+      .send(xml);
+  });
+
   app.post("/v1/suite-runs/:suiteRunId/cancel", async (req, reply) =>
     reply.status(202).send(await suiteRuns.cancel(req.principal, parseOr400(SuiteRunParams, req.params).suiteRunId)),
   );

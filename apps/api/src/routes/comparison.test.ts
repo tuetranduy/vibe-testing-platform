@@ -124,3 +124,25 @@ describe("GET /v1/test-runs/:runId/comparison (V1.2 F2)", () => {
     });
   });
 });
+
+describe("suite runs for CI (V1.2 F5)", () => {
+  it("records the CI job that started it, and gives the settled run as JUnit XML", async () => {
+    const source = await finishedRunWithTest(t, { requirement: `JUnit ${Date.now()}` });
+    const suite = (await post("/v1/suites", { name: `CI & suite ${Date.now()}` })).json();
+    await post(`/v1/suites/${suite.id}/entries`, { sourceRunId: source });
+    const ci = { repository: "acme/shop", ref: "refs/heads/main", sha: "abc123", runUrl: "https://github.com/acme/shop/actions/runs/1" };
+    expect((await post(`/v1/suites/${suite.id}/runs`, { context: { ...ci, runUrl: "http://insecure.example" } })).statusCode).toBe(400);
+    const started = (await post(`/v1/suites/${suite.id}/runs`, { context: ci })).json();
+    expect((await call(`/v1/suite-runs/${started.suiteRunId}`)).json()).toMatchObject({ ci, startedWithToken: null });
+
+    expect((await call(`/v1/suite-runs/${started.suiteRunId}/junit.xml`)).json().code).toBe("SUITE_RUN_NOT_FINISHED");
+    await complete(started.runIds[0], "FAIL");
+    const res = await call(`/v1/suite-runs/${started.suiteRunId}/junit.xml`);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toBe("application/xml; charset=utf-8");
+    expect(res.headers["content-disposition"]).toBe(`attachment; filename="junit-${started.suiteRunId}.xml"`);
+    expect(res.body).toContain(`<testsuites name="${suite.name.replace("&", "&amp;")}" id="${started.suiteRunId}" tests="1" failures="1"`);
+    expect(res.body).toContain('name="AC-1 The cart count is 1"');
+    expect(res.body).toContain("<failure");
+  });
+});

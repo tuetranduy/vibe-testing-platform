@@ -121,6 +121,26 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
             {run.owner ? ` by ${run.owner.name}` : ""} · <time dateTime={run.createdAt}>{formatWhen(run.createdAt)}</time>
           </span>
         </div>
+        {(run.ci || run.startedWithToken) && (
+          <p className="muted">
+            {run.startedWithToken && <>With the API token “{run.startedWithToken.name}”</>}
+            {run.startedWithToken && run.ci && " · "}
+            {run.ci && (
+              <>
+                {run.ci.runUrl ? (
+                  <a href={run.ci.runUrl} rel="noopener noreferrer" target="_blank">
+                    CI job <Icon name="external" />
+                  </a>
+                ) : (
+                  "CI job"
+                )}
+                {run.ci.repository && ` for ${run.ci.repository}`}
+                {run.ci.ref && ` · ${run.ci.ref.replace(/^refs\/heads\//, "")}`}
+                {run.ci.sha && <span className="mono"> · {run.ci.sha.slice(0, 7)}</span>}
+              </>
+            )}
+          </p>
+        )}
         <p role="status" aria-live="polite">
           {countsText(run)}
         </p>
@@ -132,6 +152,14 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
               .join(", ")}{" "}
             since their previous run.
           </p>
+        )}
+        {run.status === "COMPLETED" && (
+          <div className="actions">
+            <a className="button button-secondary" href={`/api/v1/suite-runs/${encodeURIComponent(run.id)}/junit.xml`} download>
+              <Icon name="download" />
+              Download JUnit XML
+            </a>
+          </div>
         )}
         {run.status === "RUNNING" && (
           <div className="actions">

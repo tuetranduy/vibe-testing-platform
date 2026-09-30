@@ -47,11 +47,26 @@ export const ReorderSuiteEntriesRequestSchema = z.object({
 });
 export type ReorderSuiteEntriesRequest = z.infer<typeof ReorderSuiteEntriesRequestSchema>;
 
+/** Where a CI job started a suite run from (V1.2 F5): shown on the suite run, never trusted. */
+export const CiContextSchema = z.object({
+  repository: z.string().trim().max(200).optional(),
+  ref: z.string().trim().max(200).optional(),
+  sha: z.string().trim().max(64).optional(),
+  runUrl: z
+    .url()
+    .max(500)
+    .refine((u) => u.startsWith("https://"), "Use an https URL")
+    .optional(),
+});
+export type CiContext = z.infer<typeof CiContextSchema>;
+
 export const RunSuiteRequestSchema = z.object({
   /** Secrets for this run only; they win over the credentials below. */
   secrets: SecretRecordSchema.default({}),
   /** Saved credentials for this run; they win over the suite's own. */
   credentialProfileId: SavedIdSchema.optional(),
+  /** The CI job that started it (V1.2 F5). */
+  context: CiContextSchema.optional(),
 });
 export type RunSuiteRequestInput = z.input<typeof RunSuiteRequestSchema>;
 
@@ -146,6 +161,9 @@ export const SuiteRunViewSchema = SuiteRunBriefSchema.extend({
   suiteName: z.string(),
   owner: RunOwnerSchema.nullable(),
   counts: SuiteRunCountsSchema,
+  /** The CI job that started it (V1.2 F5), and the API token it used (F4). */
+  ci: CiContextSchema.nullable().default(null),
+  startedWithToken: z.object({ id: z.string(), name: z.string() }).nullable().default(null),
   /** Children that got worse / better than their previous run (V1.2 F2). */
   changes: z.object({ regressed: z.number().int(), fixed: z.number().int() }).default({ regressed: 0, fixed: 0 }),
   children: z.array(SuiteRunChildSchema),

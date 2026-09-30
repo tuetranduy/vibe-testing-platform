@@ -216,6 +216,8 @@ importers:
         specifier: 0.8.2
         version: 0.8.2
 
+  integrations/platform-client: {}
+
   packages/config:
     dependencies:
       '@platform/contracts':
