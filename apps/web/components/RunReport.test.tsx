@@ -11,6 +11,20 @@ function reportFetch(handler: () => Response) {
   const fetch = vi.fn(async (input: RequestInfo | URL) => {
     if (String(input) === REPORT) return handler();
     if (String(input).includes("/artifacts/")) return json(200, { url: "https://s3.test/x.png", expiresAt: "2099-01-01T00:00:00.000Z" });
+    // The first run of its test (V1.2 F2): the comparison panel shows nothing.
+    if (String(input).endsWith("/comparison")) {
+      return json(200, {
+        runId: "run_1",
+        baseline: null,
+        chosenBaseline: false,
+        verdict: { before: null, after: "FAILED" },
+        criteria: [],
+        counts: { regressed: 0, fixed: 0, changed: 0, unchanged: 0, added: 0, removed: 0 },
+        durationMs: { before: null, after: 1 },
+        costUsd: { before: null, after: 0 },
+        history: [],
+      });
+    }
     throw new Error(`unexpected request ${String(input)}`);
   });
   vi.stubGlobal("fetch", fetch);

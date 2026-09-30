@@ -3965,3 +3965,118 @@ fieldset.stack-tight {
     font-size: 2rem;
   }
 }
+
+/* V1.2: suites — the ordered tests of a suite, its recent runs, a suite run's table */
+.suite-entries {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.suite-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.suite-entry:first-child {
+  border-top: 0;
+}
+.suite-entry-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.suite-entry-title {
+  font-weight: 560;
+  overflow-wrap: anywhere;
+}
+.suite-entry-actions {
+  gap: 4px;
+}
+.entry-result {
+  text-decoration: none;
+}
+.suite-run-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.suite-run-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+.card-flush {
+  padding: 0;
+  overflow: hidden;
+}
+.card-flush-title {
+  padding: 18px 20px 12px;
+}
+@media (max-width: 720px) {
+  .suite-entry {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* V1.2: a run compared with its previous run */
+.comparison-verdicts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+.comparison-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.comparison-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.comparison-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 14px;
+}
+.comparison-text {
+  overflow-wrap: anywhere;
+}
+.comparison-statuses {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 720px) {
+  .comparison-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.schedule-row {
+  justify-content: space-between;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.schedule-row:first-child {
+  border-top: 0;
+}
+.token-value {
+  display: block;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  overflow-wrap: anywhere;
+  user-select: all;
+}

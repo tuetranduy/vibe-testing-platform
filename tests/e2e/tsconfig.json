@@ -1,4 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The CI client (integrations/platform-client) is plain JavaScript with JSDoc types.
+    "allowJs": true
+  },
   "include": ["**/*.ts"]
 }

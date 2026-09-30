@@ -15,7 +15,32 @@ import {
   TestReportSchema,
   TestRunListResponseSchema,
   TestRunSummarySchema,
+  RunSuiteResponseSchema,
+  RunComparisonSchema,
+  type RunComparison,
+  SuiteDetailSchema,
+  SuiteListSchema,
+  SuiteRunListSchema,
+  SuiteRunViewSchema,
+  ScheduleListSchema,
+  ApiTokenListSchema,
+  ApiTokenViewSchema,
+  CreatedApiTokenSchema,
+  type ApiTokenView,
+  type CreateApiTokenRequest,
+  type CreatedApiToken,
+  ScheduleViewSchema,
+  type ScheduleInput,
+  type ScheduleView,
   type ApiError,
+  type AddSuiteEntryRequest,
+  type RunSuiteRequestInput,
+  type RunSuiteResponse,
+  type SuiteDetail,
+  type SuiteInput,
+  type SuiteRunBrief,
+  type SuiteRunView,
+  type SuiteView,
   type CreateTestRunRequestInput,
   type CreateTestRunResponse,
   type RerunRequestInput,
@@ -132,6 +157,10 @@ export const listRuns = (cursor: string | null = null, limit = 50, owner?: "me" 
 
 /** The report as a Markdown file, downloaded by the browser through this app's proxy (V1.1). */
 export const reportMarkdownPath = (runId: string) => `${runPath(runId)}/report.md`;
+
+/** How a completed run changed since an earlier run of the same test (V1.2): the previous one, or `baseline`. */
+export const getComparison = (runId: string, baseline?: string): Promise<RunComparison> =>
+  request(RunComparisonSchema, `${runPath(runId)}/comparison${baseline ? `?baseline=${seg(baseline)}` : ""}`);
 
 /** The final report (COMPLETED) or a partial one (ERRORED / CANCELLED); 409 while the run is still going. */
 export const getReport = (runId: string): Promise<TestReport> => request(TestReportSchema, `${runPath(runId)}/report`);
@@ -254,3 +283,67 @@ export const saveProviderKey = (provider: LlmKeyProvider, apiKey: string | null)
 /** Prefer `fetchArtifactUrl` (lib/artifacts.ts), which applies the reveal rule. */
 export const getArtifactUrl = (runId: string, artifactId: string, reveal: boolean): Promise<ArtifactUrl> =>
   request(ArtifactUrlSchema, `${runPath(runId)}/artifacts/${seg(artifactId)}/url${reveal ? "?reveal=true" : ""}`);
+
+const SUITES = "/api/v1/suites";
+const SUITE_RUNS = "/api/v1/suite-runs";
+
+/** Suites (V1.2): saved Playwright tests that run together, with no AI. */
+export const listSuites = async (): Promise<SuiteView[]> => (await request(SuiteListSchema, SUITES)).items;
+
+export const getSuite = (suiteId: string): Promise<SuiteDetail> => request(SuiteDetailSchema, `${SUITES}/${seg(suiteId)}`);
+
+export const createSuite = (body: SuiteInput): Promise<SuiteDetail> => request(SuiteDetailSchema, SUITES, { method: "POST", body });
+
+export const updateSuite = (suiteId: string, body: SuiteInput): Promise<SuiteDetail> =>
+  request(SuiteDetailSchema, `${SUITES}/${seg(suiteId)}`, { method: "PUT", body });
+
+export const deleteSuite = async (suiteId: string): Promise<void> => {
+  await request(NoContentSchema, `${SUITES}/${seg(suiteId)}`, { method: "DELETE" });
+};
+
+export const addSuiteEntry = (suiteId: string, body: AddSuiteEntryRequest): Promise<SuiteDetail> =>
+  request(SuiteDetailSchema, `${SUITES}/${seg(suiteId)}/entries`, { method: "POST", body });
+
+export const removeSuiteEntry = async (suiteId: string, sourceRunId: string): Promise<void> => {
+  await request(NoContentSchema, `${SUITES}/${seg(suiteId)}/entries/${seg(sourceRunId)}`, { method: "DELETE" });
+};
+
+export const reorderSuiteEntries = (suiteId: string, sourceRunIds: string[]): Promise<SuiteDetail> =>
+  request(SuiteDetailSchema, `${SUITES}/${seg(suiteId)}/entries/order`, { method: "PUT", body: { sourceRunIds } });
+
+export const runSuite = (suiteId: string, body: RunSuiteRequestInput, idempotencyKey: string): Promise<RunSuiteResponse> =>
+  request(RunSuiteResponseSchema, `${SUITES}/${seg(suiteId)}/runs`, { method: "POST", body, headers: { "idempotency-key": idempotencyKey } });
+
+export const listSuiteRuns = async (suiteId: string): Promise<SuiteRunBrief[]> =>
+  (await request(SuiteRunListSchema, `${SUITES}/${seg(suiteId)}/runs?limit=20`)).items;
+
+export const getSuiteRun = (suiteRunId: string): Promise<SuiteRunView> => request(SuiteRunViewSchema, `${SUITE_RUNS}/${seg(suiteRunId)}`);
+
+export const cancelSuiteRun = (suiteRunId: string): Promise<SuiteRunView> =>
+  request(SuiteRunViewSchema, `${SUITE_RUNS}/${seg(suiteRunId)}/cancel`, { method: "POST" });
+
+/** A suite's schedules (V1.2): when it runs by itself, with its saved credentials only. */
+export const listSchedules = async (suiteId: string): Promise<ScheduleView[]> =>
+  (await request(ScheduleListSchema, `${SUITES}/${seg(suiteId)}/schedules`)).items;
+
+export const createSchedule = (suiteId: string, body: ScheduleInput): Promise<ScheduleView> =>
+  request(ScheduleViewSchema, `${SUITES}/${seg(suiteId)}/schedules`, { method: "POST", body });
+
+export const updateSchedule = (scheduleId: string, body: ScheduleInput): Promise<ScheduleView> =>
+  request(ScheduleViewSchema, `/api/v1/suite-schedules/${seg(scheduleId)}`, { method: "PUT", body });
+
+export const deleteSchedule = async (scheduleId: string): Promise<void> => {
+  await request(NoContentSchema, `/api/v1/suite-schedules/${seg(scheduleId)}`, { method: "DELETE" });
+};
+
+const TOKENS = "/api/v1/api-tokens";
+
+/** API tokens (V1.2): yours, or (administrators) everyone's. */
+export const listApiTokens = async (all = false): Promise<ApiTokenView[]> =>
+  (await request(ApiTokenListSchema, `${TOKENS}${all ? "?user=all" : ""}`)).items;
+
+/** The answer holds the token itself: the only time it is shown. */
+export const createApiToken = (body: CreateApiTokenRequest): Promise<CreatedApiToken> =>
+  request(CreatedApiTokenSchema, TOKENS, { method: "POST", body });
+
+export const revokeApiToken = (id: string): Promise<ApiTokenView> => request(ApiTokenViewSchema, `${TOKENS}/${seg(id)}`, { method: "DELETE" });

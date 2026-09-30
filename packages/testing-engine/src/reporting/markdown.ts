@@ -1,4 +1,5 @@
-import { STATUS_REASON_TEXT, type CriterionResult, type RunVerdict, type TestReport } from "@platform/contracts";
+import { STATUS_REASON_TEXT, type CriterionChange, type CriterionResult, type RunVerdict, type TestReport } from "@platform/contracts";
+import type { ResultComparison } from "./comparison";
 
 /**
  * The report as a Markdown document (V1.1 F6, `GET /v1/test-runs/:runId/report.md`). Pure. Everything the
@@ -54,7 +55,22 @@ function confirmation(c: CriterionResult): string {
   return c.reason ? STATUS_REASON_TEXT[c.reason] : "No reason was recorded";
 }
 
-export function renderReportMarkdown(report: TestReport): string {
+const CHANGE: Record<CriterionChange, string> = {
+  fixed: "Fixed",
+  regressed: "Regressed",
+  changed: "Changed",
+  unchanged: "Unchanged",
+  added: "New",
+  removed: "No longer checked",
+};
+
+/** The run this report is compared with (V1.2 F2), and how the results changed. */
+export interface MarkdownComparison {
+  baselineRunId: string;
+  comparison: ResultComparison;
+}
+
+export function renderReportMarkdown(report: TestReport, compared: MarkdownComparison | null = null): string {
   const out: string[] = [];
   const statementOf = new Map((report.requirement?.criteria ?? []).map((c) => [c.id, c.statement]));
   const push = (...lines: string[]) => out.push(...lines);
@@ -85,6 +101,23 @@ export function renderReportMarkdown(report: TestReport): string {
       `${s.nonCritical.total} non-critical ${s.nonCritical.total === 1 ? "criterion" : "criteria"} (${s.nonCritical.notPassed} did not pass): reported, but the verdict ignores them.`,
       "",
     );
+  }
+
+  if (compared) {
+    const { comparison: c } = compared;
+    const verdictText = (v: RunVerdict | null) => (v ? VERDICT[v] : "no verdict");
+    push("## Compared with the previous run", "");
+    push(`- **Previous run:** ${escapeMarkdown(compared.baselineRunId)}`);
+    push(`- **Result:** ${verdictText(c.verdict.before)} → ${verdictText(c.verdict.after)}`);
+    push(`- **Criteria:** ${c.counts.regressed} regressed, ${c.counts.fixed} fixed, ${c.counts.changed} changed, ${c.counts.unchanged} unchanged`, "");
+    const changed = c.criteria.filter((x) => x.change !== "unchanged");
+    if (changed.length > 0) {
+      push("| Criterion | Before | Now | Change |", "|---|---|---|---|");
+      for (const x of changed) {
+        push(`| ${escapeMarkdown(x.id)} — ${escapeMarkdown(x.description)} | ${x.before ?? "—"} | ${x.after ?? "—"} | ${CHANGE[x.change]} |`);
+      }
+      push("");
+    }
   }
 
   push("## Criteria", "");

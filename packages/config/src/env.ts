@@ -109,6 +109,8 @@ const EnvSchema = z
     /** A blank requirement's survey (explore the site, suggest tests): its hard deadline. Page loading stops at 60 % of it. */
     SURVEY_TIMEOUT_SECONDS: intWithDefault(180),
     WORKER_CONCURRENCY: intWithDefault(2),
+    /** A suite schedule's least time between two runs (V1.2 F3). */
+    SCHEDULE_MIN_INTERVAL_MINUTES: intWithDefault(15, 1, 24 * 60),
     ARTIFACT_RETENTION_DAYS: intWithDefault(30),
     SECRET_ARTIFACT_RETENTION_DAYS: intWithDefault(7),
     API_PORT: intWithDefault(3001, 1, 65535),

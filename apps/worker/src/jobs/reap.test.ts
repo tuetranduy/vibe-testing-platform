@@ -1,4 +1,5 @@
-import { RunRepository, SecretRepository } from "@platform/db";
+import { RunRepository, SecretRepository, SuiteRunRepository } from "@platform/db";
+import { TEST_TENANT_ID } from "@platform/db/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createWorkerMetrics } from "../metrics";
 import { createFakeStages, createHarness, eventsOf, seedRun, type WorkerHarness } from "../test-support";
@@ -141,5 +142,21 @@ describe("reaper", () => {
     const r = await reapJob(h.deps(createFakeStages()));
     expect(r.secretsPurged).toContain(run.id);
     expect(await new SecretRepository(h.tdb.db).listActive(run.id)).toHaveLength(0);
+  });
+
+  it("settles a suite run whose children have all ended, and leaves one with an active child running", async () => {
+    const suiteRuns = new SuiteRunRepository(h.tdb.db);
+    const runs = new RunRepository(h.tdb.db);
+    const make = () => suiteRuns.create({ tenantId: TEST_TENANT_ID, suiteId: "ste_x", suiteName: "Smoke", trigger: "manual", ownerUserId: null });
+    const [done, busy] = [await make(), await make()];
+    const child = await runs.create({ tenantId: TEST_TENANT_ID, targetUrl: "https://shop.example.com", request: (await seedRun(h)).request, suiteRunId: done.id });
+    await runs.create({ tenantId: TEST_TENANT_ID, targetUrl: "https://shop.example.com", request: (await seedRun(h)).request, suiteRunId: busy.id });
+    await runs.transition(child.id, "QUEUED", "CANCELLED", { cancelReason: "USER_REQUESTED" });
+
+    const r = await reapJob(h.deps(createFakeStages()));
+    expect(r.suiteRunsSettled).toContain(done.id);
+    expect(r.suiteRunsSettled).not.toContain(busy.id);
+    expect(await suiteRuns.findById(done.id)).toMatchObject({ status: "COMPLETED", verdict: "INCONCLUSIVE" });
+    expect(await suiteRuns.findById(busy.id)).toMatchObject({ status: "RUNNING" });
   });
 });
