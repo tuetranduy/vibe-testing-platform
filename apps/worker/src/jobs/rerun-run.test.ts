@@ -1,5 +1,5 @@
 import type { GeneratedTest, NormalizedRequirement } from "@platform/contracts";
-import { GeneratedTestRepository, RequirementRepository, ResultRepository, RunRepository, SecretRepository } from "@platform/db";
+import { GeneratedTestRepository, RequirementRepository, ResultRepository, RunRepository, SecretRepository, SuiteRunRepository } from "@platform/db";
 import { TEST_TENANT_ID } from "@platform/db/testing";
 import { encryptSecret } from "@platform/security";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -41,12 +41,13 @@ const requirement = (runId: string): NormalizedRequirement => ({
 });
 
 /** A queued manual rerun, as the API creates it: copies of the source's requirement and saved test. */
-async function queuedRerun(secrets: Record<string, string> = {}) {
+async function queuedRerun(secrets: Record<string, string> = {}, suiteRunId?: string) {
   const runs = new RunRepository(h.tdb.db);
   const run = await runs.create({
     tenantId: TEST_TENANT_ID,
     targetUrl: "https://shop.example.com",
     request: { ...request({}, Object.keys(secrets)), rerunOf: "run_source" },
+    ...(suiteRunId ? { suiteRunId } : {}),
   });
   await new SecretRepository(h.tdb.db).insertMany(
     run.id,
@@ -97,6 +98,16 @@ describe("rerun-run (V1.1 F5)", () => {
     await rerunRunJob(h.deps(createFakeStages()), plain.id);
     expect((await runs.getById(plain.id)).lifecycle).toBe("QUEUED");
     await rerunRunJob(h.deps(createFakeStages()), "run_missing");
+  });
+
+  it("settles its suite run when it is the last child to end (V1.2 F1)", async () => {
+    const suiteRuns = new SuiteRunRepository(h.tdb.db);
+    const suiteRun = await suiteRuns.create({ tenantId: TEST_TENANT_ID, suiteId: "ste_x", suiteName: "Smoke", trigger: "manual", ownerUserId: null });
+    const [first, second] = [await queuedRerun({}, suiteRun.id), await queuedRerun({}, suiteRun.id)];
+    await rerunRunJob(h.deps(createFakeStages()), first.id);
+    expect(await suiteRuns.findById(suiteRun.id)).toMatchObject({ status: "RUNNING", verdict: null });
+    await rerunRunJob(h.deps(createFakeStages()), second.id);
+    expect(await suiteRuns.findById(suiteRun.id)).toMatchObject({ status: "COMPLETED", verdict: "PASSED" });
   });
 
   it("a cancel request before the rerun ends the run CANCELLED", async () => {

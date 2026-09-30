@@ -88,7 +88,7 @@ export const TestDataRecordSchema = z
 export const SavedRefSchema = z.object({ id: z.string(), name: z.string() });
 export type SavedRef = z.infer<typeof SavedRefSchema>;
 
-const SavedIdSchema = z.string().trim().min(1).max(100);
+export const SavedIdSchema = z.string().trim().min(1).max(100);
 
 /** At most this many secrets per run (the run's own plus a saved profile's, merged). */
 export const MAX_SECRETS = 10;
@@ -249,6 +249,8 @@ export const TestRunSummarySchema = z.object({
   sourceRunId: z.string().nullable(),
   /** The secret names the run uses (never values): what a manual rerun must be given again. */
   secretNames: z.array(z.string()),
+  /** The suite run this run belongs to (V1.2 F1); null for a run started on its own. */
+  suiteRunId: z.string().nullable().default(null),
 });
 export type TestRunSummary = z.infer<typeof TestRunSummarySchema>;
 

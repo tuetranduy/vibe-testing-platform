@@ -1,4 +1,4 @@
-import { EventRepository, RunRepository, SecretRepository, StaleTransitionError, type Database, type TestRun } from "@platform/db";
+import { EventRepository, RunRepository, SecretRepository, StaleTransitionError, SuiteRunRepository, type Database, type TestRun } from "@platform/db";
 import { redactByKey } from "@platform/security";
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import type { Redis } from "ioredis";
@@ -69,6 +69,8 @@ export interface ReapResult {
   confirmationExpired: string[];
   selectionExpired: string[];
   secretsPurged: string[];
+  /** Suite runs whose last child had ended without settling them (V1.2 F1). */
+  suiteRunsSettled: string[];
 }
 
 /** `runs_reaped_total` reason of each category the reaper errors a run with. */
@@ -81,6 +83,7 @@ const REAPED_REASON = { WORKER_LOST: "WORKER_LOST", TIMEOUT: "TIMEOUT", INTERNAL
  *  - AWAITING_CONFIRMATION past CONFIRMATION_TTL_HOURS → CANCELLED / CONFIRMATION_EXPIRED
  *  - AWAITING_SELECTION past CONFIRMATION_TTL_HOURS → CANCELLED / SELECTION_EXPIRED
  *  - purge secrets of terminal runs (safety net)
+ *  - settle suite runs whose children have all ended (the worker settles them too; this covers a crash between)
  * Losing a CAS race to a live worker is expected and ignored.
  */
 export async function reapRuns(deps: ReaperDeps): Promise<ReapResult> {
@@ -93,7 +96,7 @@ export async function reapRuns(deps: ReaperDeps): Promise<ReapResult> {
     redact: redactByKey,
     logger: deps.logger,
   });
-  const result: ReapResult = { workerLost: [], timedOut: [], neverStarted: [], confirmationExpired: [], selectionExpired: [], secretsPurged: [] };
+  const result: ReapResult = { workerLost: [], timedOut: [], neverStarted: [], confirmationExpired: [], selectionExpired: [], secretsPurged: [], suiteRunsSettled: [] };
 
   // Each run is counted as soon as it is ended, so a pass that fails later still counts it.
   const errorRun = async (run: TestRun, category: keyof typeof REAPED_REASON, message: string) => {
@@ -188,6 +191,15 @@ export async function reapRuns(deps: ReaperDeps): Promise<ReapResult> {
 
   for (const runId of await secrets.findTerminalRunIdsWithActiveSecrets()) {
     if ((await secrets.purge(runId)) > 0) result.secretsPurged.push(runId);
+  }
+
+  const suiteRuns = new SuiteRunRepository(deps.db);
+  for (const suiteRun of await suiteRuns.findRunningSince(now)) {
+    try {
+      if (await suiteRuns.settle(suiteRun.id)) result.suiteRunsSettled.push(suiteRun.id);
+    } catch (err) {
+      deps.logger.error({ err, suiteRunId: suiteRun.id }, "reaper failed on suite run");
+    }
   }
   return result;
 }

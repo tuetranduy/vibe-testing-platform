@@ -15,7 +15,20 @@ import {
   TestReportSchema,
   TestRunListResponseSchema,
   TestRunSummarySchema,
+  RunSuiteResponseSchema,
+  SuiteDetailSchema,
+  SuiteListSchema,
+  SuiteRunListSchema,
+  SuiteRunViewSchema,
   type ApiError,
+  type AddSuiteEntryRequest,
+  type RunSuiteRequestInput,
+  type RunSuiteResponse,
+  type SuiteDetail,
+  type SuiteInput,
+  type SuiteRunBrief,
+  type SuiteRunView,
+  type SuiteView,
   type CreateTestRunRequestInput,
   type CreateTestRunResponse,
   type RerunRequestInput,
@@ -254,3 +267,41 @@ export const saveProviderKey = (provider: LlmKeyProvider, apiKey: string | null)
 /** Prefer `fetchArtifactUrl` (lib/artifacts.ts), which applies the reveal rule. */
 export const getArtifactUrl = (runId: string, artifactId: string, reveal: boolean): Promise<ArtifactUrl> =>
   request(ArtifactUrlSchema, `${runPath(runId)}/artifacts/${seg(artifactId)}/url${reveal ? "?reveal=true" : ""}`);
+
+const SUITES = "/api/v1/suites";
+const SUITE_RUNS = "/api/v1/suite-runs";
+
+/** Suites (V1.2): saved Playwright tests that run together, with no AI. */
+export const listSuites = async (): Promise<SuiteView[]> => (await request(SuiteListSchema, SUITES)).items;
+
+export const getSuite = (suiteId: string): Promise<SuiteDetail> => request(SuiteDetailSchema, `${SUITES}/${seg(suiteId)}`);
+
+export const createSuite = (body: SuiteInput): Promise<SuiteDetail> => request(SuiteDetailSchema, SUITES, { method: "POST", body });
+
+export const updateSuite = (suiteId: string, body: SuiteInput): Promise<SuiteDetail> =>
+  request(SuiteDetailSchema, `${SUITES}/${seg(suiteId)}`, { method: "PUT", body });
+
+export const deleteSuite = async (suiteId: string): Promise<void> => {
+  await request(NoContentSchema, `${SUITES}/${seg(suiteId)}`, { method: "DELETE" });
+};
+
+export const addSuiteEntry = (suiteId: string, body: AddSuiteEntryRequest): Promise<SuiteDetail> =>
+  request(SuiteDetailSchema, `${SUITES}/${seg(suiteId)}/entries`, { method: "POST", body });
+
+export const removeSuiteEntry = async (suiteId: string, sourceRunId: string): Promise<void> => {
+  await request(NoContentSchema, `${SUITES}/${seg(suiteId)}/entries/${seg(sourceRunId)}`, { method: "DELETE" });
+};
+
+export const reorderSuiteEntries = (suiteId: string, sourceRunIds: string[]): Promise<SuiteDetail> =>
+  request(SuiteDetailSchema, `${SUITES}/${seg(suiteId)}/entries/order`, { method: "PUT", body: { sourceRunIds } });
+
+export const runSuite = (suiteId: string, body: RunSuiteRequestInput, idempotencyKey: string): Promise<RunSuiteResponse> =>
+  request(RunSuiteResponseSchema, `${SUITES}/${seg(suiteId)}/runs`, { method: "POST", body, headers: { "idempotency-key": idempotencyKey } });
+
+export const listSuiteRuns = async (suiteId: string): Promise<SuiteRunBrief[]> =>
+  (await request(SuiteRunListSchema, `${SUITES}/${seg(suiteId)}/runs?limit=20`)).items;
+
+export const getSuiteRun = (suiteRunId: string): Promise<SuiteRunView> => request(SuiteRunViewSchema, `${SUITE_RUNS}/${seg(suiteRunId)}`);
+
+export const cancelSuiteRun = (suiteRunId: string): Promise<SuiteRunView> =>
+  request(SuiteRunViewSchema, `${SUITE_RUNS}/${seg(suiteRunId)}/cancel`, { method: "POST" });

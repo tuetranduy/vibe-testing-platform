@@ -16,11 +16,12 @@ function currentLinks() {
 }
 
 describe("AppNav", () => {
-  it("links Test runs, Usage, Settings and New test, in that order", () => {
+  it("links Test runs, Suites, Usage, Settings and New test, in that order", () => {
     pathname = "/runs";
     render(<AppNav />);
     expect(screen.getAllByRole("link").map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
       ["Test runs", "/runs"],
+      ["Suites", "/suites"],
       ["Usage", "/usage"],
       ["Settings", "/settings"],
       ["New test", "/runs/new"],
@@ -34,6 +35,9 @@ describe("AppNav", () => {
     ["/settings", ["Settings"]],
     ["/settings/users", ["Settings"]],
     ["/usage", ["Usage"]],
+    ["/suites", ["Suites"]],
+    ["/suites/ste_1", ["Suites"]],
+    ["/suite-runs/srn_1", ["Suites"]],
     ["/somewhere-else", []],
   ])("on %s marks %j as the current page", (path, expected) => {
     pathname = path;
