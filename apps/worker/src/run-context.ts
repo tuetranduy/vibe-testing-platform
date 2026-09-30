@@ -1,6 +1,7 @@
 import { isTerminalLifecycle, type LlmChoice } from "@platform/contracts";
 import {
   EventRepository,
+  GeneratedTestRepository,
   PlanRepository,
   RequirementRepository,
   ResultRepository,
@@ -40,11 +41,19 @@ export interface RunContextHandle {
 export async function createRunContext(
   deps: WorkerDeps,
   run: TestRun,
-  opts: { deadlineAt: Date; totalBudgetMs: number },
+  opts: {
+    deadlineAt: Date;
+    totalBudgetMs: number;
+    /** A manual rerun (V1.1 F5): no model client at all. */
+    withoutModel?: boolean;
+    /** Replaces the default split of `totalBudgetMs` (exploration 60 %, rerun 25 %). */
+    budgets?: StageContext["budgets"];
+  },
 ): Promise<RunContextHandle> {
   // The run's model client, from its recorded choice. A missing or unreadable provider key fails here, before
   // anything starts: the job ends the run ERRORED / MODEL_PROVIDER with the message naming the fix (finish.ts).
-  const { choice, llm } = await deps.runLlm.forRun(run);
+  // A manual rerun makes no model call, so it builds no client (a removed key never stops it).
+  const { choice, llm } = opts.withoutModel ? { choice: deps.runLlm.choiceOf(run), llm: null } : await deps.runLlm.forRun(run);
   const now = deps.now ?? (() => new Date());
   const runs = new RunRepository(deps.db);
   const controller = new AbortController();
@@ -87,7 +96,7 @@ export async function createRunContext(
     request: run.request,
     signal: controller.signal,
     deadlineAt: opts.deadlineAt,
-    budgets: { explorationMs: Math.floor(opts.totalBudgetMs * 0.6), rerunMs: Math.floor(opts.totalBudgetMs * 0.25) },
+    budgets: opts.budgets ?? { explorationMs: Math.floor(opts.totalBudgetMs * 0.6), rerunMs: Math.floor(opts.totalBudgetMs * 0.25) },
     secrets: {
       names: [...secretValues.keys()],
       get: (name) => secretValues.get(name),
@@ -139,6 +148,11 @@ export async function createRunContext(
       if (disagreements > 0) deps.metrics?.reconciliationDisagreements.inc(disagreements);
     },
     enqueueExecute: () => deps.queue.enqueueExecute(run.id),
+    async getGeneratedTest() {
+      const test = await new GeneratedTestRepository(deps.db).findByRun(run.id);
+      if (!test) throw new ContractError("A rerun without a generated test");
+      return test;
+    },
     saveSuggestions: (draft) => new SuggestionRepository(deps.db).save(run.id, draft),
   };
 

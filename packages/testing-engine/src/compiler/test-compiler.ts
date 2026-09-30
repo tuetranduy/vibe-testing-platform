@@ -3,6 +3,7 @@ import {
   SecretNameSchema,
   URL_FACT_KEY,
   factRefsOf,
+  stepScenario,
   type AcceptanceCriterion,
   type ElementRef,
   type ExplorationStep,
@@ -58,6 +59,12 @@ import { SourceWriter, ident, lit, member } from "./source-builder";
  * INCONCLUSIVE, a fact that is missing, MODEL_EXTRACTED, read in a mode the assertion cannot replay,
  * or captured off the replayed flow, and anything behind a golden step the test cannot replay.
  *
+ * Several scenarios (V1.1 F9): one `test()` per scenario with compiled criteria, in plan order, each
+ * replaying that scenario's golden steps from `data.targetUrl` in Playwright's fresh context (the executor
+ * started each scenario from a cleared session), so a hard failure in one never hides another's criteria.
+ * A criterion whose facts were captured in different scenarios is not compiled. One scenario compiles to
+ * the single `test("discovered flow", …)` it always did.
+ *
  * D11: the source holds only compiler-chosen identifiers, schema-validated criterion ids, allow-listed
  * ARIA roles and fixed template text; every string literal goes through `lit` (JSON.stringify).
  * Page text, test data, literal inputs, URLs and criterion text are referenced as `data.<path>`;
@@ -97,12 +104,15 @@ interface FactRead {
   kind: ReadKind;
   /** The recorded candidate (null for `url`). */
   candidate: LocatorCandidate | null;
-  /** Golden-path position of the checkpoint the fact was captured at. */
+  /** Golden-path position (within its scenario) of the checkpoint the fact was captured at. */
   position: number;
+  scenario: string;
 }
 
 interface CriterionPlan {
   criterion: AcceptanceCriterion;
+  /** The scenario whose flow asserts it. */
+  scenario: string;
   /** Golden-path position of the latest checkpoint the criterion references: where it is asserted. */
   position: number;
   /** One per FactRef, in `factRefsOf` order. Those at `position` are re-read until they match. */
@@ -163,12 +173,13 @@ export function compilePlaywrightTest(input: CompileTestInput): CompiledTest {
 }
 
 class Compiler {
-  private readonly golden: ExplorationStep[];
+  /** Each scenario's golden path, in index order; scenarios in plan order. */
+  private readonly golden = new Map<string, ExplorationStep[]>();
   private readonly plannedKind: Map<string, PlannedStep["kind"]>;
-  /** Golden position of each checkpoint step, by step id. */
-  private readonly checkpointAt = new Map<string, number>();
-  /** Why a golden step cannot be replayed, by golden position. */
-  private readonly problems = new Map<number, string>();
+  /** Scenario and golden position of each checkpoint step, by step id. */
+  private readonly checkpointAt = new Map<string, { scenario: string; position: number }>();
+  /** Why a golden step cannot be replayed, by `scenario#position`. */
+  private readonly problems = new Map<string, string>();
 
   private readonly data: RunData;
   private readonly locatorKeys = new Map<string, string>();
@@ -177,14 +188,20 @@ class Compiler {
   private readonly factVars = new Map<string, string>();
 
   constructor(private readonly input: CompileTestInput) {
-    this.golden = [...input.steps].filter((s) => s.onGoldenPath && s.outcome === "SUCCESS").sort((a, b) => a.index - b.index);
+    for (const s of input.plan.scenarios) this.golden.set(s.id, []);
+    for (const step of [...input.steps].filter((s) => s.onGoldenPath && s.outcome === "SUCCESS").sort((a, b) => a.index - b.index)) {
+      const scenario = stepScenario(step);
+      this.golden.set(scenario, [...(this.golden.get(scenario) ?? []), step]);
+    }
     this.plannedKind = new Map(input.plan.scenarios.flatMap((s) => s.steps).map((s) => [s.id, s.kind]));
     this.data = { targetUrl: input.targetUrl, urls: {}, locators: {}, inputs: {}, criteria: {} };
-    this.golden.forEach((step, position) => {
-      if (step.kind === "checkpoint") this.checkpointAt.set(step.id, position);
-      const problem = this.stepProblem(step, position);
-      if (problem) this.problems.set(position, `step ${step.index} ${problem}`);
-    });
+    for (const [scenario, golden] of this.golden) {
+      golden.forEach((step, position) => {
+        if (step.kind === "checkpoint") this.checkpointAt.set(step.id, { scenario, position });
+        const problem = this.stepProblem(step, position);
+        if (problem) this.problems.set(`${scenario}#${position}`, `step ${step.index} ${problem}`);
+      });
+    }
   }
 
   compile(): CompiledTest {
@@ -196,9 +213,16 @@ class Compiler {
       else plans.push(planned);
     }
 
-    const body = new SourceWriter();
-    if (plans.length > 0) this.emitFlow(body, plans);
-    const source = this.assemble(body);
+    // One test per scenario that asserts something, in plan order.
+    const bodies: { scenario: string; body: SourceWriter }[] = [];
+    for (const scenario of this.golden.keys()) {
+      const own = plans.filter((p) => p.scenario === scenario);
+      if (own.length === 0) continue;
+      const body = new SourceWriter();
+      this.emitFlow(body, scenario, own);
+      bodies.push({ scenario, body });
+    }
+    const source = this.assemble(bodies);
     assertSafeSource(source);
     return {
       source,
@@ -268,8 +292,9 @@ class Compiler {
       const fact = this.input.facts.findLast((f) => f.key === ref.key && f.checkpoint === ref.checkpoint);
       if (!fact) return `${label} was not recorded`;
       if (fact.provenance !== "DOM_VERIFIED") return `${label} was extracted by the model, not read from the page`;
-      const position = this.checkpointAt.get(fact.stepId);
-      if (position === undefined) return `${label} was not captured on the replayed flow`;
+      const where = this.checkpointAt.get(fact.stepId);
+      if (where === undefined) return `${label} was not captured on the replayed flow`;
+      const { position, scenario } = where;
       let kind: ReadKind;
       let candidate: LocatorCandidate | null = null;
       if (fact.key === URL_FACT_KEY) {
@@ -282,22 +307,24 @@ class Compiler {
         candidate = fact.read.element.candidates[fact.read.element.chosenIndex]!;
       }
       if (!allowed(path[0]!).includes(kind)) return `${label} was read as ${kind}, which this assertion cannot replay`;
-      reads.push({ ref, kind, candidate, position });
+      reads.push({ ref, kind, candidate, position, scenario });
     }
 
+    const scenario = reads[0]!.scenario;
+    if (reads.some((r) => r.scenario !== scenario)) return "Its facts were captured in different scenarios";
     const position = Math.max(...reads.map((r) => r.position));
     for (let p = 0; p < position; p++) {
-      const problem = this.problems.get(p);
+      const problem = this.problems.get(`${scenario}#${p}`);
       if (problem) return `The discovered flow cannot be replayed: ${problem}`;
     }
-    return { criterion, position, reads };
+    return { criterion, scenario, position, reads };
   }
 
   // -------------------------------------------------------------------------------------------
   // Emission
   // -------------------------------------------------------------------------------------------
 
-  private emitFlow(w: SourceWriter, plans: CriterionPlan[]): void {
+  private emitFlow(w: SourceWriter, scenario: string, plans: CriterionPlan[]): void {
     const cutoff = Math.max(...plans.map((p) => p.position));
     // Facts read into variables at their own checkpoint: those of a checkpoint before the criterion's.
     // Facts at the criterion's own checkpoint are re-read inside its poll (the page may still be updating).
@@ -313,7 +340,7 @@ class Compiler {
 
     w.line("await page.goto(data.targetUrl);");
     let checkpoints = 0;
-    this.golden.forEach((step, position) => {
+    (this.golden.get(scenario) ?? []).forEach((step, position) => {
       if (position > cutoff) return;
       switch (step.kind) {
         case "navigate":
@@ -341,7 +368,7 @@ class Compiler {
     });
   }
 
-  private assemble(body: SourceWriter): string {
+  private assemble(bodies: { scenario: string; body: SourceWriter }[]): string {
     const w = new SourceWriter();
     w.comment("Generated by the AI testing platform from a discovered flow. Do not edit.");
     w.comment("Values live in run-data.json; secrets are read from SECRET_* environment variables.");
@@ -351,10 +378,17 @@ class Compiler {
     w.line();
     w.line("const softExpect = expect.configure({ soft: true });");
     w.line();
-    const inner = body.toString().trimEnd();
-    w.block(`test(${lit("discovered flow")}, async ({ page }) => {`, () => {
-      for (const line of inner.split("\n")) w.line(line);
-    }, "});");
+    const several = bodies.length > 1 || (bodies.length === 1 && this.golden.size > 1);
+    bodies.forEach(({ scenario, body }, i) => {
+      if (i > 0) w.line();
+      const inner = body.toString().trimEnd();
+      const title = several ? `scenario ${scenario}` : "discovered flow";
+      w.block(`test(${lit(title)}, async ({ page }) => {`, () => {
+        for (const line of inner.split("\n")) w.line(line);
+      }, "});");
+    });
+    // Nothing compiled: still a valid (empty) test file.
+    if (bodies.length === 0) w.block(`test(${lit("discovered flow")}, async ({ page }) => {`, () => {}, "});");
     return w.toString();
   }
 

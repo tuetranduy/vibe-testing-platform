@@ -17,10 +17,18 @@ export const PlannerStepOutputSchema = z.object({
 });
 export type PlannerStepOutput = z.infer<typeof PlannerStepOutputSchema>;
 
-/** What the model returns: the single scenario's title and steps, plus stop conditions. */
-export const PlannerOutputSchema = z.object({
+export const MAX_SCENARIOS = 5;
+
+/** One scenario as the model returns it: a title and its steps (it starts from a clean session at the target). */
+export const PlannerScenarioOutputSchema = z.object({
   title: z.string().min(1).max(200),
   steps: z.array(PlannerStepOutputSchema).min(1).max(MAX_PLANNED_STEPS),
+});
+export type PlannerScenarioOutput = z.infer<typeof PlannerScenarioOutputSchema>;
+
+/** What the model returns (V1.1 F9): 1–5 scenarios, plus stop conditions shared by all of them. */
+export const PlannerOutputSchema = z.object({
+  scenarios: z.array(PlannerScenarioOutputSchema).min(1).max(MAX_SCENARIOS),
   stopConditions: z.array(z.string().max(300)).max(10),
 });
 export type PlannerOutput = z.infer<typeof PlannerOutputSchema>;

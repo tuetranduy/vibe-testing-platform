@@ -9,10 +9,21 @@ import {
   type LlmOverride,
   type LlmSettingsView,
   type ReasoningLevel,
+  type CredentialProfile,
+  type TestDataSet,
 } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ApiRequestError, createRun, getCriteria, getLlmSettings, getRun, getSuggestions } from "../lib/api";
+import {
+  ApiRequestError,
+  createRun,
+  getCriteria,
+  getLlmSettings,
+  getRun,
+  getSuggestions,
+  listCredentialProfiles,
+  listTestDataSets,
+} from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
 import { Icon, type IconName } from "./Icon";
 import { LEVEL_LABEL } from "./llm-format";
@@ -38,6 +49,7 @@ interface Options {
   allowDestructiveActions: boolean;
   confirmProductionHost: string;
   additionalAllowedHosts: string;
+  useExplorationCache: boolean;
 }
 type Errors = Record<string, string>;
 interface Banner {
@@ -57,6 +69,7 @@ const DEFAULT_OPTIONS: Options = {
   allowDestructiveActions: false,
   confirmProductionHost: "",
   additionalAllowedHosts: "",
+  useExplorationCache: true,
 };
 
 const MSG = {
@@ -79,6 +92,8 @@ const fid = {
   secretValue: (id: number) => `secret-${id}-value`,
   option: (name: string) => `options-${name}`,
   llm: (name: "model" | "reasoning") => `llm-${name}`,
+  testDataSet: "testDataSetId",
+  credentialProfile: "credentialProfileId",
 };
 
 /** The URL's host as the API compares it (lowercase, with a non-default port), or null while the URL is invalid. */
@@ -153,6 +168,8 @@ function build(
       generatePlaywright: options.generatePlaywright,
       rerunGeneratedTest: options.generatePlaywright && options.rerunGeneratedTest,
       autoConfirmCriteria: options.autoConfirmCriteria,
+      // Sent only when turned off: absent means on (V1.1).
+      ...(options.useExplorationCache ? {} : { useExplorationCache: false }),
       allowDestructiveActions: options.allowDestructiveActions,
       // Only sent when there is a non-empty value to confirm: a valid URL with an empty value is
       // already refused above, and an empty string here would otherwise surface the contract's raw
@@ -203,7 +220,7 @@ function issuesToErrors(err: ApiRequestError): Errors {
   const errors: Errors = {};
   for (const issue of err.issues ?? []) {
     const [head, name] = issue.path;
-    if (head === "targetUrl" || head === "requirement") errors[head] = issue.message;
+    if (head === "targetUrl" || head === "requirement" || head === "testDataSetId" || head === "credentialProfileId") errors[head] = issue.message;
     else if (head === "options" && typeof name === "string") errors[fid.option(name)] = issue.message;
   }
   return errors;
@@ -265,6 +282,26 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const [llmModel, setLlmModel] = useState("");
   const [llmReasoning, setLlmReasoning] = useState<ReasoningLevel | "">("");
   const [catalog, setCatalog] = useState<Catalog>({ status: "loading" });
+  /** Saved test data sets (V1.1): offered only once loaded; a failed load just hides the choice. */
+  const [dataSets, setDataSets] = useState<TestDataSet[]>([]);
+  const [dataSetId, setDataSetId] = useState("");
+  /** Saved credentials (V1.1): names only; likewise hidden when they can't be loaded. */
+  const [profiles, setProfiles] = useState<CredentialProfile[]>([]);
+  const [profileId, setProfileId] = useState("");
+  useEffect(() => {
+    let live = true;
+    listTestDataSets().then(
+      (sets) => live && setDataSets(sets),
+      () => {},
+    );
+    listCredentialProfiles().then(
+      (ps) => live && setProfiles(ps),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
   useEffect(() => {
     let live = true;
     getLlmSettings().then(
@@ -334,6 +371,8 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
     const { errors: errs, body } = build(targetUrl, requirement, environment, data, secrets, options);
     const llm = llmOverride(llmModel, llmReasoning);
     if (llm) body.llm = llm;
+    if (dataSetId) body.testDataSetId = dataSetId;
+    if (profileId) body.credentialProfileId = profileId;
     setErrors(errs);
     setBanner(null);
     if (Object.keys(errs).length > 0) {
@@ -385,7 +424,10 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
         }
       } else if (err.code === "TOO_MANY_ACTIVE_RUNS") {
         setBanner({ title: "Can't start another run yet", message: `${err.message}. You can cancel a run or try again later.` });
-      } else if (err.code === "VALIDATION_FAILED" && Object.keys(issuesToErrors(err)).length > 0) {
+      } else if (
+        ["VALIDATION_FAILED", "TEST_DATA_SET_NOT_FOUND", "CREDENTIAL_PROFILE_NOT_FOUND", "CREDENTIAL_PROFILE_UNREADABLE"].includes(err.code) &&
+        Object.keys(issuesToErrors(err)).length > 0
+      ) {
         const next = issuesToErrors(err);
         setErrors(next);
         focusFirstError(next);
@@ -405,6 +447,8 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
     ) : null;
 
   const dataCount = data.filter((r) => r.key.trim() || r.value).length;
+  const dataSet = dataSets.find((s) => s.id === dataSetId);
+  const profile = profiles.find((p) => p.id === profileId);
   const secretCount = secrets.filter((r) => r.name.trim()).length;
 
   /** Fills the requirement from an example; focus moves to it, since the example buttons go away. */
@@ -533,8 +577,33 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
           icon="data"
           title="Test data"
           description="Values the test may type, such as a search term. Empty rows are ignored."
-          summary={dataCount === 0 ? "None" : plural(dataCount, "value")}
+          summary={[dataSet?.name, dataCount === 0 ? (dataSet ? null : "None") : plural(dataCount, "value")].filter(Boolean).join(" + ")}
         >
+          {dataSets.length > 0 && (
+            <div className="field saved-picker">
+              <label htmlFor={fid.testDataSet}>Saved test data set</label>
+              <select
+                id={fid.testDataSet}
+                value={dataSetId}
+                onChange={(e) => setDataSetId(e.target.value)}
+                aria-invalid={errors[fid.testDataSet] ? true : undefined}
+                aria-describedby={`${fid.testDataSet}-hint${errors[fid.testDataSet] ? ` ${fid.testDataSet}-error` : ""}`}
+              >
+                <option value="">None</option>
+                {dataSets.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <p id={`${fid.testDataSet}-hint`} className="hint">
+                {dataSet
+                  ? `Adds ${Object.keys(dataSet.values).join(", ") || "no values"}. A value you enter below with the same key wins.`
+                  : "Start from values saved under Settings → Test data."}
+              </p>
+              {fieldError(fid.testDataSet)}
+            </div>
+          )}
           {data.map((row, i) => (
             <div key={row.id} className="row">
               <div className="row-cell">
@@ -588,8 +657,33 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
           icon="lock"
           title="Secrets"
           description="Credentials such as a password: encrypted, redacted from all output, deleted when the run ends."
-          summary={secretCount === 0 ? "None" : plural(secretCount, "secret")}
+          summary={[profile?.name, secretCount === 0 ? (profile ? null : "None") : plural(secretCount, "secret")].filter(Boolean).join(" + ")}
         >
+          {profiles.length > 0 && (
+            <div className="field saved-picker">
+              <label htmlFor={fid.credentialProfile}>Saved credentials</label>
+              <select
+                id={fid.credentialProfile}
+                value={profileId}
+                onChange={(e) => setProfileId(e.target.value)}
+                aria-invalid={errors[fid.credentialProfile] ? true : undefined}
+                aria-describedby={`${fid.credentialProfile}-hint${errors[fid.credentialProfile] ? ` ${fid.credentialProfile}-error` : ""}`}
+              >
+                <option value="">None</option>
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <p id={`${fid.credentialProfile}-hint`} className="hint">
+                {profile
+                  ? `Provides ${profile.secretNames.join(", ")}. A secret you enter below with the same name wins.`
+                  : "Use a test account saved under Settings → Credentials."}
+              </p>
+              {fieldError(fid.credentialProfile)}
+            </div>
+          )}
           <p className="hint">
             <Icon name="lock" /> Secrets are filled in by the platform, never by the AI.
           </p>
@@ -751,6 +845,14 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
           <label className="choice">
             <input
               type="checkbox"
+              checked={options.useExplorationCache}
+              onChange={(e) => setOption("useExplorationCache", e.target.checked)}
+            />
+            Reuse element lookups from earlier runs (faster and cheaper; each is checked against the page first)
+          </label>
+          <label className="choice">
+            <input
+              type="checkbox"
               checked={options.autoConfirmCriteria}
               onChange={(e) => setOption("autoConfirmCriteria", e.target.checked)}
             />
@@ -885,6 +987,7 @@ function optionsSummary(o: Options): string {
     !o.generatePlaywright ? "no Playwright test" : o.rerunGeneratedTest ? "rerun on" : "no rerun",
     o.autoConfirmCriteria ? "auto-confirm" : null,
     o.allowDestructiveActions ? "destructive allowed" : null,
+    o.useExplorationCache ? null : "no cache",
   ];
   return parts.filter(Boolean).join(" · ");
 }

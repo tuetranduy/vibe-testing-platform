@@ -64,6 +64,7 @@ const cartRequirement = () =>
           delta: 1,
         },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
       {
@@ -77,6 +78,7 @@ const cartRequirement = () =>
           match: "contains",
         },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
       {
@@ -85,6 +87,7 @@ const cartRequirement = () =>
         statement: "A checkout button is visible on the cart page",
         expectedOutcome: { kind: "visible", fact: { key: "checkoutButton", checkpoint: "cart_page" }, expected: true },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
       {
@@ -93,6 +96,7 @@ const cartRequirement = () =>
         statement: "The cart looks tidy",
         expectedOutcome: { kind: "semantic", description: "The cart looks tidy." },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
     ],
@@ -134,6 +138,7 @@ const loginRequirement = (preconditions: NormalizedRequirement["criteria"][numbe
         statement: "The order history is visible after login",
         expectedOutcome: { kind: "visible", fact: { key: "orderHistory", checkpoint: "orders_page" }, expected: true },
         preconditions: [{ kind: "authenticated", description: "User is logged in" }, ...preconditions],
+        critical: true,
         ambiguity: null,
       },
       {
@@ -142,6 +147,7 @@ const loginRequirement = (preconditions: NormalizedRequirement["criteria"][numbe
         statement: "The home page shows a banner",
         expectedOutcome: { kind: "visible", fact: { key: "banner", checkpoint: "home" }, expected: true },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
     ],
@@ -178,6 +184,7 @@ const deleteRequirement = () =>
         statement: "The settings page shows the account email",
         expectedOutcome: { kind: "visible", fact: { key: "accountEmail", checkpoint: "settings" }, expected: true },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
       {
@@ -186,6 +193,7 @@ const deleteRequirement = () =>
         statement: "A confirmation message is shown after deleting the account",
         expectedOutcome: { kind: "visible", fact: { key: "deletedMessage", checkpoint: "after_delete" }, expected: true },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
     ],
@@ -207,8 +215,20 @@ const deletePlan = (deleteStep = step("click", "Click the Delete account button"
   stopConditions: [],
 });
 
+/**
+ * Most fixtures are one scenario written as `{ title, steps, stopConditions }`; the model's output is
+ * `{ scenarios: [{ title, steps }], stopConditions }` (V1.1 F9), so such a reply is wrapped here.
+ */
+function asModelOutput(reply: FakeReply): FakeReply {
+  if (typeof reply !== "object" || !("json" in reply)) return reply;
+  const json = reply.json as Record<string, unknown> | null;
+  if (!json || typeof json !== "object" || !("steps" in json) || "scenarios" in json) return reply;
+  const { title, steps, stopConditions } = json;
+  return { ...reply, json: { scenarios: [{ title, steps }], stopConditions } };
+}
+
 function setup(...replies: FakeReply[]) {
-  const transport = new FakeTransport().enqueue(...replies);
+  const transport = new FakeTransport().enqueue(...replies.map(asModelOutput));
   const llm = new LlmClient({ transport, model: "claude-sonnet-5", sleep: async () => {} });
   return { transport, llm };
 }
@@ -642,6 +662,9 @@ function executionPorts(requirement: NormalizedRequirement) {
       results = r;
     },
     enqueueExecute: async () => {},
+    getGeneratedTest: async () => {
+      throw new Error("no generated test in this test");
+    },
     saveSuggestions: async () => {
       throw new Error("not used by these tests");
     },
@@ -689,3 +712,58 @@ describe("plan stage behind runExecution (real planner, fake later stages)", () 
     ]);
   });
 });
+
+describe("planTest with several scenarios (V1.1 F9)", () => {
+  /** AC-2 (the banner) checked signed out; AC-1 (order history) after logging in, in a scenario of its own. */
+  const twoScenarios = () => ({
+    scenarios: [
+      { title: "Visitor sees the banner", steps: [step("navigate", "Open the home page"), capture("home", ["AC-2"])] },
+      {
+        title: "Customer sees their orders",
+        steps: [
+          step("navigate", "Open the home page"),
+          step("click", "Open the login page"),
+          step("fill", "Enter the email address", { inputRef: { source: "testData", key: "email" } }),
+          step("fill", "Enter the password", { inputRef: { source: "secret", key: "password" } }),
+          step("login", "Submit the login form"),
+          step("click", "Open My orders"),
+          capture("orders_page", ["AC-1"]),
+        ],
+      },
+    ],
+    stopConditions: [],
+  });
+
+  it("numbers steps across the plan, gives each criterion its scenario, and blocks per scenario", async () => {
+    const { llm } = setup({ json: twoScenarios() });
+    const plan = await planTest(llm, input(loginRequirement(), { testDataKeys: ["email"] }));
+    expect(TestPlanSchema.parse(plan)).toEqual(plan);
+    expect(plan.scenarios.map((s) => [s.id, s.title, s.criterionIds, s.steps.map((x) => x.id)])).toEqual([
+      ["SC-1", "Visitor sees the banner", ["AC-2"], ["PS-1", "PS-2"]],
+      ["SC-2", "Customer sees their orders", ["AC-1"], ["PS-3", "PS-4", "PS-5", "PS-6", "PS-7", "PS-8", "PS-9"]],
+    ]);
+    // No password secret: only the signed-in scenario's criterion is blocked.
+    expect(plan.blockedCriteria.map((b) => [b.criterionId, b.reason])).toEqual([["AC-1", "MISSING_SECRET"]]);
+  });
+
+  it("asks for a correction when a criterion's checkpoints are split across scenarios, or a scenario serves nothing", async () => {
+    const split = {
+      scenarios: [
+        { title: "Before", steps: [step("navigate", "Open the shop"), step("search", "Search", { inputRef: { source: "literal", key: "iPhone" } }), step("click", "Open the result"), capture("before_add")] },
+        { title: "After", steps: [step("navigate", "Open the shop"), step("click", "Add to cart"), capture("after_add"), step("click", "Open the cart"), capture("cart_page")] },
+      ],
+      stopConditions: [],
+    };
+    const idle = { scenarios: [...(cartPlanAsScenarios().scenarios), { title: "Nothing", steps: [step("navigate", "Open the shop")] }], stopConditions: [] };
+    const { llm, transport } = setup({ json: split }, { json: idle }, { json: idle });
+    await expect(planTest(llm, input(cartRequirement()))).rejects.toThrow(/serves no criterion/);
+    const corrections = transport.requests.slice(1).map((r) => JSON.stringify(r.messages.at(-1)));
+    expect(corrections[0]).toContain("checkpoints before_add and after_add must be captured in the same scenario");
+    expect(corrections[0]).toContain("AC-2 reads checkpoints captured in different scenarios");
+  });
+});
+
+function cartPlanAsScenarios() {
+  const { title, steps, stopConditions } = cartPlan();
+  return { scenarios: [{ title, steps }], stopConditions };
+}

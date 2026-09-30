@@ -248,6 +248,12 @@ export function RunView({ runId }: { runId: string }) {
                 <span className="visually-hidden">Website: </span>
                 {displayUrl(summary.targetUrl)}
               </span>
+              {summary.kind === "rerun" && summary.sourceRunId && (
+                <a className="meta-chip" href={`/runs/${encodeURIComponent(summary.sourceRunId)}`}>
+                  <Icon name="restart" />
+                  Rerun of an earlier run
+                </a>
+              )}
               {summary.allowDestructiveActions && (
                 <span className={`meta-chip ${summary.environment === "production" ? "meta-chip-danger" : "meta-chip-warning"}`}>
                   <Icon name="warning" />
@@ -381,6 +387,8 @@ export function RunView({ runId }: { runId: string }) {
           <RunReport
             runId={runId}
             llm={summary.llm}
+            secretNames={summary.secretNames}
+            destructive={summary.allowDestructiveActions}
             artifacts={progress.artifacts}
             steps={progress.steps}
             cancelReason={progress.outcome?.kind === "cancelled" ? progress.outcome.reason : summary.cancelReason}

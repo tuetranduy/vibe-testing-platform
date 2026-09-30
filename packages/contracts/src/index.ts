@@ -1,5 +1,8 @@
 export * from "./common";
 export * from "./llm";
+export * from "./users";
+export * from "./saved-data";
+export * from "./usage";
 export * from "./run";
 export * from "./requirement";
 export * from "./describe-outcome";
@@ -9,4 +12,5 @@ export * from "./exploration";
 export * from "./results";
 export * from "./events";
 export * from "./report";
+export * from "./report-text";
 export * from "./engine-errors";

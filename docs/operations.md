@@ -37,6 +37,36 @@ run's model client from the key saved in Settings or its own environment key. If
 accepted and then end `ERRORED / MODEL_PROVIDER` ("No API key for Anthropic: add one in Settings"). Keys saved in
 Settings avoid the question: both read them from the database.
 
+## Users and sign-in (V1.1)
+
+The web app requires sign-in. Accounts live in PostgreSQL (`users`, scrypt password hashes); a sign-in opens a
+session whose token the web server keeps in an httpOnly cookie (`platform_session`, `SameSite=Lax`, `Secure` over
+https) and forwards to the API as `X-Session-Token`. Only a SHA-256 of the token is stored (`user_sessions`).
+
+- **First administrator.** Set `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` on the API: while the tenant
+  has no user at all, the API creates that administrator at start. Production refuses the example password
+  (`admin-password-change-me`). After that, administrators add people under **Settings → Users**; the variables
+  can stay set (they do nothing once a user exists) or be removed.
+- **Roles.** Members see and act on their own runs only (others' runs answer 404). Administrators see everyone's
+  runs, and manage users, AI model settings, saved credentials and the exploration cache. The tenant always keeps
+  one enabled administrator.
+- **Sessions.** `SESSION_TTL_HOURS` (default 12) from sign-in, not sliding. Signing out, a password change (the
+  user's other sessions), a reset by an administrator and disabling an account end sessions at once.
+- **Failed sign-ins.** 10 per e-mail address in 15 minutes, then `429` for the rest of the window (a Redis counter,
+  shared by every API instance).
+- **The service token.** `API_TOKEN` still authenticates every API call (the web server holds it). A call with
+  no session header acts as the service: unrestricted, like V1. Scripts and the E2E suite use it; never expose it.
+- **Audit.** `audit_events` records sign-ins (a failed one names a hash of the typed address, not the address),
+  sign-outs, user changes, settings changes, credential profile changes, cache clears and every reveal of a
+  secret-bearing artifact, with the user who did it.
+
+When the only administrator is locked out, promote another account in the database (the bootstrap variables only
+act while there is no user at all), then reset the administrator's password from Settings → Users:
+
+```sql
+UPDATE users SET role = 'admin', disabled_at = NULL WHERE email = 'someone@example.com';
+```
+
 ## Worker network policy
 
 Browsers reach targets only through the per-run egress proxy: exploration's Chromium runs with
@@ -174,6 +204,13 @@ stops after an hour, even in the middle of a store call that does not return ("r
 limit" in the log), and leaves the rest to the next pass; S3 calls also fail after 5 s without a connection or 30 s
 of silence. As a backstop, configure an S3 lifecycle rule that expires objects some time after the longest retention
 (e.g. 45 days).
+
+The same daily pass deletes exploration cache entries (V1.1, `exploration_cache`) no run has reused for 30 days.
+Entries hold selectors and accessible names, never page values; an administrator can clear a tenant's cache at
+once from Settings (`DELETE /v1/exploration-cache`, audited), e.g. after a site redesign.
+
+Saved test data sets and credential profiles (V1.1) are kept until someone deletes them. A run takes its own copy
+when it is created; a profile's copy is purged with the run's other secrets when the run ends.
 
 ## Release checks
 

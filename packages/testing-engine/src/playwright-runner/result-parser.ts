@@ -4,8 +4,9 @@ import { z } from "zod";
 import type { LocalArtifact } from "../evidence/collector";
 
 /**
- * Reads the JSON reporter's `results.json` (Task 17). The generated test has exactly one test; each
- * compiled criterion's assertions sit in `test.step("[AC-n] <statement>")` (Task 16). Outcomes are
+ * Reads the JSON reporter's `results.json` (Task 17). The generated file has one test per scenario (V1.1
+ * F9; one in most runs); each compiled criterion's assertions sit in `test.step("[AC-n] <statement>")` of
+ * one of them (Task 16). Each test is read on its own, and the run takes the worst of them. Outcomes are
  * keyed on that step TITLE, never on assertion messages (a matcher error, e.g. a null read, drops the
  * custom `[AC-n]` message):
  *
@@ -35,7 +36,10 @@ export class RunResultsError extends Error {
 export type TestStatus = "passed" | "failed" | "timedOut" | "interrupted" | "skipped";
 
 export interface ParsedRunResults {
-  /** The single test's status; null when no test ran (e.g. the spec failed to load). */
+  /**
+   * The worst test status (cut short, then failed, then passed); null when no test ran (e.g. the spec failed
+   * to load).
+   */
   testStatus: TestStatus | null;
   /** The test was cut short (its timeout, an interruption) rather than finishing on its own. */
   stopped: boolean;
@@ -131,66 +135,77 @@ export function parseRunResults(raw: string, opts: { compiledCriteria: string[];
   } catch (err) {
     throw new RunResultsError("The rerun's results.json could not be read", { cause: err });
   }
-  const tests = collectTests(report.suites);
-  if (tests.length > 1) throw new RunResultsError(`Expected one test in the rerun's results, found ${tests.length}`);
-  const result = tests[0]?.results.at(-1) ?? null;
+  const results = collectTests(report.suites).flatMap((t) => {
+    const last = t.results.at(-1);
+    return last ? [last] : [];
+  });
 
   const perCriterion: Record<string, RerunOutcome> = {};
   const errorText: Record<string, string> = {};
   const compiled = new Set(opts.compiledCriteria);
-  const cutShort = result?.status === "timedOut" || result?.status === "interrupted";
-  let stopped = cutShort;
-  let crashed = result?.errors.some((e) => WORKER_EXIT.test(e.message ?? "")) ?? false;
+  let stopped = false;
+  let crashed = false;
+  /** The error that stopped the first test that did not pass: why its later criteria were not reached. */
+  let stoppedBy: string | undefined;
 
-  // The [AC-n] steps that started, in order.
-  const started: { id: string; error: string | null; ended: boolean }[] = [];
-  const visit = (steps: JsonStep[]) => {
-    for (const step of steps) {
-      const id = STEP_TITLE.exec(step.title)?.[1];
-      if (id && compiled.has(id)) {
-        const ended = typeof step.duration === "number" && step.duration >= 0;
-        if (!started.some((s) => s.id === id)) started.push({ id, error: firstError(step), ended });
-      } else {
-        visit(step.steps ?? []);
+  for (const result of results) {
+    const cutShort = result.status === "timedOut" || result.status === "interrupted";
+    if (cutShort) stopped = true;
+    if (result.errors.some((e) => WORKER_EXIT.test(e.message ?? ""))) crashed = true;
+    if (result.status !== "passed") stoppedBy ??= result.errors.at(-1)?.message;
+
+    // This test's [AC-n] steps that started, in order.
+    const started: { id: string; error: string | null; ended: boolean }[] = [];
+    const visit = (steps: JsonStep[]) => {
+      for (const step of steps) {
+        const id = STEP_TITLE.exec(step.title)?.[1];
+        if (id && compiled.has(id)) {
+          const ended = typeof step.duration === "number" && step.duration >= 0;
+          if (!started.some((s) => s.id === id)) started.push({ id, error: firstError(step), ended });
+        } else {
+          visit(step.steps ?? []);
+        }
       }
-    }
-  };
-  visit(result?.steps ?? []);
+    };
+    visit(result.steps ?? []);
 
-  started.forEach(({ id, error, ended }, index) => {
-    // A step without its step-end never finished, whatever it recorded: not reached.
-    if (!ended) {
-      crashed = true;
-      return;
-    }
-    if (error === null) {
-      perCriterion[id] = "PASSED";
-      return;
-    }
-    // A step the test's timeout (or an interruption) cut short did not complete: not reached.
-    if (TEST_TIMEOUT.test(error) || (cutShort && index === started.length - 1)) {
-      stopped = true;
-      return;
-    }
-    perCriterion[id] = "ASSERTION_FAILED";
-    errorText[id] = cleanErrorText(error);
-  });
+    started.forEach(({ id, error, ended }, index) => {
+      // A step without its step-end never finished, whatever it recorded: not reached.
+      if (!ended) {
+        crashed = true;
+        return;
+      }
+      if (error === null) {
+        perCriterion[id] = "PASSED";
+        return;
+      }
+      // A step the test's timeout (or an interruption) cut short did not complete: not reached.
+      if (TEST_TIMEOUT.test(error) || (cutShort && index === started.length - 1)) {
+        stopped = true;
+        return;
+      }
+      perCriterion[id] = "ASSERTION_FAILED";
+      errorText[id] = cleanErrorText(error);
+    });
+  }
 
-  const stoppedBy = result?.errors.at(-1)?.message;
-  const launchFailure = result?.errors.find((e) => BROWSER_LAUNCH.test(e.message ?? ""))?.message;
+  const launchFailure = results.flatMap((r) => r.errors).find((e) => BROWSER_LAUNCH.test(e.message ?? ""))?.message;
   for (const id of opts.compiledCriteria) {
     if (perCriterion[id]) continue;
     perCriterion[id] = "NOT_REACHED";
     if (stoppedBy) errorText[id] = `Not reached: ${cleanErrorText(stoppedBy)}`.slice(0, MAX_ERROR_TEXT);
   }
 
+  const RANK: Record<TestStatus, number> = { passed: 0, skipped: 1, failed: 2, interrupted: 3, timedOut: 4 };
+  const testStatus = results.reduce<TestStatus | null>((worst, r) => (worst === null || RANK[r.status] > RANK[worst] ? r.status : worst), null);
+
   return {
-    testStatus: result?.status ?? null,
+    testStatus,
     stopped,
     crashed,
     perCriterion,
     errorText,
-    artifacts: result ? artifactsOf(result, opts.workspaceDir) : [],
+    artifacts: results.flatMap((r) => artifactsOf(r, opts.workspaceDir)),
     runErrors: report.errors.map((e) => cleanErrorText(e.message ?? "Error")),
     launchError: launchFailure === undefined ? null : cleanErrorText(launchFailure),
   };

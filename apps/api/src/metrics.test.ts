@@ -52,6 +52,7 @@ describe("GET /metrics", () => {
           statement: "The cart shows the product",
           expectedOutcome: { kind: "text_matches", fact: { key: "cart", checkpoint: "after_add" }, match: { mode: "contains", value: "x", caseSensitive: false } },
           preconditions: [],
+          critical: true,
           ambiguity: null,
         },
       ],

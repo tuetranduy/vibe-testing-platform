@@ -297,6 +297,9 @@ function fakePorts() {
     savePlan: async () => {},
     saveResults: async () => {},
     enqueueExecute: async () => {},
+    getGeneratedTest: async () => {
+      throw new Error("no generated test in this test");
+    },
     saveSuggestions: async () => {
       throw new Error("not used by these tests");
     },

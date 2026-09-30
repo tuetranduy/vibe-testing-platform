@@ -14,6 +14,8 @@ export interface ReconcileExtras {
   relatedStepIds: string[];
   /** Semantic judge note (D3); never affects the status. */
   aiNote: string | null;
+  /** The criterion's weight (V1.1); absent: critical. Never affects the status, only the verdict. */
+  critical?: boolean;
 }
 
 const refKey = (ref: FactRef) => `${ref.key}@${ref.checkpoint}`;
@@ -55,6 +57,7 @@ export function reconcile(
     evidenceArtifactIds: extras.evidenceArtifactIds,
     relatedStepIds: extras.relatedStepIds,
     aiNote: extras.aiNote,
+    critical: extras.critical ?? true,
   });
 }
 

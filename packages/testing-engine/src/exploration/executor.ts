@@ -7,6 +7,7 @@ import {
   ObservedFactSchema,
   type ArtifactSensitivity,
   type BlockReason,
+  type CachedElement,
   type ElementRef,
   type ExplorationOutcome,
   type ExplorationStep,
@@ -32,11 +33,13 @@ import { z } from "zod";
 import type { StageContext } from "../orchestrator/stages";
 import { actionPolicyFor, isDestructiveStep } from "../shared/action-policy";
 import { captureFact, factFromReadings, modeForValueType, urlFact, type FactCaptureInput, type FactReadMode } from "./fact-reader";
+import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
 import { describeElement, fillElement, recordElement, selectElementOption } from "./recorder";
 
 /**
- * Exploration executor (Task 14): runs the confirmed plan's single scenario (D12) through an
- * `ExplorerSession` and records replayable `ExplorationStep`s and `ObservedFact`s.
+ * Exploration executor (Task 14): runs the confirmed plan's scenarios (V1.1 F9: in order, each from a clean
+ * session; see `execute`) through an `ExplorerSession` and records replayable `ExplorationStep`s and
+ * `ObservedFact`s.
  *
  * Planned step kind → what runs (and what is recorded):
  *
@@ -88,6 +91,13 @@ import { describeElement, fillElement, recordElement, selectElementOption } from
  *
  * Secrets (D7): every persisted row, published event, error text and every string passed to the
  * explorer goes through `ctx.redact` first; values are filled only by our recorder.
+ *
+ * Exploration cache (V1.1 F8, `deps.cache`): before an `observe`, the lookup of the same instruction on the
+ * same page (origin + path) from an earlier run is tried. It is reused only when its selector still
+ * resolves to an element whose chosen locator is the one recorded then; the step is recorded as an
+ * `observe` with `llm.cacheHit: true` and no tokens. The action policy checks the element either way. A new
+ * lookup is written only once the planned step that used it succeeded, so a failed, blocked or retried
+ * attempt never populates the cache. A failing cache is a miss.
  */
 
 /** Persistence ports (Ruling R12), implemented by the worker. Rows arrive validated and redacted. */
@@ -132,6 +142,28 @@ export interface ExplorationDeps {
   recorder?: RecorderPort;
   /** Delay between `wait_for` polls. */
   pollIntervalMs?: number;
+  /** Cached element lookups from earlier runs (V1.1 F8); absent: every lookup asks the explorer. */
+  cache?: ObserveCache;
+  /**
+   * Starts the next scenario from a clean session (V1.1 F9): cookies and the target origin's storage
+   * cleared. Default: the Playwright/CDP implementation (clearBrowserState).
+   */
+  resetSession?: (page: Page, targetUrl: string) => Promise<void>;
+}
+
+/**
+ * The default session reset between scenarios: every cookie, and the target origin's storage (local and
+ * session storage, IndexedDB, cache storage, service workers) through CDP. The next scenario's first step
+ * then loads the target in a fresh document.
+ */
+export async function clearBrowserState(page: Page, targetUrl: string): Promise<void> {
+  await page.context().clearCookies();
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send("Storage.clearDataForOrigin", { origin: new URL(targetUrl).origin, storageTypes: "all" });
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
 }
 
 const MAX_ATTEMPTS = 2; // one retry per planned step
@@ -251,6 +283,11 @@ class ExplorationRun {
   private readonly facts: ObservedFact[] = [];
   /** Steps of an execution in progress whose golden flag depends on its outcome (see `asOneExecution`). */
   private held: ExplorationStep[] | null = null;
+  /** The scenario being explored (V1.1 F9); recorded on each step when the plan has several. */
+  private scenarioId = "SC-1";
+  private readonly multiScenario: boolean;
+  /** New lookups of the planned step in progress, written to the cache only if it succeeds. */
+  private cacheWrites: { key: string; where: CacheWhere; entry: CachedElement }[] = [];
   private readonly session: ExplorerSession;
   private readonly recorder: RecorderPort;
   private readonly policy: ActionPolicy;
@@ -269,6 +306,7 @@ class ExplorationRun {
     this.policy = actionPolicyFor(request);
     this.sensitivity = ctx.secrets.names.length > 0 || request.secretNames.length > 0 ? "SECRET_BEARING" : "STANDARD";
     this.max = request.options.maxExplorationSteps;
+    this.multiScenario = input.plan.scenarios.length > 1;
     this.visibleFacts = new Set(
       input.requirement.criteria.flatMap((c) =>
         c.expectedOutcome.kind === "visible" ? [`${c.expectedOutcome.fact.key}@${c.expectedOutcome.fact.checkpoint}`] : [],
@@ -288,27 +326,63 @@ class ExplorationRun {
     }
   }
 
+  /**
+   * The plan's scenarios in order (V1.1 F9). A failed or blocked step ends its own scenario; the step
+   * limit and the budget end exploration (later scenarios get the same stop reason, unexplored). Every
+   * scenario after the first starts from a clean session. `stopReason` is the first scenario's that did not
+   * complete (COMPLETED when all did); `scenarioStops` gives each one's, when there are several.
+   */
   async execute(): Promise<ExplorationOutcome> {
-    let stopReason: ExplorationStopReason = "COMPLETED";
-    try {
-      const planned = this.input.plan.scenarios[0]?.steps ?? [];
-      const targetUrl = this.ctx.request.targetUrl;
-      const first = planned[0];
-      const firstUrl = first?.kind === "navigate" ? urlInDescription(first.description, targetUrl) : null;
-      const opensTarget = first?.kind === "navigate" && (firstUrl === null || sameUrl(firstUrl, targetUrl));
-
-      await this.ctx.boundary();
-      await this.withRetry(() => this.navigate(targetUrl, opensTarget ? first : null));
-      for (const step of planned.slice(opensTarget ? 1 : 0)) {
-        await this.ctx.boundary();
-        await this.executePlanned(step);
+    const scenarios = this.input.plan.scenarios;
+    const stops: Record<string, ExplorationStopReason> = {};
+    let exhausted: ExplorationStopReason | null = null;
+    for (const [i, scenario] of scenarios.entries()) {
+      this.scenarioId = scenario.id;
+      if (exhausted) {
+        stops[scenario.id] = exhausted;
+        continue;
       }
-    } catch (err) {
-      if (err instanceof Stop) stopReason = err.reason;
-      else if (this.ctx.signal.aborted) throw this.ctx.signal.reason;
-      else throw err;
+      try {
+        if (i > 0) await this.resetSession();
+        await this.exploreScenario(scenario.steps);
+        stops[scenario.id] = "COMPLETED";
+      } catch (err) {
+        if (!(err instanceof Stop)) {
+          if (this.ctx.signal.aborted) throw this.ctx.signal.reason;
+          throw err;
+        }
+        stops[scenario.id] = err.reason;
+        if (err.reason === "STEP_LIMIT_REACHED" || err.reason === "EXPLORATION_BUDGET_EXHAUSTED") exhausted = err.reason;
+      }
     }
-    return { steps: [...this.steps], facts: [...this.facts], stopReason };
+    const stopReason = scenarios.map((s) => stops[s.id]!).find((r) => r !== "COMPLETED") ?? "COMPLETED";
+    return { steps: [...this.steps], facts: [...this.facts], stopReason, ...(this.multiScenario ? { scenarioStops: stops } : {}) };
+  }
+
+  /** One scenario: its first action opens the target URL (see the header), then its planned steps. */
+  private async exploreScenario(planned: readonly PlannedStep[]): Promise<void> {
+    const targetUrl = this.ctx.request.targetUrl;
+    const first = planned[0];
+    const firstUrl = first?.kind === "navigate" ? urlInDescription(first.description, targetUrl) : null;
+    const opensTarget = first?.kind === "navigate" && (firstUrl === null || sameUrl(firstUrl, targetUrl));
+
+    await this.ctx.boundary();
+    await this.withRetry(() => this.navigate(targetUrl, opensTarget ? first : null));
+    for (const step of planned.slice(opensTarget ? 1 : 0)) {
+      await this.ctx.boundary();
+      await this.executePlanned(step);
+    }
+  }
+
+  /** Clears the browser session before a scenario; a failure is the browser's (the run errs, never guesses). */
+  private async resetSession(): Promise<void> {
+    await this.ctx.boundary();
+    try {
+      await (this.deps.resetSession ?? clearBrowserState)(this.page, this.ctx.request.targetUrl);
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      throw new BrowserProviderError("The browser session could not be cleared between scenarios", { cause: err });
+    }
   }
 
   // -------------------------------------------------------------------------------------------
@@ -355,10 +429,21 @@ class ExplorationRun {
   /** At most one retry; a planned step that still fails stops exploration. */
   private async withRetry(attempt: () => Promise<Attempt>): Promise<void> {
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
-      const result = await attempt();
-      if (result === "ok") return;
+      this.cacheWrites = [];
+      let result: Attempt;
+      try {
+        result = await attempt();
+      } catch (err) {
+        this.cacheWrites = [];
+        throw err;
+      }
+      if (result === "ok") {
+        await this.writeCache();
+        return;
+      }
       if (result === "final") break;
     }
+    this.cacheWrites = [];
     if (this.pageClosed()) throw new BrowserProviderError("The browser page closed during exploration");
     throw new Stop("COMPLETED");
   }
@@ -622,11 +707,27 @@ class ExplorationRun {
   // Building blocks
   // -------------------------------------------------------------------------------------------
 
-  /** `observe` → first element → ElementRef + accessibility facts. Recorded as an `observe` step. */
+  /**
+   * `observe` → first element → ElementRef + accessibility facts. Recorded as an `observe` step. With the
+   * cache, a verified earlier lookup replaces the `observe` (see the header).
+   */
   private async locate(step: PlannedStep, instruction: string): Promise<Located | null> {
     await this.reserve();
     const startedAt = this.ctx.now();
     const base = { plannedStepId: step.id, kind: "observe" as const, instruction, urlBefore: this.url(), startedAt };
+    const cacheAt = this.deps.cache ? observeCacheKey(this.url(), this.redactString(instruction)) : null;
+    if (cacheAt) {
+      const hit = await this.fromCache(cacheAt.key);
+      if (hit) {
+        await this.record({
+          ...base,
+          outcome: "SUCCESS",
+          element: hit.ref,
+          llm: { model: this.ctx.llm?.model ?? "cache", inputTokens: 0, outputTokens: 0, cacheHit: true },
+        });
+        return hit;
+      }
+    }
     let observed;
     try {
       observed = await this.session.observe(this.redactString(instruction));
@@ -651,7 +752,42 @@ class ExplorationRun {
       return null;
     }
     await this.record({ ...base, outcome: "SUCCESS", element: ref, llm: observed.llm });
+    if (cacheAt) {
+      const entry = this.ctx.redact({ selector: element.selector, description: element.description, method: element.method, element: ref }) as CachedElement;
+      this.cacheWrites.push({ key: cacheAt.key, where: cacheAt.where, entry });
+    }
     return { element, ref, info };
+  }
+
+  /** A cached lookup that still holds on this page, or null (a miss, a stale entry, or a failing cache). */
+  private async fromCache(key: string): Promise<Located | null> {
+    const cache = this.deps.cache!;
+    let cached: CachedElement | null;
+    try {
+      cached = await cache.get(key);
+    } catch {
+      return null;
+    }
+    if (!cached) return null;
+    try {
+      const ref = await this.recorder.record(this.page, cached.selector);
+      const chosen = (r: ElementRef) => JSON.stringify([r.candidates[r.chosenIndex], r.framePath]);
+      if (chosen(ref) !== chosen(cached.element)) return null;
+      const info = await this.recorder.describe(this.page, cached.selector);
+      cache.touch(key).catch(() => {});
+      const element: ObservedElement = { selector: cached.selector, description: cached.description, method: cached.method, arguments: [] };
+      return { element, ref, info };
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      return null;
+    }
+  }
+
+  /** Writes the lookups of a planned step that succeeded; a failing write is ignored. */
+  private async writeCache(): Promise<void> {
+    const writes = this.cacheWrites;
+    this.cacheWrites = [];
+    for (const w of writes) await this.deps.cache?.put(w.key, w.where, w.entry).catch(() => {});
   }
 
   /**
@@ -784,6 +920,7 @@ class ExplorationRun {
       durationMs: Math.max(0, finishedAt.getTime() - draft.startedAt.getTime()),
       artifactIds: draft.artifactIds ?? [],
       llm: draft.llm ?? null,
+      ...(this.multiScenario ? { scenarioId: this.scenarioId } : {}),
     }) as ExplorationStep;
     return ExplorationStepSchema.parse({
       ...redacted,

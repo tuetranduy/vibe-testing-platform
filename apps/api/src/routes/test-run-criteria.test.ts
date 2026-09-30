@@ -34,6 +34,7 @@ function baseRequirement(): Draft {
           right: { key: "cartCount", checkpoint: "before_add" },
         },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
       {
@@ -46,6 +47,7 @@ function baseRequirement(): Draft {
           match: { mode: "contains", value: "cart", caseSensitive: false },
         },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
     ],
@@ -73,6 +75,7 @@ function requirementWithWarnings(): Draft {
           right: { key: "cartCount", checkpoint: "before_add" },
         },
         preconditions: [],
+        critical: true,
         ambiguity: { reason: "Amount not specified", suggestions: ["Increase by exactly 1"] },
       },
       {
@@ -81,6 +84,7 @@ function requirementWithWarnings(): Draft {
         statement: "The page looks correct after adding to cart",
         expectedOutcome: { kind: "semantic", description: "The page should look correct after adding to cart" },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
       {
@@ -94,6 +98,7 @@ function requirementWithWarnings(): Draft {
           right: { key: "cartCount", checkpoint: "before_add" },
         },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
     ],
@@ -215,6 +220,7 @@ describe("PUT /v1/test-runs/:runId/criteria", () => {
           statement: "The cart holds 1 item",
           expectedOutcome: { kind: "numeric_compare", left: { key: "cartCount", checkpoint: "after_add" }, operator: "eq", right: 1 },
           preconditions: [],
+          critical: true,
           ambiguity: null,
         },
       ],
@@ -284,6 +290,21 @@ describe("PUT /v1/test-runs/:runId/criteria", () => {
     expect(body.code).toBe("VALIDATION_FAILED");
     const paths = body.issues.map((i: { path: string[] }) => i.path.join("."));
     expect(paths).toContain("criteria");
+  });
+
+  it("saves a criterion marked non-critical, but refuses a revision with no critical criterion (V1.1)", async () => {
+    const runId = await setupAwaitingConfirmation();
+    const current = getCriteriaBody(await getCriteria(runId));
+    const [first, ...rest] = current.criteria as { id: string; critical: boolean }[];
+    const ok = await putCriteria(runId, { ...current, criteria: [{ ...first!, critical: false }, ...rest] });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().criteria.map((c: { critical: boolean }) => c.critical)).toEqual([false, ...rest.map(() => true)]);
+
+    const none = await putCriteria(runId, { ...current, criteria: current.criteria.map((c: object) => ({ ...c, critical: false })) });
+    expect(none.statusCode).toBe(400);
+    expect(none.json().issues.map((i: { message: string }) => i.message)).toContain(
+      "Keep at least one critical criterion: only critical criteria decide the verdict",
+    );
   });
 
   it("returns 409 while the requirement is still being analyzed, and never saves the body", async () => {

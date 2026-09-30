@@ -23,6 +23,7 @@ const nothingWaiting = {
   isExecuteWaiting: async () => false,
   isAnalyzeAfterSelectionWaiting: async () => false,
   isAnalyzePending: async () => false,
+  isRerunPending: async () => false,
 };
 
 describe("startReaper", () => {

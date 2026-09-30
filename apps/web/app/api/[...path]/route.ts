@@ -16,3 +16,11 @@ export function POST(req: Request): Promise<Response> {
 export function PUT(req: Request): Promise<Response> {
   return proxy(req, "PUT");
 }
+
+export function PATCH(req: Request): Promise<Response> {
+  return proxy(req, "PATCH");
+}
+
+export function DELETE(req: Request): Promise<Response> {
+  return proxy(req, "DELETE");
+}

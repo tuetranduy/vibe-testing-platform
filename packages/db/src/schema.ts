@@ -6,6 +6,7 @@ import {
   ErrorCategorySchema,
   ReasoningLevelSchema,
   RunLifecycleSchema,
+  UserRoleSchema,
   RunVerdictSchema,
 } from "@platform/contracts";
 import { sql } from "drizzle-orm";
@@ -35,6 +36,7 @@ export const criterionStatusEnum = pgEnum("criterion_status", values(CriterionSt
 export const artifactTypeEnum = pgEnum("artifact_type", values(ArtifactTypeSchema.options));
 export const artifactSensitivityEnum = pgEnum("artifact_sensitivity", values(ArtifactSensitivitySchema.options));
 export const reasoningLevelEnum = pgEnum("reasoning_level", values(ReasoningLevelSchema.options));
+export const userRoleEnum = pgEnum("user_role", values(UserRoleSchema.options));
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
@@ -45,6 +47,134 @@ export const tenants = pgTable("tenants", {
   name: text("name").notNull(),
   createdAt: createdAt(),
 });
+
+/** People who sign in to the web app (V1.1 F1). E-mails are stored lowercased. */
+export const users = pgTable(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    /** `scrypt$N$r$p$salt$hash` (@platform/security hashPassword). */
+    passwordHash: text("password_hash").notNull(),
+    role: userRoleEnum("role").notNull(),
+    disabledAt: ts("disabled_at"),
+    createdAt: createdAt(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("users_tenant_email").on(t.tenantId, t.email)],
+);
+
+/** Web sessions: only the SHA-256 of the token is stored. */
+export const userSessions = pgTable(
+  "user_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: bytea("token_hash").notNull(),
+    expiresAt: ts("expires_at").notNull(),
+    lastSeenAt: ts("last_seen_at").notNull().defaultNow(),
+    revokedAt: ts("revoked_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("user_sessions_token_hash").on(t.tokenHash), index("user_sessions_user").on(t.userId)],
+);
+
+/** Durable audit trail (artifact reveals, logins, user and settings changes). Never holds a secret. */
+export const auditEvents = pgTable(
+  "audit_events",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    /** Null: the service token, or a failed login. */
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    action: text("action").notNull(),
+    runId: text("run_id"),
+    detail: jsonb("detail").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("audit_events_tenant_created").on(t.tenantId, t.createdAt)],
+);
+
+/** Reusable test data (V1.1 F3): a named map a new run can start from. Not secret. */
+export const testDataSets = pgTable(
+  "test_data_sets",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    name: text("name").notNull(),
+    /** TestDataRecordSchema, validated on every write and read. */
+    values: jsonb("values").notNull(),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("test_data_sets_tenant_name").on(t.tenantId, t.name)],
+);
+
+/** Saved credentials (V1.1 F4): a named set of secrets a new run can copy. Values live in the next table. */
+export const credentialProfiles = pgTable(
+  "credential_profiles",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("credential_profiles_tenant_name").on(t.tenantId, t.name)],
+);
+
+/** One value of a profile, AES-256-GCM with AAD (tenant, profile, name): encryptProfileSecret. */
+export const credentialProfileSecrets = pgTable(
+  "credential_profile_secrets",
+  {
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => credentialProfiles.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    ciphertext: bytea("ciphertext").notNull(),
+    iv: bytea("iv").notNull(),
+    authTag: bytea("auth_tag").notNull(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.profileId, t.name] })],
+);
+
+/**
+ * Element lookups verified on earlier runs (V1.1 F8), per tenant: `key` is the SHA-256 of the page's origin +
+ * path and the (redacted) instruction. Written only after the step that used the element succeeded.
+ */
+export const explorationCache = pgTable(
+  "exploration_cache",
+  {
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    key: text("key").notNull(),
+    origin: text("origin").notNull(),
+    path: text("path").notNull(),
+    /** CachedElement: the selector, its description and the ElementRef recorded for it. */
+    entry: jsonb("entry").notNull(),
+    hits: integer("hits").notNull().default(0),
+    createdAt: createdAt(),
+    lastUsedAt: ts("last_used_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.key] }), index("exploration_cache_last_used").on(t.lastUsedAt)],
+);
 
 export const testRuns = pgTable(
   "test_runs",
@@ -70,10 +200,13 @@ export const testRuns = pgTable(
     nextEventSequence: integer("next_event_sequence").notNull().default(0),
     idempotencyKey: text("idempotency_key"),
     requestHash: text("request_hash"),
+    /** The user who created the run (V1.1); null for the service token and runs created before users existed. */
+    ownerUserId: text("owner_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
   },
   (t) => [
+    index("test_runs_tenant_owner_created").on(t.tenantId, t.ownerUserId, t.createdAt),
     uniqueIndex("test_runs_tenant_idempotency_key").on(t.tenantId, t.idempotencyKey),
     index("test_runs_tenant_created").on(t.tenantId, t.createdAt),
     index("test_runs_lifecycle_heartbeat").on(t.lifecycle, t.heartbeatAt),
@@ -264,7 +397,8 @@ export const llmCalls = pgTable(
     status: text("status").notNull(),
     createdAt: createdAt(),
   },
-  (t) => [index("llm_calls_run").on(t.runId)],
+  // llm_calls_created: the cost dashboard's date-range scans (V1.1 F7).
+  (t) => [index("llm_calls_run").on(t.runId), index("llm_calls_created").on(t.createdAt)],
 );
 
 /** Settings → Defaults for new tests, per tenant. No row: the defaults come from the LLM_* environment. */

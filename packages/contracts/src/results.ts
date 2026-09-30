@@ -29,6 +29,8 @@ export const CriterionResultSchema = ProvisionalResultSchema.extend({
   evidenceArtifactIds: z.array(z.string()),
   relatedStepIds: z.array(z.string()),
   aiNote: z.string().max(1000).nullable(), // semantic judge note (D3); never affects status
+  /** From the criterion (V1.1): a non-critical result never changes the run's verdict. Rows before V1.1: true. */
+  critical: z.boolean().default(true),
 }).refine((r) => (r.status === "PASS" || r.status === "FAIL") === (r.verdictSource !== null), {
   message: "verdictSource must be set exactly for PASS/FAIL",
   path: ["verdictSource"],
@@ -52,6 +54,8 @@ export const ExplorationOutcomeSchema = z.object({
   steps: z.array(ExplorationStepSchema),
   facts: z.array(ObservedFactSchema),
   stopReason: ExplorationStopReasonSchema,
+  /** Each scenario's own stop reason (V1.1 F9); absent on outcomes before V1.1 (one scenario: `stopReason`). */
+  scenarioStops: z.record(z.string(), ExplorationStopReasonSchema).optional(),
 });
 export type ExplorationOutcome = z.infer<typeof ExplorationOutcomeSchema>;
 

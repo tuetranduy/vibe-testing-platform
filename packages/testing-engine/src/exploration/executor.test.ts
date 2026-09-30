@@ -4,6 +4,7 @@ import {
   ExplorationStepSchema,
   ModelProviderError,
   ObservedFactSchema,
+  type CachedElement,
   type ElementRef,
   type ExplorationStep,
   type NormalizedRequirement,
@@ -26,6 +27,7 @@ import type { ZodType } from "zod";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
 import { runExploration, type ExplorationStore, type RecorderPort } from "./executor";
 import { factFromReadings, type FactCaptureInput } from "./fact-reader";
+import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
 
 // ---------------------------------------------------------------------------------------------
 // Fakes
@@ -253,6 +255,7 @@ function requirementWith(facts: NormalizedRequirement["facts"], outcome?: Normal
         statement: "The cart count increases",
         expectedOutcome: outcome ?? { kind: "semantic", description: "the cart count increases" },
         preconditions: [],
+        critical: true,
         ambiguity: null,
       },
     ],
@@ -838,5 +841,179 @@ describe("runExploration (fake explorer)", () => {
       [1, "observe", "PS-2", "FAILED", false],
       [2, "observe", "PS-2", "SUCCESS", false],
     ]);
+  });
+});
+
+describe("exploration cache (V1.1 F8)", () => {
+  function memoryCache(seed: Record<string, CachedElement> = {}, opts: { fail?: boolean } = {}) {
+    const entries = new Map(Object.entries(seed));
+    const touched: string[] = [];
+    const puts: { key: string; where: CacheWhere; entry: CachedElement }[] = [];
+    const cache: ObserveCache = {
+      async get(key) {
+        if (opts.fail) throw new Error("db down");
+        return entries.get(key) ?? null;
+      },
+      async put(key, where, entry) {
+        if (opts.fail) throw new Error("db down");
+        puts.push({ key, where, entry });
+        entries.set(key, entry);
+      },
+      async touch(key) {
+        touched.push(key);
+      },
+    };
+    return { cache, entries, touched, puts };
+  }
+  const clickPlan = () => planOf(step("navigate", "Open the product page"), step("click", "Click Add to cart"));
+  const keyFor = (instruction: string) => observeCacheKey(TARGET, instruction)!.key;
+  const cached = (selector: string): CachedElement => ({
+    selector,
+    description: "Add to cart button",
+    method: "click",
+    element: { candidates: [{ strategy: "xpath", selector }], chosenIndex: 0, framePath: [] },
+  });
+
+  it("keys on origin + path + the redacted instruction, never the query or fragment", () => {
+    const a = observeCacheKey("https://shop.test/products/1?session=abc#x", "Click Add to cart")!;
+    const b = observeCacheKey("https://shop.test/products/1", "Click Add to cart")!;
+    expect(a.key).toBe(b.key);
+    expect(a.where).toEqual({ origin: "https://shop.test", path: "/products/1" });
+    expect(observeCacheKey("https://shop.test/products/2", "Click Add to cart")!.key).not.toBe(b.key);
+    expect(observeCacheKey("about:blank", "x")).toBeNull();
+  });
+
+  it("a miss observes, and the lookup is written only after the planned step succeeded", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const mem = memoryCache();
+    await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache });
+    expect(session.ops().filter((o) => o === "observe")).toHaveLength(1);
+    expect(mem.puts).toEqual([{ key: keyFor("Click Add to cart"), where: { origin: "https://shop.test", path: "/products/1" }, entry: { ...cached("xpath=/html[1]/body[1]/el[1]"), description: "an element" } }]);
+  });
+
+  it("a hit replaces the observe: no model call, recorded with cacheHit, and counted", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const mem = memoryCache({ [keyFor("Click Add to cart")]: cached("xpath=/html[1]/body[1]/button[3]") });
+    const outcome = await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache });
+    expect(session.ops()).not.toContain("observe");
+    expect(session.calls.find((c) => c.op === "actOn")!.arg).toMatchObject({ selector: "xpath=/html[1]/body[1]/button[3]", method: "click", arguments: [] });
+    expect(outcome.steps.find((s) => s.kind === "observe")).toMatchObject({ outcome: "SUCCESS", llm: { inputTokens: 0, outputTokens: 0, cacheHit: true } });
+    expect(mem.touched).toEqual([keyFor("Click Add to cart")]);
+    expect(mem.puts).toEqual([]);
+  });
+
+  it("a stale entry (another element's locator now) is a miss", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const stale = { ...cached("xpath=/html[1]/body[1]/button[3]"), element: { candidates: [{ strategy: "testId" as const, value: "old-button" }], chosenIndex: 0, framePath: [] } };
+    const mem = memoryCache({ [keyFor("Click Add to cart")]: stale });
+    await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache });
+    expect(session.ops().filter((o) => o === "observe")).toHaveLength(1);
+    expect(mem.puts.map((p) => p.entry.selector)).toEqual(["xpath=/html[1]/body[1]/el[1]"]);
+  });
+
+  it("never caches a failed or blocked step, and the policy still checks a cached element", async () => {
+    const { ctx } = fakeCtx();
+    const failing = new FakeSession({ actOn: () => ({ success: false, message: "detached" }) });
+    const mem = memoryCache();
+    await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session: failing, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache });
+    expect(mem.puts).toEqual([]);
+
+    const { ctx: ctx2 } = fakeCtx();
+    const destructive = memoryCache({ [keyFor("Click Add to cart")]: cached("xpath=/html[1]/body[1]/button[9]") });
+    const session = new FakeSession();
+    const outcome = await runExploration(
+      ctx2,
+      { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx2.budgetSignal(1) },
+      { store: memoryStore().store, recorder: fakeRecorder({ describe: () => ({ role: "button", name: "Delete account", text: "Delete account" }) }).recorder, cache: destructive.cache },
+    );
+    expect(outcome.stopReason).toBe("BLOCKED_BY_POLICY");
+    expect(session.ops()).not.toContain("actOn");
+  });
+
+  it("a failing cache is only a miss", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const outcome = await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: memoryCache({}, { fail: true }).cache });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(session.ops()).toContain("actOn");
+  });
+});
+
+describe("several scenarios (V1.1 F9)", () => {
+  function twoScenarioPlan(first: PlannedStep[], second: PlannedStep[]): TestPlan {
+    let n = 0;
+    const ids = (steps: PlannedStep[]) => steps.map((s) => ({ ...s, id: `PS-${++n}` }));
+    return {
+      runId: "run_exec",
+      requirementRevision: 1,
+      scenarios: [
+        { id: "SC-1", title: "signed out", criterionIds: ["AC-1"], steps: ids(first) },
+        { id: "SC-2", title: "signed in", criterionIds: ["AC-2"], steps: ids(second) },
+      ],
+      blockedCriteria: [],
+      stopConditions: [],
+    };
+  }
+  const run = (plan: TestPlan, session: FakeSession, extra: { resetSession?: (page: unknown, url: string) => Promise<void>; max?: number } = {}) => {
+    const { ctx } = fakeCtx(extra.max ? { options: { maxExplorationSteps: extra.max } } : {});
+    const resets: string[] = [];
+    const resetSession = extra.resetSession ?? (async (_page: unknown, url: string) => void resets.push(url));
+    const outcome = runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, resetSession });
+    return { outcome, resets };
+  };
+
+  it("runs the scenarios in order, each from a cleared session at the target, and tags each step with its scenario", async () => {
+    const session = new FakeSession();
+    const { outcome, resets } = run(twoScenarioPlan([step("navigate", "Open the home page"), step("click", "Open the banner")], [step("navigate", "Open the home page"), step("click", "Open My orders")]), session);
+    const result = await outcome;
+    expect(resets).toEqual([TARGET]);
+    expect(session.calls.filter((c) => c.op === "navigate").map((c) => c.arg)).toEqual([TARGET, TARGET]);
+    expect(result.steps.map((s) => [s.scenarioId, s.kind, s.plannedStepId])).toEqual([
+      ["SC-1", "navigate", "PS-1"],
+      ["SC-1", "observe", "PS-2"],
+      ["SC-1", "act", "PS-2"],
+      ["SC-2", "navigate", "PS-3"],
+      ["SC-2", "observe", "PS-4"],
+      ["SC-2", "act", "PS-4"],
+    ]);
+    expect(result).toMatchObject({ stopReason: "COMPLETED", scenarioStops: { "SC-1": "COMPLETED", "SC-2": "COMPLETED" } });
+  });
+
+  it("a step that fails or is blocked ends only its own scenario", async () => {
+    const session = new FakeSession();
+    const blocked = step("click", "Click Delete account", { destructive: true });
+    const { outcome } = run(twoScenarioPlan([step("navigate", "Open the home page"), blocked], [step("navigate", "Open the home page"), step("click", "Open My orders")]), session);
+    const result = await outcome;
+    expect(result).toMatchObject({ stopReason: "BLOCKED_BY_POLICY", scenarioStops: { "SC-1": "BLOCKED_BY_POLICY", "SC-2": "COMPLETED" } });
+    expect(result.steps.filter((s) => s.scenarioId === "SC-2").map((s) => s.outcome)).toEqual(["SUCCESS", "SUCCESS", "SUCCESS"]);
+  });
+
+  it("the step limit ends exploration: later scenarios are not explored", async () => {
+    const session = new FakeSession();
+    const { outcome, resets } = run(twoScenarioPlan([step("navigate", "Open the home page"), step("click", "A"), step("click", "B")], [step("navigate", "Open the home page")]), session, { max: 3 });
+    const result = await outcome;
+    expect(result).toMatchObject({ stopReason: "STEP_LIMIT_REACHED", scenarioStops: { "SC-1": "STEP_LIMIT_REACHED", "SC-2": "STEP_LIMIT_REACHED" } });
+    expect(resets).toEqual([]);
+    expect(result.steps.every((s) => s.scenarioId === "SC-1")).toBe(true);
+  });
+
+  it("a session that cannot be cleared is the browser's failure, never a guess", async () => {
+    const session = new FakeSession();
+    const { outcome } = run(twoScenarioPlan([step("navigate", "Open the home page")], [step("navigate", "Open the home page")]), session, {
+      resetSession: async () => {
+        throw new Error("CDP gone");
+      },
+    });
+    await expect(outcome).rejects.toBeInstanceOf(BrowserProviderError);
+  });
+
+  it("a one-scenario plan records no scenario ids or scenario stops (unchanged)", async () => {
+    const { ctx } = fakeCtx();
+    const result = await runExploration(ctx, { plan: planOf(step("navigate", "Open")), requirement: requirementWith([]), session: new FakeSession(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(result.steps[0]).not.toHaveProperty("scenarioId");
+    expect(result).not.toHaveProperty("scenarioStops");
   });
 });

@@ -1,4 +1,4 @@
-import { ProvisionalResultSchema, type ProvisionalResult } from "@platform/contracts";
+import { ProvisionalResultSchema, scenarioOfCriterion, stepScenario, type ProvisionalResult } from "@platform/contracts";
 import type { EngineStages } from "../orchestrator/stages";
 import { clip } from "./normalize";
 import { verifyCriterion } from "./verifier";
@@ -10,17 +10,24 @@ import { verifyCriterion } from "./verifier";
  *
  * `expected` / `actual` can quote recorded page text, so they go through the run's redactor (redact
  * first, then truncate, so a cut can never split a secret past the redactor).
+ *
+ * Several scenarios (V1.1 F9): a criterion is judged on its own scenario only — that scenario's steps, stop
+ * reason and planned steps (a login in another scenario never signs it in). Facts are keyed by checkpoint,
+ * which the plan captures exactly once, so they are shared.
  */
 export const verifyStage: EngineStages["verify"] = (ctx, requirement, plan, exploration) => {
   const redactText = (s: string) => clip(String(ctx.redact(s)));
+  const several = plan.scenarios.length > 1;
   return requirement.criteria.map((criterion): ProvisionalResult => {
+    const scenario = scenarioOfCriterion(plan, criterion.id);
+    const steps = exploration?.steps ?? [];
     const r = verifyCriterion({
       criterion,
       facts: exploration?.facts ?? [],
       blocked: plan.blockedCriteria,
-      steps: exploration?.steps ?? [],
-      stopReason: exploration?.stopReason ?? "COMPLETED",
-      plan,
+      steps: several ? steps.filter((s) => stepScenario(s) === scenario.id) : steps,
+      stopReason: (several ? exploration?.scenarioStops?.[scenario.id] : undefined) ?? exploration?.stopReason ?? "COMPLETED",
+      plan: several ? { ...plan, scenarios: [scenario] } : plan,
     });
     return ProvisionalResultSchema.parse({ ...r, expected: redactText(r.expected), actual: r.actual === null ? null : redactText(r.actual) });
   });
