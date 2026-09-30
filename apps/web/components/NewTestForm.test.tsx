@@ -143,6 +143,16 @@ describe("NewTestForm", () => {
     expect(bodyOf(fetch, 1).options).toMatchObject({ recordVideo: false, recordTrace: false, analyzeLiveSite: false });
   });
 
+  it("says which credentials it takes from the requirement (V1.3.1)", async () => {
+    const user = userEvent.setup();
+    mockFetch();
+    render(<NewTestForm />);
+    await user.type(screen.getByLabelText(/requirement/i), "Log in as admin@shop.test with password Adm1n#2026 and see the dashboard.");
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
+      "Taken from your requirement and used in the test: password (kept as a secret; removed from the text before it is stored), email (test data).",
+    );
+  });
+
   it("validates test data keys with the contract's key rule", async () => {
     const user = userEvent.setup();
     const fetch = mockFetch();

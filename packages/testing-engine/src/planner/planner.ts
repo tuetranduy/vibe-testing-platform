@@ -1,4 +1,4 @@
-import { ContractError, TestPlanSchema, type NormalizedRequirement, type TestPlan } from "@platform/contracts";
+import { ContractError, TestPlanSchema, type NormalizedRequirement, type StoredTestRunRequest, type TestPlan } from "@platform/contracts";
 import type { ActionPolicy } from "@platform/security";
 import { requireLlm, type StageContext } from "../orchestrator/stages";
 import type { RequirementLlm } from "../requirement/compiler";
@@ -18,6 +18,8 @@ export interface PlanTestInput {
   /** Names only: values never reach the planner. */
   testDataKeys: string[];
   secretNames: string[];
+  /** Credentials taken from the requirement text (V1.3.1): names only. */
+  inlineInputs?: StoredTestRunRequest["inlineInputs"];
   policy: ActionPolicy;
   signal: AbortSignal;
   deadlineAt?: Date | null;
@@ -45,6 +47,7 @@ export async function planTest(llm: RequirementLlm, input: PlanTestInput): Promi
           requirement,
           testDataKeys: input.testDataKeys,
           secretNames: input.secretNames,
+          inlineInputs: input.inlineInputs,
         }),
       },
     ],
@@ -102,6 +105,7 @@ export function createPlanStage(): (ctx: StageContext, requirement: NormalizedRe
       targetUrl: ctx.request.targetUrl,
       testDataKeys: Object.keys(ctx.request.testData),
       secretNames: ctx.secrets.names,
+      inlineInputs: ctx.request.inlineInputs,
       policy: actionPolicyFor(ctx.request),
       signal: ctx.signal,
       deadlineAt: ctx.deadlineAt,

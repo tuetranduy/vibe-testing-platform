@@ -453,8 +453,10 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
 
 ## KI-041 — The requirement compiler's prompt changed without an eval run
 - **Severity:** Medium (V1.3).
-- **Where:** `packages/testing-engine/src/requirement/prompts.ts`, `evals/requirement-compiler`.
-- **What:** the compile prompt gained the live-site section (pages, `siteChecks`, `testData`). The prompt tells the
+- **Where:** `packages/testing-engine/src/requirement/prompts.ts`, `packages/testing-engine/src/planner/prompts.ts`,
+  `evals/requirement-compiler`, `evals/planner`.
+- **What:** the compile prompt gained the live-site section (pages, `siteChecks`, `testData`), and both the compile
+  and planner prompts a rule for credentials taken from the requirement (`[secret: <name>]`, V1.3.1). The prompt tells the
   model not to drop, add or weaken criteria because of the pages, but the eval baseline (`evals/BASELINE.md`) was
   recorded before it, and the evals were not re-run (no model key in the implementation environment). The eval
   suite still runs without pages, so it does not measure the live-site path either.

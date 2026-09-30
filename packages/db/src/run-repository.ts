@@ -326,6 +326,30 @@ export class RunRepository {
   }
 
   /**
+   * Records credentials taken from a requirement written after the run was created (V1.3.1: an edited suggestion):
+   * the test data is merged in (the run's own keys win), the secret names added to `secretNames` (their encrypted
+   * values are the caller's to insert), and what was taken appended to `inlineInputs`. Under the run's row lock.
+   */
+  async addInlineInputs(
+    runId: string,
+    input: { testData: Record<string, TestDataValue>; secretNames: string[]; found: NonNullable<StoredTestRunRequest["inlineInputs"]> },
+  ): Promise<StoredTestRunRequest> {
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx.select({ requestJson: testRuns.requestJson }).from(testRuns).where(eq(testRuns.id, runId)).for("update");
+      if (!row) throw new NotFoundError("TestRun", runId);
+      const current = row.requestJson as StoredTestRunRequest;
+      const next: StoredTestRunRequest = {
+        ...current,
+        testData: { ...input.testData, ...current.testData },
+        secretNames: [...new Set([...current.secretNames, ...input.secretNames])].sort(),
+        inlineInputs: [...(current.inlineInputs ?? []), ...input.found],
+      };
+      await tx.update(testRuns).set({ requestJson: next, updatedAt: new Date() }).where(eq(testRuns.id, runId));
+      return next;
+    });
+  }
+
+  /**
    * The run `run` is compared with by default (V1.2 F2): the latest COMPLETED run of the same test (comparison key)
    * created before it, within the caller's scope; null when there is none.
    */

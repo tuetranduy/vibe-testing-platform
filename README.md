@@ -51,6 +51,15 @@ Evidence and test data, on top of V1.2 (the V1 live gate still applies):
   sends the kept values (`POST …/criteria/confirm` with `{ "testData": { … } }`, refused if a value is one of the
   run's secrets). With `autoConfirmCriteria` they are taken as suggested. The new-test form's test data rows have a
   **Generate** button that fills a value from the key.
+- **Credentials written in the requirement are used.** "Log in as admin@shop.test with password Adm1n#2026"
+  no longer ends `BLOCKED / MISSING_SECRET`: when a run is created (or a suggested test is edited), the API takes the
+  credentials the text names (`@platform/contracts` `extractInlineInputs`) — emails and usernames become test data
+  (`email`, `username`), passwords become the run's secrets (encrypted, redacted, purged like typed ones) and are
+  replaced in the stored text by `[secret: password]`, so the value never reaches the database or a model. The
+  compiler and planner are told which names came from the text and use them. Values entered in the form win. A
+  password needs a label ("password: X", `password "X"`, "mật khẩu: X") or a pair ("user@x.com / X"); after
+  "is" it must look like one (quoted, or with a digit, symbol or inner capital), so "the password is invalid" is
+  left alone — quote a value to be exact. The new-test form previews what will be taken as you type.
 - **Full-page screenshots.** Checkpoint screenshots, the survey's and the analysis' page screenshots, and the rerun's
   failure screenshot now capture the whole scrollable page (the viewport when the full page can't be taken).
 - **Video and trace recording.** Exploration records a video (the page's CDP screencast encoded to WebM by

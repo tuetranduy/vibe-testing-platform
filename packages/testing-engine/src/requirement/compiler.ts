@@ -3,6 +3,7 @@ import {
   ContractError,
   liveSiteAnalysisOn,
   type SiteAnalysisDraft,
+  type StoredTestRunRequest,
   type SurveyedPage,
   type TestDataValue,
 } from "@platform/contracts";
@@ -29,6 +30,8 @@ export interface CompileRequirementInput {
   deadlineAt?: Date | null;
   /** The run redactor (masks secret values). */
   redact: (value: unknown) => unknown;
+  /** Credentials taken from the requirement text (V1.3.1): names only. */
+  inlineInputs?: StoredTestRunRequest["inlineInputs"];
   /** Pages of the live site read for this analysis (V1.3), and the start page's screenshot. */
   site?: { pages: { url: string; inventory: PageInventory }[]; screenshot: Buffer | null };
 }
@@ -52,6 +55,7 @@ export async function compileRequirement(llm: RequirementLlm, input: CompileRequ
     originalText: input.originalText,
     testDataKeys: Object.keys(input.testData),
     secretNames: input.secretNames,
+    inlineInputs: input.inlineInputs,
     pages: input.redact(pages) as typeof pages,
     hasScreenshot: screenshot !== null,
   });
@@ -204,6 +208,7 @@ export function createAnalyzeStage(deps: AnalyzeStageDeps = {}): (ctx: StageCont
       originalText: ctx.request.requirement,
       testData: ctx.request.testData,
       secretNames: ctx.secrets.names,
+      inlineInputs: ctx.request.inlineInputs,
       signal: ctx.signal,
       deadlineAt: ctx.deadlineAt,
       redact: ctx.redact,

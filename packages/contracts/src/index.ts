@@ -12,6 +12,7 @@ export * from "./describe-outcome";
 export * from "./suggestions";
 export * from "./site-analysis";
 export * from "./test-data-generator";
+export * from "./inline-inputs";
 export * from "./plan";
 export * from "./exploration";
 export * from "./results";

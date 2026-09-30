@@ -1,3 +1,5 @@
+import type { StoredTestRunRequest } from "@platform/contracts";
+import { inlineInputsLine } from "../shared/inline-inputs";
 import type { PageInventory } from "../survey/inventory";
 
 /**
@@ -24,7 +26,8 @@ Each criterion:
   - {"kind":"collection_contains","collection":F,"item":F or "text","match":"equals"|"contains"}
   - {"kind":"semantic","description":"..."} — only when no structured kind can express it (look and feel, tone, "looks correct")
   where F is a fact reference {"key": lowerCamelCase, "checkpoint": snake_case moment name, e.g. "before_add", "after_add", "cart_page"}.
-- "preconditions": what must hold before the check: {"kind":"authenticated"} for a logged-in user; {"kind":"test_data","ref":<test data key>}; {"kind":"secret","ref":<secret name>}; each with a short "description". Use the provided names when one fits; if the requirement needs a login or a value that was not provided, still add the precondition (with the name it would need) — do not drop it. A value written in the requirement itself (a search term, a product name, a quantity) is not test data: never add a "test_data" precondition for it, and never one that only asks for something to exist on the site.
+- "preconditions": what must hold before the check: {"kind":"authenticated"} for a logged-in user; {"kind":"test_data","ref":<test data key>}; {"kind":"secret","ref":<secret name>}; each with a short "description". Use the provided names when one fits; if the requirement needs a login or a value that was not provided, still add the precondition (with the name it would need) — do not drop it. A value written in the requirement itself (a search term, a product name, a quantity) is not test data: never add a "test_data" precondition for it (credentials taken from the requirement are the exception, below), and never one that only asks for something to exist on the site.
+  Credentials written in the requirement were taken out of it for you: "[secret: <name>]" stands for the secret <name> (use that name in a "secret" precondition), and an email or username it names is the test data key listed as "taken from the requirement text" (use that key in a "test_data" precondition). Never treat such a credential as missing.
 - "ambiguity": null when the criterion is clear. Otherwise {"reason": why it cannot be checked objectively as written, "suggestions": up to 3 concrete rewrites the user could confirm}.
 
 Rules:
@@ -42,6 +45,8 @@ export interface RequirementPromptInput {
   originalText: string;
   testDataKeys: string[];
   secretNames: string[];
+  /** Credentials taken from the requirement text (V1.3.1): names only. */
+  inlineInputs?: StoredTestRunRequest["inlineInputs"];
   /** The live site's pages read for this analysis (V1.3); absent or empty: none were read. */
   pages?: { url: string; inventory: PageInventory }[];
   hasScreenshot?: boolean;
@@ -58,6 +63,7 @@ export function buildRequirementPrompt(input: RequirementPromptInput): string {
     "",
     `Test data keys available: ${list(input.testDataKeys)}`,
     `Secret names available: ${list(input.secretNames)}`,
+    ...inlineInputsLine(input.inlineInputs),
     ...(pages.length > 0
       ? [
           "",

@@ -3,6 +3,7 @@
 import {
   CreateTestRunRequestSchema,
   DataKeySchema,
+  extractInlineInputs,
   generateTestDataValue,
   HttpUrlSchema,
   SecretNameSchema,
@@ -290,6 +291,11 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const [environment, setEnvironment] = useState<"staging" | "production">("staging");
   const [data, setData] = useState<DataRow[]>([]);
   const [secrets, setSecrets] = useState<SecretRow[]>([]);
+  /** Credentials written in the requirement (V1.3.1): what the server will take from it, previewed as you type. */
+  const inlineFound = extractInlineInputs(requirement, {
+    testData: Object.fromEntries(data.filter((r) => r.key.trim() !== "").map((r) => [r.key.trim(), r.value])),
+    secrets: Object.fromEntries(secrets.filter((r) => r.name.trim() !== "").map((r) => [r.name.trim(), r.value])),
+  }).found;
   const [options, setOptions] = useState<Options>(DEFAULT_OPTIONS);
   /** This run's model and level ("" = the default: Settings, else the server's environment). */
   const [llmModel, setLlmModel] = useState("");
@@ -578,6 +584,15 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
             One behaviour per test works best: name the page, the action, and what you expect to see. Leave it empty and the agent
             explores the website and suggests what to test.
           </p>
+          {inlineFound.length > 0 && (
+            <p className="hint" role="status">
+              <Icon name="key" /> Taken from your requirement and used in the test:{" "}
+              {inlineFound
+                .map((f) => (f.kind === "secret" ? `${f.name} (kept as a secret; removed from the text before it is stored)` : `${f.name} (test data)`))
+                .join(", ")}
+              .
+            </p>
+          )}
           {fieldError(fid.requirement)}
         </div>
 
