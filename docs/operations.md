@@ -67,6 +67,40 @@ act while there is no user at all), then reset the administrator's password from
 UPDATE users SET role = 'admin', disabled_at = NULL WHERE email = 'someone@example.com';
 ```
 
+## Suites, schedules and API tokens (V1.2)
+
+**Suites** rerun saved Playwright tests with no model call; each run of a suite is a *suite run* whose tests are
+ordinary reruns (`test_runs.suite_run_id`). A running suite run takes **one** slot of
+`MAX_ACTIVE_RUNS_PER_TENANT`, whatever its size; its tests are all queued at once and `WORKER_CONCURRENCY` bounds how
+many run together (KI-038). A suite run settles when its last test ends: in the worker, on read, and in the reaper's
+sweep (every 30 s), so a crash between never leaves one `RUNNING`.
+
+**Schedules** (`suite_schedules`) fire suites at the times of a five-field cron expression in a time zone:
+
+- `SCHEDULE_MIN_INTERVAL_MINUTES` (default 15): the least time between two firings of one schedule, checked over its
+  next 20 firings. At most 5 schedules per suite and 50 per tenant.
+- Each enabled schedule has a BullMQ job scheduler on the `suite-schedules` queue, keyed by the schedule's id. The
+  table is the truth: the API resyncs every scheduler when it starts ("suite schedules synced" in the log) and
+  removes the ones whose schedule is gone or disabled. **The API processes consume the queue**, so schedules fire
+  only while an API is up (KI-037).
+- A firing runs as the schedule's creator with the suite's saved credentials only. It is skipped while that
+  schedule's previous suite run is going and fails (without running) when the creator is disabled or gone, a secret
+  is missing, or the tenant is at its cap. Each outcome is on the schedule (`lastOutcome`, `lastError`) and in
+  `audit_events` (`schedule.fired`, `schedule.skipped`, `schedule.failed`).
+
+**API tokens** (`api_tokens`) let CI and scripts run suites and read results as a person, limited to the token's
+scopes. Only the SHA-256 of a token is stored; it is shown once. Disabling a person revokes their tokens; an
+administrator can revoke anyone's under Settings → API tokens. Token creation and revocation are audited
+(`token.created`, `token.revoked`).
+
+- External callers use the **web app**, never the API: `https://<web host>/api/ext/v1/…` with `Authorization: Bearer
+  tap_…`. The web server forwards the token as `X-Api-Token` next to the service `API_TOKEN`, on an allow-list of
+  the token-reachable endpoints only, without cookies. **Add the public host CI uses to `WEB_ALLOWED_HOSTS`.**
+- Limits: 600 requests per token and hour in the API (Redis, `429` with `Retry-After`), and 120 per token and minute
+  per web instance.
+- The GitHub Action (`.github/actions/run-suite`) and the CLI (`integrations/platform-client/cli.mjs`) are described,
+  with an example workflow, in [`integrations/README.md`](../integrations/README.md).
+
 ## Worker network policy
 
 Browsers reach targets only through the per-run egress proxy: exploration's Chromium runs with
@@ -192,8 +226,8 @@ key-based (`password`, `token`, `authorization`, `cookie`, …) and the run's ow
 secret values in any encoded form, including inside error messages. An `err` field carries the error's name, message,
 `code`, stack and `cause` chain (up to five causes), redacted like the rest of the line; the `run errored` line
 carries the error that ended the run. Useful filters: all lines of one run
-(`runId`), and errors by `component`. The API's HTTP access log is Fastify's (pino), with the `authorization` and
-`cookie` headers redacted and request bodies never logged.
+(`runId`), and errors by `component`. The API's HTTP access log is Fastify's (pino), with the `authorization`,
+`cookie`, `x-session-token` and `x-api-token` headers redacted and request bodies never logged.
 
 ## Retention
 
@@ -208,6 +242,9 @@ of silence. As a backstop, configure an S3 lifecycle rule that expires objects s
 The same daily pass deletes exploration cache entries (V1.1, `exploration_cache`) no run has reused for 30 days.
 Entries hold selectors and accessible names, never page values; an administrator can clear a tenant's cache at
 once from Settings (`DELETE /v1/exploration-cache`, audited), e.g. after a site redesign.
+
+Suites, their schedules and API tokens (V1.2) are kept until someone deletes them (a revoked or expired token stays
+listed). Deleting a suite deletes its schedules; its suite runs, like every run, are kept.
 
 Saved test data sets and credential profiles (V1.1) are kept until someone deletes them. A run takes its own copy
 when it is created; a profile's copy is purged with the run's other secrets when the run ends.
