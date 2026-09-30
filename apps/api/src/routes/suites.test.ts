@@ -136,6 +136,8 @@ describe("/v1/suites/:suiteId/runs", () => {
     const { suiteRunId, runIds } = res.json() as { suiteRunId: string; runIds: string[] };
     expect(runIds).toHaveLength(2);
     expect(t.queue.rerun).toEqual(expect.arrayContaining(runIds));
+    // Queued by position in the suite, behind single runs (KI-038).
+    expect(runIds.map((id) => t.queue.rerunPositions.get(id))).toEqual([0, 1]);
 
     const [first, second] = runIds.map((id) => id);
     const summary = (await call("GET", `/v1/test-runs/${first}`)).json();

@@ -84,7 +84,8 @@ before the V1 live gate passed (it still applies). Nothing here calls a model:
 
 - **Suites** (`/suites`) — named lists of saved Playwright tests ("Add to suite" on a finished run's report). "Run
   suite" reruns each as its own run and settles one verdict for all; it asks only for the secrets the suite's saved
-  credentials don't provide. A running suite run takes one active-run slot.
+  credentials don't provide. A running suite run takes one active-run slot; its tests are queued behind single runs,
+  taking turns with other suites' tests.
 - **Compared with the previous run** — a completed run's report shows how each criterion changed since the previous
   run of the same test (same URL and requirement, or a rerun of it), or since a chosen run; the Markdown report too.
   Suite runs mark each test regressed, fixed, changed, unchanged or first run.

@@ -31,8 +31,11 @@ export interface RunQueue {
   /** analyze-run for the text a user selected (the run is ANALYZING_REQUIREMENT); see analyzeAfterSelectionJobId. */
   enqueueAnalyzeAfterSelection(runId: string): Promise<void>;
   enqueueExecute(runId: string): Promise<void>;
-  /** rerun-run for a manual rerun's run (QUEUED, `request.rerunOf` set). */
-  enqueueRerun(runId: string): Promise<void>;
+  /**
+   * rerun-run for a manual rerun's run (QUEUED, `request.rerunOf` set). A suite run's child passes its position in
+   * the suite: it is queued behind every job without one, and child n of each suite before child n + 1 of any (KI-038).
+   */
+  enqueueRerun(runId: string, opts?: { suitePosition?: number }): Promise<void>;
   /** True while the rerun-run job for this run is waiting or being processed. */
   isRerunPending(runId: string): Promise<boolean>;
   /** True while the execute-run job for this run is waiting/delayed (not yet picked up). */
@@ -48,6 +51,14 @@ export interface RunQueue {
 
 const JOB_OPTS = { attempts: 1, removeOnComplete: 1000, removeOnFail: 5000 } as const;
 
+/**
+ * BullMQ takes jobs without a priority first, then prioritized ones lowest number first (FIFO within a number), up
+ * to 2^21. A suite's child n gets n + 1: single runs never wait behind a suite, and suites share the workers turn by
+ * turn instead of the first one's 50 tests going before everything queued after it.
+ */
+const MAX_PRIORITY = 2_097_152;
+export const suiteChildPriority = (position: number) => Math.min(Math.max(0, Math.floor(position)) + 1, MAX_PRIORITY);
+
 export function createRunQueue(connection: ConnectionOptions): RunQueue {
   const queue = new Queue<RunJobData>(RUNS_QUEUE, { connection });
   return {
@@ -60,8 +71,9 @@ export function createRunQueue(connection: ConnectionOptions): RunQueue {
     async enqueueExecute(runId) {
       await queue.add(JOB_EXECUTE_RUN, { runId }, { ...JOB_OPTS, jobId: executeJobId(runId) });
     },
-    async enqueueRerun(runId) {
-      await queue.add(JOB_RERUN_RUN, { runId }, { ...JOB_OPTS, jobId: rerunJobId(runId) });
+    async enqueueRerun(runId, opts) {
+      const priority = opts?.suitePosition === undefined ? undefined : suiteChildPriority(opts.suitePosition);
+      await queue.add(JOB_RERUN_RUN, { runId }, { ...JOB_OPTS, jobId: rerunJobId(runId), ...(priority ? { priority } : {}) });
     },
     async isRerunPending(runId) {
       const state = await queue.getJobState(rerunJobId(runId));

@@ -42,7 +42,8 @@ export interface StartSuiteRunOptions {
 
 /**
  * Suite runs (V1.2 F1): one rerun of each entry's saved test, as its own run (`kind: rerun`, no model call),
- * created together in one transaction. The suite run takes one active-run slot, whatever its size.
+ * created together in one transaction. The suite run takes one active-run slot, whatever its size; its children
+ * are queued with a priority, so a large suite does not hold up runs queued after it (KI-038).
  */
 export class SuiteRunService {
   private readonly suiteRuns: SuiteRunRepository;
@@ -155,10 +156,11 @@ export class SuiteRunService {
       throw err;
     }
 
-    // In entry order. A child that cannot be queued is errored on its own (QUEUE_UNAVAILABLE); the others go on.
-    for (const c of created.runs) {
+    // In entry order, each behind single runs and taking turns with other suites (KI-038). A child that cannot be
+    // queued is errored on its own (QUEUE_UNAVAILABLE); the others go on.
+    for (const [position, c] of created.runs.entries()) {
       await publisher.notify(c.event);
-      await this.reruns.enqueue(c.run);
+      await this.reruns.enqueue(c.run, position);
     }
     await this.suiteRuns.settle(created.suiteRun.id);
     return {
