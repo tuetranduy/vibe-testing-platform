@@ -4064,3 +4064,11 @@ fieldset.stack-tight {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.schedule-row {
+  justify-content: space-between;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.schedule-row:first-child {
+  border-top: 0;
+}

@@ -26,6 +26,7 @@ import { actorId, runScope, type Principal } from "../auth/principal";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 import { RerunService } from "./rerun-service";
+import { ScheduleService } from "./schedule-service";
 
 const notFound = () => new HttpError(404, "NOT_FOUND", "Not found");
 const nameTaken = (err: NameTakenError) => new HttpError(409, "NAME_TAKEN", err.message, [{ path: ["name"], message: err.message }]);
@@ -185,8 +186,11 @@ export class SuiteService {
     return this.detail(p, suiteId);
   }
 
+  /** Its schedules go with it (their job schedulers first); its suite runs stay. */
   async remove(p: Principal, suiteId: string): Promise<void> {
-    if (!(await this.suites.remove(runScope(p), suiteId))) throw notFound();
+    const suite = await this.require(p, suiteId);
+    await new ScheduleService(this.deps).removeForSuite(suite.id);
+    if (!(await this.suites.remove(runScope(p), suite.id))) throw notFound();
   }
 
   /**

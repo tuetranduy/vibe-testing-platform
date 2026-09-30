@@ -2,7 +2,7 @@ import type { GeneratedTest, NormalizedRequirement } from "@platform/contracts";
 import { GeneratedTestRepository, RequirementRepository, RunRepository, UserRepository } from "@platform/db";
 import { TEST_TENANT_ID, createTestDatabase, type TestDatabase } from "@platform/db/testing";
 import { hashPassword } from "@platform/security";
-import { RunEventHub, type RunQueue } from "@platform/event-bus";
+import { RunEventHub, type RunQueue, type ScheduleSync } from "@platform/event-bus";
 import type { Resolver } from "@platform/security";
 import type { ArtifactStorage } from "@platform/storage";
 import type { FastifyInstance } from "fastify";
@@ -66,6 +66,21 @@ export class FakeQueue implements RunQueue {
     if (this.depthFails) throw new Error("redis down");
     if (this.depthHangs) return new Promise<number>(() => {});
     return this.depthValue;
+  }
+  async close() {}
+}
+
+/** BullMQ's job schedulers, in memory (V1.2 F3). */
+export class FakeScheduleSync implements ScheduleSync {
+  schedulers = new Map<string, { cron: string; timezone: string }>();
+  async upsert(s: { id: string; cron: string; timezone: string }) {
+    this.schedulers.set(s.id, { cron: s.cron, timezone: s.timezone });
+  }
+  async remove(id: string) {
+    this.schedulers.delete(id);
+  }
+  async ids() {
+    return [...this.schedulers.keys()];
   }
   async close() {}
 }

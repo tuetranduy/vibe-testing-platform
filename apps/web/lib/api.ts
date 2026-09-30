@@ -22,6 +22,10 @@ import {
   SuiteListSchema,
   SuiteRunListSchema,
   SuiteRunViewSchema,
+  ScheduleListSchema,
+  ScheduleViewSchema,
+  type ScheduleInput,
+  type ScheduleView,
   type ApiError,
   type AddSuiteEntryRequest,
   type RunSuiteRequestInput,
@@ -311,3 +315,17 @@ export const getSuiteRun = (suiteRunId: string): Promise<SuiteRunView> => reques
 
 export const cancelSuiteRun = (suiteRunId: string): Promise<SuiteRunView> =>
   request(SuiteRunViewSchema, `${SUITE_RUNS}/${seg(suiteRunId)}/cancel`, { method: "POST" });
+
+/** A suite's schedules (V1.2): when it runs by itself, with its saved credentials only. */
+export const listSchedules = async (suiteId: string): Promise<ScheduleView[]> =>
+  (await request(ScheduleListSchema, `${SUITES}/${seg(suiteId)}/schedules`)).items;
+
+export const createSchedule = (suiteId: string, body: ScheduleInput): Promise<ScheduleView> =>
+  request(ScheduleViewSchema, `${SUITES}/${seg(suiteId)}/schedules`, { method: "POST", body });
+
+export const updateSchedule = (scheduleId: string, body: ScheduleInput): Promise<ScheduleView> =>
+  request(ScheduleViewSchema, `/api/v1/suite-schedules/${seg(scheduleId)}`, { method: "PUT", body });
+
+export const deleteSchedule = async (scheduleId: string): Promise<void> => {
+  await request(NoContentSchema, `/api/v1/suite-schedules/${seg(scheduleId)}`, { method: "DELETE" });
+};

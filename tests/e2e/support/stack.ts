@@ -163,6 +163,8 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
       DEFAULT_TENANT_ID: "t_default",
       SECRETS_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
       MAX_ACTIVE_RUNS_PER_TENANT: "10",
+      // A schedule may fire every minute, so the suite-schedule E2E waits at most one (V1.2 F3).
+      SCHEDULE_MIN_INTERVAL_MINUTES: "1",
       TARGET_PRIVATE_ALLOWLIST: new URL(targetUrl).host,
       RUNNER_WORKSPACE_DIR: runnerDir,
       WORKER_METRICS_PORT: platform === "compose" ? "9464" : String(metricsPort),

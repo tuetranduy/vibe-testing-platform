@@ -1,12 +1,14 @@
 import { createLogger, loadEnvOrExit, resolveEnvLlmChoice } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
-import { DEFAULT_REAPER_CONFIG, RunEventHub, createRunQueue, startReaper } from "@platform/event-bus";
+import { DEFAULT_REAPER_CONFIG, RunEventHub, createRunQueue, createScheduleSync, startReaper } from "@platform/event-bus";
 import { defaultResolver } from "@platform/security";
 import { createArtifactStorage } from "@platform/storage";
 import { Redis } from "ioredis";
 import { buildApp } from "./app";
+import type { ApiDeps } from "./deps";
 import { createApiMetrics } from "./metrics";
 import { createCancelSignal } from "./services/cancel-signal";
+import { startScheduleWorker } from "./services/schedule-worker";
 import { UserService, redisLoginThrottle } from "./services/user-service";
 
 const env = loadEnvOrExit();
@@ -41,39 +43,44 @@ if (env.BOOTSTRAP_ADMIN_EMAIL && env.BOOTSTRAP_ADMIN_PASSWORD) {
 const subscriber = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 const queueConnection = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 const queue = createRunQueue(queueConnection);
+const schedules = createScheduleSync(queueConnection);
 
 const storage = createArtifactStorage(env);
 await retry(() => storage.ensureReady(), "artifact storage");
 
 const metrics = createApiMetrics({ queue });
 
-const app = await buildApp(
-  {
-    config: {
-      apiToken: env.API_TOKEN,
-      defaultTenantId: env.DEFAULT_TENANT_ID,
-      maxActiveRunsPerTenant: env.MAX_ACTIVE_RUNS_PER_TENANT,
-      privateAllowlist: env.TARGET_PRIVATE_ALLOWLIST,
-      secretsKey: env.secretsKey,
-      artifactUrlTtlSeconds: 300,
-      sseHeartbeatMs: 20_000,
-      llm: {
-        envChoice: resolveEnvLlmChoice(env),
-        envKeys: { anthropic: Boolean(env.ANTHROPIC_API_KEY?.trim()), gemini: Boolean(env.GEMINI_API_KEY?.trim()) },
-        fakeAllowed: env.NODE_ENV !== "production",
-      },
-      auth: { sessionTtlHours: env.SESSION_TTL_HOURS },
+const deps: ApiDeps = {
+  config: {
+    apiToken: env.API_TOKEN,
+    defaultTenantId: env.DEFAULT_TENANT_ID,
+    maxActiveRunsPerTenant: env.MAX_ACTIVE_RUNS_PER_TENANT,
+    privateAllowlist: env.TARGET_PRIVATE_ALLOWLIST,
+    secretsKey: env.secretsKey,
+    artifactUrlTtlSeconds: 300,
+    sseHeartbeatMs: 20_000,
+    llm: {
+      envChoice: resolveEnvLlmChoice(env),
+      envKeys: { anthropic: Boolean(env.ANTHROPIC_API_KEY?.trim()), gemini: Boolean(env.GEMINI_API_KEY?.trim()) },
+      fakeAllowed: env.NODE_ENV !== "production",
     },
-    loginThrottle: redisLoginThrottle(redis),
-    db: handle.db,
-    redis,
-    hub: new RunEventHub(subscriber),
-    queue,
-    storage,
-    cancelSignal: createCancelSignal(redis),
-    resolve: defaultResolver,
-    metrics,
+    auth: { sessionTtlHours: env.SESSION_TTL_HOURS },
+    scheduleMinIntervalMinutes: env.SCHEDULE_MIN_INTERVAL_MINUTES,
   },
+  schedules,
+  loginThrottle: redisLoginThrottle(redis),
+  db: handle.db,
+  redis,
+  hub: new RunEventHub(subscriber),
+  queue,
+  storage,
+  cancelSignal: createCancelSignal(redis),
+  resolve: defaultResolver,
+  metrics,
+};
+
+const app = await buildApp(
+  deps,
   { logger: { level: env.LOG_LEVEL, redact: ["req.headers.authorization", "req.headers.cookie"] } },
 );
 
@@ -91,8 +98,14 @@ const reaper = await startReaper(
   { connection: queueConnection },
 );
 
+// Suite schedules (V1.2 F3) fire here, so a firing creates its suite run like the endpoint does; every API
+// process consumes the queue and BullMQ gives each firing to one of them.
+const scheduleWorker = await startScheduleWorker(deps, { connection: queueConnection, logger: log });
+
 const shutdown = async () => {
   await app.close();
+  await scheduleWorker.close();
+  await schedules.close();
   await reaper.close();
   await queue.close();
   redis.disconnect();

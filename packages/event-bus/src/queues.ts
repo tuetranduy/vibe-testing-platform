@@ -86,3 +86,42 @@ export function createRunQueue(connection: ConnectionOptions): RunQueue {
     close: () => queue.close(),
   };
 }
+
+/** Suite schedules (V1.2 F3): one BullMQ job scheduler per enabled schedule, keyed by the schedule's id. */
+export const SUITE_SCHEDULES_QUEUE = "suite-schedules";
+export const JOB_FIRE_SCHEDULE = "fire-schedule";
+
+export interface ScheduleJobData {
+  scheduleId: string;
+}
+
+/** Keeps BullMQ's job schedulers in step with the `suite_schedules` table (the table is the truth). */
+export interface ScheduleSync {
+  /** Creates or replaces the schedule's job scheduler. */
+  upsert(schedule: { id: string; cron: string; timezone: string }): Promise<void>;
+  remove(scheduleId: string): Promise<void>;
+  /** The ids of every job scheduler (to remove those whose schedule is gone or disabled). */
+  ids(): Promise<string[]>;
+  close(): Promise<void>;
+}
+
+export function createScheduleSync(connection: ConnectionOptions): ScheduleSync {
+  const queue = new Queue<ScheduleJobData>(SUITE_SCHEDULES_QUEUE, { connection });
+  return {
+    async upsert(s) {
+      await queue.upsertJobScheduler(
+        s.id,
+        { pattern: s.cron, tz: s.timezone },
+        { name: JOB_FIRE_SCHEDULE, data: { scheduleId: s.id }, opts: { attempts: 1, removeOnComplete: 100, removeOnFail: 100 } },
+      );
+    },
+    async remove(scheduleId) {
+      await queue.removeJobScheduler(scheduleId);
+    },
+    async ids() {
+      const schedulers = await queue.getJobSchedulers(0, -1);
+      return schedulers.map((s) => s.key);
+    },
+    close: () => queue.close(),
+  };
+}
