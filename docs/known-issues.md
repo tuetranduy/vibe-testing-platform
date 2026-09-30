@@ -31,7 +31,7 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
 | KI-015 | Low | Docs | Spec checkboxes for Tasks 21–22 are unticked (spec file is read-only) | Resolved `04ca3c7` |
 | KI-016 | Env | Dev machine | Stale sandbox profile in `$TMPDIR` fails `sandbox-preflight.test.ts` | Resolved `6d7bcf5` + machine cleanup |
 | KI-017 | Env | Dev machine | Default shell Node 22.13 is below `engines` and its Corepack is broken | Resolved (machine setup) |
-| KI-018 | Medium | LLM provider | The Gemini provider has only been run live on a free-tier key | Open |
+| KI-018 | Medium | LLM provider | The Gemini provider has only been run live on a free-tier key | Closed: superseded by DeepSeek (2026-09-30) |
 | KI-019 | Low | Cost metrics | Gemini 3.6–3.8 Flash prices double on 2027-01-01 | Resolved `13ac37a` |
 | KI-020 | Medium | Exploration | A Stagehand step that times out holds up the next step's model call | Resolved `5c64c0c` |
 | KI-021 | High | Safety | Destructive-action policy misses most destructive buttons (English list only) | Resolved (2026-09-29) |
@@ -40,20 +40,22 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
 | KI-024 | Medium | Crash recovery | Lost runs are detected only while some worker is alive | Resolved (2026-09-29) |
 | KI-025 | Medium | Process | No CI; the repository has no remote | CI added; remote open |
 | KI-026 | Medium | LLM quality | Most models offered in Settings have never been evaluated | Open (needs paid keys) |
-| KI-027 | Low | Data model | D6: only 4 tables carry `tenant_id`; child rows rely on `run_id` | Open |
+| KI-027 | Low | Data model | D6: only 4 tables carry `tenant_id`; child rows rely on `run_id` | Resolved `3a61f16` |
 | KI-028 | Low | Audit | Revealing a secret-bearing artifact is only a log line | Resolved `6026592` (V1.1) |
-| KI-029 | Low | Isolation | The rerun runner is a worker child process; its image was never built | Open |
-| KI-030 | Low | Docs | Stale plan copy in `Claude outputs/`; architecture doc never added | Open |
+| KI-029 | Low | Isolation | The rerun runner is a worker child process; its image was never built | Resolved `1e2081d`, `ca9ef74` |
+| KI-030 | Low | Docs | Stale plan copy in `Claude outputs/`; architecture doc never added | Resolved `08d29b0` |
 | KI-031 | Medium | LLM quality | The planner's multi-scenario prompt (V1.1) has never run against a real model | Open (needs paid keys) |
-| KI-032 | Low | Exploration | The exploration cache trusts a lookup whose locator still matches | Open |
-| KI-033 | Low | Secrets | Saved credential profiles are decrypted by the API at run creation | Open (by design) |
-| KI-034 | Low | Users | Sessions: no list, no "sign out everywhere" short of a password change | Open |
-| KI-035 | Low | Users | Users exist only in the default tenant | Open |
+| KI-032 | Low | Exploration | The exploration cache trusts a lookup whose locator still matches | Resolved `66f5afd` |
+| KI-033 | Low | Secrets | Saved credential profiles are decrypted by the API at run creation | Closed: decision (2026-09-30) |
+| KI-034 | Low | Users | Sessions: no list, no "sign out everywhere" short of a password change | Resolved `9a5bfa0` |
+| KI-035 | Low | Users | Users exist only in the default tenant | Resolved `8e0d47a` |
 | KI-036 | Medium | CI | The GitHub Action has never run on GitHub | Open (needs KI-025's remote) |
-| KI-037 | Low | Schedules | Schedules fire only while an API process is up; a missed firing runs late, once | Open (by design) |
-| KI-038 | Low | Admission | A suite run takes one slot but queues all of its tests at once | Open |
-| KI-039 | Low | Performance | Suite-run views compare every child with its previous run on each read | Open |
-| KI-040 | Low | Tokens | The web app's per-minute token limit is per instance and in memory | Open |
+| KI-037 | Low | Schedules | Schedules fire only while an API process is up; a missed firing runs late, once | Resolved `ad47ad2` |
+| KI-038 | Low | Admission | A suite run takes one slot but queues all of its tests at once | Resolved `f41b0d6` |
+| KI-039 | Low | Performance | Suite-run views compare every child with its previous run on each read | Resolved `c0c9e09` |
+| KI-040 | Low | Tokens | The web app's per-minute token limit is per instance and in memory | Resolved `4287733` |
+| KI-041 | Medium | LLM quality | The requirement compiler's prompt changed without an eval run | Resolved (2026-09-30, `af80be5`) |
+| KI-042 | Low | Recordings | Exploration video and trace have not been recorded in a live run | Open |
 | KI-043 | Medium | LLM | The DeepSeek provider has not been run against the live API | Open |
 
 ---
@@ -250,6 +252,10 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   exported from `.env`. Compare the compile's answer time on `gemini-3.8-flash` (with thinking) with the Gemini
   request timeout, 25 s: a slower answer is cut off and retried, so raise `DEFAULT_TIMEOUT_MS` in `gemini.ts` if
   answers get close to it.
+- **Closed (2026-09-30, superseded):** the project's live-tested provider is DeepSeek (KI-043): the evals, the
+  `@live` Stagehand smoke, CI's nightly live suite and the release gate run on it. Gemini stays offered and works
+  (free-tier runs above), but a billing-enabled Gemini key was never available, so its default model is unscored;
+  score it (the commands above) if a Gemini key becomes the one in use.
 
 ## KI-019 — Gemini 3.6–3.8 Flash prices double on 2027-01-01
 - **Severity:** Low (cost estimates only).
@@ -340,6 +346,11 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   leaks today.
 - **To close:** add `tenant_id` to the child tables (backfilled from `test_runs`) before a second tenant exists, or
   amend D6 to "every run carries it; child rows inherit it".
+- **Resolved (`3a61f16`):** the 12 run child tables (`run_secrets`, `requirement_revisions`, `test_plans`,
+  `run_suggestions`, `run_site_analyses`, `exploration_steps`, `observed_facts`, `criterion_results`,
+  `generated_tests`, `test_events`, `diagnostic_findings`, `llm_calls`) carry `tenant_id`, backfilled from `test_runs`
+  (migration 0016) and filled by the `set_run_tenant_id` trigger on every insert, so no writer passes it and a
+  writer cannot set another tenant's. `tenant-ids.test.ts` checks every table with a `run_id` has it.
 
 ## KI-028 — Revealing a secret-bearing artifact is only a log line
 - **Severity:** Low.
@@ -359,6 +370,15 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   guard in the rerun (Ruling R31), any public host is reachable from it through its egress proxy.
 - **To close:** run the rerun in the runner image (separate container, no route to the database, Redis or S3), and
   add a navigation guard to the generated test's context.
+- **Resolved:** the navigation guard (`1e2081d`): the rerun workspace's fixed `global-setup.js` launches the
+  rerun's Chromium (sandbox on, through the egress proxy) and guards every main-frame navigation over CDP, redirect
+  hops and popups included, as exploration does; the stored test connects to it through Playwright's
+  `PW_TEST_CONNECT_WS_ENDPOINT`, so saved tests rerun unchanged. A blocked navigation fails that step, and the
+  criterion's error says the rerun was stopped from leaving the allowed website. The runner container (`ca9ef74`):
+  compose runs the reruns in the `runner` service (the worker image's `runner` target), on an internal network with
+  the workers only and the `runs` workspace volume; its browser reaches the worker's per-rerun egress proxy (which
+  then accepts only the runner's address) over a loopback forwarder. `RUNNER_URL` / `RUNNER_TOKEN` turn it on;
+  without them the worker keeps its child process (local development).
 
 ## KI-030 — Stale plan copy; architecture doc never added
 - **Severity:** Low.
@@ -366,6 +386,8 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   unticked, no Revision 3); `docs/ai-testing-platform-architecture.md`, which the plan names as its spec, never
   existed (the plan with Revision 3 serves as the spec).
 - **To close:** delete the copy; either write the architecture doc from Section 2 or drop the reference.
+- **Resolved (`08d29b0`):** the stale copy is deleted; the plan (with Revision 3) is named as the spec in the
+  plan and the README, and no architecture doc is referenced.
 
 ## KI-031 — The planner's multi-scenario prompt has never run against a real model
 - **Severity:** Medium.
@@ -386,6 +408,10 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   tenant.
 - **To close:** optionally re-run `observe` on a sample of hits and compare; or bind entries to a page fingerprint.
   Administrators can clear the cache (Settings) after a redesign or an incident.
+- **Resolved (`66f5afd`, `bdad5f3`):** an entry records what its element does (tag, type, link target, form action
+  and method, as origin + path) and a hit is used only while the element still does the same; entries from before
+  it are misses and are rewritten. One hit in ten (`cacheRecheckRate`) asks the explorer again anyway, and the fresh
+  lookup replaces the entry, so a stale or steered entry does not live out its 30 days.
 
 ## KI-033 — Saved credential profiles are decrypted by the API at run creation
 - **Severity:** Low (by design, V1.1 F4; D7 amended).
@@ -395,6 +421,11 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   for as long as the profile exists. A compromised API process can therefore read profile values.
 - **To close (if the risk matters):** let the worker decrypt profile values itself, with run-scoped copies made
   there.
+- **Closed (2026-09-30, decision):** moving the decryption to the worker would not reduce the risk: the API holds
+  `SECRETS_ENCRYPTION_KEY` (it encrypts every secret typed into a run and every profile value) and reads the
+  database, so a compromised API process can decrypt profile values whichever process normally does. Removing the
+  risk needs asymmetric encryption (the API encrypts to a key only the worker can open), which would change every
+  stored secret: a V2 decision, recorded here rather than a change that only looks safer.
 
 ## KI-034 — Sessions: no list, no "sign out everywhere" short of a password change
 - **Severity:** Low.
@@ -403,6 +434,10 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   user's sessions by resetting the password or disabling the account. Sessions have a fixed lifetime
   (`SESSION_TTL_HOURS`), not an idle timeout.
 - **To close:** a sessions list on `/account` with "sign out other sessions".
+- **Resolved (`9a5bfa0`):** `/account` lists the person's live sessions (browser, signed in, last active, ends)
+  with "Sign out" for each other session and "Sign out other sessions"
+  (`GET /v1/auth/sessions`, `DELETE /v1/auth/sessions/:id`, `POST /v1/auth/sessions/revoke-others`, audited).
+  Sessions record the browser's User-Agent at sign-in (migration 0015).
 
 ## KI-035 — Users exist only in the default tenant
 - **Severity:** Low (single tenant, D6).
@@ -410,6 +445,9 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
 - **What:** accounts are tenant-scoped in the schema, but sign-in, the bootstrap administrator and user management
   all act on the default tenant. A second tenant would need a way to choose the tenant at sign-in.
 - **To close:** with multi-tenancy (V2), together with KI-027.
+- **Resolved (`8e0d47a`):** a sign-in may name its tenant (`tenant` in the login request; `/login?org=<id>` in the web
+  app); an unknown one fails like a wrong password. `pnpm --filter @platform/api create-tenant` adds a tenant with its
+  first administrator, who adds the others. With KI-027, a second tenant needs no migration.
 
 ## KI-036 — The GitHub Action has never run on GitHub
 - **Severity:** Medium (V1.2 F5).
@@ -427,6 +465,9 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   like the endpoint does). With no API process running, nothing fires; BullMQ keeps the next firing as a delayed job, so
   when an API comes back that one firing runs late and the missed ones in between are not made up.
 - **To close (if needed):** record `nextRunAt` and skip firings older than a grace period, or let the worker fire.
+- **Resolved (`ad47ad2`):** a firing taken more than 15 minutes after it was due (`SCHEDULE_GRACE_MINUTES`; the due
+  time is the scheduler job's timestamp + delay) is skipped (`skipped_late`, audited as `schedule.skipped`) instead
+  of starting a suite run hours late; the next firing runs on time.
 
 ## KI-038 — A suite run takes one slot but queues all of its tests at once
 - **Severity:** Low (V1.2 F1, admission amended).
@@ -436,6 +477,9 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   ahead of anything queued after it. Each child's `QUEUED` wait also counts towards the reaper's "never picked up"
   check only while its job is gone, so long queues are safe.
 - **To close:** enqueue a suite run's children a few at a time (e.g. as each one finishes).
+- **Resolved (`f41b0d6`):** a suite run's children are queued with a BullMQ priority (child n: n + 1). Jobs without
+  one — single runs, reruns, analyses — go first, and several suites' children take turns, so a 50-test suite no
+  longer holds up what is queued after it.
 
 ## KI-039 — Suite-run views compare every child with its previous run on each read
 - **Severity:** Low (V1.2 F2).
@@ -444,6 +488,9 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   (about four queries per child), and the suite-run page polls every 3 s while it runs: a 50-test suite costs ~200 small
   queries per poll.
 - **To close:** store each child's change when it completes (the worker knows), or cache per settled child.
+- **Resolved (`c0c9e09`):** a completed child's change is cached per caller scope and child (10 minutes, at most
+  10,000 entries per API instance) and computed in parallel; a poll of a settled suite run makes no comparison
+  queries.
 
 ## KI-040 — The web app's per-minute token limit is per instance and in memory
 - **Severity:** Low (V1.2 F4).
@@ -451,6 +498,8 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
 - **What:** `/api/ext` allows 120 requests per token prefix and minute per web instance, counted in memory (reset on
   restart, multiplied by the number of instances). The API's limit (600 per token and hour, in Redis) is the real one.
 - **To close:** count in Redis from the web app too, or rely on the API's limit only.
+- **Resolved (`4287733`):** the web app no longer counts; the API counts each token's requests per minute (120) and
+  per hour (600) in Redis, shared by every instance, and the web app passes its `429` / `Retry-After` through.
 
 ## KI-041 — The requirement compiler's prompt changed without an eval run
 - **Severity:** Medium (V1.3).
@@ -462,6 +511,11 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   recorded before it, and the evals were not re-run (no model key in the implementation environment). The eval
   suite still runs without pages, so it does not measure the live-site path either.
 - **To close:** re-run `pnpm eval requirement-compiler` with a key; add cases with recorded page inventories.
+- **Resolved (2026-09-30, `af80be5`):** the suite was re-run at the current prompts (`7e53baa`) on both DeepSeek
+  models (`evals/BASELINE.md`), and cases can now carry the live site's pages (`pages`, as the analysis reads them):
+  cases 26–27 give the demo shop's recorded pages (from `evals/survey/cases/01-demo-shop-home.yaml`) to requirements
+  that also run without them, with the same expectations. Both pass on `deepseek-flash`: the pages added, dropped or
+  weakened no criterion and invented no credential.
 
 ## KI-042 — Exploration video and trace have not been recorded in a live run
 - **Severity:** Low (V1.3).

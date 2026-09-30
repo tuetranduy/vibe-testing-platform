@@ -34,6 +34,8 @@ export interface E2EStack {
   runnerDir: string;
   /** The worker's container (platform `compose`), else null. */
   workerContainer: string | null;
+  /** The runner service's container, where reruns run (platform `compose`, KI-029), else null. */
+  runnerContainer: string | null;
 }
 
 async function freePort(): Promise<number> {
@@ -251,6 +253,7 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
         logDir,
         runnerDir,
         workerContainer: platform === "compose" ? `platform-e2e-worker-${suffix}` : null,
+        runnerContainer: platform === "compose" ? `platform-e2e-runner-${suffix}` : null,
       },
       stop,
     };
