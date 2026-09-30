@@ -78,7 +78,7 @@ export function SuiteSchedules({ suite }: { suite: SuiteDetail }) {
     <section className="card stack" aria-labelledby="schedules-title">
       <div className="section-head">
         <h2 id="schedules-title" className="card-title">
-          <Icon name="pending" /> Schedules
+          <Icon name="clock" /> Schedules
         </h2>
         <p className="muted">The suite runs by itself at these times, as the person who added the schedule.</p>
       </div>

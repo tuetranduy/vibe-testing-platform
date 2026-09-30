@@ -87,10 +87,12 @@ export function Suites({ navigate = (url: string) => window.location.assign(url)
         <ul className="saved-list">
           {state.suites.map((s) => (
             <li key={s.id}>
-              <article className="card stack-tight" aria-labelledby={`suite-${s.id}`}>
+              <article className="card stack-tight suite-card" aria-labelledby={`suite-${s.id}`}>
                 <div className="saved-head">
-                  <h2 id={`suite-${s.id}`} className="card-title">
-                    <a href={`/suites/${encodeURIComponent(s.id)}`}>{s.name}</a>
+                  <h2 id={`suite-${s.id}`} className="suite-card-title">
+                    <a className="card-link" href={`/suites/${encodeURIComponent(s.id)}`}>
+                      {s.name}
+                    </a>
                   </h2>
                   {s.lastRun && <SuiteRunOutcome run={s.lastRun} />}
                 </div>

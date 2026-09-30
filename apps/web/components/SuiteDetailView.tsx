@@ -325,7 +325,7 @@ function EntriesCard({ suite, onChange }: { suite: SuiteDetail; onChange: (s: Su
                 </button>
                 <button
                   type="button"
-                  className="button button-quiet"
+                  className="button button-quiet button-quiet-danger"
                   onClick={() => void remove(e.sourceRunId)}
                   disabled={busy}
                   aria-label={`Remove “${e.title}” from the suite`}
@@ -464,7 +464,7 @@ function SuiteSettings({
             </button>
           </>
         ) : (
-          <button type="button" className="button button-quiet" onClick={() => setConfirmingDelete(true)} disabled={pending}>
+          <button type="button" className="button button-danger-quiet actions-end" onClick={() => setConfirmingDelete(true)} disabled={pending}>
             Delete suite
           </button>
         )}

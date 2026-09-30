@@ -38,7 +38,8 @@ export type IconName =
   | "key"
   | "chart"
   | "print"
-  | "layers";
+  | "layers"
+  | "clock";
 
 const PATHS: Record<IconName, ReactNode> = {
   check: <path d="M4 10.5l4 4 8-9" />,
@@ -191,6 +192,12 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   layers: <path d="M10 3l7 3.5-7 3.5-7-3.5zM3 10l7 3.5 7-3.5M3 13.5L10 17l7-3.5" />,
+  clock: (
+    <>
+      <circle cx="10" cy="10" r="7" />
+      <path d="M10 6.5V10l2.5 1.5" />
+    </>
+  ),
 };
 
 export function Icon({ name, className }: { name: IconName; className?: string }) {
