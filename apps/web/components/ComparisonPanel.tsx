@@ -133,7 +133,7 @@ export function ComparisonPanel({ runId }: { runId: string }) {
         </>
       )}
       {c.history.length > 0 && (
-        <div className="field">
+        <div className="field comparison-baseline">
           <label htmlFor="comparison-baseline">Compare with</label>
           <select id="comparison-baseline" value={baseline ?? ""} onChange={(e) => setBaseline(e.target.value || undefined)}>
             <option value="">The previous run</option>
