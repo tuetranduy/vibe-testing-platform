@@ -102,3 +102,39 @@ describe("V1.2 F3 — scheduled suite runs", () => {
     expect(settled).toMatchObject({ trigger: "schedule", verdict: "PASSED", owner: { name: expect.any(String) } });
   }, 180_000);
 });
+
+describe("V1.2 F4 — API tokens", () => {
+  it("a token runs its user's suite and reads the result, and gets 403 TOKEN_SCOPE anywhere else", async () => {
+    const admin = await signIn(stack.admin.email, stack.admin.password);
+    const cart = await passingRun({ requirement: REQUIREMENTS.cart });
+    const suite = (await admin.call("POST", "/v1/suites", { name: "Token smoke" })).json;
+    await admin.call("POST", `/v1/suites/${suite.id}/entries`, { sourceRunId: cart });
+    const created = await admin.call("POST", "/v1/api-tokens", { name: "E2E pipeline", scopes: ["suites:run", "results:read"] });
+    expect(created.status).toBe(201);
+    const withToken = async (method: string, url: string, body?: unknown) => {
+      const res = await fetch(`${stack.apiUrl}${url}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${stack.apiToken}`,
+          "x-api-token": created.json.token,
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: res.status, json: (await res.json()) as any };
+    };
+
+    const byName = await withToken("GET", `/v1/suites?name=${encodeURIComponent("token smoke")}`);
+    expect(byName.json.items.map((s: { id: string }) => s.id)).toEqual([suite.id]);
+    const started = await withToken("POST", `/v1/suites/${suite.id}/runs`, {});
+    expect(started.status).toBe(202);
+    const settled = await suiteRunSettled(started.json.suiteRunId);
+    expect(settled).toMatchObject({ trigger: "api", verdict: "PASSED" });
+    expect((await withToken("GET", `/v1/suite-runs/${started.json.suiteRunId}`)).json.status).toBe("COMPLETED");
+
+    expect((await withToken("POST", "/v1/test-runs", { targetUrl: `${stack.targetUrl}/`, requirement: REQUIREMENTS.cart })).json.code).toBe("TOKEN_SCOPE");
+    expect((await withToken("GET", "/v1/api-tokens")).json.code).toBe("TOKEN_SCOPE");
+    await admin.call("DELETE", `/v1/api-tokens/${created.json.id}`);
+    expect((await withToken("GET", "/v1/suites")).json.code).toBe("TOKEN_INVALID");
+  });
+});

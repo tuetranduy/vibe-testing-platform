@@ -542,3 +542,26 @@ export const suiteSchedules = pgTable(
   },
   (t) => [index("suite_schedules_suite").on(t.suiteId), index("suite_schedules_tenant").on(t.tenantId)],
 );
+
+/** API tokens (V1.2 F4): a user's credentials for CI and scripts, limited to scopes. Only the hash is stored. */
+export const apiTokens = pgTable(
+  "api_tokens",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    tokenHash: bytea("token_hash").notNull(),
+    prefix: text("prefix").notNull(),
+    scopes: text("scopes").array().notNull(),
+    expiresAt: ts("expires_at"),
+    lastUsedAt: ts("last_used_at"),
+    revokedAt: ts("revoked_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("api_tokens_token_hash").on(t.tokenHash), index("api_tokens_user").on(t.userId), index("api_tokens_tenant").on(t.tenantId)],
+);

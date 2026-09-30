@@ -50,7 +50,15 @@ export async function suiteRoutes(app: FastifyInstance, deps: ApiDeps): Promise<
   app.post("/v1/suites/:suiteId/runs", async (req, reply) => {
     const { suiteId } = parseOr400(SuiteParams, req.params);
     const key = req.headers["idempotency-key"];
-    const result = await suiteRuns.start(req.principal, suiteId, req.body, typeof key === "string" && key.length > 0 ? key : undefined);
+    // Started with an API token (V1.2 F4): recorded on the suite run, never trusted.
+    const token = req.principal.kind === "user" ? req.principal.token : undefined;
+    const result = await suiteRuns.start(
+      req.principal,
+      suiteId,
+      req.body,
+      typeof key === "string" && key.length > 0 ? key : undefined,
+      token ? { trigger: "api", context: { token: { id: token.id, name: token.name } } } : { trigger: "manual" },
+    );
     await audit(deps, req, { action: "suite.run_requested", detail: { suiteId, suiteRunId: result.body.suiteRunId } });
     for (const profileId of result.credentialProfileIds) {
       await audit(deps, req, { action: "credential_profile.used", detail: { profileId, suiteRunId: result.body.suiteRunId } });

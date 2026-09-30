@@ -4,6 +4,7 @@ import type { RunEventHub, RunQueue, ScheduleSync } from "@platform/event-bus";
 import type { Resolver } from "@platform/security";
 import type { ArtifactStorage } from "@platform/storage";
 import type { Redis } from "ioredis";
+import type { TokenThrottle } from "./auth/principal";
 import type { ApiMetrics } from "./metrics";
 import type { CancelSignal } from "./services/cancel-signal";
 import type { LoginThrottle } from "./services/user-service";
@@ -55,6 +56,8 @@ export interface ApiDeps {
   metrics?: ApiMetrics;
   /** BullMQ's job schedulers for suite schedules (V1.2 F3); unset: schedules are stored but never fire. */
   schedules?: ScheduleSync;
+  /** API tokens' hourly request count (V1.2 F4); unset: a process-local one. */
+  tokenThrottle?: TokenThrottle;
   /** The clock (tests). */
   now?: () => Date;
 }

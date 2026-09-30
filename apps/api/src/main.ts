@@ -10,6 +10,7 @@ import { createApiMetrics } from "./metrics";
 import { createCancelSignal } from "./services/cancel-signal";
 import { startScheduleWorker } from "./services/schedule-worker";
 import { UserService, redisLoginThrottle } from "./services/user-service";
+import { redisTokenThrottle } from "./auth/principal";
 
 const env = loadEnvOrExit();
 const log = createLogger({ component: "api", level: env.LOG_LEVEL });
@@ -69,6 +70,7 @@ const deps: ApiDeps = {
   },
   schedules,
   loginThrottle: redisLoginThrottle(redis),
+  tokenThrottle: redisTokenThrottle(redis),
   db: handle.db,
   redis,
   hub: new RunEventHub(subscriber),
@@ -81,7 +83,7 @@ const deps: ApiDeps = {
 
 const app = await buildApp(
   deps,
-  { logger: { level: env.LOG_LEVEL, redact: ["req.headers.authorization", "req.headers.cookie"] } },
+  { logger: { level: env.LOG_LEVEL, redact: ["req.headers.authorization", "req.headers.cookie", 'req.headers["x-session-token"]', 'req.headers["x-api-token"]'] } },
 );
 
 // The reaper runs here as well as in the workers (one of them per tick), so a run whose only worker
