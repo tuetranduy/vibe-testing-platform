@@ -76,6 +76,36 @@ function readDom(el: Element): DomFacts {
   };
 }
 
+/**
+ * What an element does when used, as one string (KI-032): its tag and type, where a link goes and where its form
+ * posts (origin + path: never a query, which can carry personal data), and its form's method. Two elements with
+ * the same locator but a different action — a link that now points elsewhere, a button moved into another form —
+ * give different strings.
+ */
+export async function elementAction(page: Page, target: ElementTarget, opts: RecorderOptions = {}): Promise<string> {
+  const handle = await resolveHandle(page, target, opts);
+  return handle.evaluate((el: Element) => {
+    const where = (raw: string | null | undefined) => {
+      if (!raw) return "";
+      try {
+        const u = new URL(raw, document.baseURI);
+        return u.protocol === "http:" || u.protocol === "https:" ? `${u.origin}${u.pathname}` : u.protocol;
+      } catch {
+        return "?";
+      }
+    };
+    const form = (el as HTMLButtonElement).form ?? el.closest("form");
+    const parts = [
+      el.localName,
+      el.getAttribute("type") ?? "",
+      where(el.getAttribute("href")),
+      form ? where(el.getAttribute("formaction") ?? form.getAttribute("action") ?? document.baseURI) : "",
+      form ? (el.getAttribute("formmethod") ?? form.getAttribute("method") ?? "get").toLowerCase() : "",
+    ];
+    return parts.join("|");
+  });
+}
+
 /** DOM + accessibility facts about one element. */
 export async function describeElement(page: Page, target: ElementTarget, opts: RecorderOptions = {}): Promise<ElementDescription> {
   const handle = await resolveHandle(page, target, opts);

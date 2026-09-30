@@ -3,7 +3,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LOCATOR_STRATEGY_ORDER } from "../shared/locator-policy";
 import { captureCheckpoint, captureFact, modeForValueType, readFact } from "./fact-reader";
-import { describeElement, fillElement, recordElement } from "./recorder";
+import { describeElement, elementAction, fillElement, recordElement } from "./recorder";
 
 /**
  * Real Chromium (Playwright's build, launched headless without a proxy) on a static fixture
@@ -111,6 +111,24 @@ describe("recordElement (acted element → ranked locator candidates)", () => {
   it("rejects selectors that do not match exactly one element", async () => {
     await expect(recordElement(page, "button >> text=Buy")).rejects.toThrow(/exactly one/);
     await expect(recordElement(page, "#missing", { timeoutMs: 200 })).rejects.toThrow(/exactly one/);
+  });
+});
+
+describe("elementAction (what a cached element does, KI-032)", () => {
+  it("names the tag and type, a link's target and a form's action and method, never a query", async () => {
+    await page.setContent(`
+      <a id="link" href="/account/orders?session=abc#top">Orders</a>
+      <form action="https://pay.example/checkout?cart=1" method="POST"><button id="pay" type="submit">Pay</button></form>
+      <form><button id="self" formaction="/cart/add" formmethod="post">Add</button></form>
+      <button id="plain" type="button">Nothing</button>`);
+    expect(await elementAction(page, "#link")).toBe("a||http://fixture.test/account/orders||");
+    expect(await elementAction(page, "#pay")).toBe("button|submit||https://pay.example/checkout|post");
+    expect(await elementAction(page, "#self")).toBe("button|||http://fixture.test/cart/add|post");
+    expect(await elementAction(page, "#plain")).toBe("button|button|||");
+
+    // Same button, moved into a form that posts elsewhere: a different action.
+    await page.evaluate(() => document.querySelector("form")!.setAttribute("action", "https://evil.example/steal"));
+    expect(await elementAction(page, "#pay")).toBe("button|submit||https://evil.example/steal|post");
   });
 });
 

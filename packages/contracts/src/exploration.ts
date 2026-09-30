@@ -95,5 +95,10 @@ export const CachedElementSchema = z.object({
   description: z.string().max(1000),
   method: z.string().max(40).nullable(),
   element: ElementRefSchema,
+  /**
+   * What the element did when it was cached (tag, type, link target, form action; KI-032). A hit whose element now
+   * does something else is a miss. Absent on entries written before it: those are misses, rewritten on success.
+   */
+  action: z.string().max(4000).optional(),
 });
 export type CachedElement = z.infer<typeof CachedElementSchema>;

@@ -897,6 +897,8 @@ describe("exploration cache (V1.1 F8)", () => {
     };
     return { cache, entries, touched, puts };
   }
+  /** Never picks a hit for a recheck (the default rate is 10 %). */
+  const NO_RECHECK = () => 1;
   const clickPlan = () => planOf(step("navigate", "Open the product page"), step("click", "Click Add to cart"));
   const keyFor = (instruction: string) => observeCacheKey(TARGET, instruction)!.key;
   const cached = (selector: string): CachedElement => ({
@@ -919,7 +921,7 @@ describe("exploration cache (V1.1 F8)", () => {
     const { ctx } = fakeCtx();
     const session = new FakeSession();
     const mem = memoryCache();
-    await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache });
+    await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache, random: NO_RECHECK });
     expect(session.ops().filter((o) => o === "observe")).toHaveLength(1);
     expect(mem.puts).toEqual([{ key: keyFor("Click Add to cart"), where: { origin: "https://shop.test", path: "/products/1" }, entry: { ...cached("xpath=/html[1]/body[1]/el[1]"), description: "an element" } }]);
   });
@@ -928,7 +930,7 @@ describe("exploration cache (V1.1 F8)", () => {
     const { ctx } = fakeCtx();
     const session = new FakeSession();
     const mem = memoryCache({ [keyFor("Click Add to cart")]: cached("xpath=/html[1]/body[1]/button[3]") });
-    const outcome = await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache });
+    const outcome = await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache, random: NO_RECHECK });
     expect(session.ops()).not.toContain("observe");
     expect(session.calls.find((c) => c.op === "actOn")!.arg).toMatchObject({ selector: "xpath=/html[1]/body[1]/button[3]", method: "click", arguments: [] });
     expect(outcome.steps.find((s) => s.kind === "observe")).toMatchObject({ outcome: "SUCCESS", llm: { inputTokens: 0, outputTokens: 0, cacheHit: true } });
@@ -941,7 +943,7 @@ describe("exploration cache (V1.1 F8)", () => {
     const session = new FakeSession();
     const stale = { ...cached("xpath=/html[1]/body[1]/button[3]"), element: { candidates: [{ strategy: "testId" as const, value: "old-button" }], chosenIndex: 0, framePath: [] } };
     const mem = memoryCache({ [keyFor("Click Add to cart")]: stale });
-    await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache });
+    await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache, random: NO_RECHECK });
     expect(session.ops().filter((o) => o === "observe")).toHaveLength(1);
     expect(mem.puts.map((p) => p.entry.selector)).toEqual(["xpath=/html[1]/body[1]/el[1]"]);
   });
@@ -950,7 +952,7 @@ describe("exploration cache (V1.1 F8)", () => {
     const { ctx } = fakeCtx();
     const failing = new FakeSession({ actOn: () => ({ success: false, message: "detached" }) });
     const mem = memoryCache();
-    await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session: failing, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache });
+    await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session: failing, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache, random: NO_RECHECK });
     expect(mem.puts).toEqual([]);
 
     const { ctx: ctx2 } = fakeCtx();
@@ -959,7 +961,7 @@ describe("exploration cache (V1.1 F8)", () => {
     const outcome = await runExploration(
       ctx2,
       { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx2.budgetSignal(1) },
-      { store: memoryStore().store, recorder: fakeRecorder({ describe: () => ({ role: "button", name: "Delete account", text: "Delete account" }) }).recorder, cache: destructive.cache },
+      { store: memoryStore().store, recorder: fakeRecorder({ describe: () => ({ role: "button", name: "Delete account", text: "Delete account" }) }).recorder, cache: destructive.cache, random: NO_RECHECK },
     );
     expect(outcome.stopReason).toBe("BLOCKED_BY_POLICY");
     expect(session.ops()).not.toContain("actOn");
@@ -968,9 +970,49 @@ describe("exploration cache (V1.1 F8)", () => {
   it("a failing cache is only a miss", async () => {
     const { ctx } = fakeCtx();
     const session = new FakeSession();
-    const outcome = await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: memoryCache({}, { fail: true }).cache });
+    const outcome = await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: memoryCache({}, { fail: true }).cache, random: NO_RECHECK });
     expect(outcome.stopReason).toBe("COMPLETED");
     expect(session.ops()).toContain("actOn");
+  });
+
+  it("a hit whose element now does something else is a miss (KI-032)", async () => {
+    const actions: Record<string, string> = { "xpath=/html[1]/body[1]/button[3]": "a||https://shop.test/account/delete||" };
+    const recorder = { ...fakeRecorder().recorder, action: async (_page: unknown, selector: string) => actions[selector] ?? "button|submit|||" };
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const moved = { ...cached("xpath=/html[1]/body[1]/button[3]"), action: "a||https://shop.test/cart/add||" };
+    const mem = memoryCache({ [keyFor("Click Add to cart")]: moved });
+    await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder, cache: mem.cache, random: NO_RECHECK });
+    expect(session.ops().filter((o) => o === "observe")).toHaveLength(1);
+    // The fresh lookup replaces the entry, with its own action.
+    expect(mem.puts.map((p) => [p.entry.selector, p.entry.action])).toEqual([["xpath=/html[1]/body[1]/el[1]", "button|submit|||"]]);
+
+    // Unchanged, the same entry is a hit; an entry written before KI-032 (no action) is a miss.
+    const { ctx: ctx2 } = fakeCtx();
+    const same = new FakeSession();
+    const hit = memoryCache({ [keyFor("Click Add to cart")]: { ...moved, action: "a||https://shop.test/account/delete||" } });
+    await runExploration(ctx2, { plan: clickPlan(), requirement: requirementWith([]), session: same, budget: ctx2.budgetSignal(1) }, { store: memoryStore().store, recorder, cache: hit.cache, random: NO_RECHECK });
+    expect(same.ops()).not.toContain("observe");
+    const { ctx: ctx3 } = fakeCtx();
+    const legacy = new FakeSession();
+    const old = memoryCache({ [keyFor("Click Add to cart")]: cached("xpath=/html[1]/body[1]/button[3]") });
+    await runExploration(ctx3, { plan: clickPlan(), requirement: requirementWith([]), session: legacy, budget: ctx3.budgetSignal(1) }, { store: memoryStore().store, recorder, cache: old.cache, random: NO_RECHECK });
+    expect(legacy.ops().filter((o) => o === "observe")).toHaveLength(1);
+  });
+
+  it("a sampled hit is looked up again and the fresh lookup replaces it (KI-032)", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const mem = memoryCache({ [keyFor("Click Add to cart")]: cached("xpath=/html[1]/body[1]/button[3]") });
+    const outcome = await runExploration(
+      ctx,
+      { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) },
+      { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache, cacheRecheckRate: 0.1, random: () => 0.05 },
+    );
+    expect(session.ops().filter((o) => o === "observe")).toHaveLength(1);
+    expect(outcome.steps.find((s) => s.kind === "observe")!.llm).toEqual(USAGE);
+    expect(mem.touched).toEqual([]);
+    expect(mem.puts.map((p) => p.entry.selector)).toEqual(["xpath=/html[1]/body[1]/el[1]"]);
   });
 });
 

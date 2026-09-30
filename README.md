@@ -118,8 +118,9 @@ live gate passed (it still applies; see the plan's Revision 3):
   (`/runs/<id>/print`, the browser's print dialog).
 - **Usage** (`/usage`, `GET /v1/usage`) — estimated model cost by day, model, stage and run.
 - **Exploration cache** — element lookups verified on earlier runs of the same page are reused without a model call
-  (after checking they still point at the same element); Settings shows and clears it; a new-test option turns it
-  off for one run.
+  (after checking they still point at the same element, and that it still does the same thing: link target, form
+  action; 1 hit in 10 is looked up again anyway); Settings shows and clears it; a new-test option turns it off for
+  one run.
 - **Several scenarios per run** — the planner may split the criteria into up to 5 scenarios, each run from a clean
   session and compiled into its own Playwright test.
 
