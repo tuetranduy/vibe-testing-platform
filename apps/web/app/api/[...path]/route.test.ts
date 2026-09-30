@@ -92,6 +92,7 @@ describe("API proxy allow-list", () => {
     ["DELETE", "/api/v1/suite-schedules/sch_1", DELETE],
     ["GET", "/api/v1/suite-runs/srn_1", GET],
     ["POST", "/api/v1/suite-runs/srn_1/cancel", POST],
+    ["GET", "/api/v1/suite-runs/srn_1/junit.xml", GET],
     ["GET", "/api/v1/exploration-cache", GET],
     ["DELETE", "/api/v1/exploration-cache", DELETE],
     ["POST", "/api/v1/credential-profiles", POST],
