@@ -96,8 +96,8 @@ administrator can revoke anyone's under Settings → API tokens. Token creation 
 - External callers use the **web app**, never the API: `https://<web host>/api/ext/v1/…` with `Authorization: Bearer
   tap_…`. The web server forwards the token as `X-Api-Token` next to the service `API_TOKEN`, on an allow-list of
   the token-reachable endpoints only, without cookies. **Add the public host CI uses to `WEB_ALLOWED_HOSTS`.**
-- Limits: 600 requests per token and hour in the API (Redis, `429` with `Retry-After`), and 120 per token and minute
-  per web instance.
+- Limits: 120 requests per token and minute and 600 per token and hour, counted by the API in Redis (shared by every
+  instance; `429` with `Retry-After`, passed through by the web app).
 - The GitHub Action (`.github/actions/run-suite`) and the CLI (`integrations/platform-client/cli.mjs`) are described,
   with an example workflow, in [`integrations/README.md`](../integrations/README.md).
 

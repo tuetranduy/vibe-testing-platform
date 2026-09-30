@@ -1,6 +1,5 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EXT_REQUESTS_PER_MINUTE, resetExtRateLimit } from "../../../../lib/ext-proxy";
 import { GET, POST } from "./route";
 
 const SERVICE = "test-token-0123456789abcdef";
@@ -33,7 +32,6 @@ beforeEach(() => {
   vi.stubEnv("API_URL", "http://api.internal:3001");
   vi.stubEnv("API_TOKEN", SERVICE);
   vi.stubEnv("WEB_ALLOWED_HOSTS", "tests.example.com");
-  resetExtRateLimit();
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -87,9 +85,8 @@ describe("/api/ext (V1.2 F4)", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it(`answers 429 after ${EXT_REQUESTS_PER_MINUTE} requests a minute from one token`, async () => {
-    stubUpstream();
-    for (let i = 0; i < EXT_REQUESTS_PER_MINUTE; i++) expect((await GET(req("GET", "/api/ext/v1/suites"))).status).toBe(200);
+  it("passes the API's 429 and Retry-After through (the limit is the API's, KI-040)", async () => {
+    stubUpstream(() => Response.json({ code: "TOO_MANY_REQUESTS" }, { status: 429, headers: { "retry-after": "60" } }));
     const over = await GET(req("GET", "/api/ext/v1/suites"));
     expect(over.status).toBe(429);
     expect(over.headers.get("retry-after")).toBe("60");

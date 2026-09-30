@@ -50,35 +50,56 @@ export const TOKEN_ROUTES: Readonly<Record<string, readonly ApiTokenScope[]>> = 
   "GET /v1/test-runs/:runId/comparison": ["results:read"],
 };
 
-/** Requests an API token may make per hour (V1.2 F4); above it, `429`. */
+/** Requests an API token may make per minute and per hour (V1.2 F4, KI-040); above either, `429`. */
+export const TOKEN_REQUESTS_PER_MINUTE = 120;
 export const TOKEN_REQUESTS_PER_HOUR = 600;
 
-/** Counts a token's requests in the current hour; returns the count including this one. */
+/** A token's request counts in the current minute and hour, this one included. */
+export interface TokenHits {
+  minute: number;
+  hour: number;
+}
+
+/** Counts a token's requests per minute and per hour, shared by every API instance in production (Redis). */
 export interface TokenThrottle {
-  hit(tokenId: string): Promise<number>;
+  hit(tokenId: string): Promise<TokenHits>;
 }
 
 /** Process-local (tests, a single API instance); main.ts uses Redis. */
 export function memoryTokenThrottle(now: () => number = Date.now): TokenThrottle {
-  const hits = new Map<string, { hour: number; n: number }>();
+  const hits = new Map<string, { minute: number; hour: number; perMinute: number; perHour: number }>();
   return {
     async hit(id) {
-      const hour = Math.floor(now() / 3_600_000);
+      const t = now();
+      const minute = Math.floor(t / 60_000);
+      const hour = Math.floor(t / 3_600_000);
       const cur = hits.get(id);
-      const next = cur && cur.hour === hour ? { hour, n: cur.n + 1 } : { hour, n: 1 };
+      const next = {
+        minute,
+        hour,
+        perMinute: cur && cur.minute === minute ? cur.perMinute + 1 : 1,
+        perHour: cur && cur.hour === hour ? cur.perHour + 1 : 1,
+      };
       hits.set(id, next);
-      return next.n;
+      return { minute: next.perMinute, hour: next.perHour };
     },
   };
 }
 
 export function redisTokenThrottle(redis: { incr(key: string): Promise<number>; expire(key: string, seconds: number): Promise<number> }): TokenThrottle {
+  const count = async (key: string, seconds: number) => {
+    const n = await redis.incr(key);
+    if (n === 1) await redis.expire(key, seconds);
+    return n;
+  };
   return {
     async hit(id) {
-      const key = `token-requests:${id}:${Math.floor(Date.now() / 3_600_000)}`;
-      const n = await redis.incr(key);
-      if (n === 1) await redis.expire(key, 3600);
-      return n;
+      const t = Date.now();
+      const [minute, hour] = await Promise.all([
+        count(`token-requests-minute:${id}:${Math.floor(t / 60_000)}`, 60),
+        count(`token-requests:${id}:${Math.floor(t / 3_600_000)}`, 3600),
+      ]);
+      return { minute, hour };
     },
   };
 }
@@ -135,8 +156,9 @@ export function createPrincipalResolver(deps: Pick<ApiDeps, "db" | "config" | "t
       if (!allowed || !allowed.some((scope) => found.token.scopes.includes(scope))) {
         return reply.status(403).send({ code: "TOKEN_SCOPE", message: "This API token may not do this" });
       }
-      if ((await throttle.hit(found.token.id)) > TOKEN_REQUESTS_PER_HOUR) {
-        reply.header("retry-after", "3600");
+      const hits = await throttle.hit(found.token.id);
+      if (hits.minute > TOKEN_REQUESTS_PER_MINUTE || hits.hour > TOKEN_REQUESTS_PER_HOUR) {
+        reply.header("retry-after", hits.hour > TOKEN_REQUESTS_PER_HOUR ? "3600" : "60");
         return reply.status(429).send({ code: "TOO_MANY_REQUESTS", message: "This API token made too many requests; wait and retry" });
       }
       const { user } = found;

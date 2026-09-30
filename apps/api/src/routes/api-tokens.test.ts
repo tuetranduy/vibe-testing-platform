@@ -127,7 +127,7 @@ describe("calling the API with a token", () => {
     expect((await new ApiTokenRepository(t.tdb.db).list(TEST_TENANT_ID, ann.userId)).every((x) => x.revokedAt !== null)).toBe(true);
   });
 
-  it("limits a token to 600 requests an hour", async () => {
+  it("limits a token to 120 requests a minute and 600 an hour", async () => {
     let now = Date.UTC(2026, 8, 30, 10);
     const limited = await createTestApi({}, { tokenThrottle: memoryTokenThrottle(() => now) });
     try {
@@ -136,10 +136,20 @@ describe("calling the API with a token", () => {
         await limited.app.inject({ method: "POST", url: "/v1/api-tokens", headers: member.headers, payload: { name: "x", scopes: ["results:read"] } })
       ).json().token;
       const get = () => limited.app.inject({ method: "GET", url: "/v1/suites", headers: withToken(token) });
-      for (let i = 0; i < 600; i++) expect((await get()).statusCode).toBe(200);
-      const over = await get();
-      expect(over.statusCode).toBe(429);
-      expect(over.headers["retry-after"]).toBe("3600");
+      for (let i = 0; i < 120; i++) expect((await get()).statusCode).toBe(200);
+      const fast = await get();
+      expect(fast.statusCode).toBe(429);
+      expect(fast.headers["retry-after"]).toBe("60");
+      // Refused requests count too: 121 this hour. Three more full minutes make 481, then 119 fit before 600.
+      for (let m = 0; m < 3; m++) {
+        now += 60_000;
+        for (let i = 0; i < 120; i++) expect((await get()).statusCode).toBe(200);
+      }
+      now += 60_000;
+      for (let i = 0; i < 119; i++) expect((await get()).statusCode).toBe(200);
+      const slow = await get();
+      expect(slow.statusCode).toBe(429);
+      expect(slow.headers["retry-after"]).toBe("3600");
       now += 3_600_000;
       expect((await get()).statusCode).toBe(200);
     } finally {
