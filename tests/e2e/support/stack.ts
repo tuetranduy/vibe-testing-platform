@@ -125,7 +125,7 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
   try {
     if (platform === "compose") {
       // The containers must run this checkout: build (cached when nothing changed).
-      await runLogged("docker", ["compose", "-f", COMPOSE_FILE, "build", "api", "worker"], path.join(logDir, "build.log"));
+      await runLogged("docker", ["compose", "-f", COMPOSE_FILE, "build", "api", "worker", "runner"], path.join(logDir, "build.log"));
     }
 
     const db: TestDatabase = await createTestDatabase();
@@ -210,9 +210,27 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
     const apiUrl = `http://127.0.0.1:${apiPort}`;
     await until("API", async () => (await fetch(`${apiUrl}/healthz`)).ok, 120_000, api.child);
 
+    // Platform `compose`: reruns run in the runner service's container (KI-029), as in the compose stack.
+    let runnerEnv: Record<string, string> = {};
+    if (platform === "compose") {
+      const runnerToken = `e2e-runner-${randomBytes(12).toString("hex")}`;
+      const runnerName = `platform-e2e-runner-${suffix}`;
+      const runner = launchComposeService({
+        composeFile: COMPOSE_FILE,
+        service: "runner",
+        name: runnerName,
+        env: { RUNNER_TOKEN: runnerToken, RUNNER_WORKSPACE_DIR: runnerDir, LOG_LEVEL: "info" },
+        publish: [],
+        logDir,
+      });
+      stops.push(runner.stop);
+      await until("runner", () => readFileSync(path.join(logDir, "runner.log"), "utf8").includes('"msg":"runner listening"'), 120_000, runner.child);
+      runnerEnv = { RUNNER_URL: `http://${runnerName}:3100`, RUNNER_TOKEN: runnerToken };
+    }
+
     const worker = launch(
       "worker",
-      { ...llmEnv, E2E_MODE: mode },
+      { ...llmEnv, E2E_MODE: mode, ...runnerEnv },
       { port: metricsPort, target: 9464 },
     );
     const workerLog = path.join(logDir, "worker.log");

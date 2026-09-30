@@ -127,6 +127,12 @@ services:
       <<: *app-env
       FAKE_ENGINE_STEP_DELAY_MS: "500"
       WORKER_METRICS_PORT: "9464"
+      # Reruns run in the runner service (KI-029), on the workspaces volume both mount.
+      RUNNER_URL: http://runner:3100
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-dev-runner-token-change-me}
+      RUNNER_WORKSPACE_DIR: /work/runs
+    volumes: ["runs:/work/runs"]
+    networks: [default, runner]
     # Metrics are unauthenticated: loopback only, and a random host port per replica so
     # `--scale worker=N` works (`docker compose port --index N worker 9464` finds it).
     ports: ["127.0.0.1::9464"]
@@ -134,6 +140,24 @@ services:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
       s3: { condition: service_healthy }
+      runner: { condition: service_healthy }
+    restart: unless-stopped
+
+  # The Playwright rerun (KI-029): its own container on the internal `runner` network only — it reaches the
+  # workers, never the database, Redis, object storage or the internet. Its browser's traffic goes through the
+  # worker's per-rerun egress proxy. Chromium keeps its sandbox on, as in the worker.
+  runner:
+    build:
+      context: ../..
+      target: runner
+    security_opt: ["seccomp=../seccomp/worker.json"]
+    init: true
+    environment:
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-dev-runner-token-change-me}
+      RUNNER_WORKSPACE_DIR: /work/runs
+      LOG_LEVEL: info
+    volumes: ["runs:/work/runs"]
+    networks: [runner]
     restart: unless-stopped
 
   web:
@@ -154,3 +178,10 @@ services:
 volumes:
   pgdata:
   s3data:
+  # Rerun workspaces, shared by the workers and the runner.
+  runs:
+
+networks:
+  # No gateway: only the workers and the runner are on it.
+  runner:
+    internal: true

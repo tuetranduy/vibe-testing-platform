@@ -9,7 +9,8 @@ metrics and alerts, logs, retention, and the release checks.
 |---|---|---|
 | `web` (Next.js) | `api` only, over `API_URL`, with the API token added server-side | 3000 |
 | `api` (Fastify) | PostgreSQL, Redis, S3 | 3001: `/healthz`, `/metrics`, `/v1/*` |
-| `worker` × N | PostgreSQL, Redis, S3, the model providers (Anthropic, Gemini, DeepSeek); runs each run's sandboxed Chromium and Playwright runner as child processes | 9464: `/metrics` (`WORKER_METRICS_PORT`, `0` disables it) |
+| `worker` × N | PostgreSQL, Redis, S3, the model providers (Anthropic, Gemini, DeepSeek), `runner`; runs each run's sandboxed exploration Chromium as a child process | 9464: `/metrics` (`WORKER_METRICS_PORT`, `0` disables it) |
+| `runner` | the workers only (internal `runner` network) | 3100: the runner service (`RUNNER_TOKEN`); runs each Playwright rerun from the `runs` volume |
 | PostgreSQL | — | runs, events, criteria, results, artifacts metadata, encrypted run secrets, and the model settings: default model and the provider API keys saved in Settings (encrypted, long-lived) |
 | Redis | — | BullMQ queues `runs`, `maintenance` (reaper) and `retention`; pub/sub for live events and cancel signals |
 | S3-compatible storage | — | screenshots, traces, videos (compose uses rclone's S3 server; any S3 store works) |
@@ -132,7 +133,16 @@ Browsers reach targets only through the per-run egress proxy: exploration's Chro
 `--proxy-server=<proxy>` and `--proxy-bypass-list=<-loopback>`, and the Playwright rerun gets its own proxy. The
 proxy resolves each host itself, refuses non-public addresses (including a public name that re-resolves to a
 private one — DNS rebinding), and publishes an `egress.blocked` event for the site's own attempts. The navigation
-guard also keeps top-level navigation on the target's hosts.
+guard also keeps top-level navigation on the target's hosts — in exploration and, since KI-029, in the rerun too
+(the rerun workspace's `global-setup.js` launches its Chromium and guards it the same way).
+
+**The rerun runs in its own container** (KI-029). With `RUNNER_URL` and `RUNNER_TOKEN` set (compose sets
+`http://runner:3100`), the worker writes each rerun's workspace to the `runs` volume and the `runner` service runs the
+Playwright CLI there. The runner is only on the internal `runner` network: it reaches the workers and nothing else —
+not PostgreSQL, Redis, S3, the model providers or the internet. Its browser's traffic goes through the worker's
+per-rerun egress proxy, which then listens on the runner network and accepts only the runner's address, over a
+loopback forwarder the runner opens for that rerun. Without `RUNNER_URL`, the worker runs the CLI as a child process
+of its own (the default outside compose). Production refuses the compose file's development `RUNNER_TOKEN`.
 
 Enforce the same boundary in the network (defense in depth — it catches anything that bypasses the proxy):
 
@@ -277,9 +287,9 @@ when it is created; a profile's copy is purged with the run's other secrets when
 ## Release checks
 
 CI (`.github/workflows/ci.yml`, GitHub Actions) runs typecheck, `pnpm test` (with the S3 tests), `pnpm
-test:integration` and `pnpm test:e2e` on every push and pull request; nightly, the live E2E suite on Gemini; on
-demand (`workflow_dispatch` with `live-gate`), the release gate. The live jobs need a `GEMINI_API_KEY` repository
-secret from a billing-enabled project. The runners are Ubuntu 24.04, whose AppArmor denies the unprivileged user
+test:integration` and `pnpm test:e2e` on every push and pull request; nightly, the live E2E suite on DeepSeek; on
+demand (`workflow_dispatch` with `live-gate`), the release gate. The live jobs need a `DEEPSEEK_API_KEY` repository
+secret. The runners are Ubuntu 24.04, whose AppArmor denies the unprivileged user
 namespaces Chromium's sandbox needs; the workflow lifts that (`kernel.apparmor_restrict_unprivileged_userns=0`).
 
 

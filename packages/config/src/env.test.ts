@@ -51,7 +51,19 @@ describe("loadEnv", () => {
     const allZero = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
     expect(() => loadEnv({ ...prod, SECRETS_ENCRYPTION_KEY: allZero })).toThrow(/SECRETS_ENCRYPTION_KEY: looks like a placeholder/);
     expect(() => loadEnv({ ...prod, API_TOKEN: "dev-api-token-change-me-please" })).toThrow(/API_TOKEN: is the development default/);
+    expect(() => loadEnv({ ...prod, RUNNER_URL: "http://runner:3100", RUNNER_TOKEN: "dev-runner-token-change-me" })).toThrow(
+      /RUNNER_TOKEN: is the development default/,
+    );
     expect(() => loadEnv({ ...validEnv, SECRETS_ENCRYPTION_KEY: allZero, API_TOKEN: "dev-api-token-change-me-please" })).not.toThrow();
+  });
+
+  it("the runner service (KI-029): RUNNER_URL needs RUNNER_TOKEN, and production refuses the dev token", () => {
+    expect(loadEnv(validEnv).RUNNER_URL).toBeUndefined();
+    expect(() => loadEnv({ ...validEnv, RUNNER_URL: "http://runner:3100" })).toThrow(/RUNNER_TOKEN: is required with RUNNER_URL/);
+    expect(() => loadEnv({ ...validEnv, RUNNER_URL: "http://runner:3100", RUNNER_TOKEN: "short" })).toThrow(/RUNNER_TOKEN/);
+    const ok = loadEnv({ ...validEnv, RUNNER_URL: "http://runner:3100", RUNNER_TOKEN: "a-long-enough-runner-token" });
+    expect(ok).toMatchObject({ RUNNER_URL: "http://runner:3100", RUNNER_TOKEN: "a-long-enough-runner-token" });
+    expect(() => loadEnv({ ...validEnv, RUNNER_URL: "http://runner:3100", RUNNER_TOKEN: "dev-runner-token-change-me" })).not.toThrow();
   });
 
   it("sessions and the bootstrap admin (V1.1): defaults, both-or-neither, no dev password in production", () => {

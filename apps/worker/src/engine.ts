@@ -24,7 +24,16 @@ import { createSurveyDeps } from "./survey";
 
 /** What the engines read from the environment. The model is not here: it comes with each run (run-llm.ts). */
 export type EngineConfig = Partial<
-  Pick<Env, "TARGET_PRIVATE_ALLOWLIST" | "ARTIFACT_RETENTION_DAYS" | "SECRET_ARTIFACT_RETENTION_DAYS" | "RUNNER_WORKSPACE_DIR" | "RUNNER_NODE_MODULES_DIR">
+  Pick<
+    Env,
+    | "TARGET_PRIVATE_ALLOWLIST"
+    | "ARTIFACT_RETENTION_DAYS"
+    | "SECRET_ARTIFACT_RETENTION_DAYS"
+    | "RUNNER_WORKSPACE_DIR"
+    | "RUNNER_NODE_MODULES_DIR"
+    | "RUNNER_URL"
+    | "RUNNER_TOKEN"
+  >
 >;
 
 /** Where reruns get their workspaces (Ruling R32): RUNNER_WORKSPACE_DIR / RUNNER_NODE_MODULES_DIR, with defaults. */
@@ -91,6 +100,7 @@ export function createEngines(config: EngineConfig, deps: EngineDeps): Engines {
       ...retention,
       workspaceDir: workspace.baseDir,
       nodeModulesDir: workspace.nodeModulesDir,
+      ...(config.RUNNER_URL && config.RUNNER_TOKEN ? { runner: { url: config.RUNNER_URL, token: config.RUNNER_TOKEN } } : {}),
     },
     ...(deps.rerun ? { overrides: deps.rerun } : {}),
   });

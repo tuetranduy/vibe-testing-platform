@@ -7,7 +7,10 @@ import type { WorkerLogger } from "./deps";
 import { countEgressBlock, type WorkerMetrics } from "./metrics";
 import { createEgressEventReporter } from "./sandbox/egress-events";
 import { startEgressProxy } from "./sandbox/egress-proxy";
+import { lookup } from "node:dns/promises";
+import net from "node:net";
 import { createRunnerSpawn } from "./sandbox/runner-process";
+import { createRemoteRunnerSpawn, openRunnerForward, type RunnerClientOptions } from "./sandbox/runner-service";
 
 export interface RerunConfig extends ArtifactRetention {
   /** TARGET_PRIVATE_ALLOWLIST: the same admission as exploration (Ruling R31). */
@@ -16,6 +19,15 @@ export interface RerunConfig extends ArtifactRetention {
   workspaceDir: string;
   /** RUNNER_NODE_MODULES_DIR; unset → the worker's own @playwright/test install. */
   nodeModulesDir?: string | undefined;
+  /** RUNNER_URL / RUNNER_TOKEN: reruns run in the runner container (KI-029); unset → a child process here. */
+  runner?: RunnerClientOptions;
+}
+
+/** The runner service's addresses: its egress proxy accepts only these (the runner network). */
+async function runnerAddresses(runnerUrl: string): Promise<string[]> {
+  const host = new URL(runnerUrl).hostname.replace(/^\[|\]$/g, "");
+  if (net.isIP(host)) return [host];
+  return (await lookup(host, { all: true })).map((a) => a.address);
 }
 
 /** The rerun evidence port for one run: object storage + `artifacts` row (retention by sensitivity). */
@@ -52,19 +64,36 @@ export function createRunTestDeps(input: RerunDepsInput): RunTestStageDeps {
   return {
     openProxy:
       overrides.openProxy ??
-      ((ctx) => {
+      (async (ctx) => {
         const report = createEgressEventReporter({ publish: (e) => ctx.publish(e), logger });
         const count = countEgressBlock(input.metrics);
-        return startEgressProxy({
+        const runner = config.runner;
+        const proxy = await startEgressProxy({
           resolve: defaultResolver,
           privateAllowlist: config.privateAllowlist,
           onBlock: (e) => {
             count(e);
             report(e);
           },
+          // In the runner container, the browser reaches this proxy over the runner network (KI-029).
+          ...(runner ? { listen: { host: "0.0.0.0", allowedClients: await runnerAddresses(runner.url) } } : {}),
         });
+        if (!runner) return proxy;
+        try {
+          const forward = await openRunnerForward(runner, proxy.port);
+          return {
+            url: `http://127.0.0.1:${forward.port}`,
+            async close() {
+              await forward.close();
+              await proxy.close();
+            },
+          };
+        } catch (err) {
+          await proxy.close();
+          throw err;
+        }
       }),
-    spawn: countedSpawn(overrides.spawn ?? createRunnerSpawn({ logger }), input.metrics),
+    spawn: countedSpawn(overrides.spawn ?? (config.runner ? createRemoteRunnerSpawn(config.runner) : createRunnerSpawn({ logger })), input.metrics),
     workspace: overrides.workspace ?? { baseDir: config.workspaceDir, nodeModulesDir: config.nodeModulesDir },
     evidence: overrides.evidence ?? ((ctx) => createRerunEvidenceStore({ db, storage, config, metrics: input.metrics }, ctx)),
     // Infrastructure failures (proxy, workspace, spawn, browser launch) reach the worker log with their cause.

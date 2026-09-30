@@ -137,6 +137,14 @@ const EnvSchema = z
      * worker's own `@playwright/test` install.
      */
     RUNNER_NODE_MODULES_DIR: absoluteDir.optional(),
+    /**
+     * The runner service (KI-029): reruns run in the runner container (`http://runner:3100` in compose), which
+     * shares RUNNER_WORKSPACE_DIR with the worker and has no route to the database, Redis or storage. Unset:
+     * the worker runs the Playwright CLI as a child process of its own.
+     */
+    RUNNER_URL: z.string().url().optional(),
+    /** Shared by the worker and the runner service; at least 16 characters. Required with RUNNER_URL. */
+    RUNNER_TOKEN: z.string().min(16).optional(),
     TARGET_PRIVATE_ALLOWLIST: z
       .string()
       .optional()
@@ -148,6 +156,12 @@ const EnvSchema = z
       ),
   })
   .superRefine((env, ctx) => {
+    if (env.RUNNER_URL && !env.RUNNER_TOKEN) {
+      ctx.addIssue({ code: "custom", path: ["RUNNER_TOKEN"], message: "is required with RUNNER_URL (the runner service's shared token)" });
+    }
+    if (env.NODE_ENV === "production" && env.RUNNER_TOKEN && KNOWN_DEV_RUNNER_TOKENS.includes(env.RUNNER_TOKEN)) {
+      ctx.addIssue({ code: "custom", path: ["RUNNER_TOKEN"], message: "is the development default; set a random token for production" });
+    }
     const key = decodeKey(env.SECRETS_ENCRYPTION_KEY);
     if (!key) {
       ctx.addIssue({
@@ -198,6 +212,8 @@ const LlmEnvSchema = LlmFields.superRefine(checkLlmSettings).transform(withDefau
 export type LiveLlmEnv = Omit<z.output<typeof LlmEnvSchema>, "LLM_PROVIDER"> & { LLM_PROVIDER: LiveLlmProvider };
 type LiveLlmProvider = "anthropic" | "gemini" | "deepseek";
 
+/** The runner token in the compose file: never valid in production. */
+export const KNOWN_DEV_RUNNER_TOKENS: readonly string[] = ["dev-runner-token-change-me"];
 /** API tokens shipped in `.env.example` and the compose file: never valid in production. */
 export const KNOWN_DEV_API_TOKENS: readonly string[] = ["dev-api-token-change-me-please"];
 /** The bootstrap admin password in `.env.example` and the compose file: never valid in production. */
