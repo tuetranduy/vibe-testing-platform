@@ -1,11 +1,12 @@
 "use client";
 
-import { describeExpectedOutcome, type NormalizedRequirement } from "@platform/contracts";
+import { describeExpectedOutcome, type NormalizedRequirement, type SiteAnalysis } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { ApiRequestError, cancelRun, confirmCriteria, getCriteria, updateCriteria, type ConfirmResult } from "../lib/api";
+import { ApiRequestError, cancelRun, confirmCriteria, getCriteria, getSiteAnalysis, updateCriteria, type ConfirmResult } from "../lib/api";
 import { CriterionCard } from "./CriterionCard";
 import { Icon } from "./Icon";
+import { LiveSiteSummary, SuggestedTestData, chosenTestData, initialChoices, type DataChoice } from "./SiteAnalysisPanel";
 
 interface Props {
   runId: string;
@@ -39,6 +40,24 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
       }),
     [],
   );
+
+  /** The live-site analysis (V1.3); null while loading, or when the run has none (it is advisory: errors hide it). */
+  const [analysis, setAnalysis] = useState<SiteAnalysis | null>(null);
+  const [dataChoices, setDataChoices] = useState<Record<string, DataChoice>>({});
+  useEffect(() => {
+    let live = true;
+    getSiteAnalysis(runId).then(
+      (a) => {
+        if (!live) return;
+        setAnalysis(a);
+        setDataChoices(initialChoices(a));
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [runId]);
 
   useEffect(() => {
     let live = true;
@@ -91,7 +110,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
     setConfirming(true);
     setError(null);
     try {
-      onConfirmed(await confirmCriteria(runId));
+      onConfirmed(await confirmCriteria(runId, analysis ? chosenTestData(analysis, dataChoices) : {}));
     } catch (err) {
       setError(messageOf(err));
       setConfirming(false);
@@ -122,6 +141,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
   const aiJudged = criteria.filter((c) => c.expectedOutcome.kind === "semantic").length;
   const nonCritical = criteria.filter((c) => !c.critical).length;
   const openEdits = criteria.map((c) => c.id).filter((id) => editing.has(id));
+  const suggestedTaken = analysis ? Object.keys(chosenTestData(analysis, dataChoices)).length : 0;
 
   return (
     <section className="review" aria-labelledby="review-title">
@@ -146,10 +166,13 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
           </div>
         )}
 
+        {analysis && <LiveSiteSummary analysis={analysis} />}
+
         <div className="criteria-list">
           {criteria.map((c) => (
             <CriterionCard
               key={c.id}
+              siteCheck={analysis?.checks.find((check) => check.criterionId === c.id)}
               criterion={c}
               facts={requirement.facts}
               busy={saving || confirming}
@@ -170,6 +193,15 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
             />
           ))}
         </div>
+
+        {analysis && (
+          <SuggestedTestData
+            analysis={analysis}
+            choices={dataChoices}
+            disabled={confirming}
+            onChange={(key, choice) => setDataChoices((prev) => ({ ...prev, [key]: choice }))}
+          />
+        )}
       </div>
 
       <aside className="review-side" aria-labelledby="confirm-title">
@@ -194,6 +226,12 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
               <div className="count-info">
                 <dt>Judged by a model only</dt>
                 <dd>{aiJudged}</dd>
+              </div>
+            )}
+            {suggestedTaken > 0 && (
+              <div className="count-info">
+                <dt>Suggested test data taken</dt>
+                <dd>{suggestedTaken}</dd>
               </div>
             )}
             {nonCritical > 0 && (

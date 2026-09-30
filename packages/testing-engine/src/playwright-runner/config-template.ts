@@ -16,7 +16,8 @@ import { OUTPUT_DIR } from "./result-parser";
  *   loads the untrusted target site. Where no usable sandbox exists (e.g. a container without the
  *   worker's seccomp profile, infra/seccomp), Chromium fails to start and the rerun is ERRORED
  *   (Ruling R41) — never unsandboxed.
- * - trace / screenshot / video kept on failure only (the evidence of a failed criterion).
+ * - trace / video kept on failure only — or always, with `record` (V1.3: the run's recordVideo / recordTrace,
+ *   so a passing rerun has a video and a trace too); the screenshot on failure only, of the full page.
  * - bounded action / navigation timeouts, so a missing element fails that action (the later criteria
  *   are NOT_REACHED) instead of consuming the whole budget.
  */
@@ -49,6 +50,8 @@ export interface PlaywrightConfigInput {
   navigationTimeoutMs?: number;
   /** Assertion timeout (`expect.timeout`); Playwright's default (5 s) when omitted. */
   expectTimeoutMs?: number;
+  /** Keep the video / trace of a passing test too (V1.3); omitted: on failure only. */
+  record?: { video: boolean; trace: boolean };
 }
 
 const LOCAL_PROXY = /^http:\/\/127\.0\.0\.1:(\d{1,5})$/;
@@ -80,9 +83,9 @@ export function buildPlaywrightConfig(input: PlaywrightConfigInput): string {
       browserName: "chromium",
       headless: true,
       proxy: { server: input.proxyUrl },
-      trace: "retain-on-failure",
-      screenshot: "only-on-failure",
-      video: "retain-on-failure",
+      trace: input.record?.trace ? "on" : "retain-on-failure",
+      screenshot: { mode: "only-on-failure", fullPage: true },
+      video: input.record?.video ? "on" : "retain-on-failure",
       actionTimeout: input.actionTimeoutMs,
       navigationTimeout: navigationTimeoutMs,
       acceptDownloads: false,

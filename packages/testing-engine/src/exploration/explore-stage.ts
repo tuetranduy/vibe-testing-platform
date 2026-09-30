@@ -1,5 +1,6 @@
 import { BrowserProviderError, CancelledError, EngineError, explorationCacheOn, type ExplorationOutcome } from "@platform/contracts";
 import type { BrowserExplorer, ExplorerSession, SandboxedPage } from "@platform/stagehand-adapter/browser-explorer";
+import { collectEvidence, type EvidenceStore, type LocalArtifact } from "../evidence/collector";
 import { requireLlm, type EngineStages, type StageContext } from "../orchestrator/stages";
 import { actionPolicyFor } from "../shared/action-policy";
 import { runExploration, type ExplorationStore, type RecorderPort } from "./executor";
@@ -8,6 +9,17 @@ import type { ObserveCache } from "./observe-cache";
 /** A run's sandboxed browser (the worker's `RunSandbox`): the explorer's page plus teardown. */
 export interface ExplorationSandbox extends SandboxedPage {
   close(): Promise<void>;
+}
+
+/**
+ * The exploration's recordings (V1.3): a video and/or a Playwright trace of the sandbox's page, started by the
+ * worker before the explorer attaches (per the run's `recordVideo` / `recordTrace`).
+ */
+export interface SessionRecording {
+  /** Stops recording; the files to keep (inside the worker's temporary directory). Called at most once. */
+  stop(): Promise<LocalArtifact[]>;
+  /** Stops if still recording and deletes every file. Idempotent; never throws. */
+  discard(): Promise<void>;
 }
 
 /** Injected dependencies of the real explore stage (Ruling R12). */
@@ -25,7 +37,11 @@ export interface ExploreStageDeps {
    * Receives the raw error when the sandbox or the explorer fails to start (it may carry Chromium's
    * stderr). Only the log sees it: the run records a short template message.
    */
-  logger?: { error(obj: object, msg?: string): void };
+  logger?: { error(obj: object, msg?: string): void; warn?(obj: object, msg?: string): void };
+  /** Starts the run's recordings on the sandbox (V1.3); absent, or null returned: nothing is recorded. */
+  startRecording?(ctx: StageContext, sandbox: ExplorationSandbox): Promise<SessionRecording | null>;
+  /** Where the recordings are stored (the rerun's evidence store: scrubbed traces, sensitivity by the run's secrets). */
+  recordingStore?(ctx: StageContext): EvidenceStore;
 }
 
 /** Which start-up step failed, for the user-facing template message. */
@@ -46,11 +62,15 @@ export function createExploreStage(deps: ExploreStageDeps): EngineStages["explor
     const budget = ctx.budgetSignal(ctx.budgets.explorationMs);
     let sandbox: ExplorationSandbox | undefined;
     let session: ExplorerSession | undefined;
+    let recording: SessionRecording | null = null;
+    /** Set once exploration returned: a later failure (storing the recordings) never discards it as "nothing explored". */
+    let explored: ExplorationOutcome | undefined;
     let starting: keyof typeof START_FAILURES | null = "sandbox";
     try {
       sandbox = await deps.openSandbox(ctx);
       const opened = sandbox;
       ctx.addCleanup(() => opened.close());
+      recording = await startRecording(ctx, deps, sandbox);
       starting = "explorer";
       session = await deps.explorer.start({
         page: sandbox,
@@ -65,16 +85,19 @@ export function createExploreStage(deps: ExploreStageDeps): EngineStages["explor
       const started = session;
       ctx.addCleanup(() => started.close());
       starting = null;
-      return await runExploration(ctx, { plan, requirement, session, budget }, {
+      const outcome = (explored = await runExploration(ctx, { plan, requirement, session, budget }, {
         store: deps.store(ctx),
         ...(deps.recorder ? { recorder: deps.recorder } : {}),
         ...(deps.pollIntervalMs !== undefined ? { pollIntervalMs: deps.pollIntervalMs } : {}),
         ...(deps.cache && explorationCacheOn(ctx.request) ? { cache: deps.cache(ctx) } : {}),
-      });
+      }));
+      // Before the sandbox closes: stopping the trace needs the browser.
+      const artifactIds = recording ? await keepRecording(ctx, deps, recording) : [];
+      return artifactIds.length > 0 ? { ...outcome, artifactIds } : outcome;
     } catch (err) {
       if (ctx.signal.aborted) throw ctx.signal.reason;
       // The budget ran out while the browser or the explorer was still starting: nothing explored.
-      if (budget.aborted) return { steps: [], facts: [], stopReason: "EXPLORATION_BUDGET_EXHAUSTED" };
+      if (budget.aborted && explored === undefined) return { steps: [], facts: [], stopReason: "EXPLORATION_BUDGET_EXHAUSTED" };
       // Launch / proxy / extension failures are the browser provider's, not INTERNAL. The raw message
       // (e.g. Chromium's stderr tail) stays in the worker log, never in the run's error or events.
       if (starting && !(err instanceof EngineError) && !(err instanceof CancelledError)) {
@@ -84,8 +107,41 @@ export function createExploreStage(deps: ExploreStageDeps): EngineStages["explor
       }
       throw err;
     } finally {
+      await recording?.discard();
       await session?.close().catch(() => {});
       await sandbox?.close().catch(() => {});
     }
   };
+}
+
+/** Starts the recordings, best effort: a recorder that fails to start never stops the exploration. */
+async function startRecording(ctx: StageContext, deps: ExploreStageDeps, sandbox: ExplorationSandbox): Promise<SessionRecording | null> {
+  if (!deps.startRecording || !deps.recordingStore) return null;
+  try {
+    return await deps.startRecording(ctx, sandbox);
+  } catch (err) {
+    if (ctx.signal.aborted) throw ctx.signal.reason;
+    deps.logger?.warn?.({ err: err instanceof Error ? err.message : String(err), runId: ctx.runId }, "exploration recording failed to start");
+    await ctx.publish({ type: "artifact.omitted", message: "Exploration recording omitted", payload: { type: "VIDEO", reason: "The recording could not be started" } });
+    return null;
+  }
+}
+
+/**
+ * Stops the recordings and stores them like the rerun's evidence (collectEvidence: traces scrubbed of every
+ * secret value, SECRET_BEARING when the run has secrets). A recording that cannot be stopped is omitted;
+ * storage failures propagate (infrastructure, like screenshots).
+ */
+async function keepRecording(ctx: StageContext, deps: ExploreStageDeps, recording: SessionRecording): Promise<string[]> {
+  let files: LocalArtifact[];
+  try {
+    files = await recording.stop();
+  } catch (err) {
+    if (ctx.signal.aborted) throw ctx.signal.reason;
+    deps.logger?.warn?.({ err: err instanceof Error ? err.message : String(err), runId: ctx.runId }, "exploration recording failed to stop");
+    await ctx.publish({ type: "artifact.omitted", message: "Exploration recording omitted", payload: { type: "VIDEO", reason: "The recording could not be finished" } });
+    return [];
+  }
+  const secretValues = ctx.secrets.names.map((n) => ctx.secrets.get(n)).filter((v): v is string => v !== undefined);
+  return collectEvidence(ctx, files, { store: deps.recordingStore!(ctx), secretValues, origin: "Exploration" });
 }

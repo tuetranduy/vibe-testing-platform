@@ -1,9 +1,10 @@
 import { createGenerateTestStage, type GenerateTestStageDeps } from "../compiler/generate-stage";
+import { createCaptureEvidenceStage, type CaptureEvidenceDeps } from "../exploration/evidence-snapshot";
 import { createExploreStage, type ExploreStageDeps } from "../exploration/explore-stage";
 import { createRunTestStage, type RunTestStageDeps } from "../playwright-runner/run-stage";
 import { createPlanStage } from "../planner/planner";
 import { createReportStage, type ReportStageDeps } from "../reporting/report-builder";
-import { createAnalyzeStage } from "../requirement/compiler";
+import { createAnalyzeStage, type AnalyzeStageDeps } from "../requirement/compiler";
 import { createSurveyStage, type SurveyStageDeps } from "../survey/survey-stage";
 import { verifyStage } from "../verification/verify-stage";
 import type { EngineStages } from "./stages";
@@ -20,6 +21,10 @@ export interface RealStageDeps {
   runTest: RunTestStageDeps;
   /** Findings / usage persistence and the optional diagnostics model for the report (Task 18, R37). */
   report: ReportStageDeps;
+  /** The live-site read of the requirement analysis (V1.3); absent: the analysis reads no page. */
+  analyze?: AnalyzeStageDeps;
+  /** The start-page evidence of a run whose every criterion is blocked (V1.3); absent: none is taken. */
+  captureEvidence?: CaptureEvidenceDeps;
 }
 
 /**
@@ -29,12 +34,13 @@ export interface RealStageDeps {
 export function createRealStages(deps: RealStageDeps): EngineStages {
   return {
     survey: createSurveyStage(deps.survey), // spec 2026-09-28-suggest-tests
-    analyze: createAnalyzeStage(), // Task 10
+    analyze: createAnalyzeStage(deps.analyze), // Task 10; V1.3: against the live site
     plan: createPlanStage(), // Task 12
     explore: createExploreStage(deps.exploration), // Task 14
     verify: verifyStage, // Task 15
     generateTest: createGenerateTestStage(deps.generateTest), // Task 16
     runTest: createRunTestStage(deps.runTest), // Task 17
     report: createReportStage(deps.report), // Task 18: reconciliation (R35 replaces the interim R26 rule)
+    ...(deps.captureEvidence ? { captureEvidence: createCaptureEvidenceStage(deps.captureEvidence) } : {}), // V1.3
   };
 }

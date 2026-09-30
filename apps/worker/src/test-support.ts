@@ -296,6 +296,8 @@ export function fakeExploration(opts: { facts?: Record<string, FakeFactValue> } 
       }),
       explorer: { start: async () => session },
       recorder,
+      // A browserless page cannot be recorded (V1.3 recordings are covered by sandbox/session-recording.test.ts).
+      startRecording: async () => null,
     },
   };
 }

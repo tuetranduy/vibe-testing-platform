@@ -29,6 +29,51 @@ The V1 release gate (live E2E suite green 3 times, KI-001) has not passed yet: i
 
 **Real exploration and the Playwright rerun run in the Docker worker, with Chromium's sandbox on** (2026-09-27, [KI-002](docs/known-issues.md#ki-002--chromiums-sandbox-cannot-start-in-the-compose-worker)). Chromium's sandbox needs Linux user namespaces, which Docker's default seccomp profile denies ("No usable sandbox!", runs `ERRORED / BROWSER_PROVIDER`). Of the options — a seccomp profile that permits user namespaces, `cap_add: SYS_ADMIN` (broad), or Chromium's `--no-sandbox` (the browser runs untrusted pages) — the compose `worker` uses the first: [`infra/seccomp/worker.json`](infra/seccomp/README.md) is Docker's default profile plus user, PID and network namespaces for `clone` / `unshare`, with no extra capability. Both exploration's Chromium and the rerun's (launched by `@playwright/test`, `chromiumSandbox: true`) start sandboxed in the container, and `pnpm test:e2e:compose` runs the E2E suite against the compose API and worker. A deployment elsewhere needs the same profile (a Kubernetes `Localhost` profile) and a host that allows unprivileged user namespaces; see the profile's README.
 
+### V1.3 (2026-09-30)
+
+Evidence and test data, on top of V1.2 (the V1 live gate still applies):
+
+- **The requirement is checked against the live site.** While a requirement is analyzed, the worker first reads
+  the target's start page and up to 3 pages it links to — the survey's read-only reader (`survey/site-reader.ts`:
+  platform code loads each page by URL and reads it with a fixed script; nothing is clicked, typed or submitted),
+  choosing the links that share the most words with the requirement. The same compile call then sees those pages
+  (and the start page's screenshot) and returns, besides the criteria, a per-criterion **site check** (seen on the
+  site / not found on the pages read / unclear) and values for the test data the criteria need. It is advisory: it
+  never changes a status, and a site that cannot be read leaves the analysis `UNAVAILABLE` (the criteria come from
+  the requirement alone). Stored per run (`run_site_analyses`, `GET /v1/test-runs/:runId/site-analysis`); a full-page
+  screenshot of each page read is kept with the run. Off per run with `options.analyzeLiveSite: false`. The live-site
+  read gets at most 45 s (or half the analysis' exploration budget) of `ANALYSIS_TIMEOUT_SECONDS`.
+- **Suggested and generated test data.** Every test data key a criterion's precondition names that the run was not
+  given gets a suggested value: one the live site shows (a product it lists) or a generated, obviously fictional one
+  (`qa.x7k2p9@example.com`, 555-01xx phone numbers, public test card numbers) — from the model, else from the
+  platform's deterministic generator (`@platform/contracts` `generateTestDataValue`). Credentials are never generated:
+  they stay secrets. Criteria review shows them under "Suggested test data" (take, edit or drop each); confirming
+  sends the kept values (`POST …/criteria/confirm` with `{ "testData": { … } }`, refused if a value is one of the
+  run's secrets). With `autoConfirmCriteria` they are taken as suggested. The new-test form's test data rows have a
+  **Generate** button that fills a value from the key.
+- **Credentials written in the requirement are used.** "Log in as admin@shop.test with password Adm1n#2026"
+  no longer ends `BLOCKED / MISSING_SECRET`: when a run is created (or a suggested test is edited), the API takes the
+  credentials the text names (`@platform/contracts` `extractInlineInputs`) — emails and usernames become test data
+  (`email`, `username`), passwords become the run's secrets (encrypted, redacted, purged like typed ones) and are
+  replaced in the stored text by `[secret: password]`, so the value never reaches the database or a model. The
+  compiler and planner are told which names came from the text and use them. Values entered in the form win. A
+  password needs a label ("password: X", `password "X"`, "mật khẩu: X") or a pair ("user@x.com / X"); after
+  "is" it must look like one (quoted, or with a digit, symbol or inner capital), so "the password is invalid" is
+  left alone — quote a value to be exact. The new-test form previews what will be taken as you type.
+- **Full-page screenshots.** Checkpoint screenshots, the survey's and the analysis' page screenshots, and the rerun's
+  failure screenshot now capture the whole scrollable page (the viewport when the full page can't be taken).
+- **Video and trace recording.** Exploration records a video (the page's CDP screencast encoded to WebM by
+  Playwright's bundled ffmpeg — idle pauses are shortened to 3 s) and a Playwright trace (screenshots + DOM
+  snapshots), both stored as run evidence after the trace is scrubbed of every secret value like the rerun's. The
+  rerun keeps its video and trace on success too. Each criterion's evidence now lists the rerun's recordings whenever
+  the rerun reached a verdict on it, and the exploration's recordings last. Off per run with
+  `options.recordVideo: false` / `options.recordTrace: false` (the rerun then keeps them on failure only, as before).
+  No ffmpeg (`FFMPEG_PATH`, or Playwright's) → the video is skipped and logged; the trace still records.
+- **Evidence for blocked tests.** A step blocked by policy (missing secret or test data, a destructive action, a
+  blocked navigation) now keeps a full-page screenshot of where it stopped, and a blocked criterion's evidence lists
+  it. When the plan blocks every criterion (so nothing is explored), the worker still loads the start page read-only
+  and keeps a full-page screenshot, recorded as a `screenshot` step, as the blocked criteria's evidence.
+
 ### V1.2 (2026-09-30)
 
 Built on branch `feat/v1.2` from the plan's Section 7 backlog (spec

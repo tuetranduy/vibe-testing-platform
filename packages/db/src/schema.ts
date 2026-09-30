@@ -287,6 +287,17 @@ export const runSuggestions = pgTable("run_suggestions", {
   updatedAt: ts("updated_at").notNull().defaultNow(),
 });
 
+/** The requirement analysis against the live site (V1.3): pages read, per-criterion checks, suggested test data. */
+export const runSiteAnalyses = pgTable("run_site_analyses", {
+  runId: text("run_id")
+    .primaryKey()
+    .references(() => testRuns.id, { onDelete: "cascade" }),
+  /** SiteAnalysis, validated by SiteAnalysisSchema on every write and read. */
+  json: jsonb("json").notNull(),
+  createdAt: createdAt(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
 export const explorationSteps = pgTable(
   "exploration_steps",
   {

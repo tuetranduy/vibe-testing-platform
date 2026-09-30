@@ -61,6 +61,44 @@ describe("POST /v1/test-runs", () => {
     expect(JSON.stringify(events)).not.toContain("hunter2");
   });
 
+  it("uses credentials written in the requirement (V1.3.1): the email as test data, the password as an encrypted secret out of the text", async () => {
+    const res = await post(validBody({ requirement: "Log in as admin@shop.test with password Adm1n#2026-long and see the account page." }));
+    expect(res.statusCode).toBe(202);
+    const { runId } = res.json();
+    const [row] = await t.tdb.db.select().from(schema.testRuns).where(eq(schema.testRuns.id, runId));
+    expect(JSON.stringify(row)).not.toContain("Adm1n#2026-long");
+    const request = row!.requestJson as { requirement: string; testData: Record<string, string>; secretNames: string[]; inlineInputs: unknown };
+    expect(request.requirement).toBe("Log in as admin@shop.test with password [secret: password] and see the account page.");
+    expect(request.testData).toEqual({ email: "admin@shop.test" });
+    expect(request.secretNames).toEqual(["password"]);
+    expect(request.inlineInputs).toEqual([
+      { kind: "secret", name: "password" },
+      { kind: "testData", name: "email" },
+    ]);
+    const [secret] = await new SecretRepository(t.tdb.db).listActive(runId);
+    expect(decryptSecret(secret!, { runId, name: "password" }, SECRETS_KEY)).toBe("Adm1n#2026-long");
+    const events = await new EventRepository(t.tdb.db).listAfter(runId, 0);
+    expect(JSON.stringify(events)).not.toContain("Adm1n#2026-long");
+  });
+
+  it("what the user entered wins over what the requirement names (V1.3.1)", async () => {
+    const res = await post(
+      validBody({
+        requirement: "Log in as admin@shop.test with password Adm1n#2026-long and see the account page.",
+        testData: { email: "mine@shop.test" },
+        secrets: { password: "typed-password-1" },
+      }),
+    );
+    const { runId } = res.json();
+    const run = await new RunRepository(t.tdb.db).getById(runId);
+    expect(run.request.testData).toEqual({ email: "mine@shop.test" });
+    expect(run.request.secretNames).toEqual(["password", "password_2"]);
+    expect(run.request.requirement).toContain("[secret: password_2]");
+    const secrets = await new SecretRepository(t.tdb.db).listActive(runId);
+    const values = Object.fromEntries(secrets.map((s) => [s.name, decryptSecret(s, { runId, name: s.name }, SECRETS_KEY)]));
+    expect(values).toEqual({ password: "typed-password-1", password_2: "Adm1n#2026-long" });
+  });
+
   it("redacts secret values that also appear in the requirement text or test data", async () => {
     const res = await post(
       validBody({
@@ -74,7 +112,8 @@ describe("POST /v1/test-runs", () => {
     const [row] = await t.tdb.db.select().from(schema.testRuns).where(eq(schema.testRuns.id, runId));
     expect(JSON.stringify(row)).not.toContain("hunter2");
     const stored = row!.requestJson as { requirement: string; testData: Record<string, string> };
-    expect(stored.requirement).toBe("Log in with password [REDACTED] and check the account page.");
+    // V1.3.1: a password written in the requirement that is one of the run's secrets is replaced by its name.
+    expect(stored.requirement).toBe("Log in with password [secret: login_password] and check the account page.");
     expect(stored.testData.email).toBe("qa@demo.test");
     const summary = await t.app.inject({ method: "GET", url: `/v1/test-runs/${runId}`, headers: auth });
     expect(summary.body).not.toContain("hunter2");

@@ -7,6 +7,7 @@ import {
   ResultRepository,
   RunRepository,
   SecretRepository,
+  SiteAnalysisRepository,
   SuggestionRepository,
   type TestRun,
 } from "@platform/db";
@@ -154,6 +155,14 @@ export async function createRunContext(
       return test;
     },
     saveSuggestions: (draft) => new SuggestionRepository(deps.db).save(run.id, draft),
+    async saveSiteAnalysis(analysis) {
+      await new SiteAnalysisRepository(deps.db).save(run.id, analysis);
+    },
+    async applyTestData(values) {
+      const testData = await runs.mergeTestData(run.id, values);
+      ctx.request = { ...ctx.request, testData };
+      await new SiteAnalysisRepository(deps.db).markApplied(run.id, Object.keys(values));
+    },
   };
 
   // Registered last: nothing above can fail after it, so a registration is always released by dispose().

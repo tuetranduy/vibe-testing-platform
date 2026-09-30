@@ -8,8 +8,10 @@ import type {
   RerunResult,
   RunLifecycle,
   RunVerdict,
+  SiteAnalysisDraft,
   SuggestionSet,
   SuggestionSetDraft,
+  TestDataValue,
   TestPlan,
   TestReport,
 } from "@platform/contracts";
@@ -41,6 +43,10 @@ export interface RunPorts {
   getGeneratedTest(): Promise<GeneratedTest>;
   /** Stores the survey's suggestions for the run (nothing selected yet). */
   saveSuggestions(draft: SuggestionSetDraft): Promise<SuggestionSet>;
+  /** Stores the requirement's analysis against the live site (V1.3), replacing an earlier one. */
+  saveSiteAnalysis(analysis: SiteAnalysisDraft): Promise<void>;
+  /** Adds suggested test data to the run (V1.3, auto-confirmed criteria) and records the keys as applied. */
+  applyTestData(values: Record<string, TestDataValue>): Promise<void>;
 }
 
 /**
@@ -98,9 +104,11 @@ export async function runAnalysis(ctx: StageContext, ports: RunPorts, stages: En
   await started(ports, "ANALYZING_REQUIREMENT");
   await ctx.boundary();
 
-  const draft = await guard(ctx, stages.analyze(ctx));
+  const { siteAnalysis, ...draft } = await guard(ctx, stages.analyze(ctx));
   await ctx.boundary();
   const requirement = await ports.saveRequirement(draft);
+  // Stored before the criteria are announced: the review reads both once `criteria.proposed` arrives.
+  if (siteAnalysis) await ports.saveSiteAnalysis(siteAnalysis);
   const n = requirement.criteria.length;
   await ports.publish({
     type: "criteria.proposed",
@@ -120,6 +128,10 @@ export async function runAnalysis(ctx: StageContext, ports: RunPorts, stages: En
       message: `Criteria revision ${confirmed.revision} confirmed automatically`,
       payload: { revision: confirmed.revision },
     });
+    // Nobody reviews auto-confirmed criteria, so the suggested test data is taken as suggested (V1.3): only
+    // keys the run lacks are ever suggested, so nothing the user entered is replaced.
+    const suggested = siteAnalysis?.testData ?? [];
+    if (suggested.length > 0) await ports.applyTestData(Object.fromEntries(suggested.map((t) => [t.key, t.value])));
     await ctx.boundary();
     // Enqueuing execute-run resets heartbeatAt so the reaper leaves it alone while it waits.
     await ports.transition("PLANNING", { heartbeatAt: ctx.now() });
@@ -195,6 +207,10 @@ export async function runExecution(ctx: StageContext, ports: RunPorts, stages: E
     for (const s of ["EXPLORING", "VERIFYING", "GENERATING_TEST", "RUNNING_PLAYWRIGHT"] as const) await skipped(ports, s);
     provisional = stages.verify(ctx, requirement, plan, null);
     await ports.saveResults(provisional);
+    // Nothing was explored: keep what the start page looks like as the blocked criteria's evidence (V1.3).
+    const evidence = stages.captureEvidence ? await guard(ctx, stages.captureEvidence(ctx)) : [];
+    if (evidence.length > 0) exploration = { steps: evidence, facts: [], stopReason: "BLOCKED_BY_POLICY" };
+    await ctx.boundary();
   } else {
     // EXPLORING
     await ports.transition("EXPLORING");

@@ -69,6 +69,8 @@ export interface RunGeneratedTestInput {
   /** The rerun budget. */
   timeoutMs: number;
   signal: AbortSignal;
+  /** Keep the video / trace of a passing rerun too (V1.3, the run's recordVideo / recordTrace). Default: on failure only. */
+  record?: { video: boolean; trace: boolean };
 }
 
 /** Receives the cause of a rerun infrastructure failure. Only the log sees it. */
@@ -182,6 +184,7 @@ export async function runGeneratedTest(input: RunGeneratedTestInput, deps: RunGe
       testTimeoutMs: testTimeoutFor(input.timeoutMs),
       actionTimeoutMs: deps.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS,
       ...(deps.expectTimeoutMs !== undefined ? { expectTimeoutMs: deps.expectTimeoutMs } : {}),
+      ...(input.record ? { record: input.record } : {}),
     });
     workspace = await prepareWorkspace(deps.workspace, input.runId, {
       source: input.test.source,

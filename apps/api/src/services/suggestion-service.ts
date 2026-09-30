@@ -1,4 +1,13 @@
-import { SelectSuggestionRequestSchema, destructiveActionsAllowed, type SuggestionSetResponse, type TestRunSummary } from "@platform/contracts";
+import {
+  MAX_SECRETS,
+  MAX_TEST_DATA_ENTRIES,
+  SelectSuggestionRequestSchema,
+  destructiveActionsAllowed,
+  extractInlineInputs,
+  type StoredTestRunRequest,
+  type SuggestionSetResponse,
+  type TestRunSummary,
+} from "@platform/contracts";
 import {
   EventRepository,
   RunRepository,
@@ -9,7 +18,7 @@ import {
   type RunScope,
 } from "@platform/db";
 import { createRunEventPublisher, type RunEventPublisher } from "@platform/event-bus";
-import { redactByKey, redactFingerprintedSecrets } from "@platform/security";
+import { encryptSecret, redactByKey, redactFingerprintedSecrets, secretFingerprint } from "@platform/security";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 import { NO_VERDICT, observeStage } from "../metrics";
@@ -84,8 +93,12 @@ export class SuggestionService {
     // fingerprints and masked before the text is stored, so a value typed into the edit never lands
     // in the database even if no worker ever picks the run up. The worker's run redactor also masks
     // encoded forms before any model sees it.
-    const fingerprints = await new SecretRepository(this.deps.db).listFingerprints(runId);
-    const requirement = redactFingerprintedSecrets(redactByKey(text) as string, fingerprints, this.deps.config.secretsKey);
+    const secretRepo = new SecretRepository(this.deps.db);
+    const fingerprints = await secretRepo.listFingerprints(runId);
+    // Credentials written into the chosen text are used, not ignored (V1.3.1), as at creation: passwords become
+    // the run's secrets (encrypted here) and leave the text, emails and usernames become its test data.
+    const inline = await this.takeInlineInputs(runId, run.request, text, await secretRepo.listNames(runId));
+    const requirement = redactFingerprintedSecrets(redactByKey(inline) as string, fingerprints, this.deps.config.secretsKey);
 
     let selected: Awaited<ReturnType<SuggestionRepository["select"]>>;
     try {
@@ -113,6 +126,29 @@ export class SuggestionService {
       throw new HttpError(503, "QUEUE_UNAVAILABLE", "The run could not be queued; please retry");
     }
     return summaryOf(this.deps.db, selected.run);
+  }
+
+  /** Stores the credentials `text` names (extractInlineInputs) on the run; returns the text with passwords replaced. */
+  private async takeInlineInputs(runId: string, request: StoredTestRunRequest, text: string, secretNames: string[]): Promise<string> {
+    // The API holds no secret plaintext: existing secrets are passed by name only, so theirs are never reused.
+    const inline = extractInlineInputs(text, {
+      testData: request.testData,
+      secrets: Object.fromEntries(secretNames.map((n) => [n, "\u0000"])),
+      maxSecrets: MAX_SECRETS,
+      maxTestData: MAX_TEST_DATA_ENTRIES,
+    });
+    if (inline.found.length === 0) return text;
+    const key = this.deps.config.secretsKey;
+    await new SecretRepository(this.deps.db).insertMany(
+      runId,
+      Object.entries(inline.secrets).map(([name, value]) => ({
+        name,
+        ...encryptSecret(value, { runId, name }, key),
+        fingerprint: secretFingerprint(value, key).digest,
+      })),
+    );
+    await this.runs.addInlineInputs(runId, { testData: inline.testData, secretNames: Object.keys(inline.secrets), found: inline.found });
+    return inline.text;
   }
 
   private async failEnqueue(runId: string, analyzingAt: Date): Promise<void> {

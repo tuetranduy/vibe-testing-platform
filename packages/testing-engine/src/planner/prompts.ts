@@ -2,7 +2,8 @@
  * Prompts for the test planner. Re-run `pnpm eval planner` before changing them.
  * Only testData KEYS and secret NAMES are ever interpolated — never their values.
  */
-import type { NormalizedRequirement } from "@platform/contracts";
+import type { NormalizedRequirement, StoredTestRunRequest } from "@platform/contracts";
+import { inlineInputsLine } from "../shared/inline-inputs";
 import { MAX_PLANNED_STEPS, MAX_SCENARIOS } from "./model-output";
 import { checkpointOrder } from "./post-validate";
 
@@ -37,6 +38,7 @@ Each step:
 Rules:
 - Capture every listed checkpoint exactly once, at the moment its facts are visible on the page. A "before_*" checkpoint is captured before the action it precedes, and an "after_*" checkpoint after it; respect the listed capture order.
 - Login: enter each credential with a "fill" step that carries its inputRef (e.g. the email or username from test data, the password from a secret), then submit them with exactly one step of kind "login" (never more than one "login" step per scenario).
+- Credentials written in the requirement were taken out of it for you: "[secret: <name>]" in the requirement stands for the secret <name>, and an email or username it names is available as the test data key listed as "taken from the requirement text". Use those names in "inputRef"; never treat such a credential as missing.
 - Destructive actions are planned plainly and marked "destructive": true; do not avoid, disguise or reword them. Whether they may run is decided by the platform, not by you.
 - Criteria with a "semantic" outcome have no facts: reference them from the step where their subject is visible.
 - Use ONE scenario unless the criteria cannot all be checked in one continuous flow: for example one criterion needs a signed-out visitor and another a signed-in user, or checking one would undo another's precondition. Then use one scenario per starting state.
@@ -47,6 +49,8 @@ export interface PlannerPromptInput {
   requirement: Pick<NormalizedRequirement, "originalText" | "criteria" | "facts">;
   testDataKeys: string[];
   secretNames: string[];
+  /** Credentials taken from the requirement text (V1.3.1): names only. */
+  inlineInputs?: StoredTestRunRequest["inlineInputs"];
 }
 
 export function buildPlannerPrompt(input: PlannerPromptInput): string {
@@ -80,5 +84,6 @@ export function buildPlannerPrompt(input: PlannerPromptInput): string {
     "",
     `Test data keys available: ${list(input.testDataKeys)}`,
     `Secret names available: ${list(input.secretNames)}`,
+    ...inlineInputsLine(input.inlineInputs),
   ].join("\n");
 }

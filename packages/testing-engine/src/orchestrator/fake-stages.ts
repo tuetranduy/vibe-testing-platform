@@ -19,7 +19,7 @@ import {
 import type { GeneratedTestStore } from "../compiler/generate-stage";
 import { summarize } from "../reporting/report-builder";
 import { aggregateVerdict } from "../verification/aggregate";
-import type { EngineStages, RequirementDraft, StageContext } from "./stages";
+import type { AnalyzedRequirement, EngineStages, StageContext } from "./stages";
 
 export interface FakeBrowser {
   closeCount: number;
@@ -134,7 +134,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
       return set;
     },
 
-    async analyze(ctx): Promise<RequirementDraft> {
+    async analyze(ctx): Promise<AnalyzedRequirement> {
       await enter("analyze");
       if (opts.analyzeDelayMs) await sleep(opts.analyzeDelayMs, ctx.signal);
       const text = ctx.request.requirement;
@@ -176,6 +176,17 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
           { key: "cartCount", checkpoint: "after_add", description: "Cart badge count", valueType: "number" },
           { key: "cartItems", checkpoint: "cart_page", description: "Names of items in the cart", valueType: "string_list" },
         ],
+        // The demo's stand-in for the live-site analysis (V1.3): the fake survey's pages, both criteria seen.
+        siteAnalysis: {
+          status: "READ",
+          reason: null,
+          pages: fakeSuggestionSet(ctx.request.targetUrl).pages,
+          checks: [
+            { criterionId: "AC-1", status: "FOUND", note: "The header shows a cart count badge" },
+            { criterionId: "AC-2", status: "FOUND", note: "The Products page lists iPhone 17 Pro with an Add to cart button" },
+          ],
+          testData: [],
+        },
       };
     },
 

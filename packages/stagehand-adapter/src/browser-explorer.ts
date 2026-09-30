@@ -111,8 +111,8 @@ export interface ExplorerSession {
   actOn(element: ObservedElement): Promise<ActResult>;
   /** Model extraction validated against `schema`. */
   extract<T>(instruction: string, schema: ZodType<T>): Promise<ExtractResult<T>>;
-  /** PNG of the viewport. */
-  screenshot(): Promise<Buffer>;
+  /** PNG of the viewport, or of the whole scrollable page with `fullPage: true` (V1.3). */
+  screenshot(options?: { fullPage?: boolean }): Promise<Buffer>;
   /** Detaches the explorer. Never closes the browser (the sandbox owns it). Idempotent. */
   close(): Promise<void>;
 }

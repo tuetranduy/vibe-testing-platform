@@ -1,4 +1,4 @@
-import { RerunResultSchema, type GeneratedTest, type RerunResult } from "@platform/contracts";
+import { RerunResultSchema, traceRecordingOn, videoRecordingOn, type GeneratedTest, type RerunResult } from "@platform/contracts";
 import { collectEvidence, type EvidenceStore } from "../evidence/collector";
 import type { EngineStages, StageContext } from "../orchestrator/stages";
 import { redactedCause } from "../shared/log-cause";
@@ -82,7 +82,15 @@ export function createRunTestStage(deps: RunTestStageDeps): EngineStages["runTes
     ctx.addCleanup(closeProxy);
 
     const running = runGeneratedTest(
-      { runId: ctx.runId, test, secrets, proxyUrl: proxy.url, timeoutMs: rerunTimeoutMs(ctx), signal: ctx.signal },
+      {
+        runId: ctx.runId,
+        test,
+        secrets,
+        proxyUrl: proxy.url,
+        timeoutMs: rerunTimeoutMs(ctx),
+        signal: ctx.signal,
+        record: { video: videoRecordingOn(ctx.request), trace: traceRecordingOn(ctx.request) },
+      },
       deps,
     );
     // The child is gone once `running` settles (aborts kill it); only then is the workspace deleted.

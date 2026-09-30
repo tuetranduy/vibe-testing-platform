@@ -1,4 +1,5 @@
 import {
+  MAX_TEST_DATA_ENTRIES,
   destructiveActionsAllowed,
   isTerminalLifecycle,
   type CancelReason,
@@ -6,6 +7,7 @@ import {
   type RunLifecycle,
   type RunVerdict,
   type StoredTestRunRequest,
+  type TestDataValue,
   type TestRunSummary,
 } from "@platform/contracts";
 import { and, count, desc, eq, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
@@ -298,6 +300,53 @@ export class RunRepository {
         updatedAt: new Date(),
       })
       .where(eq(testRuns.id, runId));
+  }
+
+  /**
+   * Adds test data to a run that has not started executing (V1.3: suggested values accepted at confirmation,
+   * or applied automatically): `values` are merged over the run's own (a key it has is replaced), under the
+   * run's row lock. More than MAX_TEST_DATA_ENTRIES keys in all → RunInvariantError, and nothing is written.
+   * Returns the merged test data.
+   */
+  async mergeTestData(runId: string, values: Record<string, TestDataValue>): Promise<Record<string, TestDataValue>> {
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx.select({ requestJson: testRuns.requestJson }).from(testRuns).where(eq(testRuns.id, runId)).for("update");
+      if (!row) throw new NotFoundError("TestRun", runId);
+      const current = (row.requestJson as StoredTestRunRequest).testData ?? {};
+      const merged = { ...current, ...values };
+      if (Object.keys(merged).length > MAX_TEST_DATA_ENTRIES) {
+        throw new RunInvariantError(`A run has at most ${MAX_TEST_DATA_ENTRIES} test data entries`);
+      }
+      await tx
+        .update(testRuns)
+        .set({ requestJson: sql`jsonb_set(${testRuns.requestJson}, '{testData}', ${JSON.stringify(merged)}::jsonb)`, updatedAt: new Date() })
+        .where(eq(testRuns.id, runId));
+      return merged;
+    });
+  }
+
+  /**
+   * Records credentials taken from a requirement written after the run was created (V1.3.1: an edited suggestion):
+   * the test data is merged in (the run's own keys win), the secret names added to `secretNames` (their encrypted
+   * values are the caller's to insert), and what was taken appended to `inlineInputs`. Under the run's row lock.
+   */
+  async addInlineInputs(
+    runId: string,
+    input: { testData: Record<string, TestDataValue>; secretNames: string[]; found: NonNullable<StoredTestRunRequest["inlineInputs"]> },
+  ): Promise<StoredTestRunRequest> {
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx.select({ requestJson: testRuns.requestJson }).from(testRuns).where(eq(testRuns.id, runId)).for("update");
+      if (!row) throw new NotFoundError("TestRun", runId);
+      const current = row.requestJson as StoredTestRunRequest;
+      const next: StoredTestRunRequest = {
+        ...current,
+        testData: { ...input.testData, ...current.testData },
+        secretNames: [...new Set([...current.secretNames, ...input.secretNames])].sort(),
+        inlineInputs: [...(current.inlineInputs ?? []), ...input.found],
+      };
+      await tx.update(testRuns).set({ requestJson: next, updatedAt: new Date() }).where(eq(testRuns.id, runId));
+      return next;
+    });
   }
 
   /**

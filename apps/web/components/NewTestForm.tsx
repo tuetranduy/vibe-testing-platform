@@ -3,6 +3,8 @@
 import {
   CreateTestRunRequestSchema,
   DataKeySchema,
+  extractInlineInputs,
+  generateTestDataValue,
   HttpUrlSchema,
   SecretNameSchema,
   type CreateTestRunRequestInput,
@@ -50,6 +52,9 @@ interface Options {
   confirmProductionHost: string;
   additionalAllowedHosts: string;
   useExplorationCache: boolean;
+  recordVideo: boolean;
+  recordTrace: boolean;
+  analyzeLiveSite: boolean;
 }
 type Errors = Record<string, string>;
 interface Banner {
@@ -70,6 +75,9 @@ const DEFAULT_OPTIONS: Options = {
   confirmProductionHost: "",
   additionalAllowedHosts: "",
   useExplorationCache: true,
+  recordVideo: true,
+  recordTrace: true,
+  analyzeLiveSite: true,
 };
 
 const MSG = {
@@ -80,6 +88,8 @@ const MSG = {
   secretValue: "Enter at least 4 characters.",
   secretMissing: "Enter the secret value.",
   duplicate: "This name is already used.",
+  credentialKey: "This looks like a credential: enter it under Secrets, where it is encrypted — no value is generated.",
+  generateNeedsKey: "Enter a key first: the value is generated from it.",
   confirmHost: (host: string) => `Type ${host} exactly to confirm.`,
 };
 
@@ -170,6 +180,10 @@ function build(
       autoConfirmCriteria: options.autoConfirmCriteria,
       // Sent only when turned off: absent means on (V1.1).
       ...(options.useExplorationCache ? {} : { useExplorationCache: false }),
+      // Sent only when turned off: absent means on (V1.3).
+      ...(options.recordVideo ? {} : { recordVideo: false }),
+      ...(options.recordTrace ? {} : { recordTrace: false }),
+      ...(options.analyzeLiveSite ? {} : { analyzeLiveSite: false }),
       allowDestructiveActions: options.allowDestructiveActions,
       // Only sent when there is a non-empty value to confirm: a valid URL with an empty value is
       // already refused above, and an empty string here would otherwise surface the contract's raw
@@ -277,6 +291,11 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const [environment, setEnvironment] = useState<"staging" | "production">("staging");
   const [data, setData] = useState<DataRow[]>([]);
   const [secrets, setSecrets] = useState<SecretRow[]>([]);
+  /** Credentials written in the requirement (V1.3.1): what the server will take from it, previewed as you type. */
+  const inlineFound = extractInlineInputs(requirement, {
+    testData: Object.fromEntries(data.filter((r) => r.key.trim() !== "").map((r) => [r.key.trim(), r.value])),
+    secrets: Object.fromEntries(secrets.filter((r) => r.name.trim() !== "").map((r) => [r.name.trim(), r.value])),
+  }).found;
   const [options, setOptions] = useState<Options>(DEFAULT_OPTIONS);
   /** This run's model and level ("" = the default: Settings, else the server's environment). */
   const [llmModel, setLlmModel] = useState("");
@@ -313,6 +332,25 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
     };
   }, []);
   const [errors, setErrors] = useState<Errors>({});
+
+  /**
+   * Fills a test data row with a fictional value generated from its key (V1.3). A new seed each time, so
+   * "Generate" again gives a new value; a credential-like key gets none (it belongs under Secrets).
+   */
+  function generateValue(row: DataRow) {
+    const key = row.key.trim();
+    const field = fid.dataKey(row.id);
+    const value = key === "" ? null : generateTestDataValue(key, { seed: `${Date.now()}-${Math.random()}` });
+    if (value === null) {
+      setErrors((prev) => ({ ...prev, [field]: key === "" ? MSG.generateNeedsKey : MSG.credentialKey }));
+      return;
+    }
+    setErrors((prev) => {
+      const { [field]: _cleared, ...rest } = prev;
+      return rest;
+    });
+    setData((rows) => rows.map((r) => (r.id === row.id ? { ...r, value: String(value) } : r)));
+  }
   const [banner, setBanner] = useState<Banner | null>(null);
   const [pending, setPending] = useState(false);
   /** Secret values were wiped after a failed submit and must be typed again. */
@@ -546,6 +584,15 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
             One behaviour per test works best: name the page, the action, and what you expect to see. Leave it empty and the agent
             explores the website and suggests what to test.
           </p>
+          {inlineFound.length > 0 && (
+            <p className="hint" role="status">
+              <Icon name="key" /> Taken from your requirement and used in the test:{" "}
+              {inlineFound
+                .map((f) => (f.kind === "secret" ? `${f.name} (kept as a secret; removed from the text before it is stored)` : `${f.name} (test data)`))
+                .join(", ")}
+              .
+            </p>
+          )}
           {fieldError(fid.requirement)}
         </div>
 
@@ -634,6 +681,9 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
                   onChange={(e) => setData((rows) => rows.map((r) => (r.id === row.id ? { ...r, value: e.target.value } : r)))}
                 />
               </div>
+              <button type="button" className="button button-quiet" onClick={() => generateValue(row)}>
+                Generate<span className="visually-hidden"> a value for test data {i + 1}</span>
+              </button>
               <button
                 type="button"
                 className="button button-quiet"
@@ -851,6 +901,18 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
             Reuse element lookups from earlier runs (faster and cheaper; each is checked against the page first)
           </label>
           <label className="choice">
+            <input type="checkbox" checked={options.analyzeLiveSite} onChange={(e) => setOption("analyzeLiveSite", e.target.checked)} />
+            Read the live website before writing the criteria (a few pages; nothing is clicked, typed or submitted)
+          </label>
+          <label className="choice">
+            <input type="checkbox" checked={options.recordVideo} onChange={(e) => setOption("recordVideo", e.target.checked)} />
+            Record a video of the exploration and of the rerun
+          </label>
+          <label className="choice">
+            <input type="checkbox" checked={options.recordTrace} onChange={(e) => setOption("recordTrace", e.target.checked)} />
+            Record a Playwright trace of the exploration and of the rerun (secrets are removed from it)
+          </label>
+          <label className="choice">
             <input
               type="checkbox"
               checked={options.autoConfirmCriteria}
@@ -988,6 +1050,9 @@ function optionsSummary(o: Options): string {
     o.autoConfirmCriteria ? "auto-confirm" : null,
     o.allowDestructiveActions ? "destructive allowed" : null,
     o.useExplorationCache ? null : "no cache",
+    o.recordVideo ? null : "no video",
+    o.recordTrace ? null : "no trace",
+    o.analyzeLiveSite ? null : "no live-site check",
   ];
   return parts.filter(Boolean).join(" · ");
 }

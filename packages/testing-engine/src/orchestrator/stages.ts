@@ -1,10 +1,12 @@
 import {
   ContractError,
   type ExplorationOutcome,
+  type ExplorationStep,
   type GeneratedTest,
   type NormalizedRequirement,
   type ProvisionalResult,
   type RerunResult,
+  type SiteAnalysisDraft,
   type StoredTestRunRequest,
   type SuggestionSetDraft,
   type TestEventInput,
@@ -57,6 +59,12 @@ export function requireLlm(ctx: Pick<StageContext, "llm">): LlmClient {
 
 export type RequirementDraft = Omit<NormalizedRequirement, "runId" | "revision" | "confirmedAt">;
 
+/**
+ * What `analyze` returns: the draft, and (V1.3) its analysis against the live site — the pages read, the
+ * per-criterion site checks and the suggested test data. The orchestrator stores the two apart.
+ */
+export type AnalyzedRequirement = RequirementDraft & { siteAnalysis?: SiteAnalysisDraft };
+
 export interface GenerateTestInput {
   requirement: NormalizedRequirement;
   plan: TestPlan;
@@ -80,7 +88,7 @@ export interface EngineStages {
    * tests. Publishes `page.surveyed` / `artifact.created` itself; the orchestrator stores the set.
    */
   survey(ctx: StageContext): Promise<SuggestionSetDraft>;
-  analyze(ctx: StageContext): Promise<RequirementDraft>;
+  analyze(ctx: StageContext): Promise<AnalyzedRequirement>;
   plan(ctx: StageContext, requirement: NormalizedRequirement): Promise<TestPlan>;
   /** Must return (not throw) when the exploration budget or step limit is exhausted. */
   explore(ctx: StageContext, plan: TestPlan, requirement: NormalizedRequirement): Promise<ExplorationOutcome>;
@@ -93,4 +101,10 @@ export interface EngineStages {
   generateTest(ctx: StageContext, input: GenerateTestInput): Promise<GeneratedTest | null>;
   runTest(ctx: StageContext, test: GeneratedTest): Promise<RerunResult>;
   report(ctx: StageContext, input: ReportInput): Promise<TestReport>;
+  /**
+   * V1.3: every criterion is blocked before exploration, so nothing would be seen of the site. Loads the start
+   * page read-only (no model) and keeps a full-page screenshot as the blocked criteria's evidence, recorded as
+   * a `screenshot` step. Best effort: returns [] when it cannot. Optional (absent: no evidence).
+   */
+  captureEvidence?(ctx: StageContext): Promise<ExplorationStep[]>;
 }

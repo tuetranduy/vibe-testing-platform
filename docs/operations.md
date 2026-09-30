@@ -101,6 +101,23 @@ administrator can revoke anyone's under Settings → API tokens. Token creation 
 - The GitHub Action (`.github/actions/run-suite`) and the CLI (`integrations/platform-client/cli.mjs`) are described,
   with an example workflow, in [`integrations/README.md`](../integrations/README.md).
 
+## Recordings and live-site reads (V1.3)
+
+- **ffmpeg.** Exploration videos are encoded by the ffmpeg Playwright installs next to Chromium
+  (`playwright-core install chromium`, as the worker image does); set `FFMPEG_PATH` to use another. Without one the
+  worker logs "exploration video skipped" and records the trace only. Encoding runs one ffmpeg per exploring run
+  (VP8, 1 Mbit/s, one thread): size worker CPU for it, or turn video off per run (`options.recordVideo: false`).
+- **Storage.** Videos and traces are ordinary artifacts (`VIDEO`, `TRACE`) with the run's retention; a run with
+  secrets stores them `SECRET_BEARING` (shorter retention, reveal required), and every trace is scrubbed of the
+  secret values before upload. Expect a few MB per run for each; the rerun now keeps its video and trace on success
+  too unless the run turns them off.
+- **Temporary files.** Recordings are written under the OS temp directory (`recording-<runId>-*`) and deleted when
+  the explore stage ends, whatever its outcome.
+- **Live-site reads.** The analysis (and a fully blocked run's evidence snapshot) opens the run's browser sandbox
+  without Stagehand — same egress proxy, navigation guard and allowed hosts as exploration — so the worker network
+  policy below applies unchanged. It adds up to 45 s to `ANALYSIS_TIMEOUT_SECONDS` (default 120 s) worth of work;
+  raise that timeout if analyses of slow sites time out.
+
 ## Worker network policy
 
 Browsers reach targets only through the per-run egress proxy: exploration's Chromium runs with
