@@ -123,6 +123,8 @@ const input = (test: GeneratedTest, over: Partial<RunGeneratedTestInput> = {}): 
   proxyUrl: proxy.url,
   timeoutMs: 60_000,
   signal: new AbortController().signal,
+  // The demo shop and the test servers all listen on 127.0.0.1.
+  allowedHosts: ["127.0.0.1"],
   ...over,
 });
 const deps = () => ({ spawn, workspace: { baseDir: base }, actionTimeoutMs: 2_000, expectTimeoutMs: 2_000 });
@@ -225,6 +227,25 @@ describe("runGeneratedTest against the demo shop (real child process, egress pro
     } finally {
       await new Promise((r) => other.close(r));
     }
+  });
+
+  it("the navigation guard keeps the rerun on the run's hosts: an off-domain page never loads, not even at the proxy (KI-029)", async () => {
+    const test = generated({
+      targetUrl: `${shop.url}/products/1`,
+      flow: ["await page.goto(data.targetUrl);"],
+      steps: [
+        { id: "AC-1", body: 'await expect.soft(page.getByRole("button", { name: data.locators.loc1.name, exact: true }), message).toBeVisible();' },
+        { id: "AC-2", body: "await page.goto(data.urls.url1);" },
+      ],
+      data: { urls: { url1: "http://evil.example/steal" }, locators: { loc1: { name: "Add to cart" } } },
+    });
+    const before = blocks.length;
+    const out = await runGeneratedTest(input(test), deps());
+    expect(out.status).toBe("FAILED");
+    expect(out.perCriterion).toEqual({ "AC-1": "PASSED", "AC-2": "ASSERTION_FAILED" });
+    expect(out.errorText["AC-2"]).toMatch(/^The rerun was stopped from leaving the allowed website \(to evil\.example\)\..*ERR_BLOCKED_BY_CLIENT/s);
+    // Stopped in the browser: the request never reached the egress proxy.
+    expect(blocks.slice(before)).toEqual([]);
   });
 
   it("Chromium runs with its sandbox on; abort signal → the child (and its Chromium) is killed within 5 s; ERRORED; no orphan process survives", async () => {

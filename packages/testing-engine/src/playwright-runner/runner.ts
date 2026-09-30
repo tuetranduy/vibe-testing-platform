@@ -7,7 +7,8 @@ import { HELPERS_SOURCE } from "../compiler/helpers-template";
 import { secretEnvName } from "../compiler/test-compiler";
 import type { LocalArtifact } from "../evidence/collector";
 import { redactedCause, type FailureLogger } from "../shared/log-cause";
-import { CONFIG_FILE, RESULTS_FILE, buildPlaywrightConfig } from "./config-template";
+import { CONFIG_FILE, RERUN_CHROMIUM_ARGS, RESULTS_FILE, buildPlaywrightConfig } from "./config-template";
+import { NAVIGATION_BLOCKS_FILE, buildGuardSettings } from "./guard-template";
 import { RunResultsError, parseRunResults, type ParsedRunResults } from "./result-parser";
 import { prepareWorkspace, type Workspace, type WorkspaceConfig } from "./workspace";
 
@@ -71,7 +72,37 @@ export interface RunGeneratedTestInput {
   signal: AbortSignal;
   /** Keep the video / trace of a passing rerun too (V1.3, the run's recordVideo / recordTrace). Default: on failure only. */
   record?: { video: boolean; trace: boolean };
+  /** The hosts the rerun's pages may navigate to (the navigation guard, KI-029): computeAllowedHosts. */
+  allowedHosts: string[];
 }
+
+/** The navigation guard's blocks (navigation-blocks.jsonl), oldest first; none when the file is absent. */
+async function readNavigationBlocks(dir: string): Promise<{ url: string; reason: string }[]> {
+  let raw: string;
+  try {
+    raw = await readFile(path.join(dir, NAVIGATION_BLOCKS_FILE), "utf8");
+  } catch {
+    return [];
+  }
+  const out: { url: string; reason: string }[] = [];
+  for (const line of raw.split("\n")) {
+    try {
+      const b = JSON.parse(line) as { url?: unknown; reason?: unknown };
+      if (typeof b.url === "string" && typeof b.reason === "string") out.push({ url: b.url, reason: b.reason });
+    } catch {
+      // a partial last line
+    }
+  }
+  return out;
+}
+
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).host || url.slice(0, 100);
+  } catch {
+    return url.slice(0, 100);
+  }
+};
 
 /** Receives the cause of a rerun infrastructure failure. Only the log sees it. */
 export type RerunLogger = FailureLogger;
@@ -186,11 +217,13 @@ export async function runGeneratedTest(input: RunGeneratedTestInput, deps: RunGe
       ...(deps.expectTimeoutMs !== undefined ? { expectTimeoutMs: deps.expectTimeoutMs } : {}),
       ...(input.record ? { record: input.record } : {}),
     });
+    const guardSettings = buildGuardSettings({ proxyUrl: input.proxyUrl, allowedHosts: input.allowedHosts, args: RERUN_CHROMIUM_ARGS });
     workspace = await prepareWorkspace(deps.workspace, input.runId, {
       source: input.test.source,
       helpersSource: HELPERS_SOURCE,
       dataJson: input.test.dataJson,
       config,
+      guardSettings,
     });
   } catch (err) {
     logFailure("rerun workspace could not be prepared (check RUNNER_WORKSPACE_DIR and RUNNER_NODE_MODULES_DIR)", err);
@@ -208,6 +241,14 @@ export async function runGeneratedTest(input: RunGeneratedTestInput, deps: RunGe
     return errored(REASON.spawn);
   }
   if (input.signal.aborted) return errored(REASON.aborted);
+
+  // A navigation the guard stopped fails the step that made it; the log and the criterion's error say why.
+  const blocks = await readNavigationBlocks(workspace.dir);
+  if (blocks.length > 0) {
+    deps.logger?.warn?.({ runId: input.runId, blocks: blocks.map((b) => ({ host: hostOf(b.url), reason: b.reason })) }, "rerun navigation blocked");
+  }
+  const blockNote =
+    blocks.length > 0 ? `The rerun was stopped from leaving the allowed website (to ${hostOf(blocks[0]!.url)})` : null;
 
   let raw: string;
   try {
@@ -246,7 +287,11 @@ export async function runGeneratedTest(input: RunGeneratedTestInput, deps: RunGe
   }
   if (parsed.stopped) return errored(REASON.budget, parsed);
   if (parsed.testStatus === "failed") {
-    return { status: "FAILED", perCriterion: parsed.perCriterion, errorText: parsed.errorText, artifacts: parsed.artifacts, durationMs: Date.now() - startedAt };
+    const errorText = { ...parsed.errorText };
+    if (blockNote) {
+      for (const id of compiled) if (parsed.perCriterion[id] !== "PASSED") errorText[id] = errorText[id] ? `${blockNote}. ${errorText[id]}` : blockNote;
+    }
+    return { status: "FAILED", perCriterion: parsed.perCriterion, errorText, artifacts: parsed.artifacts, durationMs: Date.now() - startedAt };
   }
   if (parsed.testStatus === "passed" && allPassed) {
     return { status: "PASSED", perCriterion: parsed.perCriterion, errorText: parsed.errorText, artifacts: parsed.artifacts, durationMs: Date.now() - startedAt };

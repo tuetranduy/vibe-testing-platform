@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { CONFIG_FILE, SPEC_FILE } from "./config-template";
+import { GLOBAL_SETUP_FILE, GLOBAL_SETUP_SOURCE, GUARD_SETTINGS_FILE } from "./guard-template";
 
 /**
  * The rerun workspace (Task 17, Ruling R32): `<baseDir>/<runId>/`, deleted and recreated for every
@@ -10,6 +11,7 @@ import { CONFIG_FILE, SPEC_FILE } from "./config-template";
  *
  *   run.spec.ts, helpers.ts, run-data.json   the generated test (Task 16)
  *   playwright.config.js                     config-template.ts
+ *   global-setup.js, rerun-guard.json        the navigation guard and its settings (guard-template.ts)
  *   package.json                             `"type": "commonjs"`: run.spec.ts imports run-data.json
  *                                            without an import attribute, which only CommonJS allows
  *   node_modules → <runner node_modules>     the runner's pre-installed @playwright/test (the runner
@@ -32,6 +34,8 @@ export interface WorkspaceFiles {
   helpersSource: string;
   dataJson: string;
   config: string;
+  /** rerun-guard.json (buildGuardSettings). */
+  guardSettings: string;
 }
 
 export interface Workspace {
@@ -95,6 +99,8 @@ export async function prepareWorkspace(config: WorkspaceConfig, runId: string, f
     writeFile(path.join(dir, "helpers.ts"), files.helpersSource),
     writeFile(path.join(dir, "run-data.json"), files.dataJson),
     writeFile(path.join(dir, CONFIG_FILE), files.config),
+    writeFile(path.join(dir, GLOBAL_SETUP_FILE), GLOBAL_SETUP_SOURCE),
+    writeFile(path.join(dir, GUARD_SETTINGS_FILE), files.guardSettings),
     writeFile(path.join(dir, "package.json"), JSON.stringify({ private: true, type: "commonjs" })),
     symlink(nodeModules, path.join(dir, "node_modules"), "dir"),
   ]);

@@ -1,4 +1,6 @@
+import { isIP } from "node:net";
 import { RerunResultSchema, traceRecordingOn, videoRecordingOn, type GeneratedTest, type RerunResult } from "@platform/contracts";
+import { normalizeHost } from "@platform/security";
 import { collectEvidence, type EvidenceStore } from "../evidence/collector";
 import type { EngineStages, StageContext } from "../orchestrator/stages";
 import { redactedCause } from "../shared/log-cause";
@@ -22,6 +24,19 @@ export interface RunTestStageDeps {
   expectTimeoutMs?: number;
   /** Receives the (redacted) cause of an infrastructure failure: proxy, workspace, spawn, browser. */
   logger?: RerunLogger | undefined;
+}
+
+/**
+ * The hosts a rerun's pages may navigate to, as exploration's navigation guard computes them (worker
+ * navigation-guard.ts `computeAllowedHosts`): the target's host, its subdomains (not for an IP), and the run's
+ * additional allowed hosts.
+ */
+export function rerunAllowedHosts(request: Pick<StageContext["request"], "targetUrl" | "options">): string[] {
+  const host = normalizeHost(new URL(request.targetUrl).hostname);
+  const hosts = [host];
+  if (isIP(host) === 0) hosts.push(`*.${host}`);
+  for (const extra of request.options.additionalAllowedHosts) hosts.push(normalizeHost(extra));
+  return [...new Set(hosts.filter(Boolean))];
 }
 
 /** At most this much of the time left before the deadline is kept for evidence upload and the report stage. */
@@ -90,6 +105,7 @@ export function createRunTestStage(deps: RunTestStageDeps): EngineStages["runTes
         timeoutMs: rerunTimeoutMs(ctx),
         signal: ctx.signal,
         record: { video: videoRecordingOn(ctx.request), trace: traceRecordingOn(ctx.request) },
+        allowedHosts: rerunAllowedHosts(ctx.request),
       },
       deps,
     );
