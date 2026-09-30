@@ -10,11 +10,13 @@ KI-002 to KI-017 were resolved on 2026-09-27 (branch `fix/known-issues`); each e
 are open: both need a paid model key. KI-019 and KI-020 were resolved on 2026-09-28. KI-021 to KI-030 came from the
 audit of 2026-09-29 against the plan; the plan's Revision 3 lists what is outstanding in priority order. KI-028 was
 resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to KI-035. V1.2 (branch `feat/v1.2`,
-2026-09-30) recorded KI-036 to KI-040.
+2026-09-30) recorded KI-036 to KI-040. On 2026-09-30 (branch `fix/open-issues`) every open issue was worked with a
+DeepSeek key, DeepSeek standing in for Gemini where a paid key was needed: all but KI-001 (the live gate, not yet
+green on DeepSeek) and KI-025 / KI-036 (they need the branch pushed to GitHub) are resolved or closed by decision.
 
 | ID | Severity | Area | Summary | Status |
 |---|---|---|---|---|
-| KI-001 | High | Release gate | Live E2E gate (3 consecutive green runs) has not been run | Open |
+| KI-001 | High | Release gate | Live E2E gate (3 consecutive green runs) has not been run | Open: run on DeepSeek 2026-09-30, not green (model quality) |
 | KI-002 | High | Deployment | Chromium's sandbox cannot start in the compose worker | Resolved `03dcc07` |
 | KI-003 | Medium | Metrics | `test_run_duration_seconds` attributes the first stage of each job wrongly | Resolved `d7b2606` |
 | KI-004 | Medium | Metrics | `runs_reaped_total` undercounts when a reaper pass fails midway | Resolved `068b4f8` |
@@ -55,8 +57,8 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
 | KI-039 | Low | Performance | Suite-run views compare every child with its previous run on each read | Resolved `c0c9e09` |
 | KI-040 | Low | Tokens | The web app's per-minute token limit is per instance and in memory | Resolved `4287733` |
 | KI-041 | Medium | LLM quality | The requirement compiler's prompt changed without an eval run | Resolved (2026-09-30, `af80be5`) |
-| KI-042 | Low | Recordings | Exploration video and trace have not been recorded in a live run | Open |
-| KI-043 | Medium | LLM | The DeepSeek provider has not been run against the live API | Open |
+| KI-042 | Low | Recordings | Exploration video and trace have not been recorded in a live run | Resolved (2026-09-30, live DeepSeek run) |
+| KI-043 | Medium | LLM | The DeepSeek provider has not been run against the live API | Resolved (2026-09-30): run live; see KI-001 |
 
 ---
 
@@ -81,6 +83,24 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   billing-enabled Gemini project, `pnpm infra:up && LLM_PROVIDER=gemini GEMINI_API_KEY=… LLM_MODEL=
   ./scripts/e2e-live-gate.sh`. Then record the date and result in README "Status", and tick Task 21 step 6 in the
   plan.
+- **2026-09-30, DeepSeek (the provider chosen in place of Gemini, KI-018):** the gate ran on `deepseek-flash`:
+  run 1 of 3 failed: 14 of 27 live cases passed, 13 failed (the prompt-injection case among them). Most failures are the happy-path run ending `INCONCLUSIVE`
+  instead of `PASSED`, which the suite, rerun, comparison, schedule, token and CI cases build on. Diagnosed on
+  `platform-pass` with `E2E_KEEP_LOGS=1`:
+  1. The planner wrote a `wait_for` step naming no element ("Wait until the search results page has loaded"), so
+     exploration stopped. Fixed (`58f19ba`: the prompt now requires `wait_for` to name an element); the flow then
+     runs end to end.
+  2. Flash proposed a criterion the requirement does not state (the cart's contents "right after" adding, i.e. a
+     mini-cart the demo shop does not have: `FACT_NOT_OBSERVED`) — the over-splitting its compiler eval shows.
+  3. Flash extracts list facts as asked ("names of the products": `iPhone 17 Pro`) while the page's items carry
+     more text (`iPhone 17 Pro — $1,199.00`). The DOM check needs each item to be equal, so those facts stay
+     `MODEL_EXTRACTED` and their criteria `UNVERIFIED_EVIDENCE`. Accepting "contained in" would make the verifier
+     judge the DOM's longer text and turn an `equals` criterion from inconclusive into a false FAIL: a verdict-rule
+     decision, left open deliberately.
+  `deepseek-v4-pro` (better compiler score) is too slow here with thinking on: the pass run was still exploring at
+  the suite's 180 s limit. Every failing case failed on the run's verdict, or (the confirmation case) on editing a criterion the scripted
+  model proposes and DeepSeek did not. **To close:** decide (3); then either a lower reasoning level for V4 Pro (Settings, per model) within
+  the suite's time limits, or a paid Claude key, and re-run `./scripts/e2e-live-gate.sh`.
 
 ## KI-002 — Chromium's sandbox cannot start in the compose worker
 - **Severity:** High for deployment (pre-existing; see README "Status").
@@ -526,6 +546,10 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   renderer processes (e.g. to another site allowed by `additionalAllowedHosts`) could end the stream early (the video
   then stops there; the trace is unaffected).
 - **To close:** a live E2E run with recordings on; if videos stop early, restart the screencast on `framenavigated`.
+- **Resolved (2026-09-30):** live DeepSeek runs of the E2E suite recorded and stored the exploration video and the
+  scrubbed trace (`Exploration video stored`, `Exploration trace stored` events of the run) through the real worker.
+  No early-ending video was seen on the demo shop (one host, no renderer
+  swap); the `framenavigated` restart stays the remedy if one is.
 
 ## KI-043 — The DeepSeek provider has not been run against the live API
 - **Severity:** Medium (no eval score or live E2E run on DeepSeek yet).
@@ -538,3 +562,7 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
   peak. `deepseek-v4-pro` takes no images, so a screenshot Stagehand sends it is replaced by a note.
 - **To close:** `LLM_PROVIDER=deepseek pnpm eval …` on each suite (record the scores in `evals/BASELINE.md`), the
   `@live` Stagehand smoke and the live E2E suite; check the 120 s request timeout against thinking-mode answer times.
+- **Resolved (2026-09-30):** run against the live API: all three eval suites on both models (`evals/BASELINE.md`),
+  the `@live` Stagehand smoke (passes on `deepseek-flash`, 16 s) and the live E2E suite (KI-001: not green, for the
+  model-quality reasons recorded there). No call reached the 120 s request timeout: V4 Pro's thinking-mode compiles
+  took 26 s on average. `INVALID_OUTPUT` was not a failure cause in any eval case.
