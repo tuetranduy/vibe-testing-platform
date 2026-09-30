@@ -267,7 +267,8 @@ function compileRecorded(recording: Recording, targetUrl: string): GeneratedTest
 // ---------------------------------------------------------------------------------------------
 
 async function rerun(test: GeneratedTest) {
-  const run = await seedRun(h, { secrets: { password: VALID_PASSWORD } });
+  // The run targets the demo shop: the rerun's navigation guard keeps it on that host (KI-029).
+  const run = await seedRun(h, { secrets: { password: VALID_PASSWORD }, targetUrl: `${shop.url}/` });
   const events: EventDraft[] = [];
   const cleanups: (() => Promise<void> | void)[] = [];
   const ctx = {
