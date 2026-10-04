@@ -88,18 +88,20 @@ function viaHost(url: string, host: string, port: number): string {
 function liveLlmEnv(): Record<string, string> {
   const llm = loadLiveLlmEnv();
   if ("missingKey" in llm) throw new Error(`E2E_MODE=live needs ${llm.missingKey}`);
+  const reasoning: Record<string, string> = llm.LLM_REASONING ? { LLM_REASONING: llm.LLM_REASONING } : {};
   if (llm.LLM_PROVIDER === "gemini") {
     return {
       LLM_PROVIDER: "gemini",
       LLM_MODEL: llm.LLM_MODEL,
       GEMINI_API_KEY: llm.GEMINI_API_KEY!,
+      ...reasoning,
       ...(llm.GEMINI_THINKING_LEVEL ? { GEMINI_THINKING_LEVEL: llm.GEMINI_THINKING_LEVEL } : {}),
     };
   }
   if (llm.LLM_PROVIDER === "deepseek") {
-    return { LLM_PROVIDER: "deepseek", LLM_MODEL: llm.LLM_MODEL, DEEPSEEK_API_KEY: llm.DEEPSEEK_API_KEY! };
+    return { LLM_PROVIDER: "deepseek", LLM_MODEL: llm.LLM_MODEL, DEEPSEEK_API_KEY: llm.DEEPSEEK_API_KEY!, ...reasoning };
   }
-  return { LLM_PROVIDER: "anthropic", LLM_MODEL: llm.LLM_MODEL, ANTHROPIC_API_KEY: llm.ANTHROPIC_API_KEY! };
+  return { LLM_PROVIDER: "anthropic", LLM_MODEL: llm.LLM_MODEL, ANTHROPIC_API_KEY: llm.ANTHROPIC_API_KEY!, ...reasoning };
 }
 
 /**

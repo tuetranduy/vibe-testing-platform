@@ -33,6 +33,7 @@ commit of `packages/testing-engine/src/requirement/prompts.ts`, and any failing 
 | 2026-09-30 | deepseek-flash (thinking high) | 7e53baa | 20/25 (80.0%) | 74,239 / 29,095 | $0.03 | login-dashboard (`collection_contains`), italian-login (`semantic`), cancel-order (5 criteria), spanish-newsletter and empty-cart (3 criteria: split finer than the case allows) |
 | 2026-09-30 | deepseek-flash (thinking high), with cases 26–27 (live-site pages, KI-041) | 7e53baa | 24/27 (88.9%) | 81,154 / 31,878 | $0.03 | french-contact, about-link (3 criteria), empty-cart (4 criteria); both page cases pass. The same 25 cases went from 20 to 22 between two runs: Flash's criterion count varies |
 | 2026-09-30 | deepseek-v4-pro (thinking high) | 7e53baa | 23/25 (92.0%) | 75,514 / 64,824 | $0.18 | login-dashboard (`semantic`), spanish-newsletter (`visible`, not `text_matches`) — 654 s in all, 26 s a case on average |
+| 2026-10-04 | deepseek-v4-pro (`LLM_REASONING=low`), 27 cases | 7e53baa | 25/27 (92.6%) | 83,650 / 46,538 | $0.15 | login-dashboard, italian-login (`semantic`, not `text_matches` / `visible`) — 470 s in all, 17 s a case: the same score as thinking high, a third faster |
 
 The second row's prompt change fixes a `test_data` precondition invented for a value written in the
 requirement (seen in the Milestone B demo: "Search for iPhone 17 Pro…" got a `test_data` precondition

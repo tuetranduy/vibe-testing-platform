@@ -19,6 +19,13 @@ describe("resolveEnvLlmChoice (the defaults when Settings hold none)", () => {
     expect(resolveEnvLlmChoice({ LLM_PROVIDER: "deepseek", GEMINI_THINKING_LEVEL: "high" })).toEqual({ provider: "deepseek", model: "deepseek-flash", reasoning: "default" });
   });
 
+  it("LLM_REASONING is the reasoning level for any provider, ahead of GEMINI_THINKING_LEVEL", () => {
+    expect(resolveEnvLlmChoice({ LLM_PROVIDER: "deepseek", LLM_MODEL: "deepseek-v4-pro", LLM_REASONING: "low" })).toEqual({ provider: "deepseek", model: "deepseek-v4-pro", reasoning: "low" });
+    expect(resolveEnvLlmChoice({ LLM_PROVIDER: "anthropic", LLM_REASONING: "high" }).reasoning).toBe("high");
+    expect(resolveEnvLlmChoice({ LLM_PROVIDER: "gemini", LLM_REASONING: "minimal", GEMINI_THINKING_LEVEL: "high" }).reasoning).toBe("minimal");
+    expect(resolveEnvLlmChoice({ LLM_PROVIDER: "fake", LLM_REASONING: "low" }).reasoning).toBe("default");
+  });
+
   it("fake: the fake engine, whatever LLM_MODEL says", () => {
     expect(resolveEnvLlmChoice({ LLM_PROVIDER: "fake", LLM_MODEL: "claude-sonnet-5" })).toEqual({ provider: "fake", model: "fake", reasoning: "default" });
   });

@@ -361,8 +361,8 @@ pnpm eval survey                 # same, for the survey's test suggestions
 ```
 
 The live commands, the gate and the evals run on Gemini with `LLM_PROVIDER=gemini` and `GEMINI_API_KEY`; with
-`LLM_PROVIDER` unset or `fake` (as in `.env`) they run on Anthropic with `ANTHROPIC_API_KEY`, as before. `LLM_MODEL`
-and `GEMINI_THINKING_LEVEL` work as for the worker; the other provider's model (e.g. `.env`'s
+`LLM_PROVIDER` unset or `fake` (as in `.env`) they run on Anthropic with `ANTHROPIC_API_KEY`, as before. `LLM_MODEL`,
+`LLM_REASONING` and `GEMINI_THINKING_LEVEL` work as for the worker; the other provider's model (e.g. `.env`'s
 `LLM_MODEL=claude-sonnet-5` with Gemini) is rejected, so set `LLM_MODEL=` (empty) for the provider's default.
 They read only the environment: the keys and defaults saved in Settings apply to the platform's tests, not to
 these tools.
@@ -423,7 +423,7 @@ Each proposed criterion shows its wording and *what will be checked*. You can ad
 A test can pick another model or level under the new-test form's Advanced options. Each run records the provider,
 model and reasoning level it was created with, in this order: the test's own choice, else the defaults saved in
 Settings, else the environment (`LLM_PROVIDER`, `LLM_MODEL` or the provider's default model, and
-`GEMINI_THINKING_LEVEL` for Gemini). Changing Settings never changes a run already created; the run page shows the
+`LLM_REASONING`, else `GEMINI_THINKING_LEVEL` for Gemini). Changing Settings never changes a run already created; the run page shows the
 run's model ("Claude Sonnet 5 · medium reasoning"). A test whose provider has no key, or whose model or level is not
 offered, is refused when it is submitted (`422 MODEL_NOT_AVAILABLE`, naming the fix). The fake engine ("Fake engine
 (development)") is offered only outside production. Over the API: `GET /v1/settings/llm`, `PUT /v1/settings/llm`

@@ -24,6 +24,8 @@ const LlmFields = z.object({
   LLM_MODEL: emptyAsUnset(z.string().min(1)),
   ANTHROPIC_API_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
+  /** Reasoning level of the environment's model choice, any provider (ahead of GEMINI_THINKING_LEVEL); unset: the model's default. */
+  LLM_REASONING: emptyAsUnset(z.enum(["minimal", "low", "medium", "high"])),
   /** Gemini's thinking level (thinking tokens count against a call's output limit); unset: the model's default. */
   GEMINI_THINKING_LEVEL: emptyAsUnset(z.enum(["minimal", "low", "medium", "high"])),
   DEEPSEEK_API_KEY: z.string().optional(),

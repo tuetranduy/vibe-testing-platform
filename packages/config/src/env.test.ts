@@ -191,6 +191,14 @@ describe("loadEnv", () => {
     expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "fake", DEEPSEEK_API_KEY: "sk ds" })).toThrow(/DEEPSEEK_API_KEY/);
   });
 
+  it("LLM_REASONING is optional (empty means unset) and must be a reasoning level", () => {
+    expect(loadEnv(validEnv).LLM_REASONING).toBeUndefined();
+    expect(loadEnv({ ...validEnv, LLM_REASONING: "" }).LLM_REASONING).toBeUndefined();
+    expect(loadEnv({ ...validEnv, LLM_REASONING: "low" }).LLM_REASONING).toBe("low");
+    expect(() => loadEnv({ ...validEnv, LLM_REASONING: "default" })).toThrow(/LLM_REASONING/);
+    expect(loadLiveLlmEnv({ LLM_PROVIDER: "deepseek", DEEPSEEK_API_KEY: "sk-ds-test", LLM_REASONING: "minimal" })).toMatchObject({ LLM_REASONING: "minimal" });
+  });
+
   it("GEMINI_THINKING_LEVEL is optional (empty means unset) and must be a Gemini level", () => {
     expect(loadEnv(validEnv).GEMINI_THINKING_LEVEL).toBeUndefined();
     expect(loadEnv({ ...validEnv, GEMINI_THINKING_LEVEL: "" }).GEMINI_THINKING_LEVEL).toBeUndefined();
