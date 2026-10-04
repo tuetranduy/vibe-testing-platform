@@ -184,13 +184,14 @@ const stagehandGivesUp = (bridge: ReturnType<typeof setup>["bridge"], abandoned:
   });
 
 describe("ClientLLM bridge: reasoning level", () => {
-  it("always calls the model at its default level, whatever the run's (browser steps were measured at the default)", async () => {
-    const transport = new FakeTransport().enqueue({ json: { action: { elementId: "0-23" } } });
-    const llm = new LlmClient({ transport, model: "claude-sonnet-5", reasoning: "high", logger: silent, retry: { maxRetries: 0 } });
-    const bridge = createClientLlmBridge({ llm, runId: "run_1", signal: new AbortController().signal, redact: (v) => v });
-    await bridge.client.generate(actRequest());
-    expect(llm.reasoning).toBe("high");
-    expect(transport.requests[0]!.reasoning).toBe("default");
+  it("calls the model at the run's level (KI-001: a thinking model's default level overran the browser steps' time)", async () => {
+    for (const reasoning of ["low", "minimal", "default"] as const) {
+      const transport = new FakeTransport().enqueue({ json: { action: { elementId: "0-23" } } });
+      const llm = new LlmClient({ transport, model: "deepseek-v4-pro", reasoning, logger: silent, retry: { maxRetries: 0 } });
+      const bridge = createClientLlmBridge({ llm, runId: "run_1", signal: new AbortController().signal, redact: (v) => v });
+      await bridge.client.generate(actRequest());
+      expect(transport.requests[0]!.reasoning).toBe(reasoning);
+    }
   });
 });
 
