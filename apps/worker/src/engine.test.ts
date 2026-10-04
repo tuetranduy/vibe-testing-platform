@@ -85,6 +85,8 @@ const realDeps = (
       storage: createLocalStorage({ rootDir: artifactDir }),
       exploration: exploration.deps,
       rerun: { spawn: rerunSpawn, workspace: { baseDir: rerunDir } },
+      // Browserless analysis too: no live-site read (V1.3), which would start a real Chromium within the 1.2 s budget.
+      analyze: {},
       ...extra,
     },
   };
