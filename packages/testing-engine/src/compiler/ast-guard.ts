@@ -13,7 +13,7 @@ import { HELPER_EXPORTS } from "./helpers-template";
  *   and the default `data` from `./run-data.json` (no aliases); `import x = require()`, exports,
  *   dynamic `import()`, `import.meta`;
  * - any identifier outside the template's vocabulary (`ALLOWED_IDENTIFIERS`, the helpers, and the
- *   compiler's numbered names `factN` / `locN` / `inputN` / `urlN`): no `require`, `arguments`,
+ *   compiler's numbered names `factN` / `locN` / `itemN` / `inputN` / `urlN`): no `require`, `arguments`,
  *   `Object`, `fetch`, `globalThis`, `constructor`, `evaluate`, `__dirname`, `Buffer`, …;
  * - any string literal outside the fixed set (import paths, the test title, `"[AC-n] "` prefixes,
  *   criterion ids, allow-listed ARIA roles, regex flags, match modes, the load state); no template
@@ -35,7 +35,7 @@ export const ALLOWED_IDENTIFIERS: ReadonlySet<string> = new Set([
   // imports, locals, globals
   "expect", "test", "data", "page", "softExpect", "message", "Number", "NaN", "RegExp",
   // run data
-  "targetUrl", "urls", "locators", "inputs", "criteria", "statement", "name", "text", "value", "selector",
+  "targetUrl", "urls", "locators", "items", "inputs", "criteria", "statement", "name", "text", "value", "selector",
   "pattern", "item", "delta", "right",
   // page and locators
   "goto", "click", "fill", "selectOption", "getByRole", "getByLabel", "getByPlaceholder", "getByText", "getByTestId",
@@ -48,7 +48,7 @@ export const ALLOWED_IDENTIFIERS: ReadonlySet<string> = new Set([
 ]);
 
 /** The compiler's numbered names: saved facts, and run-data keys. */
-const NUMBERED_IDENTIFIER = /^(?:fact|loc|input|url)[1-9]\d{0,3}$/;
+const NUMBERED_IDENTIFIER = /^(?:fact|loc|item|input|url)[1-9]\d{0,3}$/;
 const SECRET_ENV_NAME = /^SECRET_[A-Z][A-Z0-9_]{0,31}$/;
 const CRITERION_ID = /^AC-\d{1,3}$/;
 const CRITERION_PREFIX = /^\[AC-\d{1,3}\] $/;

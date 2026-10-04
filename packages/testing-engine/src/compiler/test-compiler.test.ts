@@ -210,7 +210,7 @@ function importsOf(source: string): string[] {
   return file.statements.filter(ts.isImportDeclaration).map((d) => (d.moduleSpecifier as ts.StringLiteral).text);
 }
 
-const dataOf = (dataJson: string) => JSON.parse(dataJson) as { targetUrl: string; locators: Record<string, Record<string, string>>; inputs: Record<string, string>; urls: Record<string, string>; criteria: Record<string, Record<string, unknown>> };
+const dataOf = (dataJson: string) => JSON.parse(dataJson) as { targetUrl: string; locators: Record<string, Record<string, string>>; items: Record<string, string>; inputs: Record<string, string>; urls: Record<string, string>; criteria: Record<string, Record<string, unknown>> };
 
 // ---------------------------------------------------------------------------------------------
 // Step 1: the discovered flow as a Playwright test
@@ -460,6 +460,17 @@ describe("compilePlaywrightTest: assertions", () => {
     expect(dataOf(out.dataJson).criteria["AC-4"]).toEqual({ statement: "Statement of AC-4", item: "iPhone 17 Pro" });
   });
 
+  it("collection_contains over rows read through a sub-element → that sub-element is read in each row (selector from data)", () => {
+    const facts = shopFacts().map((f) => (f.key === "miniCart" ? { ...f, read: { ...f.read!, itemSelector: '[data-testid="line-name"]' } } : f));
+    const out = compile({ facts });
+    expect(stepBlock(out.source, "AC-4")).toMatch(
+      /await softExpect\.poll\(async \(\) => listContains\(await readItemTexts\(page\.getByTestId\(data\.locators\.loc\d+\.value\), data\.items\.item1, 0\), data\.criteria\["AC-4"\]\.item, "contains"\), \{ message \}\)\.toBe\(true\);/,
+    );
+    expect(dataOf(out.dataJson).items).toEqual({ item1: '[data-testid="line-name"]' });
+    expect(out.source).toMatch(/^import \{[^}]*\breadItemTexts\b[^}]*\} from "\.\/helpers";$/m);
+    expect(dataOf(compile().dataJson).items).toEqual({});
+  });
+
   it("not compiled, with a reason: provisional BLOCKED / INCONCLUSIVE, any MODEL_EXTRACTED fact, semantic outcomes", () => {
     const facts = shopFacts().map((f) => (f.key === "toast" ? { ...f, provenance: "MODEL_EXTRACTED" as const } : f));
     const out = compile({ facts, statuses: { "AC-3": "BLOCKED", "AC-4": "INCONCLUSIVE" } });
@@ -520,7 +531,8 @@ describe("compilePlaywrightTest: injection safety", () => {
     const criteria = shopCriteria().map((c) =>
       c.id === "AC-3" ? { ...c, statement: `${INJECTION}\n${TEMPLATE_INJECTION}`, expectedOutcome: { ...c.expectedOutcome, match: { mode: "contains" as const, value: TEMPLATE_INJECTION, caseSensitive: false } } as ExpectedOutcome } : c,
     );
-    const out = compile({ steps, plan: planWithTestData, testData: { query: TEMPLATE_INJECTION }, requirement: requirementOf(criteria) });
+    const facts = shopFacts().map((f) => (f.key === "miniCart" ? { ...f, read: { ...f.read!, itemSelector: TEMPLATE_INJECTION } } : f));
+    const out = compile({ steps, plan: planWithTestData, testData: { query: TEMPLATE_INJECTION }, requirement: requirementOf(criteria), facts });
 
     for (const hostile of [INJECTION, TEMPLATE_INJECTION, "process.exit", "child_process", "execSync", "${"]) {
       expect(out.source).not.toContain(hostile);
@@ -529,6 +541,7 @@ describe("compilePlaywrightTest: injection safety", () => {
     const data = dataOf(out.dataJson);
     expect(Object.values(data.locators)).toContainEqual({ name: INJECTION });
     expect(data.inputs.input1).toBe(TEMPLATE_INJECTION);
+    expect(data.items.item1).toBe(TEMPLATE_INJECTION);
     expect(data.criteria["AC-3"]).toEqual({ statement: `${INJECTION}\n${TEMPLATE_INJECTION}`, value: TEMPLATE_INJECTION });
     expect(checkGeneratedSource(out.source)).toEqual([]);
     expect(out.compiledCriteria).toContain("AC-3");
@@ -656,8 +669,11 @@ describe("generated workspace", () => {
       criterion("AC-10", { kind: "numeric_compare", left: after, operator: "neq", right: 7 }),
       criterion("AC-11", { kind: "visible", fact: { key: "toast", checkpoint: "after_add" }, expected: false }),
     ];
-    const out = compile({ steps, secretNames: ["password"], requirement: requirementOf(criteria) });
+    // AC-4 and AC-9 read the mini cart's rows through a sub-element.
+    const facts = shopFacts().map((f) => (f.key === "miniCart" ? { ...f, read: { ...f.read!, itemSelector: "span.name" } } : f));
+    const out = compile({ steps, secretNames: ["password"], requirement: requirementOf(criteria), facts });
     expect(out.compiledCriteria).toHaveLength(10);
+    expect(out.source).toContain("readItemTexts(");
     expect(checkGeneratedSource(out.source)).toEqual([]);
 
     const dir = mkdtempSync(path.join(os.tmpdir(), "generated-test-tsc-"));

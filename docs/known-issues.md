@@ -16,7 +16,7 @@ green on DeepSeek) and KI-025 / KI-036 (they need the branch pushed to GitHub) a
 
 | ID | Severity | Area | Summary | Status |
 |---|---|---|---|---|
-| KI-001 | High | Release gate | Live E2E gate (3 consecutive green runs) has not been run | Open: run on DeepSeek 2026-09-30, not green (model quality) |
+| KI-001 | High | Release gate | Live E2E gate (3 consecutive green runs) has not been run | Open: run on DeepSeek 2026-09-30, not green (model quality); list-fact rule decided 2026-10-04 |
 | KI-002 | High | Deployment | Chromium's sandbox cannot start in the compose worker | Resolved `03dcc07` |
 | KI-003 | Medium | Metrics | `test_run_duration_seconds` attributes the first stage of each job wrongly | Resolved `d7b2606` |
 | KI-004 | Medium | Metrics | `runs_reaped_total` undercounts when a reaper pass fails midway | Resolved `068b4f8` |
@@ -96,10 +96,14 @@ green on DeepSeek) and KI-025 / KI-036 (they need the branch pushed to GitHub) a
      more text (`iPhone 17 Pro — $1,199.00`). The DOM check needs each item to be equal, so those facts stay
      `MODEL_EXTRACTED` and their criteria `UNVERIFIED_EVIDENCE`. Accepting "contained in" would make the verifier
      judge the DOM's longer text and turn an `equals` criterion from inconclusive into a false FAIL: a verdict-rule
-     decision, left open deliberately.
+     decision, left open deliberately. **Decided 2026-10-04:** neither "contained in" nor a looser rule. When the
+     whole rows differ, the reader looks for one sub-element of the rows (test id, tag and classes, itemprop, tag)
+     whose texts, read from every row, *equal* the model's list; the fact is then DOM_VERIFIED with that
+     `read.itemSelector`, and the compiled rerun replays it (`readItemTexts`). Exact matching still decides
+     provenance; rows with no such element keep the fact MODEL_EXTRACTED as before.
   `deepseek-v4-pro` (better compiler score) is too slow here with thinking on: the pass run was still exploring at
   the suite's 180 s limit. Every failing case failed on the run's verdict, or (the confirmation case) on editing a criterion the scripted
-  model proposes and DeepSeek did not. **To close:** decide (3); then either a lower reasoning level for V4 Pro (Settings, per model) within
+  model proposes and DeepSeek did not. **To close:** ~~decide (3)~~ (done); then either a lower reasoning level for V4 Pro (Settings, per model) within
   the suite's time limits, or a paid Claude key, and re-run `./scripts/e2e-live-gate.sh`.
 
 ## KI-002 — Chromium's sandbox cannot start in the compose worker

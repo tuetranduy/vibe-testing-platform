@@ -405,6 +405,13 @@ describe("exploration and results", () => {
     expect(ObservedFactSchema.safeParse({ ...base, read: { element: el, mode: "number" } }).success).toBe(true);
   });
 
+  it("an item selector (a list row's sub-element) goes only with text_list reads", () => {
+    const list = { key: "names", checkpoint: "cart", value: ["a"], provenance: "DOM_VERIFIED", stepId: "s1" };
+    expect(ObservedFactSchema.safeParse({ ...list, read: { element: el, mode: "text_list", itemSelector: '[data-testid="name"]' } }).success).toBe(true);
+    expect(ObservedFactSchema.safeParse({ ...list, read: { element: el, mode: "text", itemSelector: "b.title" } }).success).toBe(false);
+    expect(ObservedFactSchema.safeParse({ ...list, read: { element: el, mode: "text_list", itemSelector: "" } }).success).toBe(false);
+  });
+
   it("keeps a disagreeing DOM reading next to the model value on MODEL_EXTRACTED facts", () => {
     const fact = {
       key: "cartCount",

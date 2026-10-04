@@ -53,7 +53,8 @@ import { SourceWriter, ident, lit, member } from "./source-builder";
  * - numeric_compare    → polled number vs the other side (`toBeGreaterThan`, …; eq/neq within 1e-9);
  *                        both facts at the checkpoint → their polled difference vs 0
  * - numeric_delta      → polled difference `toBeCloseTo(delta)`
- * - collection_contains → polled `listContains(readTextList(…), item)` (verifier matching)
+ * - collection_contains → polled `listContains(readTextList(…), item)` (verifier matching); rows read through a
+ *   recorded sub-element: `readItemTexts(…, data.items.itemN)`
  *
  * Not compiled (with a template-built reason): semantic outcomes (D3), provisional BLOCKED /
  * INCONCLUSIVE, a fact that is missing, MODEL_EXTRACTED, read in a mode the assertion cannot replay,
@@ -92,6 +93,8 @@ interface RunData {
   targetUrl: string;
   urls: Record<string, string>;
   locators: Record<string, Record<string, string>>;
+  /** Row sub-element selectors of list reads (KI-001), keyed `itemN`. */
+  items: Record<string, string>;
   inputs: Record<string, string>;
   criteria: Record<string, Record<string, string | number>>;
 }
@@ -104,6 +107,8 @@ interface FactRead {
   kind: ReadKind;
   /** The recorded candidate (null for `url`). */
   candidate: LocatorCandidate | null;
+  /** text_list only: the sub-element read inside each row, as recorded. */
+  itemSelector: string | null;
   /** Golden-path position (within its scenario) of the checkpoint the fact was captured at. */
   position: number;
   scenario: string;
@@ -194,7 +199,7 @@ class Compiler {
       this.golden.set(scenario, [...(this.golden.get(scenario) ?? []), step]);
     }
     this.plannedKind = new Map(input.plan.scenarios.flatMap((s) => s.steps).map((s) => [s.id, s.kind]));
-    this.data = { targetUrl: input.targetUrl, urls: {}, locators: {}, inputs: {}, criteria: {} };
+    this.data = { targetUrl: input.targetUrl, urls: {}, locators: {}, items: {}, inputs: {}, criteria: {} };
     for (const [scenario, golden] of this.golden) {
       golden.forEach((step, position) => {
         if (step.kind === "checkpoint") this.checkpointAt.set(step.id, { scenario, position });
@@ -297,6 +302,7 @@ class Compiler {
       const { position, scenario } = where;
       let kind: ReadKind;
       let candidate: LocatorCandidate | null = null;
+      let itemSelector: string | null = null;
       if (fact.key === URL_FACT_KEY) {
         kind = "url";
       } else {
@@ -305,9 +311,10 @@ class Compiler {
         const problem = unreplayable(fact.read.element);
         if (problem) return `${label} is read through an element the test cannot locate`;
         candidate = fact.read.element.candidates[fact.read.element.chosenIndex]!;
+        itemSelector = fact.read.itemSelector ?? null;
       }
       if (!allowed(path[0]!).includes(kind)) return `${label} was read as ${kind}, which this assertion cannot replay`;
-      reads.push({ ref, kind, candidate, position, scenario });
+      reads.push({ ref, kind, candidate, itemSelector, position, scenario });
     }
 
     const scenario = reads[0]!.scenario;
@@ -395,9 +402,7 @@ class Compiler {
   private emitSavedRead(w: SourceWriter, read: FactRead): void {
     const name = ident(`fact${this.factVars.size + 1}`);
     this.factVars.set(refKey(read.ref), name);
-    this.withReads(w, [read], (l) =>
-      read.candidate ? `const ${name} = await ${this.helper(READ_HELPER[read.kind]!)}(${l});` : `const ${name} = page.url();`,
-    );
+    this.withReads(w, [read], (l) => (read.candidate ? `const ${name} = await ${this.readCall(read, l)};` : `const ${name} = page.url();`));
   }
 
   private emitCriterion(w: SourceWriter, plan: CriterionPlan): void {
@@ -521,8 +526,20 @@ class Compiler {
   private freshRead(read: FactRead, awaited = true): string {
     if (!read.candidate) return "page.url()";
     // No attach wait inside a poll (the poll retries; a read must not outlast its timeout).
-    const call = `${this.helper(READ_HELPER[read.kind]!)}(${this.locator(read.candidate)}, 0)`;
+    const call = this.readCall(read, this.locator(read.candidate), "0");
     return awaited ? `await ${call}` : call;
+  }
+
+  /** The helper call reading a fact at `locator` (a list read through a row sub-element: `readItemTexts`, selector from data). */
+  private readCall(read: FactRead, locator: string, waitMs?: string): string {
+    const wait = waitMs === undefined ? "" : `, ${waitMs}`;
+    if (read.itemSelector === null) return `${this.helper(READ_HELPER[read.kind]!)}(${locator}${wait})`;
+    let key = Object.entries(this.data.items).find(([, selector]) => selector === read.itemSelector)?.[0];
+    if (!key) {
+      key = ident(`item${Object.keys(this.data.items).length + 1}`);
+      this.data.items[key] = read.itemSelector;
+    }
+    return `${this.helper("readItemTexts")}(${locator}, data.items.${key}${wait})`;
   }
 
   /**

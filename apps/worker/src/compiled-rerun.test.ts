@@ -219,7 +219,8 @@ async function recordFlow(targetUrl: string): Promise<Recording> {
     await click("PS-8", "add to cart", '[data-testid="add-to-cart"]');
     await checkpoint("PS-9", "after_add", "cartCount", '[data-testid="cart-count"]', "number", 1);
     await navigate("PS-10", `${shop.url}/cart`);
-    await checkpoint("PS-11", "cart_page", "cartItems", 'ul[aria-label="Cart items list"]', "text_list", ["iPhone 17 Pro — Qty 1 — $1,199.00"]);
+    // The model names the product; the row also shows quantity and price (KI-001): read through the name's element.
+    await checkpoint("PS-11", "cart_page", "cartItems", 'ul[aria-label="Cart items list"]', "text_list", ["iPhone 17 Pro"]);
   } finally {
     await context.close();
   }
@@ -329,6 +330,10 @@ describe("compiled demo-shop flow, rerun by Playwright (real runner, egress prox
       "cartItems@cart_page": { strategy: "role", role: "list", name: "Cart items list", exact: true },
     });
     expect(recording.facts.filter((f) => f.provenance !== "DOM_VERIFIED")).toEqual([]);
+    expect(recording.facts.find((f) => f.key === "cartItems")).toMatchObject({
+      value: ["iPhone 17 Pro"],
+      read: { mode: "text_list", itemSelector: '[data-testid="cart-item-name"]' },
+    });
   });
 
   it("healthy shop → the compiled test PASSES every compiled criterion; its video and scrubbed trace are kept (V1.3), no screenshot", async () => {
@@ -337,6 +342,7 @@ describe("compiled demo-shop flow, rerun by Playwright (real runner, egress prox
     expect(test.notCompiled.map((n) => n.criterionId)).toEqual(["AC-4"]);
     expect(test.source).not.toContain(VALID_PASSWORD);
     expect(test.dataJson).not.toContain(VALID_PASSWORD);
+    expect(test.source).toContain("readItemTexts(");
 
     const { result, artifacts } = await rerun(test);
     expect(result.errorText).toEqual({});
