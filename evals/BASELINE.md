@@ -72,6 +72,7 @@ Record the `Total:` line with the commit of `packages/testing-engine/src/planner
 | 2026-09-30 | deepseek-v4-pro (thinking high) | 7e53baa | 13/14 (92.9%) | 24,534 / 42,519 | $0.10 | search-results (as Flash) |
 | 2026-09-30 | deepseek-flash, with case 15 (two scenarios, KI-031) | 7e53baa | 13/15 (86.7%) | 25,611 / 12,404 | $0.01 | search-results (no `search` step; AC-3 blocked), sort-by-price (9 steps > 8); **signed-out-and-signed-in passes: 2 scenarios** |
 | 2026-09-30 | deepseek-v4-pro, with case 15 | 7e53baa | 13/15 (86.7%) | 26,376 / 45,484 | $0.11 | search-results, **signed-out-and-signed-in (1 scenario)**; it planned 2 in an earlier run cut short by DNS failures |
+| 2026-10-04 | deepseek-v4-pro (`LLM_REASONING=low`) | 7e53baa | 13/15 (86.7%) | 26,001 / 30,692 | $0.08 | search-results (AC-3 blocked), signed-out-and-signed-in (1 scenario): as at thinking high, 273 s. In the live E2E pass case it planned "Add to cart" on the search results page (the demo shop has it on the product page only), which no case here checks |
 | 2026-09-30 | deepseek-flash, `wait_for` must name an element (two runs) | this change | 12/15, 13/15 | 29,124 / 14,795; 28,538 / 13,750 | $0.01 each | search-results, sort-by-price in both; empty-cart once. Same score as before: Flash varies by a case or two between runs |
 | 2026-09-27 | gemini-3.5-flash-lite (free tier, default thinking) | 8a6800a | 12/14 (85.7%) | 15,516 / 6,306 | $0.02 | german-cart, invalid-email (the 180 s case budget: free-tier stalls; both pass on re-run) |
 
