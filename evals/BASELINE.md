@@ -34,6 +34,7 @@ commit of `packages/testing-engine/src/requirement/prompts.ts`, and any failing 
 | 2026-09-30 | deepseek-flash (thinking high), with cases 26–27 (live-site pages, KI-041) | 7e53baa | 24/27 (88.9%) | 81,154 / 31,878 | $0.03 | french-contact, about-link (3 criteria), empty-cart (4 criteria); both page cases pass. The same 25 cases went from 20 to 22 between two runs: Flash's criterion count varies |
 | 2026-09-30 | deepseek-v4-pro (thinking high) | 7e53baa | 23/25 (92.0%) | 75,514 / 64,824 | $0.18 | login-dashboard (`semantic`), spanish-newsletter (`visible`, not `text_matches`) — 654 s in all, 26 s a case on average |
 | 2026-10-04 | deepseek-v4-pro (`LLM_REASONING=low`), 27 cases | 7e53baa | 25/27 (92.6%) | 83,650 / 46,538 | $0.15 | login-dashboard, italian-login (`semantic`, not `text_matches` / `visible`) — 470 s in all, 17 s a case: the same score as thinking high, a third faster |
+| 2026-10-04 | deepseek-v4-pro (`LLM_REASONING=minimal`: thinking off), 27 cases | 7e53baa | 26/27 (96.3%) | 80,398 / 10,812 | $0.07 | literal-search-term (5 criteria) — 90 s in all, 3.3 s a case. In the live E2E pass case (3 runs) it compiled "see the selected product in the cart" as `semantic` + ambiguous every time: no case here says "the selected product" |
 
 The second row's prompt change fixes a `test_data` precondition invented for a value written in the
 requirement (seen in the Milestone B demo: "Search for iPhone 17 Pro…" got a `test_data` precondition
@@ -73,6 +74,7 @@ Record the `Total:` line with the commit of `packages/testing-engine/src/planner
 | 2026-09-30 | deepseek-flash, with case 15 (two scenarios, KI-031) | 7e53baa | 13/15 (86.7%) | 25,611 / 12,404 | $0.01 | search-results (no `search` step; AC-3 blocked), sort-by-price (9 steps > 8); **signed-out-and-signed-in passes: 2 scenarios** |
 | 2026-09-30 | deepseek-v4-pro, with case 15 | 7e53baa | 13/15 (86.7%) | 26,376 / 45,484 | $0.11 | search-results, **signed-out-and-signed-in (1 scenario)**; it planned 2 in an earlier run cut short by DNS failures |
 | 2026-10-04 | deepseek-v4-pro (`LLM_REASONING=low`) | 7e53baa | 13/15 (86.7%) | 26,001 / 30,692 | $0.08 | search-results (AC-3 blocked), signed-out-and-signed-in (1 scenario): as at thinking high, 273 s. In the live E2E pass case it planned "Add to cart" on the search results page (the demo shop has it on the product page only), which no case here checks |
+| 2026-10-04 | deepseek-v4-pro (`LLM_REASONING=minimal`: thinking off) | 7e53baa | 15/15 (100%) | 26,001 / 6,926 | $0.03 | — (54 s; signed-out-and-signed-in planned as 2 scenarios). The live pass case's plans opened the product page in both runs |
 | 2026-09-30 | deepseek-flash, `wait_for` must name an element (two runs) | this change | 12/15, 13/15 | 29,124 / 14,795; 28,538 / 13,750 | $0.01 each | search-results, sort-by-price in both; empty-cart once. Same score as before: Flash varies by a case or two between runs |
 | 2026-09-27 | gemini-3.5-flash-lite (free tier, default thinking) | 8a6800a | 12/14 (85.7%) | 15,516 / 6,306 | $0.02 | german-cart, invalid-email (the 180 s case budget: free-tier stalls; both pass on re-run) |
 
