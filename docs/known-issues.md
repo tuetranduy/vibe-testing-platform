@@ -16,7 +16,7 @@ green on DeepSeek) and KI-025 / KI-036 (they need the branch pushed to GitHub) a
 
 | ID | Severity | Area | Summary | Status |
 |---|---|---|---|---|
-| KI-001 | High | Release gate | Live E2E gate (3 consecutive green runs) has not been run | Open: run on DeepSeek 2026-09-30, not green (model quality); list-fact rule decided 2026-10-04 |
+| KI-001 | High | Release gate | Live E2E gate (3 consecutive green runs) has not been run | Open: not green on DeepSeek (model variance; pass case 1 of 3 on V4 Pro, 2026-10-05); needs a paid Claude key |
 | KI-002 | High | Deployment | Chromium's sandbox cannot start in the compose worker | Resolved `03dcc07` |
 | KI-003 | Medium | Metrics | `test_run_duration_seconds` attributes the first stage of each job wrongly | Resolved `d7b2606` |
 | KI-004 | Medium | Metrics | `runs_reaped_total` undercounts when a reaper pass fails midway | Resolved `068b4f8` |
@@ -105,6 +105,26 @@ green on DeepSeek) and KI-025 / KI-036 (they need the branch pushed to GitHub) a
   the suite's 180 s limit. Every failing case failed on the run's verdict, or (the confirmation case) on editing a criterion the scripted
   model proposes and DeepSeek did not. **To close:** ~~decide (3)~~ (done); then either a lower reasoning level for V4 Pro (Settings, per model) within
   the suite's time limits, or a paid Claude key, and re-run `./scripts/e2e-live-gate.sh`.
+- **2026-10-04/05, `deepseek-v4-pro` at lower reasoning levels** (the pass case alone, `E2E_KEEP_LOGS=1`; the full gate
+  was not run). `LLM_REASONING` (`01630af`) sets the level for the live suite.
+  1. **Speed.** At `low` the compiler eval keeps its score (25/27, 17 s a case against 26 s at high), but the pass case
+     still overran 180 s in 3 of 4 runs: Stagehand's browser steps ran at the model's default (thinking high), 10–27 s
+     an observe. They now follow the run's level (`19d7dbf`); even so `low` still thinks (up to 2,800 output tokens a
+     call). With thinking off (`LLM_REASONING=minimal`) a pass run takes 26–63 s, and the evals score 26/27 and 15/15
+     (`evals/BASELINE.md`).
+  2. **Waits for a page "to load".** V4 Pro without thinking ignores the planner's rule that `wait_for` names an element
+     (`58f19ba`), and the unfound element stopped exploration. A failed `wait_for` no longer stops it (`042414e`).
+  3. **"see the selected product in the cart"** was compiled `semantic` + ambiguous in every V4 Pro run, so the cart was
+     never read; then, with a rule for it, as a cart list read at `after_add` (still the product page: the model read
+     the `Cart (1)` badge as the list, refused as UNVERIFIED_EVIDENCE). Two compiler rules and eval cases 28–29
+     (`9ae38b1`): in 3 live runs since, every cart check was on `cart_page` against the name read on the product page.
+  4. **Result: 1 of 3 pass runs green** (the first green pass case on DeepSeek, rerun-confirmed). The two others: the
+     browser agent did not locate the cart list's container (its model-read value stayed MODEL_EXTRACTED), and the
+     compiler split the requirement into 7 criteria, one a `semantic` duplicate of a correct `collection_contains` one.
+     Both are model variance, not a platform defect found; the compiler eval moves 24–28 of 29 between identical runs.
+  **Stopped here on DeepSeek (2026-10-05).** The gate needs the 27-case suite green 3 times in a row, which V4 Pro
+  without thinking is far from. **To close:** a paid Claude key (`ANTHROPIC_API_KEY=… ./scripts/e2e-live-gate.sh`); or,
+  to keep on DeepSeek, the next leads are the browser agent missing list containers and duplicate `semantic` criteria.
 
 ## KI-002 — Chromium's sandbox cannot start in the compose worker
 - **Severity:** High for deployment (pre-existing; see README "Status").
