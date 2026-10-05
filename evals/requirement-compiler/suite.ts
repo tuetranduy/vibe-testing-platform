@@ -39,6 +39,10 @@ export const EvalCaseSchema = z.object({
     /** Each entry must be matched by at least one criterion; a list entry means "any of these kinds". */
     requiredOutcomeKinds: z.array(z.union([Kind, z.array(Kind).min(1)])).default([]),
     mustFlagAmbiguous: z.boolean(),
+    /** No criterion may be flagged ambiguous (a requirement that is clear as written). */
+    mustNotFlagAmbiguous: z.boolean().default(false),
+    /** Outcome kinds no criterion may have, e.g. `semantic` for a requirement every part of which the page shows. */
+    forbiddenOutcomeKinds: z.array(Kind).default([]),
     /**
      * Every test_data / secret precondition names a provided key or secret. Off by default: a case whose
      * requirement needs an input that was not provided expects the precondition with the name it needs.
@@ -79,6 +83,11 @@ export function scoreCase(
     if (!anyOf.some((k) => kinds.has(k))) failures.push(`no criterion with outcome kind ${anyOf.join(" | ")} (got ${[...kinds].join(", ")})`);
   }
   if (c.expect.mustFlagAmbiguous && !criteria.some((x) => x.ambiguity !== null)) failures.push("expected an ambiguous criterion, none flagged");
+  const flagged = criteria.filter((x) => x.ambiguity !== null).length;
+  if (c.expect.mustNotFlagAmbiguous && flagged > 0) failures.push(`${flagged} criteria flagged ambiguous, expected none`);
+  for (const kind of c.expect.forbiddenOutcomeKinds) {
+    if (kinds.has(kind)) failures.push(`a criterion has outcome kind ${kind}, which this case forbids`);
+  }
   if (c.expect.onlyProvidedInputRefs) {
     const provided = { test_data: new Set(Object.keys(caseTestData(c))), secret: new Set(c.secretNames) };
     for (const p of criteria.flatMap((x) => x.preconditions)) {

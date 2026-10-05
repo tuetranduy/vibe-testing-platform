@@ -1,0 +1,60 @@
+id: selected-product-with-pages
+tags: [cart, references, live-site]
+# KI-001: the live E2E pass case's requirement. "the selected product" is the product the flow opened: a fact read
+# on its page, looked for in the cart (collection_contains). V4 Pro compiled it as semantic + ambiguous in 3 of 3
+# live runs (2026-10-04), so the cart was never read.
+input: Verify that a user can search for an iPhone, add it to the cart, and see the selected product in the cart.
+testDataKeys: []
+secretNames: []
+pages:
+  - url: http://localhost:4000/
+    inventory:
+      title: Home · Demo Shop
+      description: ""
+      headings: [{ level: 1, text: Demo Shop }, { level: 2, text: Featured products }]
+      links:
+        - { text: Demo Shop, url: "http://localhost:4000/", area: nav }
+        - { text: Products, url: "http://localhost:4000/products", area: nav }
+        - { text: Cart, url: "http://localhost:4000/cart", area: nav }
+        - { text: Login, url: "http://localhost:4000/login", area: nav }
+        - { text: iPhone 17 Pro, url: "http://localhost:4000/products/1", area: main }
+        - { text: Pixel 11, url: "http://localhost:4000/products/2", area: main }
+        - { text: Galaxy S27, url: "http://localhost:4000/products/3", area: main }
+      forms:
+        - { name: Product search, fields: [{ label: Search products, type: search, placeholder: "" }], submit: Search }
+      buttons: []
+  - url: http://localhost:4000/products/1
+    inventory:
+      title: iPhone 17 Pro · Demo Shop
+      description: ""
+      headings: [{ level: 1, text: iPhone 17 Pro }]
+      links: [{ text: Back to products, url: "http://localhost:4000/products", area: main }]
+      forms: [{ name: "", fields: [], submit: Add to cart }]
+      buttons: []
+  - url: http://localhost:4000/cart
+    inventory:
+      title: Cart · Demo Shop
+      description: ""
+      headings: [{ level: 1, text: Your cart }]
+      links: [{ text: Browse products, url: "http://localhost:4000/products", area: main }]
+      forms: []
+      buttons: []
+  - url: http://localhost:4000/login
+    inventory:
+      title: Log in · Demo Shop
+      description: ""
+      headings: [{ level: 1, text: Log in }]
+      links: []
+      forms:
+        - name: Log in
+          fields: [{ label: Email, type: email, placeholder: "" }, { label: Password, type: password, placeholder: "" }]
+          submit: Log in
+      buttons: []
+expect:
+  criteriaCount: { min: 1, max: 3 }
+  requiredOutcomeKinds:
+    - collection_contains
+  forbiddenOutcomeKinds: [semantic]
+  mustFlagAmbiguous: false
+  mustNotFlagAmbiguous: true
+  onlyProvidedInputRefs: true
