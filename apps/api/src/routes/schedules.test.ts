@@ -126,6 +126,20 @@ describe("firing a schedule", () => {
     expect(await later.fire(schedule.id)).toMatchObject({ outcome: "started" });
   });
 
+  it("skips a firing taken more than 15 minutes after it was due, and runs one that is on time (KI-037)", async () => {
+    const ann = await signInMember(t);
+    const suiteId = await suiteWith({ headers: ann.headers });
+    const schedule = (await call("POST", `/v1/suites/${suiteId}/schedules`, { cron: "0 9 * * *" }, ann.headers)).json();
+
+    const late = await service().fire(schedule.id, new Date(NOW.getTime() - 16 * 60_000));
+    expect(late).toEqual({ outcome: "skipped_late" });
+    const view = (await call("GET", `/v1/suites/${suiteId}/schedules`, undefined, ann.headers)).json().items[0];
+    expect(view).toMatchObject({ lastOutcome: "skipped_late", lastSuiteRunId: null });
+    expect(t.audit.some((e) => e.action === "schedule.skipped" && (e.detail as { scheduleId?: string })?.scheduleId === schedule.id)).toBe(true);
+
+    expect(await service().fire(schedule.id, new Date(NOW.getTime() - 14 * 60_000))).toMatchObject({ outcome: "started" });
+  });
+
   it("fails without starting when the creator is disabled or the saved credentials no longer cover the suite", async () => {
     const ann = await signInMember(t);
     const suiteId = await suiteWith({ headers: ann.headers });

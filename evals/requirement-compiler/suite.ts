@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TestDataValueSchema } from "@platform/contracts";
 import type { LlmClient } from "@platform/llm";
-import { compileRequirement } from "@platform/testing-engine";
+import { PageInventorySchema, compileRequirement } from "@platform/testing-engine";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { describeError, report, type CaseResult, type UsageMeter } from "../usage";
@@ -28,11 +28,21 @@ export const EvalCaseSchema = z.object({
    */
   testData: z.record(z.string(), TestDataValueSchema).default({}),
   secretNames: z.array(z.string()).default([]),
+  /**
+   * Pages of the live site as the analysis reads them (V1.3, KI-041), e.g. recorded from the demo shop: the compile
+   * then sees them like a real run does. The criteria must be the same as without them — pages never add, drop or
+   * weaken one.
+   */
+  pages: z.array(z.object({ url: z.string().url(), inventory: PageInventorySchema })).default([]),
   expect: z.object({
     criteriaCount: z.object({ min: z.number().int().min(1), max: z.number().int().min(1) }),
     /** Each entry must be matched by at least one criterion; a list entry means "any of these kinds". */
     requiredOutcomeKinds: z.array(z.union([Kind, z.array(Kind).min(1)])).default([]),
     mustFlagAmbiguous: z.boolean(),
+    /** No criterion may be flagged ambiguous (a requirement that is clear as written). */
+    mustNotFlagAmbiguous: z.boolean().default(false),
+    /** Outcome kinds no criterion may have, e.g. `semantic` for a requirement every part of which the page shows. */
+    forbiddenOutcomeKinds: z.array(Kind).default([]),
     /**
      * Every test_data / secret precondition names a provided key or secret. Off by default: a case whose
      * requirement needs an input that was not provided expects the precondition with the name it needs.
@@ -73,6 +83,11 @@ export function scoreCase(
     if (!anyOf.some((k) => kinds.has(k))) failures.push(`no criterion with outcome kind ${anyOf.join(" | ")} (got ${[...kinds].join(", ")})`);
   }
   if (c.expect.mustFlagAmbiguous && !criteria.some((x) => x.ambiguity !== null)) failures.push("expected an ambiguous criterion, none flagged");
+  const flagged = criteria.filter((x) => x.ambiguity !== null).length;
+  if (c.expect.mustNotFlagAmbiguous && flagged > 0) failures.push(`${flagged} criteria flagged ambiguous, expected none`);
+  for (const kind of c.expect.forbiddenOutcomeKinds) {
+    if (kinds.has(kind)) failures.push(`a criterion has outcome kind ${kind}, which this case forbids`);
+  }
   if (c.expect.onlyProvidedInputRefs) {
     const provided = { test_data: new Set(Object.keys(caseTestData(c))), secret: new Set(c.secretNames) };
     for (const p of criteria.flatMap((x) => x.preconditions)) {
@@ -103,6 +118,7 @@ export async function runRequirementCompilerSuite(llm: LlmClient, cases: EvalCas
         signal: AbortSignal.timeout(180_000),
         deadlineAt: null,
         redact: (v) => v,
+        ...(c.pages.length > 0 ? { site: { pages: c.pages, screenshot: null } } : {}),
       });
       failures = scoreCase(c, draft.criteria);
     } catch (err) {

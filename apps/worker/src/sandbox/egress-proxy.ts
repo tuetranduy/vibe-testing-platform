@@ -38,11 +38,21 @@ export interface EgressProxyOptions {
   dial?: Dialer;
   /** Per-address connect timeout. */
   connectTimeoutMs?: number;
+  /**
+   * Where the proxy listens. Default: loopback, for a browser on this host. A rerun in the runner container
+   * (KI-029) reaches it over the runner network: listen on all interfaces and accept only these client
+   * addresses (the runner's); every other connection is dropped unread.
+   */
+  listen?: { host: string; allowedClients: string[] };
 }
+
+/** `::ffff:10.0.0.3` → `10.0.0.3`. */
+const plainAddress = (a: string | undefined) => (a ?? "").replace(/^::ffff:/, "");
 
 export interface EgressProxy {
   /** `http://127.0.0.1:<port>` — pass to Chromium as `--proxy-server`. */
   url: string;
+  port: number;
   close(): Promise<void>;
 }
 
@@ -142,6 +152,16 @@ export async function startEgressProxy(opts: EgressProxyOptions): Promise<Egress
   const dial = opts.dial ?? defaultDial;
   const connectTimeoutMs = opts.connectTimeoutMs ?? 10_000;
   const sockets = new Set<net.Socket>();
+  const clients = opts.listen ? new Set(opts.listen.allowedClients.map(plainAddress)) : null;
+  /** Incoming connections only: a client that is not allowed is dropped unread. */
+  const accept = (s: net.Socket) => {
+    if (clients && !clients.has(plainAddress(s.remoteAddress))) {
+      s.destroy();
+      return;
+    }
+    track(s);
+  };
+  /** Every socket (clients and upstreams), destroyed on close. */
   const track = (s: net.Socket) => {
     sockets.add(s);
     s.once("close", () => sockets.delete(s));
@@ -216,7 +236,7 @@ export async function startEgressProxy(opts: EgressProxyOptions): Promise<Egress
   }
 
   const server = http.createServer();
-  server.on("connection", track);
+  server.on("connection", accept);
 
   // Plain-HTTP forward requests (absolute-form request target).
   server.on("request", (req: http.IncomingMessage, res: http.ServerResponse) => {
@@ -314,7 +334,7 @@ export async function startEgressProxy(opts: EgressProxyOptions): Promise<Egress
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(0, opts.listen?.host ?? "127.0.0.1", () => {
       server.off("error", reject);
       resolve();
     });
@@ -324,6 +344,7 @@ export async function startEgressProxy(opts: EgressProxyOptions): Promise<Egress
   let closing: Promise<void> | undefined;
   return {
     url: `http://127.0.0.1:${port}`,
+    port,
     close() {
       closing ??= new Promise<void>((resolve) => {
         server.close(() => resolve());

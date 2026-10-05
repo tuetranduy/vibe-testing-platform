@@ -32,10 +32,13 @@ export class FakeQueue implements RunQueue {
     this.analyze.push(runId);
   }
   rerun: string[] = [];
+  /** Each rerun's suite position (undefined: not a suite run's child). */
+  rerunPositions = new Map<string, number | undefined>();
   rerunPending = new Set<string>();
-  async enqueueRerun(runId: string) {
+  async enqueueRerun(runId: string, opts?: { suitePosition?: number }) {
     if ((this as { fail?: boolean }).fail) throw new Error("queue down");
     this.rerun.push(runId);
+    this.rerunPositions.set(runId, opts?.suitePosition);
   }
   async isRerunPending(runId: string) {
     return this.rerunPending.has(runId);

@@ -32,10 +32,17 @@ export const UserViewSchema = z.object({
 });
 export type UserView = z.infer<typeof UserViewSchema>;
 
-/** `POST /v1/auth/login`. The password is not length-checked here: a wrong one is just wrong. */
+/** A tenant id, as a sign-in names it (KI-035). */
+export const TenantIdSchema = z.string().trim().regex(/^[A-Za-z0-9_-]{1,100}$/, "Enter an organization id");
+
+/**
+ * `POST /v1/auth/login`. The password is not length-checked here: a wrong one is just wrong. `tenant`: the
+ * organization to sign in to (KI-035); absent, the default tenant. An unknown one is just a failed sign-in.
+ */
 export const LoginRequestSchema = z.object({
   email: z.string().trim().toLowerCase().min(1, "Enter your e-mail address").max(254),
   password: z.string().min(1, "Enter your password").max(200),
+  tenant: TenantIdSchema.optional(),
 });
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 
@@ -57,6 +64,23 @@ export const ChangePasswordRequestSchema = z.object({
   newPassword: PasswordSchema,
 });
 export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;
+
+/** One of the signed-in user's live sessions (`GET /v1/auth/sessions`, KI-034). Never the token. */
+export const SessionInfoSchema = z.object({
+  id: z.string(),
+  createdAt: IsoDateTime,
+  lastSeenAt: IsoDateTime,
+  expiresAt: IsoDateTime,
+  userAgent: z.string().nullable(),
+  /** The session this request came from. */
+  current: z.boolean(),
+});
+export type SessionInfo = z.infer<typeof SessionInfoSchema>;
+
+export const SessionListResponseSchema = z.object({ items: z.array(SessionInfoSchema) });
+
+/** `POST /v1/auth/sessions/revoke-others`: how many sessions ended. */
+export const RevokeSessionsResponseSchema = z.object({ revoked: z.number().int().nonnegative() });
 
 /** `POST /v1/users` (admin). */
 export const CreateUserRequestSchema = z.object({

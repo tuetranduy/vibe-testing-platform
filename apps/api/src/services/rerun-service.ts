@@ -147,9 +147,10 @@ export class RerunService {
   }
 
   /** Queues a created rerun; a queue failure errors it (QUEUE_UNAVAILABLE for a single rerun, the caller decides). */
-  async enqueue(run: TestRun): Promise<boolean> {
+  /** `suitePosition`: the run is a suite run's child, at this position in the suite (queued behind single runs). */
+  async enqueue(run: TestRun, suitePosition?: number): Promise<boolean> {
     try {
-      await this.deps.queue.enqueueRerun(run.id);
+      await this.deps.queue.enqueueRerun(run.id, suitePosition === undefined ? undefined : { suitePosition });
       return true;
     } catch {
       await this.create.failEnqueue(run);

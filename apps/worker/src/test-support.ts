@@ -174,14 +174,16 @@ export async function seedRun(
     /** The run's recorded model choice; unset, a run created before model choice (the environment's). */
     llm?: LlmChoice;
     requirement?: string;
+    /** The run's target (the rerun's navigation guard allows its host); default https://shop.example.com. */
+    targetUrl?: string;
   } = {},
 ): Promise<TestRun> {
   const runs = new RunRepository(h.tdb.db);
   const secrets = opts.secrets ?? {};
-  const stored = request(opts.options, Object.keys(secrets));
+  const stored = { ...request(opts.options, Object.keys(secrets)), ...(opts.targetUrl ? { targetUrl: opts.targetUrl } : {}) };
   const run = await runs.create({
     tenantId: TEST_TENANT_ID,
-    targetUrl: "https://shop.example.com",
+    targetUrl: stored.targetUrl,
     request: {
       ...(opts.requirement === undefined ? stored : { ...stored, requirement: opts.requirement }),
       ...(opts.llm ? { llm: opts.llm } : {}),

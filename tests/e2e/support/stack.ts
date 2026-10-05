@@ -34,6 +34,8 @@ export interface E2EStack {
   runnerDir: string;
   /** The worker's container (platform `compose`), else null. */
   workerContainer: string | null;
+  /** The runner service's container, where reruns run (platform `compose`, KI-029), else null. */
+  runnerContainer: string | null;
 }
 
 async function freePort(): Promise<number> {
@@ -86,18 +88,20 @@ function viaHost(url: string, host: string, port: number): string {
 function liveLlmEnv(): Record<string, string> {
   const llm = loadLiveLlmEnv();
   if ("missingKey" in llm) throw new Error(`E2E_MODE=live needs ${llm.missingKey}`);
+  const reasoning: Record<string, string> = llm.LLM_REASONING ? { LLM_REASONING: llm.LLM_REASONING } : {};
   if (llm.LLM_PROVIDER === "gemini") {
     return {
       LLM_PROVIDER: "gemini",
       LLM_MODEL: llm.LLM_MODEL,
       GEMINI_API_KEY: llm.GEMINI_API_KEY!,
+      ...reasoning,
       ...(llm.GEMINI_THINKING_LEVEL ? { GEMINI_THINKING_LEVEL: llm.GEMINI_THINKING_LEVEL } : {}),
     };
   }
   if (llm.LLM_PROVIDER === "deepseek") {
-    return { LLM_PROVIDER: "deepseek", LLM_MODEL: llm.LLM_MODEL, DEEPSEEK_API_KEY: llm.DEEPSEEK_API_KEY! };
+    return { LLM_PROVIDER: "deepseek", LLM_MODEL: llm.LLM_MODEL, DEEPSEEK_API_KEY: llm.DEEPSEEK_API_KEY!, ...reasoning };
   }
-  return { LLM_PROVIDER: "anthropic", LLM_MODEL: llm.LLM_MODEL, ANTHROPIC_API_KEY: llm.ANTHROPIC_API_KEY! };
+  return { LLM_PROVIDER: "anthropic", LLM_MODEL: llm.LLM_MODEL, ANTHROPIC_API_KEY: llm.ANTHROPIC_API_KEY!, ...reasoning };
 }
 
 /**
@@ -117,7 +121,10 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
   const work = realpathSync(mkdtempSync(path.join(os.tmpdir(), "platform-e2e-")));
   const logDir = path.join(work, "logs");
   mkdirSync(logDir);
-  const stops: (() => Promise<void> | void)[] = [() => rmSync(work, { recursive: true, force: true })];
+  // E2E_KEEP_LOGS=1 keeps the stack's logs (and workspaces) after the suite, for a failure to be read.
+  const stops: (() => Promise<void> | void)[] = [
+    () => (process.env.E2E_KEEP_LOGS ? console.error(`[e2e] logs kept in ${logDir}`) : rmSync(work, { recursive: true, force: true })),
+  ];
   const stop = async () => {
     for (const fn of stops.splice(0).reverse()) await Promise.resolve().then(fn).catch(() => {});
   };
@@ -125,11 +132,11 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
   try {
     if (platform === "compose") {
       // The containers must run this checkout: build (cached when nothing changed).
-      await runLogged("docker", ["compose", "-f", COMPOSE_FILE, "build", "api", "worker"], path.join(logDir, "build.log"));
+      await runLogged("docker", ["compose", "-f", COMPOSE_FILE, "build", "api", "worker", "runner"], path.join(logDir, "build.log"));
     }
 
     const db: TestDatabase = await createTestDatabase();
-    stops.push(() => db.drop());
+    stops.push(() => (process.env.E2E_KEEP_LOGS ? console.error(`[e2e] database kept: ${db.url}`) : db.drop()));
 
     const redisUrl = process.env.E2E_REDIS_URL ?? "redis://localhost:6379/14";
     const redis = new Redis(redisUrl);
@@ -210,9 +217,27 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
     const apiUrl = `http://127.0.0.1:${apiPort}`;
     await until("API", async () => (await fetch(`${apiUrl}/healthz`)).ok, 120_000, api.child);
 
+    // Platform `compose`: reruns run in the runner service's container (KI-029), as in the compose stack.
+    let runnerEnv: Record<string, string> = {};
+    if (platform === "compose") {
+      const runnerToken = `e2e-runner-${randomBytes(12).toString("hex")}`;
+      const runnerName = `platform-e2e-runner-${suffix}`;
+      const runner = launchComposeService({
+        composeFile: COMPOSE_FILE,
+        service: "runner",
+        name: runnerName,
+        env: { RUNNER_TOKEN: runnerToken, RUNNER_WORKSPACE_DIR: runnerDir, LOG_LEVEL: "info" },
+        publish: [],
+        logDir,
+      });
+      stops.push(runner.stop);
+      await until("runner", () => readFileSync(path.join(logDir, "runner.log"), "utf8").includes('"msg":"runner listening"'), 120_000, runner.child);
+      runnerEnv = { RUNNER_URL: `http://${runnerName}:3100`, RUNNER_TOKEN: runnerToken };
+    }
+
     const worker = launch(
       "worker",
-      { ...llmEnv, E2E_MODE: mode },
+      { ...llmEnv, E2E_MODE: mode, ...runnerEnv },
       { port: metricsPort, target: 9464 },
     );
     const workerLog = path.join(logDir, "worker.log");
@@ -233,6 +258,7 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
         logDir,
         runnerDir,
         workerContainer: platform === "compose" ? `platform-e2e-worker-${suffix}` : null,
+        runnerContainer: platform === "compose" ? `platform-e2e-runner-${suffix}` : null,
       },
       stop,
     };

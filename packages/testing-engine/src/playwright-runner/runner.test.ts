@@ -1,3 +1,5 @@
+import { GLOBAL_SETUP_SOURCE } from "./guard-template";
+import { rerunAllowedHosts } from "./run-stage";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -125,6 +127,7 @@ const runInput = (test: GeneratedTest, over: Partial<Parameters<typeof runGenera
   proxyUrl: PROXY,
   timeoutMs: 60_000,
   signal: new AbortController().signal,
+  allowedHosts: ["shop.test", "*.shop.test"],
   ...over,
 });
 const title = (id: string) => `[${id}] Statement of ${id}`;
@@ -139,7 +142,7 @@ function captureLog() {
 // ---------------------------------------------------------------------------------------------
 
 describe("rerun workspace", () => {
-  const files = { source: "// spec", helpersSource: "// helpers", dataJson: "{}", config: "module.exports = {};" };
+  const files = { source: "// spec", helpersSource: "// helpers", dataJson: "{}", config: "module.exports = {};", guardSettings: '{"guard":true}' };
 
   it("prepares <base>/<runId>/ with the test files, a CommonJS package.json, a tmp dir and node_modules linked from the runner dir", async () => {
     const ws = await prepareWorkspace({ baseDir: base }, "run_1", files);
@@ -149,6 +152,9 @@ describe("rerun workspace", () => {
     expect(readFileSync(path.join(ws.dir, "helpers.ts"), "utf8")).toBe("// helpers");
     expect(readFileSync(path.join(ws.dir, "run-data.json"), "utf8")).toBe("{}");
     expect(readFileSync(path.join(ws.dir, "playwright.config.js"), "utf8")).toBe("module.exports = {};");
+    // The navigation guard (KI-029): the fixed global setup and its settings.
+    expect(readFileSync(path.join(ws.dir, "global-setup.js"), "utf8")).toBe(GLOBAL_SETUP_SOURCE);
+    expect(readFileSync(path.join(ws.dir, "rerun-guard.json"), "utf8")).toBe('{"guard":true}');
     // run.spec.ts imports run-data.json without an import attribute: it must load as CommonJS.
     expect(JSON.parse(readFileSync(path.join(ws.dir, "package.json"), "utf8"))).toEqual({ private: true, type: "commonjs" });
     expect(lstatSync(path.join(ws.dir, "node_modules")).isSymbolicLink()).toBe(true);
@@ -203,6 +209,17 @@ describe("rerun workspace", () => {
 // Step 4: config
 // ---------------------------------------------------------------------------------------------
 
+describe("rerunAllowedHosts (KI-029)", () => {
+  it("allows the target's host, its subdomains and the run's additional hosts, as exploration does", () => {
+    expect(rerunAllowedHosts({ targetUrl: "https://Shop.Test/x", options: { additionalAllowedHosts: ["cdn.example"] } } as never)).toEqual([
+      "shop.test",
+      "*.shop.test",
+      "cdn.example",
+    ]);
+    expect(rerunAllowedHosts({ targetUrl: "http://127.0.0.1:4000/", options: { additionalAllowedHosts: [] } } as never)).toEqual(["127.0.0.1"]);
+  });
+});
+
 describe("buildPlaywrightConfig", () => {
   const load = (source: string) => {
     const module = { exports: {} as Record<string, unknown> };
@@ -215,6 +232,7 @@ describe("buildPlaywrightConfig", () => {
     expect(config).toMatchObject({
       testDir: ".",
       testMatch: "run.spec.ts",
+      globalSetup: "./global-setup.js",
       retries: 0,
       workers: 1,
       timeout: 45_000,
@@ -499,8 +517,8 @@ describe("createRunTestStage", () => {
     const ctx = {
       runId: "run_1",
       tenantId: "t_1",
-      // Only the options are read (V1.3: recordVideo / recordTrace, both on by default).
-      request: { options: {} },
+      // Read: the options (V1.3: recordVideo / recordTrace, both on by default) and the target (the navigation guard).
+      request: { targetUrl: "https://shop.test/", options: { additionalAllowedHosts: ["cdn.example"] } },
       signal: opts.signal ?? new AbortController().signal,
       budgets: { explorationMs: 1_000, rerunMs: 60_000 },
       secrets: { names: ["password"], get: (n: string) => (n === "password" ? SECRET : undefined) },

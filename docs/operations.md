@@ -9,7 +9,8 @@ metrics and alerts, logs, retention, and the release checks.
 |---|---|---|
 | `web` (Next.js) | `api` only, over `API_URL`, with the API token added server-side | 3000 |
 | `api` (Fastify) | PostgreSQL, Redis, S3 | 3001: `/healthz`, `/metrics`, `/v1/*` |
-| `worker` × N | PostgreSQL, Redis, S3, the model providers (Anthropic, Gemini, DeepSeek); runs each run's sandboxed Chromium and Playwright runner as child processes | 9464: `/metrics` (`WORKER_METRICS_PORT`, `0` disables it) |
+| `worker` × N | PostgreSQL, Redis, S3, the model providers (Anthropic, Gemini, DeepSeek), `runner`; runs each run's sandboxed exploration Chromium as a child process | 9464: `/metrics` (`WORKER_METRICS_PORT`, `0` disables it) |
+| `runner` | the workers only (internal `runner` network) | 3100: the runner service (`RUNNER_TOKEN`); runs each Playwright rerun from the `runs` volume |
 | PostgreSQL | — | runs, events, criteria, results, artifacts metadata, encrypted run secrets, and the model settings: default model and the provider API keys saved in Settings (encrypted, long-lived) |
 | Redis | — | BullMQ queues `runs`, `maintenance` (reaper) and `retention`; pub/sub for live events and cancel signals |
 | S3-compatible storage | — | screenshots, traces, videos (compose uses rclone's S3 server; any S3 store works) |
@@ -51,7 +52,14 @@ https) and forwards to the API as `X-Session-Token`. Only a SHA-256 of the token
   runs, and manage users, AI model settings, saved credentials and the exploration cache. The tenant always keeps
   one enabled administrator.
 - **Sessions.** `SESSION_TTL_HOURS` (default 12) from sign-in, not sliding. Signing out, a password change (the
-  user's other sessions), a reset by an administrator and disabling an account end sessions at once.
+  user's other sessions), a reset by an administrator and disabling an account end sessions at once. Each person
+  sees their live sessions (browser, sign-in and last-active times) on `/account` and can sign out one of them or
+  every other one.
+- **More organizations (tenants).** `/login` signs in to `DEFAULT_TENANT_ID`; `/login?org=<id>` to another tenant.
+  Add one, with its first administrator, with
+  `TENANT_ADMIN_PASSWORD=… pnpm --filter @platform/api create-tenant <id> "<name>" <admin e-mail>`; that administrator
+  adds the others. A tenant's people, runs, suites, settings and keys are its own; every run's child rows carry the
+  tenant too (D6).
 - **Failed sign-ins.** 10 per e-mail address in 15 minutes, then `429` for the rest of the window (a Redis counter,
   shared by every API instance).
 - **The service token.** `API_TOKEN` still authenticates every API call (the web server holds it). A call with
@@ -82,7 +90,8 @@ sweep (every 30 s), so a crash between never leaves one `RUNNING`.
 - Each enabled schedule has a BullMQ job scheduler on the `suite-schedules` queue, keyed by the schedule's id. The
   table is the truth: the API resyncs every scheduler when it starts ("suite schedules synced" in the log) and
   removes the ones whose schedule is gone or disabled. **The API processes consume the queue**, so schedules fire
-  only while an API is up (KI-037).
+  only while an API is up. A firing taken more than 15 minutes after it was due (no API was up then) is skipped
+  (`skipped_late`), not run late; the next one runs on time.
 - A firing runs as the schedule's creator with the suite's saved credentials only. It is skipped while that
   schedule's previous suite run is going and fails (without running) when the creator is disabled or gone, a secret
   is missing, or the tenant is at its cap. Each outcome is on the schedule (`lastOutcome`, `lastError`) and in
@@ -96,8 +105,8 @@ administrator can revoke anyone's under Settings → API tokens. Token creation 
 - External callers use the **web app**, never the API: `https://<web host>/api/ext/v1/…` with `Authorization: Bearer
   tap_…`. The web server forwards the token as `X-Api-Token` next to the service `API_TOKEN`, on an allow-list of
   the token-reachable endpoints only, without cookies. **Add the public host CI uses to `WEB_ALLOWED_HOSTS`.**
-- Limits: 600 requests per token and hour in the API (Redis, `429` with `Retry-After`), and 120 per token and minute
-  per web instance.
+- Limits: 120 requests per token and minute and 600 per token and hour, counted by the API in Redis (shared by every
+  instance; `429` with `Retry-After`, passed through by the web app).
 - The GitHub Action (`.github/actions/run-suite`) and the CLI (`integrations/platform-client/cli.mjs`) are described,
   with an example workflow, in [`integrations/README.md`](../integrations/README.md).
 
@@ -124,7 +133,16 @@ Browsers reach targets only through the per-run egress proxy: exploration's Chro
 `--proxy-server=<proxy>` and `--proxy-bypass-list=<-loopback>`, and the Playwright rerun gets its own proxy. The
 proxy resolves each host itself, refuses non-public addresses (including a public name that re-resolves to a
 private one — DNS rebinding), and publishes an `egress.blocked` event for the site's own attempts. The navigation
-guard also keeps top-level navigation on the target's hosts.
+guard also keeps top-level navigation on the target's hosts — in exploration and, since KI-029, in the rerun too
+(the rerun workspace's `global-setup.js` launches its Chromium and guards it the same way).
+
+**The rerun runs in its own container** (KI-029). With `RUNNER_URL` and `RUNNER_TOKEN` set (compose sets
+`http://runner:3100`), the worker writes each rerun's workspace to the `runs` volume and the `runner` service runs the
+Playwright CLI there. The runner is only on the internal `runner` network: it reaches the workers and nothing else —
+not PostgreSQL, Redis, S3, the model providers or the internet. Its browser's traffic goes through the worker's
+per-rerun egress proxy, which then listens on the runner network and accepts only the runner's address, over a
+loopback forwarder the runner opens for that rerun. Without `RUNNER_URL`, the worker runs the CLI as a child process
+of its own (the default outside compose). Production refuses the compose file's development `RUNNER_TOKEN`.
 
 Enforce the same boundary in the network (defense in depth — it catches anything that bypasses the proxy):
 
@@ -269,9 +287,9 @@ when it is created; a profile's copy is purged with the run's other secrets when
 ## Release checks
 
 CI (`.github/workflows/ci.yml`, GitHub Actions) runs typecheck, `pnpm test` (with the S3 tests), `pnpm
-test:integration` and `pnpm test:e2e` on every push and pull request; nightly, the live E2E suite on Gemini; on
-demand (`workflow_dispatch` with `live-gate`), the release gate. The live jobs need a `GEMINI_API_KEY` repository
-secret from a billing-enabled project. The runners are Ubuntu 24.04, whose AppArmor denies the unprivileged user
+test:integration` and `pnpm test:e2e` on every push and pull request; nightly, the live E2E suite on DeepSeek; on
+demand (`workflow_dispatch` with `live-gate`), the release gate. The live jobs need a `DEEPSEEK_API_KEY` repository
+secret. The runners are Ubuntu 24.04, whose AppArmor denies the unprivileged user
 namespaces Chromium's sandbox needs; the workflow lifts that (`kernel.apparmor_restrict_unprivileged_userns=0`).
 
 

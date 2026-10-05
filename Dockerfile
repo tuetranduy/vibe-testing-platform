@@ -43,6 +43,15 @@ HEALTHCHECK --interval=10s --timeout=3s --retries=6 \
   CMD node -e "process.exit(Date.now()-require('fs').statSync('/tmp/worker-alive').mtimeMs<30000?0:1)"
 CMD ["pnpm", "--filter", "@platform/worker", "start"]
 
+# The Playwright runner service (KI-029): the worker image (same @playwright/test, Chromium and paths, so a
+# workspace's node_modules link resolves the same here), running only the runner server. In compose it is on an
+# internal network with the workers: no route to the database, Redis, object storage or the internet.
+FROM worker AS runner
+EXPOSE 3100
+HEALTHCHECK --interval=10s --timeout=3s --retries=6 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.RUNNER_PORT||3100)+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+CMD ["pnpm", "--filter", "@platform/worker", "runner"]
+
 FROM source AS migrate
 USER node
 CMD ["pnpm", "--filter", "@platform/db", "migrate"]

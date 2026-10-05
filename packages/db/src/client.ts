@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { fileURLToPath } from "node:url";
@@ -26,6 +27,12 @@ export function createDb(databaseUrl: string, opts: { max?: number } = {}): DbHa
 
 export async function runMigrations(db: Database): Promise<void> {
   await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+}
+
+/** Whether a tenant exists (a sign-in naming another tenant, KI-035). */
+export async function tenantExists(db: Executor, tenantId: string): Promise<boolean> {
+  const rows = await db.select({ id: schema.tenants.id }).from(schema.tenants).where(eq(schema.tenants.id, tenantId)).limit(1);
+  return rows.length > 0;
 }
 
 /** Seed the default tenant (D6). Idempotent. */

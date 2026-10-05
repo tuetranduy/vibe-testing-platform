@@ -7,6 +7,9 @@ import {
   type SiteAnalysis,
   NormalizedRequirementSchema,
   SessionViewSchema,
+  SessionListResponseSchema,
+  RevokeSessionsResponseSchema,
+  type SessionInfo,
   CredentialProfileListSchema,
   CredentialProfileSchema,
   TestDataSetListSchema,
@@ -202,8 +205,8 @@ const AUTH = "/api/v1/auth";
 const NoContentSchema = z.unknown();
 
 /** Signs in: the session goes into an httpOnly cookie (set by this app's proxy); the answer names the user. */
-export const login = (email: string, password: string): Promise<SessionView> =>
-  request(SessionViewSchema, `${AUTH}/login`, { method: "POST", body: { email, password } });
+export const login = (email: string, password: string, tenant?: string | null): Promise<SessionView> =>
+  request(SessionViewSchema, `${AUTH}/login`, { method: "POST", body: { email, password, ...(tenant ? { tenant } : {}) } });
 
 export const logout = async (): Promise<void> => {
   await request(NoContentSchema, `${AUTH}/logout`, { method: "POST" });
@@ -215,6 +218,17 @@ export const getMe = (): Promise<UserView> => request(UserViewSchema, `${AUTH}/m
 export const changePassword = async (currentPassword: string, newPassword: string): Promise<void> => {
   await request(NoContentSchema, `${AUTH}/password`, { method: "PUT", body: { currentPassword, newPassword } });
 };
+
+/** The signed-in user's live sessions (KI-034), most recently used first. */
+export const listSessions = async (): Promise<SessionInfo[]> => (await request(SessionListResponseSchema, `${AUTH}/sessions`)).items;
+
+export const revokeSession = async (id: string): Promise<void> => {
+  await request(NoContentSchema, `${AUTH}/sessions/${seg(id)}`, { method: "DELETE" });
+};
+
+/** Signs out every other session; returns how many ended. */
+export const revokeOtherSessions = async (): Promise<number> =>
+  (await request(RevokeSessionsResponseSchema, `${AUTH}/sessions/revoke-others`, { method: "POST" })).revoked;
 
 const USERS = "/api/v1/users";
 

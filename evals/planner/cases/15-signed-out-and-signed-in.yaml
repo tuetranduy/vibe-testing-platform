@@ -1,0 +1,38 @@
+id: signed-out-and-signed-in
+tags: [login, scenarios]
+# KI-031: the criteria need different starting states (a signed-out visitor, a signed-in user), so the plan needs
+# two scenarios; every other case fits one.
+testDataKeys: [username, firstName]
+secretNames: [password]
+requirement:
+  originalText: >-
+    A visitor who is not signed in and opens the account page is sent to the login page. A signed-in user who opens
+    the account page sees their first name there.
+  criteria:
+    - id: AC-1
+      sourceText: A visitor who is not signed in and opens the account page is sent to the login page.
+      statement: A signed-out visitor opening the account page sees the login form
+      expectedOutcome: { kind: visible, fact: { key: loginForm, checkpoint: signed_out_account }, expected: true }
+      preconditions: []
+      ambiguity: null
+    - id: AC-2
+      sourceText: A signed-in user who opens the account page sees their first name there.
+      statement: The account page shows the signed-in user's first name
+      expectedOutcome: { kind: visible, fact: { key: accountName, checkpoint: signed_in_account }, expected: true }
+      preconditions:
+        - { kind: authenticated, description: User is logged in }
+        - { kind: test_data, ref: username, description: Username to log in with }
+        - { kind: secret, ref: password, description: Account password }
+      ambiguity: null
+  facts:
+    - { key: loginForm, checkpoint: signed_out_account, description: The login form on the page, valueType: boolean }
+    - { key: accountName, checkpoint: signed_in_account, description: The user's first name shown on the account page, valueType: boolean }
+expect:
+  requiredStepKinds: [navigate, fill, login, capture_checkpoint]
+  maxSteps: 20
+  blocked: []
+  requiresLogin: true
+  inputRefs:
+    - { source: testData, key: username }
+    - { source: secret, key: password }
+  scenarios: { min: 2, max: 2 }

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { AccountSessions } from "../../components/AccountSessions";
 import { AccountSettings } from "../../components/AccountSettings";
 
 export const metadata: Metadata = { title: "Your account" };
@@ -14,6 +15,7 @@ export default function AccountPage() {
         </p>
       </div>
       <AccountSettings />
+      <AccountSessions />
     </div>
   );
 }

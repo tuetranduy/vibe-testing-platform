@@ -73,6 +73,12 @@ export const ObservedFactSchema = z
       .object({
         element: ElementRefSchema,
         mode: z.enum(["text", "number", "visible", "count", "value", "text_list"]),
+        /** text_list only: a CSS selector read inside each list row instead of the whole row (KI-001). */
+        itemSelector: z.string().min(1).max(500).optional(),
+      })
+      .refine((r) => r.itemSelector === undefined || r.mode === "text_list", {
+        message: "itemSelector goes only with text_list reads",
+        path: ["itemSelector"],
       })
       .nullable(), // required when provenance = DOM_VERIFIED (except key "url")
     modelValue: FactValueSchema.optional(), // what the model extracted, kept for audit
@@ -95,5 +101,10 @@ export const CachedElementSchema = z.object({
   description: z.string().max(1000),
   method: z.string().max(40).nullable(),
   element: ElementRefSchema,
+  /**
+   * What the element did when it was cached (tag, type, link target, form action; KI-032). A hit whose element now
+   * does something else is a miss. Absent on entries written before it: those are misses, rewritten on success.
+   */
+  action: z.string().max(4000).optional(),
 });
 export type CachedElement = z.infer<typeof CachedElementSchema>;

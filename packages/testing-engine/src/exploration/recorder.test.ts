@@ -3,7 +3,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LOCATOR_STRATEGY_ORDER } from "../shared/locator-policy";
 import { captureCheckpoint, captureFact, modeForValueType, readFact } from "./fact-reader";
-import { describeElement, fillElement, recordElement } from "./recorder";
+import { describeElement, elementAction, fillElement, recordElement } from "./recorder";
 
 /**
  * Real Chromium (Playwright's build, launched headless without a proxy) on a static fixture
@@ -24,6 +24,15 @@ const FIXTURE_HTML = `<!doctype html>
   <span data-testid="cart-count" role="status" aria-label="Cart items">Cart (3)</span>
   <ul data-testid="cart-items"><li>  Apple  </li><li>
       Banana   split </li></ul>
+  <ul data-testid="order-lines">
+    <li><span data-testid="line-name">iPhone 17 Pro</span> — Qty 1 — $1,199.00</li>
+    <li><span data-testid="line-name">USB-C   Cable</span> — Qty 2 — $38.00</li>
+    <li class="subtotal">Subtotal: $1,237.00</li>
+  </ul>
+  <ul data-testid="plain-lines">
+    <li><b class="title">Pixel 11</b> <i class="price">$799.00</i></li>
+    <li><b class="title">Galaxy S27</b> <i class="price">$899.00</i></li>
+  </ul>
   <p data-testid="notice">Free   shipping</p>
   <p data-testid="hidden-note" style="display:none">Secret sale</p>
 </body></html>`;
@@ -114,6 +123,24 @@ describe("recordElement (acted element → ranked locator candidates)", () => {
   });
 });
 
+describe("elementAction (what a cached element does, KI-032)", () => {
+  it("names the tag and type, a link's target and a form's action and method, never a query", async () => {
+    await page.setContent(`
+      <a id="link" href="/account/orders?session=abc#top">Orders</a>
+      <form action="https://pay.example/checkout?cart=1" method="POST"><button id="pay" type="submit">Pay</button></form>
+      <form><button id="self" formaction="/cart/add" formmethod="post">Add</button></form>
+      <button id="plain" type="button">Nothing</button>`);
+    expect(await elementAction(page, "#link")).toBe("a||http://fixture.test/account/orders||");
+    expect(await elementAction(page, "#pay")).toBe("button|submit||https://pay.example/checkout|post");
+    expect(await elementAction(page, "#self")).toBe("button|||http://fixture.test/cart/add|post");
+    expect(await elementAction(page, "#plain")).toBe("button|button|||");
+
+    // Same button, moved into a form that posts elsewhere: a different action.
+    await page.evaluate(() => document.querySelector("form")!.setAttribute("action", "https://evil.example/steal"));
+    expect(await elementAction(page, "#pay")).toBe("button|submit||https://evil.example/steal|post");
+  });
+});
+
 describe("fillElement (our code fills; values never go through the model)", () => {
   it("fills the located field deterministically", async () => {
     await fillElement(page, "xpath=/html[1]/body[1]/input[1]", "s3cret-value");
@@ -131,6 +158,11 @@ describe("fact reads", () => {
     const ref = await recordElement(page, "[data-testid=cart-items]");
     expect(await readFact(page, ref, "text_list")).toMatchObject({ value: ["Apple", "Banana split"] });
     expect(await readFact(page, ref, "count")).toMatchObject({ value: 2 });
+  });
+
+  it("text_list with an item selector reads that sub-element of each row; rows without it are dropped", async () => {
+    const ref = await recordElement(page, "[data-testid=order-lines]");
+    expect(await readFact(page, ref, "text_list", '[data-testid="line-name"]')).toMatchObject({ value: ["iPhone 17 Pro", "USB-C Cable"] });
   });
 
   it("visible returns a boolean; text is whitespace-collapsed; value reads inputs", async () => {
@@ -177,6 +209,35 @@ describe("captureFact / captureCheckpoint (provenance)", () => {
     await page.evaluate(() => document.querySelector("[data-testid=cart-count]")?.remove());
     const gone = await captureFact(page, { ...base, modelValue: 3, element, mode: "number" });
     expect(gone).toMatchObject({ provenance: "MODEL_EXTRACTED", read: null });
+  });
+
+  it("list rows holding more than the model's items: the sub-element that holds them in every row is recorded (DOM_VERIFIED)", async () => {
+    const element = await recordElement(page, "[data-testid=order-lines]");
+    const fact = await captureFact(page, { ...base, key: "lineNames", modelValue: ["iPhone 17 Pro", "usb-c cable"], element, mode: "text_list" });
+    expect(fact).toMatchObject({
+      value: ["iPhone 17 Pro", "USB-C Cable"],
+      provenance: "DOM_VERIFIED",
+      modelValue: ["iPhone 17 Pro", "usb-c cable"],
+      read: { element, mode: "text_list", itemSelector: '[data-testid="line-name"]' },
+    });
+    expect(ObservedFactSchema.parse(fact)).toEqual(fact);
+  });
+
+  it("without a test id, the row sub-element is found by tag and class", async () => {
+    const element = await recordElement(page, "[data-testid=plain-lines]");
+    const fact = await captureFact(page, { ...base, key: "titles", modelValue: ["Pixel 11", "Galaxy S27"], element, mode: "text_list" });
+    expect(fact).toMatchObject({ value: ["Pixel 11", "Galaxy S27"], provenance: "DOM_VERIFIED", read: { mode: "text_list", itemSelector: "b.title" } });
+  });
+
+  it("list rows the model's items do not exactly match through one sub-element stay MODEL_EXTRACTED", async () => {
+    const element = await recordElement(page, "[data-testid=order-lines]");
+    // "iPhone 17" is only part of a sub-element's text; "iPhone 17 Pro" alone is one row short.
+    for (const modelValue of [["iPhone 17", "USB-C Cable"], ["iPhone 17 Pro"], ["USB-C Cable", "iPhone 17 Pro"]]) {
+      const fact = await captureFact(page, { ...base, key: "lineNames", modelValue, element, mode: "text_list" });
+      expect(fact).toMatchObject({ value: modelValue, provenance: "MODEL_EXTRACTED", read: { element, mode: "text_list" } });
+      expect(fact.read).not.toHaveProperty("itemSelector");
+      expect((fact.domValue as string[])[0]).toBe("iPhone 17 Pro — Qty 1 — $1,199.00");
+    }
   });
 
   it("a boolean fact without an explicit visible mode stays MODEL_EXTRACTED even when the element is visible (R24)", async () => {

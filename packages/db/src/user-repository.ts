@@ -1,5 +1,5 @@
 import type { UserRole, UserView } from "@platform/contracts";
-import { and, asc, count, eq, gt, inArray, isNull, ne } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNull, ne } from "drizzle-orm";
 import type { Executor } from "./client";
 import { newId } from "./ids";
 import { auditEvents, userSessions, users } from "./schema";
@@ -120,11 +120,18 @@ export interface Session {
   expiresAt: Date;
 }
 
+/** A live session as its owner sees it in the sessions list (KI-034). */
+export interface SessionInfo extends Session {
+  createdAt: Date;
+  lastSeenAt: Date;
+  userAgent: string | null;
+}
+
 /** Web sessions: looked up by the token's hash, never by the token. */
 export class SessionRepository {
   constructor(private readonly db: Executor) {}
 
-  async create(input: { userId: string; tokenHash: Buffer; expiresAt: Date }): Promise<Session> {
+  async create(input: { userId: string; tokenHash: Buffer; expiresAt: Date; userAgent?: string | null }): Promise<Session> {
     const [row] = await this.db
       .insert(userSessions)
       .values({ id: newId("ses"), ...input })
@@ -152,6 +159,33 @@ export class SessionRepository {
 
   async touch(sessionId: string, at: Date = new Date()): Promise<void> {
     await this.db.update(userSessions).set({ lastSeenAt: at }).where(eq(userSessions.id, sessionId));
+  }
+
+  /** A user's live sessions (not revoked, not expired), most recently used first. */
+  async listLive(userId: string, now: Date = new Date()): Promise<SessionInfo[]> {
+    const rows = await this.db
+      .select()
+      .from(userSessions)
+      .where(and(eq(userSessions.userId, userId), isNull(userSessions.revokedAt), gt(userSessions.expiresAt, now)))
+      .orderBy(desc(userSessions.lastSeenAt));
+    return rows.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      expiresAt: r.expiresAt,
+      createdAt: r.createdAt,
+      lastSeenAt: r.lastSeenAt,
+      userAgent: r.userAgent,
+    }));
+  }
+
+  /** Revokes one of a user's live sessions; false when it is not theirs or already ended. */
+  async revokeOwn(userId: string, sessionId: string): Promise<boolean> {
+    const rows = await this.db
+      .update(userSessions)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(userSessions.id, sessionId), eq(userSessions.userId, userId), isNull(userSessions.revokedAt)))
+      .returning({ id: userSessions.id });
+    return rows.length > 0;
   }
 
   async revoke(sessionId: string): Promise<void> {

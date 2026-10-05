@@ -4,6 +4,7 @@ import {
   LoginRequestSchema,
   UpdateUserRequestSchema,
   type LoginResponse,
+  type SessionInfo,
   type UserView,
 } from "@platform/contracts";
 import { ApiTokenRepository, EmailTakenError, SessionRepository, UserRepository, toUserView, type User } from "@platform/db";
@@ -78,6 +79,13 @@ function parse<T>(
 
 export type LoginOutcome = { ok: true; response: LoginResponse; user: User } | { ok: false; reason: "invalid" | "throttled" };
 
+/** A signed-in user acting through a web session (an API token's principal is not one). */
+function requireSession(principal: Principal) {
+  const p = requireUser(principal);
+  if (p.sessionId.startsWith("token:")) throw new HttpError(400, "NO_SESSION", "This endpoint needs a signed-in user");
+  return p;
+}
+
 /** Accounts, sessions and user management (V1.1 F1, spec 2026-09-29-v1.1-design). */
 export class UserService {
   private readonly users: UserRepository;
@@ -100,7 +108,7 @@ export class UserService {
    * Checks the password (an unknown or disabled account costs the same scrypt), counts failures per
    * e-mail, and opens a session: the token is returned once, only its hash is stored.
    */
-  async login(tenantId: string, body: unknown): Promise<LoginOutcome> {
+  async login(tenantId: string, body: unknown, userAgent?: string): Promise<LoginOutcome> {
     const { email, password } = parse(LoginRequestSchema, body);
     const key = `${tenantId}:${emailHash(email)}`;
     if ((await this.throttle().failures(key)) >= LOGIN_MAX_FAILURES) return { ok: false, reason: "throttled" };
@@ -114,7 +122,7 @@ export class UserService {
     await this.throttle().reset(key);
     const token = newSessionToken();
     const expiresAt = new Date(Date.now() + this.deps.config.auth.sessionTtlHours * 3_600_000);
-    await this.sessions.create({ userId: usable.id, tokenHash: sessionTokenHash(token), expiresAt });
+    await this.sessions.create({ userId: usable.id, tokenHash: sessionTokenHash(token), expiresAt, userAgent: userAgent?.slice(0, 300) || null });
     return { ok: true, user: usable, response: { token, expiresAt: expiresAt.toISOString(), user: toUserView(usable) } };
   }
 
@@ -127,6 +135,31 @@ export class UserService {
     const user = await this.users.findById(p.tenantId, p.userId);
     if (!user) throw new HttpError(401, "SESSION_INVALID", "Your session has ended; sign in again");
     return toUserView(user);
+  }
+
+  /** The signed-in user's live sessions (KI-034); API tokens are not sessions and are listed on their own page. */
+  async sessionsOf(principal: Principal): Promise<SessionInfo[]> {
+    const p = requireSession(principal);
+    return (await this.sessions.listLive(p.userId)).map((s) => ({
+      id: s.id,
+      createdAt: s.createdAt.toISOString(),
+      lastSeenAt: s.lastSeenAt.toISOString(),
+      expiresAt: s.expiresAt.toISOString(),
+      userAgent: s.userAgent,
+      current: s.id === p.sessionId,
+    }));
+  }
+
+  /** Ends one of the signed-in user's own sessions; 404 for any other (or an ended one). */
+  async revokeSession(principal: Principal, sessionId: string): Promise<void> {
+    const p = requireSession(principal);
+    if (!(await this.sessions.revokeOwn(p.userId, sessionId))) throw new HttpError(404, "NOT_FOUND", "Not found");
+  }
+
+  /** "Sign out other sessions": every live session of the user but this one. */
+  async revokeOtherSessions(principal: Principal): Promise<number> {
+    const p = requireSession(principal);
+    return this.sessions.revokeAllForUser(p.userId, p.sessionId);
   }
 
   /** A user changes their own password: their other sessions end, this one stays. */

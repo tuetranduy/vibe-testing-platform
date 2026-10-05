@@ -34,7 +34,7 @@ import type { StageContext } from "../orchestrator/stages";
 import { actionPolicyFor, isDestructiveStep } from "../shared/action-policy";
 import { captureFact, factFromReadings, modeForValueType, urlFact, type FactCaptureInput, type FactReadMode } from "./fact-reader";
 import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
-import { describeElement, fillElement, recordElement, selectElementOption } from "./recorder";
+import { describeElement, elementAction, fillElement, recordElement, selectElementOption } from "./recorder";
 
 /**
  * Exploration executor (Task 14): runs the confirmed plan's scenarios (V1.1 F9: in order, each from a clean
@@ -76,7 +76,10 @@ import { describeElement, fillElement, recordElement, selectElementOption } from
  *                (key, checkpoint), else it has no DOM read (Ruling R24). The reserved `url` fact
  *                comes first. Then a screenshot artifact. Recorded: `extract`, `observe`s, and the
  *                `checkpoint` step the facts point at (`stepId`, `artifactIds`).
- * - wait_for     Bounded poll: up to 3 `observe`s, `pollIntervalMs` apart, within the budget.
+ * - wait_for     Bounded poll: up to 3 `observe`s, `pollIntervalMs` apart, within the budget. An element that
+ *                never appears does not stop exploration (KI-001: models plan waits for a page "to load", which
+ *                names no element): the failed observes are recorded, and the checkpoint facts and later steps
+ *                decide. It is the only planned step that does not stop exploration when it fails.
  *
  * Golden path: `onGoldenPath = true` only for the successful execution of a planned step (the
  * `navigate` / `act` / `fill` / `checkpoint` step); observes, extracts, retries and failed attempts
@@ -95,10 +98,15 @@ import { describeElement, fillElement, recordElement, selectElementOption } from
  * Exploration cache (V1.1 F8, `deps.cache`): before an `observe`, the lookup of the same instruction on the
  * same page (origin + path) from an earlier run is tried. It is reused only when its selector still
  * resolves to an element whose chosen locator is the one recorded then; the step is recorded as an
- * `observe` with `llm.cacheHit: true` and no tokens. The action policy checks the element either way. A new
+ * `observe` with `llm.cacheHit: true` and no tokens, and only while the element still does what it did then (its
+ * tag, type, link target and form action; KI-032). A share of hits (`cacheRecheckRate`) asks the explorer again,
+ * and the fresh lookup replaces the entry. The action policy checks the element either way. A new
  * lookup is written only once the planned step that used it succeeded, so a failed, blocked or retried
  * attempt never populates the cache. A failing cache is a miss.
  */
+
+/** The default share of exploration cache hits looked up again (KI-032). */
+const CACHE_RECHECK_RATE = 0.1;
 
 /** Persistence ports (Ruling R12), implemented by the worker. Rows arrive validated and redacted. */
 export interface ExplorationStore {
@@ -112,6 +120,8 @@ export interface ExplorationStore {
 export interface RecorderPort {
   describe(page: Page, selector: string): Promise<{ role: string | null; name: string | null; text: string | null }>;
   record(page: Page, selector: string): Promise<ElementRef>;
+  /** What the element does (elementAction); used to check a cached lookup (KI-032). Absent: never checked. */
+  action?(page: Page, selector: string): Promise<string>;
   fill(page: Page, selector: string, value: string): Promise<void>;
   select(page: Page, selector: string, value: string): Promise<void>;
   captureFact(page: Page, input: FactCaptureInput): Promise<ObservedFact>;
@@ -123,6 +133,7 @@ export const playwrightRecorder: RecorderPort = {
     return { role: d.role, name: d.name, text: d.text };
   },
   record: (page, selector) => recordElement(page, selector),
+  action: (page, selector) => elementAction(page, selector),
   fill: (page, selector, value) => fillElement(page, selector, value),
   select: (page, selector, value) => selectElementOption(page, selector, value),
   captureFact: (page, input) => captureFact(page, input),
@@ -144,6 +155,13 @@ export interface ExplorationDeps {
   pollIntervalMs?: number;
   /** Cached element lookups from earlier runs (V1.1 F8); absent: every lookup asks the explorer. */
   cache?: ObserveCache;
+  /**
+   * The share of cache hits looked up again with `observe` anyway, the fresh lookup replacing the entry once its
+   * step succeeds (KI-032): an entry the page or a steered model made wrong does not live for its whole 30 days.
+   * Default 0.1; `random` is the test seam.
+   */
+  cacheRecheckRate?: number;
+  random?: () => number;
   /**
    * Starts the next scenario from a clean session (V1.1 F9): cookies and the target origin's storage
    * cleared. Default: the Playwright/CDP implementation (clearBrowserState).
@@ -422,7 +440,8 @@ class ExplorationRun {
       case "capture_checkpoint":
         return this.withRetry(() => this.checkpoint(step));
       case "wait_for":
-        return this.withRetry(() => this.waitFor(step));
+        await this.waitFor(step);
+        return;
     }
   }
 
@@ -669,9 +688,11 @@ class ExplorationRun {
     return "ok";
   }
 
-  private async waitFor(step: PlannedStep): Promise<Attempt> {
+  /** Polls for the step's element; whether it appeared or not, exploration goes on (see the header). */
+  private async waitFor(step: PlannedStep): Promise<void> {
+    this.cacheWrites = [];
     for (let poll = 0; poll < WAIT_FOR_POLLS; poll++) {
-      if (await this.locate(step, step.description)) return "ok";
+      if (await this.locate(step, step.description)) return this.writeCache();
       if (poll < WAIT_FOR_POLLS - 1) {
         try {
           await sleep(this.deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS, this.input.budget);
@@ -680,7 +701,6 @@ class ExplorationRun {
         }
       }
     }
-    return "final";
   }
 
   // -------------------------------------------------------------------------------------------
@@ -697,7 +717,8 @@ class ExplorationRun {
     const base = { plannedStepId: step.id, kind: "observe" as const, instruction, urlBefore: this.url(), startedAt };
     const cacheAt = this.deps.cache ? observeCacheKey(this.url(), this.redactString(instruction)) : null;
     if (cacheAt) {
-      const hit = await this.fromCache(cacheAt.key);
+      const recheck = (this.deps.random ?? Math.random)() < (this.deps.cacheRecheckRate ?? CACHE_RECHECK_RATE);
+      const hit = recheck ? null : await this.fromCache(cacheAt.key);
       if (hit) {
         await this.record({
           ...base,
@@ -723,9 +744,11 @@ class ExplorationRun {
     }
     let ref: ElementRef;
     let info: Located["info"];
+    let action: string | undefined;
     try {
       ref = await this.recorder.record(this.page, element.selector);
       info = await this.recorder.describe(this.page, element.selector);
+      if (cacheAt) action = await this.recorder.action?.(this.page, element.selector);
     } catch (err) {
       this.rethrowIfFatal(err);
       await this.record({ ...base, outcome: "FAILED", error: firstLine(err), llm: observed.llm });
@@ -733,7 +756,7 @@ class ExplorationRun {
     }
     await this.record({ ...base, outcome: "SUCCESS", element: ref, llm: observed.llm });
     if (cacheAt) {
-      const entry = this.ctx.redact({ selector: element.selector, description: element.description, method: element.method, element: ref }) as CachedElement;
+      const entry = this.ctx.redact({ selector: element.selector, description: element.description, method: element.method, element: ref, action }) as CachedElement;
       this.cacheWrites.push({ key: cacheAt.key, where: cacheAt.where, entry });
     }
     return { element, ref, info };
@@ -753,6 +776,11 @@ class ExplorationRun {
       const ref = await this.recorder.record(this.page, cached.selector);
       const chosen = (r: ElementRef) => JSON.stringify([r.candidates[r.chosenIndex], r.framePath]);
       if (chosen(ref) !== chosen(cached.element)) return null;
+      // Same locator, but does it still do the same thing? An entry from before KI-032 has no action: a miss.
+      if (this.recorder.action) {
+        if (cached.action === undefined) return null;
+        if (this.ctx.redact(await this.recorder.action(this.page, cached.selector)) !== cached.action) return null;
+      }
       const info = await this.recorder.describe(this.page, cached.selector);
       cache.touch(key).catch(() => {});
       const element: ObservedElement = { selector: cached.selector, description: cached.description, method: cached.method, arguments: [] };

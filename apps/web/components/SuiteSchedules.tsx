@@ -40,6 +40,7 @@ export function describeCron(cron: string): string {
 const OUTCOME_TEXT: Record<NonNullable<ScheduleView["lastOutcome"]>, string> = {
   started: "started a run",
   skipped_running: "skipped: the previous run was still going",
+  skipped_late: "skipped: it was due while the platform was down",
   failed: "failed",
 };
 

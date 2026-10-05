@@ -1,7 +1,9 @@
 import {
   MAX_SCHEDULES_PER_SUITE,
   MAX_SCHEDULES_PER_TENANT,
+  SCHEDULE_GRACE_MINUTES,
   ScheduleInputSchema,
+  type ScheduleOutcome,
   type ScheduleView,
 } from "@platform/contracts";
 import { AuditRepository, ScheduleRepository, SuiteRunRepository, UserRepository, type ScheduleRow } from "@platform/db";
@@ -190,14 +192,21 @@ export class ScheduleService {
    * scheduler is removed), its creator is gone or disabled, or its previous run is still going (skipped). Every
    * outcome is recorded on the schedule and in the audit log.
    */
-  async fire(scheduleId: string): Promise<{ outcome: "started" | "skipped_running" | "failed" | "ignored"; suiteRunId?: string; error?: string }> {
+  /**
+   * One firing. `dueAt`: when the job scheduler meant it to run. A firing more than SCHEDULE_GRACE_MINUTES late —
+   * the API was down when it was due, and BullMQ kept it — is skipped, not run hours later (KI-037).
+   */
+  async fire(
+    scheduleId: string,
+    dueAt?: Date,
+  ): Promise<{ outcome: ScheduleOutcome | "ignored"; suiteRunId?: string; error?: string }> {
     const now = this.now();
     const row = await this.repo.findById(scheduleId);
     if (!row || !row.enabled) {
       await this.deps.schedules?.remove(scheduleId);
       return { outcome: "ignored" };
     }
-    const record = async (outcome: "started" | "skipped_running" | "failed", detail: { error?: string; suiteRunId?: string } = {}) => {
+    const record = async (outcome: ScheduleOutcome, detail: { error?: string; suiteRunId?: string } = {}) => {
       await this.repo.recordFiring(row.id, now, outcome, detail);
       const action = outcome === "started" ? "schedule.fired" : outcome === "failed" ? "schedule.failed" : "schedule.skipped";
       const entry = { tenantId: row.tenantId, userId: row.createdBy, action, detail: { scheduleId: row.id, suiteId: row.suiteId, ...detail } };
@@ -205,6 +214,8 @@ export class ScheduleService {
       await new AuditRepository(this.deps.db).append(entry).catch(() => {});
       return { outcome, ...detail };
     };
+
+    if (dueAt && now.getTime() - dueAt.getTime() > SCHEDULE_GRACE_MINUTES * 60_000) return record("skipped_late");
 
     const creator = row.createdBy ? await new UserRepository(this.deps.db).findById(row.tenantId, row.createdBy) : null;
     if (!creator || creator.disabledAt) return record("failed", { error: "OWNER_UNAVAILABLE" });

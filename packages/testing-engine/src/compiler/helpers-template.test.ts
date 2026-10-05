@@ -30,6 +30,7 @@ interface Helpers {
   readNumber(locator: Locator, waitMs?: number): Promise<number | null>;
   readCount(locator: Locator, waitMs?: number): Promise<number | null>;
   readTextList(locator: Locator, waitMs?: number): Promise<string[] | null>;
+  readItemTexts(locator: Locator, itemSelector: string, waitMs?: number): Promise<string[] | null>;
 }
 
 let helpers: Helpers;
@@ -117,6 +118,8 @@ const FIXTURE_HTML = `<!doctype html>
   <span data-testid="price">CHF 1'299.50</span>
   <ul data-testid="cart-items"><li>  Apple  </li><li>
       Banana   split </li><li>   </li></ul>
+  <ul data-testid="order-lines"><li><span class="name">iPhone 17 Pro</span> — $1,199.00</li><li>Subtotal</li><li><span class="name">USB-C
+      Cable</span> — $19.00</li><li><span class="name"> </span> — $0.00</li></ul>
   <div data-testid="lines">first line<br>second   line</div>
   <p data-testid="notice">Free   shipping</p>
   <input data-testid="email" value="  a@b.c ">
@@ -164,6 +167,16 @@ describe("helpers.ts DOM reads match the fact reader", () => {
     expect(await helpers.readNumber(locatorFor(page, { strategy: "testId", value: "missing" }), 0)).toBeNull();
     expect(await helpers.readText(locatorFor(page, { strategy: "testId", value: "notice" }), 0)).toBe("Free shipping");
     expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it.each(["order-lines", "cart-items", "notice", "dup"])("%s read through a row sub-element", async (testId) => {
+    const ref = refOf(testId);
+    const expected: FactValue | undefined = (await readFact(page, ref, "text_list", "span.name"))?.value ?? null;
+    expect(await helpers.readItemTexts(locatorFor(page, ref.candidates[0]!), "span.name")).toEqual(expected);
+  });
+
+  it("readItemTexts reads only the sub-element of each row", async () => {
+    expect(await helpers.readItemTexts(locatorFor(page, { strategy: "testId", value: "order-lines" }), "span.name")).toEqual(["iPhone 17 Pro", "USB-C Cable"]);
   });
 
   it.each(cases)("%s read as %s", async (testId, mode, helper) => {

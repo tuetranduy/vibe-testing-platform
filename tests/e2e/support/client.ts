@@ -112,9 +112,14 @@ export function logs(stack: E2EStack): string {
  */
 export function processesMentioning(stack: E2EStack, text: string): string[] {
   const ps = ["ps", "-axo", "pid=,command="];
-  const [file, ...args] = stack.workerContainer ? ["docker", "exec", stack.workerContainer, ...ps] : ps;
-  const out = execFileSync(file!, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  return out.split("\n").filter((l) => l.includes(text) && !l.includes("ps -axo"));
+  // Platform `compose`: the worker's container, and the runner's, where the rerun runs (KI-029).
+  const containers = [stack.workerContainer, stack.runnerContainer].filter((c): c is string => c !== null);
+  const commands = containers.length > 0 ? containers.map((c) => ["docker", "exec", c, ...ps]) : [ps];
+  return commands.flatMap(([file, ...args]) =>
+    execFileSync(file!, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+      .split("\n")
+      .filter((l) => l.includes(text) && !l.includes("ps -axo")),
+  );
 }
 
 /** Whether the run's Playwright workspace (`<RUNNER_WORKSPACE_DIR>/<runId>`) exists where the worker runs. */

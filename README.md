@@ -84,7 +84,8 @@ before the V1 live gate passed (it still applies). Nothing here calls a model:
 
 - **Suites** (`/suites`) — named lists of saved Playwright tests ("Add to suite" on a finished run's report). "Run
   suite" reruns each as its own run and settles one verdict for all; it asks only for the secrets the suite's saved
-  credentials don't provide. A running suite run takes one active-run slot.
+  credentials don't provide. A running suite run takes one active-run slot; its tests are queued behind single runs,
+  taking turns with other suites' tests.
 - **Compared with the previous run** — a completed run's report shows how each criterion changed since the previous
   run of the same test (same URL and requirement, or a rerun of it), or since a chosen run; the Markdown report too.
   Suite runs mark each test regressed, fixed, changed, unchanged or first run.
@@ -117,8 +118,9 @@ live gate passed (it still applies; see the plan's Revision 3):
   (`/runs/<id>/print`, the browser's print dialog).
 - **Usage** (`/usage`, `GET /v1/usage`) — estimated model cost by day, model, stage and run.
 - **Exploration cache** — element lookups verified on earlier runs of the same page are reused without a model call
-  (after checking they still point at the same element); Settings shows and clears it; a new-test option turns it
-  off for one run.
+  (after checking they still point at the same element, and that it still does the same thing: link target, form
+  action; 1 hit in 10 is looked up again anyway); Settings shows and clears it; a new-test option turns it off for
+  one run.
 - **Several scenarios per run** — the planner may split the criteria into up to 5 scenarios, each run from a clean
   session and compiled into its own Playwright test.
 
@@ -359,8 +361,8 @@ pnpm eval survey                 # same, for the survey's test suggestions
 ```
 
 The live commands, the gate and the evals run on Gemini with `LLM_PROVIDER=gemini` and `GEMINI_API_KEY`; with
-`LLM_PROVIDER` unset or `fake` (as in `.env`) they run on Anthropic with `ANTHROPIC_API_KEY`, as before. `LLM_MODEL`
-and `GEMINI_THINKING_LEVEL` work as for the worker; the other provider's model (e.g. `.env`'s
+`LLM_PROVIDER` unset or `fake` (as in `.env`) they run on Anthropic with `ANTHROPIC_API_KEY`, as before. `LLM_MODEL`,
+`LLM_REASONING` and `GEMINI_THINKING_LEVEL` work as for the worker; the other provider's model (e.g. `.env`'s
 `LLM_MODEL=claude-sonnet-5` with Gemini) is rejected, so set `LLM_MODEL=` (empty) for the provider's default.
 They read only the environment: the keys and defaults saved in Settings apply to the platform's tests, not to
 these tools.
@@ -421,7 +423,7 @@ Each proposed criterion shows its wording and *what will be checked*. You can ad
 A test can pick another model or level under the new-test form's Advanced options. Each run records the provider,
 model and reasoning level it was created with, in this order: the test's own choice, else the defaults saved in
 Settings, else the environment (`LLM_PROVIDER`, `LLM_MODEL` or the provider's default model, and
-`GEMINI_THINKING_LEVEL` for Gemini). Changing Settings never changes a run already created; the run page shows the
+`LLM_REASONING`, else `GEMINI_THINKING_LEVEL` for Gemini). Changing Settings never changes a run already created; the run page shows the
 run's model ("Claude Sonnet 5 · medium reasoning"). A test whose provider has no key, or whose model or level is not
 offered, is refused when it is submitted (`422 MODEL_NOT_AVAILABLE`, naming the fix). The fake engine ("Fake engine
 (development)") is offered only outside production. Over the API: `GET /v1/settings/llm`, `PUT /v1/settings/llm`
@@ -437,7 +439,7 @@ worker must share the `LLM_*` variables (see [`docs/operations.md`](docs/operati
 - **Anthropic, Gemini and DeepSeek are the providers** (DeepSeek since 2026-09-30, by plain `fetch` as well). Gemini is reached through the Gemini Developer API with an API key (not Vertex AI), by plain `fetch` rather than Google's SDK, which would add 32 packages (google-auth-library among them) to the worker for one endpoint. `LLM_PROVIDER=openai` makes the worker fail at start-up. Each test's model comes from Settings or the new-test form; `LLM_MODEL` (default `claude-sonnet-5`, `gemini-3.8-flash` for Gemini, `deepseek-flash` for DeepSeek) is the default while Settings hold none.
 - **Engine error classes live in `@platform/contracts`** (re-exported by `@platform/testing-engine`) so `@platform/llm` can throw `ModelProviderError` / `ContractError` / `CancelledError` without depending on the engine.
 - **`analyze` returns a draft; the orchestrator persists revision 1** (the plan's `compileRequirement` signature returns the stored requirement).
-- **`docs/ai-testing-platform-architecture.md`** is referenced by the plan but wasn't in the repo, so it hasn't been updated.
+- **No separate architecture doc.** The plan (`docs/ai-testing-platform-implementation-plan.md`, with Revision 3) is the spec (KI-030).
 - **Stagehand caching is unavailable in this deployment.** Stagehand v4's action cache is Browserbase-only (Task 0 spike, Ruling R21). Since V1.1 the executor keeps its own cache of element lookups (`exploration_cache`, see V1.1 below); model extractions are never cached, and `llm.cacheHit` is `true` only on a step whose lookup came from that cache.
 - **Stagehand's OTel telemetry can't be disabled** (Task 0 spike caveat 3, Ruling R22): the egress proxy silently denies its fixed endpoint instead (no `egress.blocked` event, since it isn't caused by the site under test).
 - **Milestone C (Tasks 16–18):**
@@ -456,7 +458,7 @@ worker must share the `LLM_*` variables (see [`docs/operations.md`](docs/operati
   - **The confirmation-TTL test runs the worker's real reaper in the test process** with its clock moved 25 hours ahead (the "fake clock"), against the E2E database.
   - **`queue_depth` is exported by the API**, not the worker: the backlog matters most when workers are down.
 - **Destructive actions on production (amends D9; spec `docs/superpowers/specs/2026-09-28-production-destructive-actions-design.md`).** Destructive actions stay blocked by default. A production run may perform them only when its request sets `allowDestructiveActions` and `options.confirmProductionHost` equal to the target URL's host (the API answers `400` on `options.confirmProductionHost` otherwise); the new-test form asks for the host to be typed. A run that allows destructive actions skips the Playwright rerun unless it asks for it (`rerunGeneratedTest` defaults to `!allowDestructiveActions`), because the rerun repeats every action. With destructive actions allowed, the executor acts on a destructive element only for a planned step that is itself destructive (flagged by the planner or worded as one), and Stagehand's guardrail says the same. Run pages and the history mark such runs. The API does not derive the environment from the URL: `environment` is what the client declares, so API clients must label production targets "production" for the confirmation to apply.
-- **The model client is built per run** (spec `docs/superpowers/specs/2026-09-28-llm-settings-design.md`). The plan's worker built one `LlmClient` at start-up from `LLM_*`. Now the worker builds both engines at start-up and, for each run, a client from the provider, model and reasoning level the run recorded when it was created (`request.llm`; runs created before this change use `LLM_*`), with the key saved in Settings, else the environment's. The storage check and the browser and runner preflights therefore always run at start-up (the log says "test engines ready"). The reasoning level applies to requirement analysis, planning and report diagnostics; Stagehand's browser steps keep the model's default level. Claude Fable 5.1 and Opus 5.5 go through Anthropic's beta Messages API with server-side refusal fallback (`server-side-fallback-2026-07-01`): a call a fallback model answered is recorded and priced under that model.
+- **The model client is built per run** (spec `docs/superpowers/specs/2026-09-28-llm-settings-design.md`). The plan's worker built one `LlmClient` at start-up from `LLM_*`. Now the worker builds both engines at start-up and, for each run, a client from the provider, model and reasoning level the run recorded when it was created (`request.llm`; runs created before this change use `LLM_*`), with the key saved in Settings, else the environment's. The storage check and the browser and runner preflights therefore always run at start-up (the log says "test engines ready"). The reasoning level applies to requirement analysis, planning, Stagehand's browser steps and report diagnostics (browser steps kept the model's default level until 2026-10-04: at DeepSeek's default, thinking high, exploration overran the E2E time limit, KI-001). Claude Fable 5.1 and Opus 5.5 go through Anthropic's beta Messages API with server-side refusal fallback (`server-side-fallback-2026-07-01`): a call a fallback model answered is recorded and priced under that model.
 - **Audit fixes (2026-09-29; [`docs/known-issues.md`](docs/known-issues.md) KI-021 to KI-026):**
   - **The destructive-action terms go beyond the plan's Task 4 list**: erasing and revoking wording ("Erase all data",
     "Terminate account", "Revoke access"), commit verb + order/payment noun ("Confirm payment", "Submit your order",

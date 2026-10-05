@@ -1,3 +1,4 @@
+import { GLOBAL_SETUP_FILE } from "./guard-template";
 import { OUTPUT_DIR } from "./result-parser";
 
 /**
@@ -11,6 +12,8 @@ import { OUTPUT_DIR } from "./result-parser";
  * - `use.proxy` — every browser connection goes through the rerun's egress proxy (D8, Ruling R31).
  *   No `bypass`: Playwright then passes `--proxy-bypass-list=<-loopback>`, so loopback is proxied too
  *   (the child never gets PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK: env allow-list).
+ * - `globalSetup` — launches the rerun's Chromium with the navigation guard (guard-template.ts, KI-029); the test
+ *   connects to it, so `launchOptions` below only applies if a test ever launches a browser of its own.
  * - `launchOptions.chromiumSandbox: true` — Chromium's own sandbox stays on, as in exploration's
  *   browser-launcher: Playwright adds `--no-sandbox` unless this is true, and the rerun's browser
  *   loads the untrusted target site. Where no usable sandbox exists (e.g. a container without the
@@ -72,6 +75,7 @@ export function buildPlaywrightConfig(input: PlaywrightConfigInput): string {
   const config = {
     testDir: ".",
     testMatch: SPEC_FILE,
+    globalSetup: `./${GLOBAL_SETUP_FILE}`,
     retries: 0,
     workers: 1,
     forbidOnly: true,

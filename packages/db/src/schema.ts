@@ -86,6 +86,8 @@ export const userSessions = pgTable(
     expiresAt: ts("expires_at").notNull(),
     lastSeenAt: ts("last_seen_at").notNull().defaultNow(),
     revokedAt: ts("revoked_at"),
+    /** The browser's User-Agent at sign-in (at most 300 characters), shown in the sessions list (KI-034). */
+    userAgent: text("user_agent"),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("user_sessions_token_hash").on(t.tokenHash), index("user_sessions_user").on(t.userId)],
@@ -231,6 +233,16 @@ export const testRuns = pgTable(
   ],
 );
 
+/**
+ * D6 (KI-027): a run's child rows carry its tenant. Filled from `test_runs` by the `set_run_tenant_id` trigger
+ * (migration 0016) on every insert, so writers never pass it; Drizzle sends DEFAULT and the trigger replaces it.
+ */
+const runTenantId = () =>
+  text("tenant_id")
+    .notNull()
+    .references(() => tenants.id)
+    .$defaultFn(() => sql`default`);
+
 export const runSecrets = pgTable(
   "run_secrets",
   {
@@ -238,6 +250,7 @@ export const runSecrets = pgTable(
     runId: text("run_id")
       .notNull()
       .references(() => testRuns.id, { onDelete: "cascade" }),
+    tenantId: runTenantId(),
     name: text("name").notNull(),
     ciphertext: bytea("ciphertext").notNull(),
     iv: bytea("iv").notNull(),
@@ -260,6 +273,7 @@ export const requirementRevisions = pgTable(
     runId: text("run_id")
       .notNull()
       .references(() => testRuns.id, { onDelete: "cascade" }),
+    tenantId: runTenantId(),
     revision: integer("revision").notNull(),
     json: jsonb("json").notNull(),
     confirmedAt: ts("confirmed_at"),
@@ -272,6 +286,7 @@ export const testPlans = pgTable("test_plans", {
   runId: text("run_id")
     .primaryKey()
     .references(() => testRuns.id, { onDelete: "cascade" }),
+  tenantId: runTenantId(),
   json: jsonb("json").notNull(),
   createdAt: createdAt(),
 });
@@ -281,6 +296,7 @@ export const runSuggestions = pgTable("run_suggestions", {
   runId: text("run_id")
     .primaryKey()
     .references(() => testRuns.id, { onDelete: "cascade" }),
+  tenantId: runTenantId(),
   /** SuggestionSet, validated by SuggestionSetSchema on every write and read. */
   json: jsonb("json").notNull(),
   createdAt: createdAt(),
@@ -292,6 +308,7 @@ export const runSiteAnalyses = pgTable("run_site_analyses", {
   runId: text("run_id")
     .primaryKey()
     .references(() => testRuns.id, { onDelete: "cascade" }),
+  tenantId: runTenantId(),
   /** SiteAnalysis, validated by SiteAnalysisSchema on every write and read. */
   json: jsonb("json").notNull(),
   createdAt: createdAt(),
@@ -305,6 +322,7 @@ export const explorationSteps = pgTable(
     runId: text("run_id")
       .notNull()
       .references(() => testRuns.id, { onDelete: "cascade" }),
+    tenantId: runTenantId(),
     index: integer("index").notNull(),
     json: jsonb("json").notNull(),
     createdAt: createdAt(),
@@ -319,6 +337,7 @@ export const observedFacts = pgTable(
     runId: text("run_id")
       .notNull()
       .references(() => testRuns.id, { onDelete: "cascade" }),
+    tenantId: runTenantId(),
     key: text("key").notNull(),
     checkpoint: text("checkpoint").notNull(),
     json: jsonb("json").notNull(),
@@ -334,6 +353,7 @@ export const criterionResults = pgTable(
     runId: text("run_id")
       .notNull()
       .references(() => testRuns.id, { onDelete: "cascade" }),
+    tenantId: runTenantId(),
     criterionId: text("criterion_id").notNull(),
     status: criterionStatusEnum("status").notNull(),
     json: jsonb("json").notNull(),
@@ -348,6 +368,7 @@ export const generatedTests = pgTable("generated_tests", {
     .notNull()
     .unique()
     .references(() => testRuns.id, { onDelete: "cascade" }),
+  tenantId: runTenantId(),
   source: text("source").notNull(),
   helpersSource: text("helpers_source").notNull(),
   dataJson: text("data_json").notNull(),
@@ -386,6 +407,7 @@ export const testEvents = pgTable(
     runId: text("run_id")
       .notNull()
       .references(() => testRuns.id, { onDelete: "cascade" }),
+    tenantId: runTenantId(),
     sequence: integer("sequence").notNull(),
     type: text("type").notNull(),
     stage: runLifecycleEnum("stage").notNull(),
@@ -401,6 +423,7 @@ export const diagnosticFindings = pgTable("diagnostic_findings", {
   runId: text("run_id")
     .notNull()
     .references(() => testRuns.id, { onDelete: "cascade" }),
+  tenantId: runTenantId(),
   criterionId: text("criterion_id"),
   summary: text("summary").notNull(),
   createdAt: createdAt(),
@@ -413,6 +436,7 @@ export const llmCalls = pgTable(
     runId: text("run_id")
       .notNull()
       .references(() => testRuns.id, { onDelete: "cascade" }),
+    tenantId: runTenantId(),
     stage: runLifecycleEnum("stage").notNull(),
     provider: text("provider").notNull(),
     model: text("model").notNull(),

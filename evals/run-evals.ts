@@ -1,6 +1,6 @@
 /**
  * `pnpm eval <suite>` — runs an eval suite against the real LLM provider (LLM_PROVIDER=gemini or deepseek, or
- * anthropic when unset or fake; LLM_MODEL and GEMINI_THINKING_LEVEL as for the worker) and prints
+ * anthropic when unset or fake; LLM_MODEL, LLM_REASONING and GEMINI_THINKING_LEVEL as for the worker) and prints
  * per-case PASS/FAIL plus totals. Always exits 0 once the suite ran: scores are tracked in
  * evals/BASELINE.md, not enforced. Without the provider's API key it validates the cases and explains
  * how to run it; invalid LLM settings exit 1.
@@ -63,12 +63,12 @@ async function main(): Promise<number> {
 
   // Usage is counted per provider request (failed attempts included) through the call-record sink.
   const meter = createUsageMeter();
-  // GEMINI_THINKING_LEVEL is the client's reasoning level (gemini only), as for a run on the environment's defaults.
+  // LLM_REASONING (or GEMINI_THINKING_LEVEL, gemini only) is the client's reasoning level, as for a run on the environment's defaults.
   const choice = resolveEnvLlmChoice(env);
   const apiKey = { anthropic: env.ANTHROPIC_API_KEY, gemini: env.GEMINI_API_KEY, deepseek: env.DEEPSEEK_API_KEY }[env.LLM_PROVIDER];
   const transport = createTransport({ provider: choice.provider, apiKey });
   const llm = new LlmClient({ transport, model: choice.model, reasoning: choice.reasoning, recordCall: meter.sink });
-  const thinking = choice.provider === "gemini" ? `, thinking: ${choice.reasoning === "default" ? "model default" : choice.reasoning}` : "";
+  const thinking = `, reasoning: ${choice.reasoning === "default" ? "model default" : choice.reasoning}`;
   console.log(`provider: ${env.LLM_PROVIDER}, model: ${env.LLM_MODEL}${thinking}\n`);
   const started = Date.now();
   const results = await loaded.run(llm, meter);

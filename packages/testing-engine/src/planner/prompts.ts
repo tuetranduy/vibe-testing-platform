@@ -27,7 +27,7 @@ Each step:
   - "submit" — submit a form
   - "login" — submit login credentials (see Login)
   - "capture_checkpoint" — record the page state at a named checkpoint so its facts can be read
-  - "wait_for" — wait until something appears
+  - "wait_for" — wait until a specific element is visible; the description names that element (e.g. "Wait for the search results list", "Wait for the 'Added to cart' message"). Never use it to wait for a page to load: navigate, click and submit steps already wait for the page
   - "other" — anything else
 - "description": one short instruction for a browser agent, in English. NEVER write a value into it (no passwords, emails, card numbers, search terms from test data); describe the field and put the value in "inputRef".
 - "inputRef": for steps that enter a value (fill, search, select): {"source":"testData","key":<test data key>} or {"source":"secret","key":<secret name>}; {"source":"literal","key":<the value>} only for a value written in the requirement itself (e.g. a search term), never for credentials or personal data. Every "fill" step must have one. Otherwise null. If a needed value was not provided, still reference the name it would need — never invent a value and never drop the step.

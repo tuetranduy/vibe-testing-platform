@@ -109,9 +109,8 @@ export function createClientLlmBridge(opts: ClientLlmBridgeOptions): ClientLlmBr
       redact: opts.redact,
       deadlineAt: opts.deadlineAt ?? null,
       maxTokens: opts.maxTokens,
-      // Browser steps keep the model's own level whatever the run's: each has a 60 s limit and runs many
-      // times, and exploration quality was measured (evals) at the default.
-      reasoning: "default",
+      // Browser steps run at the run's reasoning level (the client's), like every other stage: at a thinking
+      // model's default level each observe took 10–27 s and exploration overran its time (KI-001).
     });
     usage = {
       calls: usage.calls + 1,

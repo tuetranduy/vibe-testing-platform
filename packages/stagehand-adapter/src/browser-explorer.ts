@@ -121,8 +121,8 @@ export interface ExplorerStartInput {
   page: SandboxedPage;
   runId: string;
   /**
-   * The run's model client: Stagehand's calls go through it (redaction, retries, LlmCall records), always at
-   * the model's default reasoning level (see client-llm.ts).
+   * The run's model client: Stagehand's calls go through it (redaction, retries, LlmCall records), at the
+   * run's reasoning level (see client-llm.ts).
    */
   llm: Pick<LlmClient, "model" | "generateJson">;
   signal: AbortSignal;

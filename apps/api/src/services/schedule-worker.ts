@@ -9,7 +9,8 @@ export interface ScheduleWorkerLogger {
 }
 
 /**
- * Consumes the suite-schedules queue (V1.2 F3): each job is one firing of one schedule. Before that, makes the
+ * Consumes the suite-schedules queue (V1.2 F3): each job is one firing of one schedule, skipped when it is taken
+ * more than SCHEDULE_GRACE_MINUTES after it was due (KI-037). Before that, makes the
  * job schedulers match the `suite_schedules` table, so schedules survive a Redis that lost them and deleted or
  * disabled ones stop firing.
  */
@@ -23,7 +24,9 @@ export async function startScheduleWorker(
   const worker = new Worker<ScheduleJobData>(
     SUITE_SCHEDULES_QUEUE,
     async (job) => {
-      const result = await service.fire(job.data.scheduleId);
+      // A scheduler's job is added delayed until its firing time: timestamp + delay is when it was due.
+      const dueAt = new Date(job.timestamp + (job.opts.delay ?? 0));
+      const result = await service.fire(job.data.scheduleId, dueAt);
       opts.logger.info({ scheduleId: job.data.scheduleId, ...result }, "suite schedule fired");
     },
     { connection: opts.connection, concurrency: 1, maxStalledCount: 0 },

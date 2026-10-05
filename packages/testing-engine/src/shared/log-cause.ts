@@ -10,4 +10,5 @@ export function redactedCause(err: unknown, redact: (value: unknown) => unknown)
 /** Receives the cause of a failure the run degrades from (rerun infrastructure, test generation). */
 export interface FailureLogger {
   error(obj: object, msg?: string): void;
+  warn?(obj: object, msg?: string): void;
 }

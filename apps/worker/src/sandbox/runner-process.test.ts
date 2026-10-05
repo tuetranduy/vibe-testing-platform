@@ -20,6 +20,7 @@ import { strFromU8, unzipSync } from "fflate";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { startEgressProxy, type EgressBlockEvent, type EgressProxy } from "./egress-proxy";
 import { createRunnerSpawn, runnerEnv } from "./runner-process";
+import { checkSpawnRequest, createRemoteRunnerSpawn, openRunnerForward, startRunnerServer, type RunnerServer } from "./runner-service";
 
 /**
  * Task 17 Step 2: the generated test rerun for real — the Playwright CLI in a child process (env
@@ -123,6 +124,8 @@ const input = (test: GeneratedTest, over: Partial<RunGeneratedTestInput> = {}): 
   proxyUrl: proxy.url,
   timeoutMs: 60_000,
   signal: new AbortController().signal,
+  // The demo shop and the test servers all listen on 127.0.0.1.
+  allowedHosts: ["127.0.0.1"],
   ...over,
 });
 const deps = () => ({ spawn, workspace: { baseDir: base }, actionTimeoutMs: 2_000, expectTimeoutMs: 2_000 });
@@ -227,6 +230,25 @@ describe("runGeneratedTest against the demo shop (real child process, egress pro
     }
   });
 
+  it("the navigation guard keeps the rerun on the run's hosts: an off-domain page never loads, not even at the proxy (KI-029)", async () => {
+    const test = generated({
+      targetUrl: `${shop.url}/products/1`,
+      flow: ["await page.goto(data.targetUrl);"],
+      steps: [
+        { id: "AC-1", body: 'await expect.soft(page.getByRole("button", { name: data.locators.loc1.name, exact: true }), message).toBeVisible();' },
+        { id: "AC-2", body: "await page.goto(data.urls.url1);" },
+      ],
+      data: { urls: { url1: "http://evil.example/steal" }, locators: { loc1: { name: "Add to cart" } } },
+    });
+    const before = blocks.length;
+    const out = await runGeneratedTest(input(test), deps());
+    expect(out.status).toBe("FAILED");
+    expect(out.perCriterion).toEqual({ "AC-1": "PASSED", "AC-2": "ASSERTION_FAILED" });
+    expect(out.errorText["AC-2"]).toMatch(/^The rerun was stopped from leaving the allowed website \(to evil\.example\)\..*ERR_BLOCKED_BY_CLIENT/s);
+    // Stopped in the browser: the request never reached the egress proxy.
+    expect(blocks.slice(before)).toEqual([]);
+  });
+
   it("Chromium runs with its sandbox on; abort signal → the child (and its Chromium) is killed within 5 s; ERRORED; no orphan process survives", async () => {
     const test = cartTest(`${shop.url}/products/1`, { beforeAc3: ['await page.getByRole("button", { name: data.locators.loc5.name, exact: true }).click();'] });
     const controller = new AbortController();
@@ -305,5 +327,117 @@ describe("runner child process environment", () => {
     expect(() => runnerEnv({ DATABASE_URL: "x" }, "/tmp")).toThrow(/SECRET_/);
     expect(() => runnerEnv({ SECRET_lower: "x" }, "/tmp")).toThrow(/SECRET_/);
     expect(runnerEnv({ SECRET_A: "1" }, "/w/tmp")).toMatchObject({ SECRET_A: "1", TMPDIR: "/w/tmp", PATH: process.env.PATH });
+  });
+});
+
+describe("the runner as its own service (KI-029)", () => {
+  const TOKEN = "runner-token-for-tests-0123";
+  const quiet = { info: () => {}, warn: () => {}, error: () => {} };
+  let runner: RunnerServer;
+  beforeEach(async () => {
+    runner = await startRunnerServer({ host: "127.0.0.1", port: 0, token: TOKEN, workspaceDir: base, logger: quiet });
+  });
+  afterEach(async () => {
+    await runner.close();
+  });
+
+  /** A proxy reachable only from the runner's address, and the runner's loopback forwarder to it. */
+  async function forwardedProxy(allowedClients = ["127.0.0.1"]) {
+    const own = await startEgressProxy({
+      resolve: defaultResolver,
+      privateAllowlist: [`127.0.0.1:${shop.port}`],
+      onBlock: (e) => blocks.push(e),
+      listen: { host: "127.0.0.1", allowedClients },
+    });
+    const forward = await openRunnerForward({ url: runner.url, token: TOKEN }, own.port);
+    return {
+      url: `http://127.0.0.1:${forward.port}`,
+      async close() {
+        await forward.close();
+        await own.close();
+      },
+    };
+  }
+
+  it("reruns in the runner: the workspace on the shared dir, the browser through the forwarder and the worker's proxy → PASSED", async () => {
+    const forwarded = await forwardedProxy();
+    try {
+      const out = await runGeneratedTest(input(cartTest(`${shop.url}/products/1`), { proxyUrl: forwarded.url }), {
+        ...deps(),
+        spawn: createRemoteRunnerSpawn({ url: runner.url, token: TOKEN }),
+      });
+      expect(out.status).toBe("PASSED");
+      expect(out.perCriterion).toEqual({ "AC-1": "PASSED", "AC-2": "PASSED", "AC-3": "PASSED" });
+    } finally {
+      await forwarded.close();
+    }
+  });
+
+  it("the worker's proxy drops every client but the runner", async () => {
+    const forwarded = await forwardedProxy(["10.99.99.99"]);
+    try {
+      const out = await runGeneratedTest(input(cartTest(`${shop.url}/products/1`), { proxyUrl: forwarded.url }), {
+        ...deps(),
+        spawn: createRemoteRunnerSpawn({ url: runner.url, token: TOKEN }),
+      });
+      expect(out.status).not.toBe("PASSED");
+    } finally {
+      await forwarded.close();
+    }
+  });
+
+  it("refuses a request without the token, and any spawn but a rerun workspace's own CLI", async () => {
+    const post = (pathname: string, body: object, token?: string) =>
+      fetch(new URL(pathname, runner.url), {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(body),
+      });
+    const cwd = path.join(base, "run_1");
+    const ok = { cwd, cliPath: path.join(cwd, "node_modules", "@playwright", "test", "cli.js"), args: ["test", "--config", "playwright.config.js"], env: {}, tmpDir: path.join(cwd, "tmp") };
+    expect((await post("/spawn", ok)).status).toBe(401);
+    expect((await post("/spawn", ok, "wrong-token-of-the-same-len")).status).toBe(401);
+    expect(checkSpawnRequest(ok, base)).toMatchObject({ cwd });
+    for (const bad of [
+      { ...ok, cwd: "/etc" },
+      { ...ok, cwd: path.join(base, "run_1", "..", "..") },
+      { ...ok, cliPath: "/usr/bin/env" },
+      { ...ok, args: ["test", "--config", "/tmp/evil.js"] },
+      { ...ok, tmpDir: "/tmp" },
+      { ...ok, env: { SECRET_X: 1 } },
+    ]) {
+      const res = await post("/spawn", bad, TOKEN);
+      expect(res.status).toBe(400);
+    }
+    expect((await post("/forwards", { proxyPort: 0 }, TOKEN)).status).toBe(400);
+  });
+
+  it("an abort closes the spawn request: the runner kills the rerun; ERRORED; no process survives", async () => {
+    const forwarded = await forwardedProxy();
+    try {
+      const test = cartTest(`${shop.url}/products/1`, { beforeAc3: ['await page.getByRole("button", { name: data.locators.loc5.name, exact: true }).click();'] });
+      const controller = new AbortController();
+      const running = runGeneratedTest(input(test, { proxyUrl: forwarded.url, signal: controller.signal }), {
+        ...deps(),
+        actionTimeoutMs: 60_000,
+        spawn: createRemoteRunnerSpawn({ url: runner.url, token: TOKEN }),
+      });
+      const tmp = path.join(workspaceDir({ baseDir: base }, "run_fixture"), "tmp");
+      const deadline = Date.now() + 20_000;
+      while (!processesMentioning(tmp).some((l) => /chrom|headless_shell/i.test(l))) {
+        if (Date.now() > deadline) throw new Error("Chromium did not start");
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      controller.abort(new Error("cancelled"));
+      const out = await running;
+      expect(out.status).toBe("ERRORED");
+      const gone = Date.now() + 10_000;
+      while (processesMentioning(workspaceDir({ baseDir: base }, "run_fixture")).length > 0 && Date.now() < gone) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(processesMentioning(workspaceDir({ baseDir: base }, "run_fixture"))).toEqual([]);
+    } finally {
+      await forwarded.close();
+    }
   });
 });
