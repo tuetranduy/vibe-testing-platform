@@ -874,6 +874,25 @@ describe("runExploration (fake explorer)", () => {
       [2, "observe", "PS-2", "SUCCESS", false],
     ]);
   });
+
+  it("a wait_for whose element never appears is recorded as failed and exploration goes on (KI-001)", async () => {
+    // e.g. "Wait for the cart page to load": no element to find, but the page is there. The checkpoint's facts
+    // decide the criteria; a step that needed the missing element fails on its own.
+    const { ctx } = fakeCtx();
+    const button = [{ selector: "xpath=/html[1]/body[1]/button[1]", description: "Add to cart", method: "click", arguments: [] }];
+    const session = new FakeSession({ observe: (instruction) => (instruction.startsWith("Wait") ? [] : button) });
+    const plan = planOf(step("navigate", "Open"), step("wait_for", "Wait for the product page to load"), step("click", "Click Add to cart"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, pollIntervalMs: 1 });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "FAILED", false],
+      [2, "observe", "PS-2", "FAILED", false],
+      [3, "observe", "PS-2", "FAILED", false],
+      [4, "observe", "PS-3", "SUCCESS", false],
+      [5, "act", "PS-3", "SUCCESS", true],
+    ]);
+  });
 });
 
 describe("exploration cache (V1.1 F8)", () => {
@@ -924,6 +943,18 @@ describe("exploration cache (V1.1 F8)", () => {
     await runExploration(ctx, { plan: clickPlan(), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache, random: NO_RECHECK });
     expect(session.ops().filter((o) => o === "observe")).toHaveLength(1);
     expect(mem.puts).toEqual([{ key: keyFor("Click Add to cart"), where: { origin: "https://shop.test", path: "/products/1" }, entry: { ...cached("xpath=/html[1]/body[1]/el[1]"), description: "an element" } }]);
+  });
+
+  it("a wait_for caches the element it found, and nothing when none appeared", async () => {
+    const waitPlan = planOf(step("navigate", "Open the product page"), step("wait_for", "Wait for the Added to cart message"));
+    const { ctx } = fakeCtx();
+    const mem = memoryCache();
+    await runExploration(ctx, { plan: waitPlan, requirement: requirementWith([]), session: new FakeSession(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: mem.cache, random: NO_RECHECK, pollIntervalMs: 1 });
+    expect(mem.puts.map((p) => p.key)).toEqual([keyFor("Wait for the Added to cart message")]);
+
+    const none = memoryCache();
+    await runExploration(ctx, { plan: waitPlan, requirement: requirementWith([]), session: new FakeSession({ observe: () => [] }), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, cache: none.cache, random: NO_RECHECK, pollIntervalMs: 1 });
+    expect(none.puts).toEqual([]);
   });
 
   it("a hit replaces the observe: no model call, recorded with cacheHit, and counted", async () => {

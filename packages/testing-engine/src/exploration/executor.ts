@@ -76,7 +76,10 @@ import { describeElement, elementAction, fillElement, recordElement, selectEleme
  *                (key, checkpoint), else it has no DOM read (Ruling R24). The reserved `url` fact
  *                comes first. Then a screenshot artifact. Recorded: `extract`, `observe`s, and the
  *                `checkpoint` step the facts point at (`stepId`, `artifactIds`).
- * - wait_for     Bounded poll: up to 3 `observe`s, `pollIntervalMs` apart, within the budget.
+ * - wait_for     Bounded poll: up to 3 `observe`s, `pollIntervalMs` apart, within the budget. An element that
+ *                never appears does not stop exploration (KI-001: models plan waits for a page "to load", which
+ *                names no element): the failed observes are recorded, and the checkpoint facts and later steps
+ *                decide. It is the only planned step that does not stop exploration when it fails.
  *
  * Golden path: `onGoldenPath = true` only for the successful execution of a planned step (the
  * `navigate` / `act` / `fill` / `checkpoint` step); observes, extracts, retries and failed attempts
@@ -437,7 +440,8 @@ class ExplorationRun {
       case "capture_checkpoint":
         return this.withRetry(() => this.checkpoint(step));
       case "wait_for":
-        return this.withRetry(() => this.waitFor(step));
+        await this.waitFor(step);
+        return;
     }
   }
 
@@ -684,9 +688,11 @@ class ExplorationRun {
     return "ok";
   }
 
-  private async waitFor(step: PlannedStep): Promise<Attempt> {
+  /** Polls for the step's element; whether it appeared or not, exploration goes on (see the header). */
+  private async waitFor(step: PlannedStep): Promise<void> {
+    this.cacheWrites = [];
     for (let poll = 0; poll < WAIT_FOR_POLLS; poll++) {
-      if (await this.locate(step, step.description)) return "ok";
+      if (await this.locate(step, step.description)) return this.writeCache();
       if (poll < WAIT_FOR_POLLS - 1) {
         try {
           await sleep(this.deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS, this.input.budget);
@@ -695,7 +701,6 @@ class ExplorationRun {
         }
       }
     }
-    return "final";
   }
 
   // -------------------------------------------------------------------------------------------
