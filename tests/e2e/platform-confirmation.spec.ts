@@ -19,12 +19,15 @@ describe("Task 21 step 8 — confirmation", () => {
 
     const rev1 = await client.criteria(runId);
     expect(rev1.revision).toBe(1);
-    // The cart shows "iPhone 17 Pro": narrow the check from "iPhone" to "Pro".
+    // The products shown are "iPhone 17 Pro" and the like: narrow a list check's literal item ("iPhone") to "Pro". Only a
+    // literal can be edited in review; a model may also check the list for a fact (e.g. the name read on the product
+    // page), which stays as it is.
+    type Check = { id: string; expectedOutcome: { kind: string; item?: unknown } };
+    const literal = rev1.criteria.find((c: Check) => c.expectedOutcome.kind === "collection_contains" && typeof c.expectedOutcome.item === "string") as Check | undefined;
+    expect(literal, "a list check with a literal item").toBeDefined();
     const edited = {
       ...rev1,
-      criteria: rev1.criteria.map((c: { expectedOutcome: { kind: string } }) =>
-        c.expectedOutcome.kind === "collection_contains" ? { ...c, expectedOutcome: { ...c.expectedOutcome, item: "Pro" } } : c,
-      ),
+      criteria: rev1.criteria.map((c: Check) => (c.id === literal!.id ? { ...c, expectedOutcome: { ...c.expectedOutcome, item: "Pro" } } : c)),
     };
     const put = await client.putCriteria(runId, edited);
     expect(put.status).toBe(200);
@@ -34,7 +37,7 @@ describe("Task 21 step 8 — confirmation", () => {
     expect(await client.finished(runId)).toMatchObject({ lifecycle: "COMPLETED", verdict: "PASSED" });
     const report = await client.report(runId);
     expect(report.requirement?.revision).toBe(2);
-    const contains = report.requirement!.criteria.find((c) => c.expectedOutcome.kind === "collection_contains")!;
+    const contains = report.requirement!.criteria.find((c) => c.id === literal!.id)!;
     expect(contains.expectedOutcome).toMatchObject({ item: "Pro" });
     expect(report.criteria.find((r) => r.criterionId === contains.id)).toMatchObject({ status: "PASS", verdictSource: "PLAYWRIGHT_RERUN" });
   });
