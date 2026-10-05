@@ -875,6 +875,27 @@ describe("runExploration (fake explorer)", () => {
     ]);
   });
 
+  it("a list fact's reads say that a message shown in place of the list (e.g. an empty cart) is what it lists (KI-001)", async () => {
+    // In CI mode an empty cart reads as ["Your cart is empty"], the message in the list's place, so a check that the
+    // cart contains an item FAILs; a model that answers null instead leaves it FACT_NOT_OBSERVED.
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({ extract: () => ({ cartItems: ["Your cart is empty"], cartCount: 1 }) });
+    const cartItems = { key: "cartItems", checkpoint: "cart_page", description: "The products listed in the cart", valueType: "string_list" as const };
+    const cartCount = { key: "cartCount", checkpoint: "cart_page", description: "The cart badge count", valueType: "number" as const };
+    const plan = planOf(step("navigate", "Open"), step("capture_checkpoint", "Read the cart", { checkpoint: "cart_page" }));
+    await runExploration(ctx, { plan, requirement: requirementWith([cartItems, cartCount]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    const extract = session.calls.find((c) => c.op === "extract")!.arg as string;
+    expect(extract).toMatch(/message in place of the list .* its only item/i);
+    const observes = session.calls.filter((c) => c.op === "observe").map((c) => c.arg as string);
+    expect(observes.find((o) => o.includes("The products listed in the cart"))).toMatch(/or the message shown in its place/i);
+    expect(observes.find((o) => o.includes("The cart badge count"))).not.toMatch(/in its place/);
+
+    // Without a list fact, the extract keeps its one rule.
+    const plain = new FakeSession({ extract: () => ({ cartCount: 1 }) });
+    await runExploration(ctx, { plan, requirement: requirementWith([{ ...cartCount, checkpoint: "cart_page" }]), session: plain, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(plain.calls.find((c) => c.op === "extract")!.arg as string).not.toMatch(/in place of the list/);
+  });
+
   it("a wait_for whose element never appears is recorded as failed and exploration goes on (KI-001)", async () => {
     // e.g. "Wait for the cart page to load": no element to find, but the page is there. The checkpoint's facts
     // decide the criteria; a step that needed the missing element fails on its own.

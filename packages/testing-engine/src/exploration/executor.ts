@@ -187,6 +187,12 @@ export async function clearBrowserState(page: Page, targetUrl: string): Promise<
 const MAX_ATTEMPTS = 2; // one retry per planned step
 const WAIT_FOR_POLLS = 3;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
+/**
+ * How a list fact reads a message shown in place of its list (KI-001): as the list's only item, as the fact
+ * reader reads that message's element (`text_list`), so an empty cart is evidence a "contains" check can FAIL on.
+ */
+const LIST_IN_PLACE_RULE =
+  "For a list (string_list): when the page shows a message in place of the list (e.g. that it is empty), give that message as its only item; null only when neither the list nor such a message is shown.";
 const LOAD_SETTLE_TIMEOUT_MS = 10_000;
 /** `other` steps may keep these observed methods (none takes a value); everything else clicks. */
 const SAFE_OTHER_METHODS = new Set(["click", "doubleClick", "hover", "scrollIntoView"]);
@@ -640,6 +646,7 @@ class ExplorationRun {
       const startedAt = this.ctx.now();
       const instruction = [
         "Read these values from the current page. Use null for a value that is not shown.",
+        ...(requests.some((r) => r.valueType === "string_list") ? [LIST_IN_PLACE_RULE] : []),
         ...requests.map((r) => `- ${r.key}: ${r.description} (${r.valueType})`),
       ].join("\n");
       const schema = z.object(Object.fromEntries(requests.map((r) => [r.key, valueSchema(r.valueType)])));
@@ -850,7 +857,7 @@ class ExplorationRun {
 
   private locateInstruction(request: FactRequest): string {
     return request.valueType === "string_list"
-      ? `Find the list or container whose items are: ${request.description}`
+      ? `Find the list or container whose items are: ${request.description} (or the message shown in its place, e.g. that it is empty)`
       : `Find the element that shows: ${request.description}`;
   }
 
