@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   CheckpointSchema,
   CriterionIdSchema,
+  DataKeySchema,
   FactKeySchema,
   FactRefSchema,
   IsoDateTime,
@@ -9,11 +10,27 @@ import {
   type FactRef,
 } from "./common";
 
-export const TextMatchSchema = z.object({
-  mode: z.enum(["equals", "contains", "regex"]),
-  value: z.string().min(1).max(500),
-  caseSensitive: z.boolean().default(false),
-});
+/**
+ * What a text check compares with: a literal `value`, or the run's value for a test data key (`testDataKey`, KI-001:
+ * "the account page shows the user's email" — the model sees test data keys, never their values). Exactly one; a
+ * regex is always a literal. `resolveTestDataValues` turns a key into its value before a check is evaluated.
+ */
+export const TextMatchSchema = z
+  .object({
+    mode: z.enum(["equals", "contains", "regex"]),
+    value: z.string().min(1).max(500).optional(),
+    testDataKey: DataKeySchema.optional(),
+    caseSensitive: z.boolean().default(false),
+  })
+  .refine((m) => (m.value === undefined) !== (m.testDataKey === undefined), {
+    message: "A text check compares with either a value or a test data key",
+    path: ["value"],
+  })
+  .refine((m) => m.mode !== "regex" || m.testDataKey === undefined, {
+    message: "A regular expression is always written out, never taken from test data",
+    path: ["testDataKey"],
+  });
+export type TextMatch = z.infer<typeof TextMatchSchema>;
 
 export const ExpectedOutcomeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("visible"), fact: FactRefSchema, expected: z.boolean().default(true) }),

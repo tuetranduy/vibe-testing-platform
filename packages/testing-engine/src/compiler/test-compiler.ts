@@ -269,6 +269,8 @@ class Compiler {
   private planCriterion(criterion: AcceptanceCriterion): CriterionPlan | string {
     const outcome = criterion.expectedOutcome;
     if (outcome.kind === "semantic") return "AI-judged (semantic) criteria are never compiled";
+    // The generate stage resolves test data keys first (resolveTestDataValues); one left is a value the run lacks.
+    if (outcome.kind === "text_matches" && outcome.match.value === undefined) return "Its test data value was not provided";
     const provisional = this.input.provisional.find((p) => p.criterionId === criterion.id);
     if (!provisional) return "No provisional result";
     if (provisional.status !== "PASS" && provisional.status !== "FAIL") {
@@ -444,7 +446,8 @@ class Compiler {
 
       case "text_matches": {
         const read = fresh[0]!;
-        const { mode, value, caseSensitive } = outcome.match;
+        const { mode, caseSensitive } = outcome.match;
+        const value = outcome.match.value!; // planCriterion compiles only a check with a value
         if (mode === "regex") {
           const pattern = param("pattern", value);
           const text = `${this.helper("collapseText")}(${this.freshRead(read)})`;

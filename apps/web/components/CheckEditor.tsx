@@ -46,7 +46,7 @@ function draftOf(o: EditableOutcome): Draft {
     case "visible":
       return { ...d, expected: o.expected };
     case "text_matches":
-      return { ...d, mode: o.match.mode, text: o.match.value, caseSensitive: o.match.caseSensitive };
+      return { ...d, mode: o.match.mode, text: o.match.value ?? "", caseSensitive: o.match.caseSensitive };
     case "numeric_compare":
       return { ...d, operator: o.operator, number: typeof o.right === "number" ? String(o.right) : "" };
     case "numeric_delta":
@@ -78,6 +78,11 @@ function build(o: EditableOutcome, d: Draft): { outcome: ExpectedOutcome } | { e
     case "visible":
       return { outcome: { ...o, expected: d.expected } };
     case "text_matches":
+      // Against a test data value (KI-001): the key stays; a pattern is always written out, so no regex.
+      if (o.match.testDataKey !== undefined) {
+        const mode = d.mode === "regex" ? "contains" : d.mode;
+        return { outcome: { ...o, match: { mode, testDataKey: o.match.testDataKey, caseSensitive: d.caseSensitive } } };
+      }
       if (!textOk(d.text)) return { errors: { text: "Enter 1 to 500 characters." } };
       if (d.mode === "regex" && !compiles(d.text, d.caseSensitive)) return { errors: { text: "Not a valid pattern." } };
       return { outcome: { ...o, match: { mode: d.mode, value: d.text, caseSensitive: d.caseSensitive } } };
@@ -169,10 +174,16 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
             <select id={id("mode")} value={draft.mode} onChange={(e) => set({ mode: e.target.value as Draft["mode"] })}>
               <option value="contains">Contains</option>
               <option value="equals">Is exactly</option>
-              <option value="regex">Matches the pattern</option>
+              {outcome.match.testDataKey === undefined && <option value="regex">Matches the pattern</option>}
             </select>
           </div>
-          {textField(draft.mode === "regex" ? "Pattern" : "Text")}
+          {outcome.match.testDataKey === undefined ? (
+            textField(draft.mode === "regex" ? "Pattern" : "Text")
+          ) : (
+            <p className="hint">
+              Compared with the test data value <strong>{outcome.match.testDataKey}</strong>
+            </p>
+          )}
           <label className="choice">
             <input type="checkbox" checked={draft.caseSensitive} onChange={(e) => set({ caseSensitive: e.target.checked })} />
             Match case

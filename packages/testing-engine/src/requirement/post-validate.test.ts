@@ -108,3 +108,36 @@ describe("postValidate thresholds", () => {
     expect(r.ok && r.draft.criteria[0]!.expectedOutcome.kind).toBe("semantic");
   });
 });
+
+describe("postValidate: text checks against a test data value (KI-001)", () => {
+  const text = "Log in and verify the account page shows the user's email";
+  const keyed = (testDataKey: string, preconditions: CompilerOutput["criteria"][number]["preconditions"] = []): CompilerOutput => ({
+    criteria: [
+      {
+        sourceText: "verify the account page shows the user's email",
+        statement: "The account page shows the user's email",
+        expectedOutcome: { kind: "text_matches", fact: { key: "accountEmail", checkpoint: "account_page" }, match: { mode: "contains", testDataKey, caseSensitive: false } },
+        preconditions,
+        ambiguity: null,
+      },
+    ],
+    facts: [{ key: "accountEmail", checkpoint: "account_page", description: "Signed-in email", valueType: "string" }],
+  });
+
+  it("adds the key's test_data precondition when the model left it out, so a run without the value is BLOCKED", () => {
+    const r = postValidate(keyed("email"), { originalText: text, testData: { email: "qa@demo.test" }, secretNames: ["password"] });
+    if (!r.ok) throw new Error(r.issues.join());
+    expect(r.draft.criteria[0]!.preconditions).toEqual([{ kind: "test_data", ref: "email", description: "The test data value “email”" }]);
+
+    const stated = [{ kind: "test_data" as const, ref: "email", description: "The account email" }];
+    const again = postValidate(keyed("email", stated), { originalText: text, testData: {}, secretNames: [] });
+    if (!again.ok) throw new Error(again.issues.join());
+    expect(again.draft.criteria[0]!.preconditions).toEqual(stated);
+  });
+
+  it("refuses a secret's name: a secret is never compared or shown (a correction round)", () => {
+    const r = postValidate(keyed("password"), { originalText: text, testData: {}, secretNames: ["password"] });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.issues.join()).toMatch(/criteria\.0\.expectedOutcome\.match\.testDataKey: .*secret/);
+  });
+});

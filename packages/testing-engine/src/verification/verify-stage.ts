@@ -1,5 +1,6 @@
 import { ProvisionalResultSchema, scenarioOfCriterion, stepScenario, type ProvisionalResult } from "@platform/contracts";
 import type { EngineStages } from "../orchestrator/stages";
+import { resolveTestDataValues } from "../shared/test-data-values";
 import { clip } from "./normalize";
 import { verifyCriterion } from "./verifier";
 
@@ -14,8 +15,11 @@ import { verifyCriterion } from "./verifier";
  * Several scenarios (V1.1 F9): a criterion is judged on its own scenario only — that scenario's steps, stop
  * reason and planned steps (a login in another scenario never signs it in). Facts are keyed by checkpoint,
  * which the plan captures exactly once, so they are shared.
+ *
+ * A text check's test data key is judged against the run's value for it (resolveTestDataValues, KI-001).
  */
-export const verifyStage: EngineStages["verify"] = (ctx, requirement, plan, exploration) => {
+export const verifyStage: EngineStages["verify"] = (ctx, stored, plan, exploration) => {
+  const requirement = resolveTestDataValues(stored, ctx.request.testData ?? {});
   const redactText = (s: string) => clip(String(ctx.redact(s)));
   const several = plan.scenarios.length > 1;
   return requirement.criteria.map((criterion): ProvisionalResult => {

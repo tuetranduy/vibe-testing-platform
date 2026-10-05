@@ -24,6 +24,8 @@ import { describeExpected, evaluateRule, factLabel } from "./rules";
  *
  * Decision order (first match wins):
  *  1. The criterion is in the plan's blocked criteria            → BLOCKED, that reason (detail as `actual`).
+ *     A text check whose test data key was not resolved (the run
+ *     has no value for it; see resolveTestDataValues)            → BLOCKED / MISSING_TEST_DATA.
  *  2. An `authenticated` precondition, and the plan has no
  *     `login` step                                                → BLOCKED / PRECONDITION_NOT_MET.
  *  3. Login failed (Ruling R15): a `login` planned step whose golden
@@ -78,6 +80,9 @@ export function verifyCriterion(input: VerifyCriterionInput): ProvisionalResult 
   const planBlock =
     input.blocked.find((b) => b.criterionId === criterion.id) ?? plan.blockedCriteria.find((b) => b.criterionId === criterion.id);
   if (planBlock) return result("BLOCKED", planBlock.reason, planBlock.detail);
+  if (outcome.kind === "text_matches" && outcome.match.testDataKey !== undefined) {
+    return result("BLOCKED", "MISSING_TEST_DATA", `The test data value "${outcome.match.testDataKey}" was not provided`);
+  }
 
   // 2. Authenticated precondition with no way to log in.
   const plannedSteps = plan.scenarios.flatMap((s) => s.steps);

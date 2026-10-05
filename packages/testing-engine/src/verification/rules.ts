@@ -66,8 +66,12 @@ export function describeExpected(outcome: ExpectedOutcome): string {
       return `${factLabel(outcome.collection)} has an item ${outcome.match === "equals" ? "equal to" : "containing"} ${item}`;
     }
     case "text_matches": {
-      const { mode, value, caseSensitive } = outcome.match;
-      const what = mode === "equals" ? `equals ${quoted(value)}` : mode === "contains" ? `contains ${quoted(value)}` : `matches /${value}/`;
+      const { mode, caseSensitive } = outcome.match;
+      // A test data key is resolved to its value before a check is evaluated (resolveTestDataValues).
+      const value = outcome.match.testDataKey !== undefined ? `the test data value ${quoted(outcome.match.testDataKey)}` : null;
+      const literal = outcome.match.value ?? "";
+      const what =
+        mode === "equals" ? `equals ${value ?? quoted(literal)}` : mode === "contains" ? `contains ${value ?? quoted(literal)}` : `matches /${literal}/`;
       return `${factLabel(outcome.fact)} ${what}${caseSensitive ? " (case-sensitive)" : ""}`;
     }
     case "visible":
@@ -168,7 +172,10 @@ export function evaluateRule(outcome: DeterministicOutcome, valueOf: (ref: FactR
     }
 
     case "text_matches": {
-      const { mode, value, caseSensitive } = outcome.match;
+      const { mode, caseSensitive } = outcome.match;
+      const value = outcome.match.value;
+      // The verifier blocks a check whose test data key is unresolved before it gets here.
+      if (value === undefined) throw new Error("text_matches: a test data key must be resolved before the check is evaluated");
       const regex = mode === "regex" ? compileRegex(value, caseSensitive) : null;
       if (mode === "regex" && regex === null) {
         return { status: "INCONCLUSIVE", reason: "AMBIGUOUS_CRITERION", actual: "The criterion's regular expression is invalid" };
