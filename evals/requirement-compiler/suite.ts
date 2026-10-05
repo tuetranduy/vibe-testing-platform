@@ -43,6 +43,8 @@ export const EvalCaseSchema = z.object({
     mustNotFlagAmbiguous: z.boolean().default(false),
     /** Outcome kinds no criterion may have, e.g. `semantic` for a requirement every part of which the page shows. */
     forbiddenOutcomeKinds: z.array(Kind).default([]),
+    /** Test data keys some text check must compare with (`match.testDataKey`, KI-001). */
+    textChecksAgainstTestData: z.array(z.string()).default([]),
     /**
      * Every test_data / secret precondition names a provided key or secret. Off by default: a case whose
      * requirement needs an input that was not provided expects the precondition with the name it needs.
@@ -72,7 +74,7 @@ export function loadCases(dir = CASES_DIR): EvalCase[] {
 /** Score one compiled requirement against a case's expectations. */
 export function scoreCase(
   c: EvalCase,
-  criteria: { expectedOutcome: { kind: string }; ambiguity: unknown; preconditions: { kind: string; ref?: string | null }[] }[],
+  criteria: { expectedOutcome: { kind: string; match?: unknown }; ambiguity: unknown; preconditions: { kind: string; ref?: string | null }[] }[],
 ): string[] {
   const failures: string[] = [];
   const { min, max } = c.expect.criteriaCount;
@@ -85,6 +87,10 @@ export function scoreCase(
   if (c.expect.mustFlagAmbiguous && !criteria.some((x) => x.ambiguity !== null)) failures.push("expected an ambiguous criterion, none flagged");
   const flagged = criteria.filter((x) => x.ambiguity !== null).length;
   if (c.expect.mustNotFlagAmbiguous && flagged > 0) failures.push(`${flagged} criteria flagged ambiguous, expected none`);
+  for (const key of c.expect.textChecksAgainstTestData) {
+    const used = criteria.some((x) => x.expectedOutcome.kind === "text_matches" && (x.expectedOutcome.match as { testDataKey?: string }).testDataKey === key);
+    if (!used) failures.push(`no text check compares with the test data value "${key}"`);
+  }
   for (const kind of c.expect.forbiddenOutcomeKinds) {
     if (kinds.has(kind)) failures.push(`a criterion has outcome kind ${kind}, which this case forbids`);
   }

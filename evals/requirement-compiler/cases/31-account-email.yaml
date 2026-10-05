@@ -1,0 +1,17 @@
+id: account-email
+tags: [login, test-data]
+# KI-001: the live suite's account requirement. The email is test data (the model sees the key, never the value), so
+# the check compares the account page with the test data value "email". Before testDataKey (2026-10-05) Flash read the
+# typed email back from the login field, matched any email address, or made it AI-judged.
+input: Log in and verify the account page shows the user's email
+testDataKeys: [email]
+secretNames: [password]
+expect:
+  criteriaCount: { min: 1, max: 2 }
+  requiredOutcomeKinds:
+    - text_matches
+  forbiddenOutcomeKinds: [semantic]
+  textChecksAgainstTestData: [email]
+  mustFlagAmbiguous: false
+  mustNotFlagAmbiguous: true
+  onlyProvidedInputRefs: true
