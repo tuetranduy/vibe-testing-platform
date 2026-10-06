@@ -81,6 +81,9 @@ export function loadPlannerCases(dir = CASES_DIR): PlannerEvalCase[] {
   });
 }
 
+/** A step description that only applies sometimes ("… if not already shown", "if needed", "when present"). */
+const CONDITIONAL = /\b(if|unless|when|in case)\b[^.]*\b(not|already|needed|necessary|present|shown|visible|exists?|available|required)\b/i;
+
 /** Score one plan against a case's expectations. */
 export function scorePlan(c: PlannerEvalCase, plan: TestPlan): string[] {
   const failures: string[] = [];
@@ -89,6 +92,9 @@ export function scorePlan(c: PlannerEvalCase, plan: TestPlan): string[] {
   const kinds = new Set(steps.map((s) => s.kind));
   for (const k of c.expect.requiredStepKinds) if (!kinds.has(k)) failures.push(`no ${k} step (got ${[...kinds].join(", ")})`);
   if (steps.length > c.expect.maxSteps) failures.push(`${steps.length} steps > max ${c.expect.maxSteps}`);
+  // Every case: a step is one action that always applies (KI-001: "Open the account page … if not already shown" found
+  // nothing to click once the login had opened it, and exploration stopped).
+  for (const step of steps) if (CONDITIONAL.test(step.description)) failures.push(`conditional step ${step.id}: "${step.description}"`);
 
   const fmt = (xs: { criterionId: string; reason: string }[]) =>
     xs.map((b) => `${b.criterionId}:${b.reason}`).sort().join(", ") || "(none)";
