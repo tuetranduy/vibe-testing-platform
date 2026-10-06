@@ -769,3 +769,12 @@ function cartPlanAsScenarios() {
   const { title, steps, stopConditions } = cartPlan();
   return { scenarios: [{ title, steps }], stopConditions };
 }
+
+describe("PlannerOutputSchema: stop conditions are optional (KI-001)", () => {
+  it("a plan without stopConditions parses with none, instead of failing the run", async () => {
+    const { PlannerOutputSchema } = await import("./model-output");
+    const scenarios = [{ title: "Add to cart", steps: [{ kind: "navigate", description: "Open the shop", inputRef: null, checkpoint: null, criterionIds: [], destructive: false }] }];
+    expect(PlannerOutputSchema.parse({ scenarios })).toMatchObject({ stopConditions: [] });
+    expect(PlannerOutputSchema.parse({ scenarios, stopConditions: ["Login fails"] })).toMatchObject({ stopConditions: ["Login fails"] });
+  });
+});

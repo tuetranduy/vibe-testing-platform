@@ -26,9 +26,13 @@ export const PlannerScenarioOutputSchema = z.object({
 });
 export type PlannerScenarioOutput = z.infer<typeof PlannerScenarioOutputSchema>;
 
-/** What the model returns (V1.1 F9): 1–5 scenarios, plus stop conditions shared by all of them. */
+/**
+ * What the model returns (V1.1 F9): 1–5 scenarios, plus stop conditions shared by all of them. The stop conditions
+ * "may be empty" (the prompt), so a reply without them has none: Flash left them out of an answer and its correction,
+ * which errored the run (KI-001).
+ */
 export const PlannerOutputSchema = z.object({
   scenarios: z.array(PlannerScenarioOutputSchema).min(1).max(MAX_SCENARIOS),
-  stopConditions: z.array(z.string().max(300)).max(10),
+  stopConditions: z.array(z.string().max(300)).max(10).default([]),
 });
 export type PlannerOutput = z.infer<typeof PlannerOutputSchema>;
