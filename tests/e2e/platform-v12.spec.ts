@@ -5,6 +5,8 @@ import { api, db } from "./support/client";
 import { REQUIREMENTS } from "./support/scenarios";
 
 const stack = inject("e2e");
+/** A test that waits for several live runs in turn (about a minute each on a real model) gets 7 minutes (KI-001). */
+const LIVE_MULTI_RUN_TIMEOUT = stack.mode === "live" ? 420_000 : undefined;
 
 async function signIn(email: string, password: string) {
   const res = await service.call("POST", "/v1/auth/login", { email, password });
@@ -55,7 +57,7 @@ describe("V1.2 F1 — suites", () => {
       expect(await store.llmCalls(runId)).toEqual([]);
       expect(await store.secretsActive(runId)).toEqual([]);
     }
-  });
+  }, LIVE_MULTI_RUN_TIMEOUT);
 });
 
 describe("V1.2 F2 — compare with the previous run", () => {
@@ -86,7 +88,7 @@ describe("V1.2 F2 — compare with the previous run", () => {
     }
     const md = await fetch(`${stack.apiUrl}/v1/test-runs/${rerun.json.runId}/report.md`, { headers: { authorization: `Bearer ${stack.apiToken}` } });
     expect(await md.text()).toContain("## Compared with the previous run");
-  });
+  }, LIVE_MULTI_RUN_TIMEOUT);
 });
 
 describe("V1.2 F3 — scheduled suite runs", () => {
@@ -110,7 +112,7 @@ describe("V1.2 F3 — scheduled suite runs", () => {
     expect(fired).toMatchObject({ lastOutcome: "started" });
     const settled = await suiteRunSettled(fired!.lastSuiteRunId!);
     expect(settled).toMatchObject({ trigger: "schedule", verdict: "PASSED", owner: { name: expect.any(String) } });
-  }, 180_000);
+  }, LIVE_MULTI_RUN_TIMEOUT ?? 180_000);
 });
 
 describe("V1.2 F4 — API tokens", () => {
@@ -146,7 +148,7 @@ describe("V1.2 F4 — API tokens", () => {
     expect((await withToken("GET", "/v1/api-tokens")).json.code).toBe("TOKEN_SCOPE");
     await admin.call("DELETE", `/v1/api-tokens/${created.json.id}`);
     expect((await withToken("GET", "/v1/suites")).json.code).toBe("TOKEN_INVALID");
-  });
+  }, LIVE_MULTI_RUN_TIMEOUT);
 });
 
 describe("V1.2 F5 — CI: the client, the action's core, JUnit", () => {
@@ -182,5 +184,5 @@ describe("V1.2 F5 — CI: the client, the action's core, JUnit", () => {
       ci: { repository: "acme/shop", sha: "abc123" },
       startedWithToken: { name: "CI" },
     });
-  });
+  }, LIVE_MULTI_RUN_TIMEOUT);
 });
