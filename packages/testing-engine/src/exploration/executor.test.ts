@@ -119,6 +119,8 @@ interface FakeRecorderOptions {
   dom?: Record<string, unknown>;
   /** Whether a selector matches exactly one element (default: every selector does). */
   unique?: (selector: string) => boolean;
+  /** DOM readings per located element's selector (ahead of `dom`). */
+  readings?: Record<string, unknown>;
 }
 
 function fakeRecorder(opts: FakeRecorderOptions = {}) {
@@ -142,7 +144,9 @@ function fakeRecorder(opts: FakeRecorderOptions = {}) {
     },
     async captureFact(_page, input) {
       captures.push(input);
-      const dom = input.element && input.mode ? { value: (opts.dom?.[input.key] ?? input.modelValue) as never, read: { element: input.element, mode: input.mode } } : null;
+      const at = input.element ? (input.element.candidates[0] as { selector?: string }).selector : undefined;
+      const reading = at !== undefined && opts.readings && Object.hasOwn(opts.readings, at) ? opts.readings[at] : (opts.dom?.[input.key] ?? input.modelValue);
+      const dom = input.element && input.mode ? { value: reading as never, read: { element: input.element, mode: input.mode } } : null;
       return factFromReadings({ key: input.key, checkpoint: input.checkpoint, stepId: input.stepId, modelValue: input.modelValue, dom });
     },
   };
@@ -1066,6 +1070,38 @@ describe("runExploration (fake explorer)", () => {
     const emailPlan = planOf(step("navigate", "Open"), step("fill", "Type the email", { inputRef: { source: "testData", key: "email" } }));
     await runExploration(data, { plan: emailPlan, requirement: requirementWith([]), session: noModelAnswer(), budget: data.budgetSignal(1) }, { store: memoryStore().store, recorder: typed.recorder });
     expect(typed.fills).toEqual([]);
+  });
+
+  it("a click located on an element that cannot be clicked (a status badge) asks once more for the link or button (KI-001)", async () => {
+    // "Open the cart page from the cart indicator link": the explorer returned the "Cart (1)" badge, a status element.
+    const { ctx } = fakeCtx();
+    const badge = { selector: "xpath=/html[1]/body[1]/header[1]/span[2]", description: "Cart (1)", method: "click", arguments: [] };
+    const link = { selector: "xpath=/html[1]/body[1]/header[1]/nav[1]/a[2]", description: "Cart", method: "click", arguments: [] };
+    const session = new FakeSession({ observe: (instruction) => (instruction.startsWith("Find the link or button to click") ? [link] : [badge]) });
+    const roles: Record<string, string> = { [badge.selector]: "status", [link.selector]: "link" };
+    const { recorder } = fakeRecorder({ describe: (selector) => ({ role: roles[selector] ?? null, name: null, text: null }) });
+    const plan = planOf(step("navigate", "Open"), step("click", "Open the cart page from the cart indicator link"));
+    await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(session.calls.filter((c) => c.op === "actOn").map((c) => (c.arg as { selector: string }).selector)).toEqual([link.selector]);
+    expect(session.calls.filter((c) => c.op === "observe").map((c) => (c.arg as string).split(":")[0])).toEqual([
+      "Open the cart page from the cart indicator link",
+      "Find the link or button to click, not text, a heading or a status",
+    ]);
+  });
+
+  it("a fact whose located element has nothing to read is looked for once more as the element that shows it itself (KI-001)", async () => {
+    // "Number shown in the cart badge/link": the explorer returned the Cart link, whose text has no number.
+    const { ctx } = fakeCtx();
+    const link = { selector: "xpath=/html[1]/body[1]/header[1]/nav[1]/a[2]", description: "Cart", method: null, arguments: [] };
+    const badge = { selector: "xpath=/html[1]/body[1]/header[1]/span[2]", description: "Cart (0)", method: null, arguments: [] };
+    const session = new FakeSession({
+      extract: () => ({ cartCount: 0 }),
+      observe: (instruction) => (instruction.startsWith("Find the element whose own text shows") ? [badge] : [link]),
+    });
+    const { recorder } = fakeRecorder({ readings: { [link.selector]: null, [badge.selector]: 0 } });
+    const plan = planOf(step("navigate", "Open"), step("capture_checkpoint", "Read the badge", { checkpoint: "after_add" }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.facts.find((f) => f.key === "cartCount")).toMatchObject({ value: 0, provenance: "DOM_VERIFIED", read: { element: { candidates: [{ selector: badge.selector }] } } });
   });
 
   it("a value the model read as null where the located element shows one is read once more, alone (KI-001)", async () => {

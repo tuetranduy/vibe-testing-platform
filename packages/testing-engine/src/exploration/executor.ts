@@ -57,7 +57,8 @@ import { describeElement, elementAction, fillElement, recordElement, selectEleme
  *                destructive actions allowed, a destructive element only for a destructive step) → `actOn(element)` with method `click` and no
  *                arguments (deterministic, zero model calls; model-chosen arguments are never
  *                replayed). `other` may keep a non-value method (hover, double click, scroll into
- *                view). Recorded: `observe` + `act`. Nothing to click on the page: the explorer is asked once for
+ *                view). Recorded: `observe` + `act`. An element that cannot be clicked (a status, a heading, …)
+ *                gets one more lookup for the link or button itself. Nothing to click on the page: the explorer is asked once for
  *                the link or button that leads there, which is clicked (policy-checked) before looking again.
  * - fill         Value from `inputRef` (testData / secret via `ctx.secrets.get` / literal) →
  *                `observe(description)` → policy check → the recorder's deterministic `fill`. An observed link
@@ -80,7 +81,8 @@ import { describeElement, elementAction, fillElement, recordElement, selectEleme
  *                when the DOM agrees, else MODEL_EXTRACTED). Read mode = `modeForValueType`, except
  *                a boolean is read as `visible` only when a `visible` outcome references that
  *                (key, checkpoint), else it has no DOM read (Ruling R24). The reserved `url` fact
- *                comes first. A value the model read as null where its located element shows one is
+ *                comes first. A located element with nothing to read (no number, empty text) gets one more
+ *                lookup for the element that shows the value itself. A value the model read as null where its located element shows one is
  *                extracted once more, alone (the DOM reading must still equal the answer). Then a
  *                screenshot artifact. Recorded: `extract`, `observe`s, and the
  *                `checkpoint` step the facts point at (`stepId`, `artifactIds`).
@@ -195,6 +197,8 @@ export async function clearBrowserState(page: Page, targetUrl: string): Promise<
 const MAX_ATTEMPTS = 2; // one retry per planned step
 const WAIT_FOR_POLLS = 3;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
+/** Roles of elements a click step never targets: they show something, they do nothing when clicked (KI-001). */
+const NOT_CLICKABLE = new Set(["status", "heading", "paragraph", "img", "list", "listitem", "note", "alert", "log", "marquee", "timer", "article", "region", "banner", "contentinfo", "main"]);
 /** A secret fill's fallback when the model finds no field: the page's only visible password field. */
 const PASSWORD_FIELD = 'input[type="password"] >> visible=true';
 /**
@@ -575,6 +579,13 @@ class ExplorationRun {
       located = await this.locate(step, observeInstruction);
     }
     if (!located) return "failed";
+    // An element that cannot be clicked (e.g. the "Cart (1)" status badge for "Open the cart page", KI-001): ask once
+    // for the link or button itself.
+    if (located.info.role !== null && NOT_CLICKABLE.has(located.info.role)) {
+      const target = await this.locate(step, `Find the link or button to click, not text, a heading or a status: ${step.description}`);
+      if (!target || (target.info.role !== null && NOT_CLICKABLE.has(target.info.role))) return "failed";
+      located = target;
+    }
     const instruction = observeInstruction;
     if (searchField !== undefined && located.element.selector === searchField) {
       await this.reserve();
@@ -773,6 +784,15 @@ class ExplorationRun {
           return factFromReadings({ key: request.key, checkpoint, stepId, modelValue, dom: null });
         });
       let fact = await capture(values[request.key] ?? null);
+      // The located element has nothing to read (e.g. the Cart link for "number in the cart badge", KI-001): look once
+      // more for the element that shows the value itself; the reading must still equal the model's (D2).
+      if (mode && fact.provenance === "MODEL_EXTRACTED" && fact.modelValue !== null && fact.read && (fact.domValue === null || fact.domValue === "")) {
+        const own = await this.locate(step, `Find the element whose own text shows it, not a link or button that leads to it: ${request.description}`);
+        if (own) {
+          element = own.ref;
+          fact = await capture(values[request.key] ?? null);
+        }
+      }
       // The model said "not shown" where the element it located shows a value (KI-001): ask for that value once more,
       // alone; the DOM reading must still equal the answer (D2).
       if (fact.provenance === "MODEL_EXTRACTED" && fact.modelValue === null && fact.domValue !== undefined && fact.domValue !== null) {
