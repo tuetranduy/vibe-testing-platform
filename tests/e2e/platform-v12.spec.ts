@@ -74,7 +74,16 @@ describe("V1.2 F2 — compare with the previous run", () => {
     expect(await service.finished(broken)).toMatchObject({ verdict: "FAILED" });
     const compared = await service.call("GET", `/v1/test-runs/${broken}/comparison?baseline=${passing}`);
     expect(compared.json).toMatchObject({ chosenBaseline: true, verdict: { before: "PASSED", after: "FAILED" } });
-    expect(compared.json.counts.regressed).toBeGreaterThan(0);
+    if (stack.mode === "ci") {
+      // The same scripted wording: the cart check is matched with the passing run's and regresses.
+      expect(compared.json.counts.regressed).toBeGreaterThan(0);
+    } else {
+      // A real model words a fresh analysis of the requirement its own way, and criteria are matched by wording; the
+      // failing check is listed either way.
+      const failing = (compared.json.criteria as { after: string | null; change: string }[]).filter((c) => c.after === "FAIL");
+      expect(failing.length).toBeGreaterThan(0);
+      for (const c of failing) expect(["regressed", "added", "changed"]).toContain(c.change);
+    }
     const md = await fetch(`${stack.apiUrl}/v1/test-runs/${rerun.json.runId}/report.md`, { headers: { authorization: `Bearer ${stack.apiToken}` } });
     expect(await md.text()).toContain("## Compared with the previous run");
   });

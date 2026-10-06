@@ -22,7 +22,11 @@ describe("Task 21 step 2 — FAIL", () => {
     expect(await client.finished(runId)).toMatchObject({ lifecycle: "COMPLETED", verdict: "FAILED" });
     const report = await client.report(runId);
 
-    expect(resultOf(report, "numeric_compare")).toMatchObject({ status: "PASS", verdictSource: "PLAYWRIGHT_RERUN" });
+    // The badge still counts: a cart-count check, when the model wrote one (live mode may check "add it to the cart"
+    // another way), PASSes.
+    const count = report.requirement!.criteria.find((c) => c.expectedOutcome.kind === "numeric_compare");
+    if (stack.mode === "ci") expect(count, "a numeric_compare criterion").toBeDefined();
+    if (count) expect(report.criteria.find((r) => r.criterionId === count.id)).toMatchObject({ status: "PASS", verdictSource: "PLAYWRIGHT_RERUN" });
     const contents = resultOf(report, "collection_contains");
     expect(contents).toMatchObject({ status: "FAIL", verdictSource: "PLAYWRIGHT_RERUN", rerunOutcome: "ASSERTION_FAILED" });
 
