@@ -1068,6 +1068,28 @@ describe("runExploration (fake explorer)", () => {
     expect(typed.fills).toEqual([]);
   });
 
+  it("a value the model read as null where the located element shows one is read once more, alone (KI-001)", async () => {
+    // Extract said "not shown" while the explorer located the product link; the page reads "iPhone 17 Pro" there.
+    const { ctx } = fakeCtx();
+    let extracts = 0;
+    const session = new FakeSession({ extract: () => (++extracts === 1 ? { productName: null, cartCount: 1 } : { productName: "iPhone 17 Pro" }) });
+    const { recorder } = fakeRecorder({ dom: { productName: "iPhone 17 Pro" } });
+    const facts = [
+      { key: "productName", checkpoint: "results", description: "Name of the selected product", valueType: "string" as const },
+      { key: "cartCount", checkpoint: "results", description: "Cart badge count", valueType: "number" as const },
+    ];
+    const plan = planOf(step("navigate", "Open"), step("capture_checkpoint", "Read the results", { checkpoint: "results" }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith(facts), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.facts.filter((f) => f.key !== "url").map((f) => [f.key, f.value, f.provenance])).toEqual([
+      ["productName", "iPhone 17 Pro", "DOM_VERIFIED"],
+      ["cartCount", 1, "DOM_VERIFIED"],
+    ]);
+    const asked = session.calls.filter((c) => c.op === "extract").map((c) => c.arg as string);
+    expect(asked).toHaveLength(2);
+    expect(asked[1]).toContain("- productName: Name of the selected product (string)");
+    expect(asked[1]).not.toContain("cartCount");
+  });
+
   it("a list fact whose container is not found is looked for once more as the element that shows it (KI-001)", async () => {
     const { ctx } = fakeCtx();
     const list = { selector: "xpath=/html[1]/body[1]/main[1]/ul[1]", description: "Cart items list", method: null, arguments: [] };

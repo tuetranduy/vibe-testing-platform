@@ -80,7 +80,9 @@ import { describeElement, elementAction, fillElement, recordElement, selectEleme
  *                when the DOM agrees, else MODEL_EXTRACTED). Read mode = `modeForValueType`, except
  *                a boolean is read as `visible` only when a `visible` outcome references that
  *                (key, checkpoint), else it has no DOM read (Ruling R24). The reserved `url` fact
- *                comes first. Then a screenshot artifact. Recorded: `extract`, `observe`s, and the
+ *                comes first. A value the model read as null where its located element shows one is
+ *                extracted once more, alone (the DOM reading must still equal the answer). Then a
+ *                screenshot artifact. Recorded: `extract`, `observe`s, and the
  *                `checkpoint` step the facts point at (`stepId`, `artifactIds`).
  * - wait_for     Bounded poll: up to 3 `observe`s, `pollIntervalMs` apart, within the budget. An element that
  *                never appears does not stop exploration (KI-001: models plan waits for a page "to load", which
@@ -751,24 +753,9 @@ class ExplorationRun {
 
     let values: Record<string, FactValue> = {};
     if (requests.length > 0) {
-      await this.reserve();
-      const startedAt = this.ctx.now();
-      const instruction = [
-        "Read these values from the current page: the text the page shows, never element ids. Use null for a value that is not shown.",
-        ...(requests.some((r) => r.valueType === "string_list") ? [LIST_IN_PLACE_RULE] : []),
-        ...requests.map((r) => `- ${r.key}: ${r.description} (${r.valueType})`),
-      ].join("\n");
-      const schema = z.object(Object.fromEntries(requests.map((r) => [r.key, valueSchema(r.valueType)])));
-      const base = { plannedStepId: step.id, kind: "extract" as const, instruction, urlBefore: this.url(), startedAt };
-      try {
-        const extracted = await this.session.extract(this.redactString(instruction), schema);
-        values = extracted.data as Record<string, FactValue>;
-        await this.record({ ...base, outcome: "SUCCESS", llm: extracted.llm });
-      } catch (err) {
-        this.rethrowIfFatal(err);
-        await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
-        return "failed";
-      }
+      const extracted = await this.extract(step, requests);
+      if (!extracted) return "failed";
+      values = extracted;
     }
 
     const captured: ObservedFact[] = [urlFact(this.page, { checkpoint, stepId })];
@@ -780,13 +767,19 @@ class ExplorationRun {
         // A list's container not found: once more, as the element that shows it (KI-001).
         if (!element && request.valueType === "string_list") element = (await this.locate(step, `Find the element that shows: ${request.description}`))?.ref ?? null;
       }
-      const input: FactCaptureInput = { key: request.key, checkpoint, stepId, modelValue: values[request.key] ?? null, element, mode };
-      captured.push(
-        await this.recorder.captureFact(this.page, input).catch((err: unknown) => {
+      const capture = (modelValue: FactValue) =>
+        this.recorder.captureFact(this.page, { key: request.key, checkpoint, stepId, modelValue, element, mode }).catch((err: unknown) => {
           this.rethrowIfFatal(err);
-          return factFromReadings({ key: input.key, checkpoint, stepId, modelValue: input.modelValue, dom: null });
-        }),
-      );
+          return factFromReadings({ key: request.key, checkpoint, stepId, modelValue, dom: null });
+        });
+      let fact = await capture(values[request.key] ?? null);
+      // The model said "not shown" where the element it located shows a value (KI-001): ask for that value once more,
+      // alone; the DOM reading must still equal the answer (D2).
+      if (fact.provenance === "MODEL_EXTRACTED" && fact.modelValue === null && fact.domValue !== undefined && fact.domValue !== null) {
+        const again = await this.extract(step, [request]);
+        if (again && again[request.key] !== null && again[request.key] !== undefined) fact = await capture(again[request.key]!);
+      }
+      captured.push(fact);
     }
 
     await this.reserve();
@@ -806,6 +799,28 @@ class ExplorationRun {
     });
     for (const fact of captured) await this.saveFact(fact);
     return "ok";
+  }
+
+  /** One `extract` of these facts' model values, recorded; null when it failed (recorded FAILED). */
+  private async extract(step: PlannedStep, requests: readonly FactRequest[]): Promise<Record<string, FactValue> | null> {
+    await this.reserve();
+    const startedAt = this.ctx.now();
+    const instruction = [
+      "Read these values from the current page: the text the page shows, never element ids. Use null for a value that is not shown.",
+      ...(requests.some((r) => r.valueType === "string_list") ? [LIST_IN_PLACE_RULE] : []),
+      ...requests.map((r) => `- ${r.key}: ${r.description} (${r.valueType})`),
+    ].join("\n");
+    const schema = z.object(Object.fromEntries(requests.map((r) => [r.key, valueSchema(r.valueType)])));
+    const base = { plannedStepId: step.id, kind: "extract" as const, instruction, urlBefore: this.url(), startedAt };
+    try {
+      const extracted = await this.session.extract(this.redactString(instruction), schema);
+      await this.record({ ...base, outcome: "SUCCESS", llm: extracted.llm });
+      return extracted.data as Record<string, FactValue>;
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
+      return null;
+    }
   }
 
   /** Polls for the step's element; whether it appeared or not, exploration goes on (see the header). */
