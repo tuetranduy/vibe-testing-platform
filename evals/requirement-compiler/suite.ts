@@ -43,6 +43,8 @@ export const EvalCaseSchema = z.object({
     mustNotFlagAmbiguous: z.boolean().default(false),
     /** Outcome kinds no criterion may have, e.g. `semantic` for a requirement every part of which the page shows. */
     forbiddenOutcomeKinds: z.array(Kind).default([]),
+    /** Precondition kinds no criterion may have, e.g. `authenticated` for a requirement that never logs in (KI-001). */
+    forbiddenPreconditions: z.array(z.enum(["authenticated", "test_data", "secret"])).default([]),
     /** Test data keys some text check must compare with (`match.testDataKey`, KI-001). */
     textChecksAgainstTestData: z.array(z.string()).default([]),
     /**
@@ -87,6 +89,10 @@ export function scoreCase(
   if (c.expect.mustFlagAmbiguous && !criteria.some((x) => x.ambiguity !== null)) failures.push("expected an ambiguous criterion, none flagged");
   const flagged = criteria.filter((x) => x.ambiguity !== null).length;
   if (c.expect.mustNotFlagAmbiguous && flagged > 0) failures.push(`${flagged} criteria flagged ambiguous, expected none`);
+  for (const kind of c.expect.forbiddenPreconditions) {
+    const n = criteria.filter((x) => x.preconditions.some((p) => p.kind === kind)).length;
+    if (n > 0) failures.push(`${n} criteria have a ${kind} precondition, which this case forbids`);
+  }
   for (const key of c.expect.textChecksAgainstTestData) {
     const used = criteria.some((x) => x.expectedOutcome.kind === "text_matches" && (x.expectedOutcome.match as { testDataKey?: string }).testDataKey === key);
     if (!used) failures.push(`no text check compares with the test data value "${key}"`);

@@ -11,6 +11,8 @@ expect:
   requiredOutcomeKinds:
     - collection_contains
   forbiddenOutcomeKinds: [semantic]
+  # Nothing in it logs in: Flash once made adding to the cart need a logged-in user (2026-10-06).
+  forbiddenPreconditions: [authenticated]
   mustFlagAmbiguous: false
   mustNotFlagAmbiguous: true
   onlyProvidedInputRefs: true
