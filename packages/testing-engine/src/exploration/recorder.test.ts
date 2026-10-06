@@ -33,6 +33,7 @@ const FIXTURE_HTML = `<!doctype html>
     <li><b class="title">Pixel 11</b> <i class="price">$799.00</i></li>
     <li><b class="title">Galaxy S27</b> <i class="price">$899.00</i></li>
   </ul>
+  <main data-testid="empty-cart"><h1>Your cart</h1><p data-testid="cart-empty">Your cart is empty</p><p><a href="/products">Browse products</a></p></main>
   <section><p>Signed in as <strong data-testid="account-email">qa@demo.test</strong></p></section>
   <p data-testid="notice">Free   shipping</p>
   <p data-testid="hidden-note" style="display:none">Secret sale</p>
@@ -143,6 +144,15 @@ describe("elementAction (what a cached element does, KI-032)", () => {
 });
 
 describe("fillElement (our code fills; values never go through the model)", () => {
+  it("the executor's password-field fallback selector finds the only visible one and fills it (KI-001)", async () => {
+    await page.setContent(`<form><input type="password" name="hidden" style="display:none"><label>Password <input type="password" name="pw"></label></form>`);
+    const selector = 'input[type="password"] >> visible=true';
+    const ref = await recordElement(page, selector);
+    expect(ref.candidates[ref.chosenIndex]).toMatchObject({ strategy: "role", role: "textbox", name: "Password" });
+    await fillElement(page, selector, "pw-value");
+    expect(await page.locator('input[name="pw"]').inputValue()).toBe("pw-value");
+  });
+
   it("fills the located field deterministically", async () => {
     await fillElement(page, "xpath=/html[1]/body[1]/input[1]", "s3cret-value");
     expect(await page.locator("#email").inputValue()).toBe("s3cret-value");
@@ -222,6 +232,14 @@ describe("captureFact / captureCheckpoint (provenance)", () => {
       read: { element, mode: "text_list", itemSelector: '[data-testid="line-name"]' },
     });
     expect(ObservedFactSchema.parse(fact)).toEqual(fact);
+  });
+
+  it("a row itself can be the item: a message in place of the list (an empty cart) is read alone (KI-001)", async () => {
+    // The explorer points at the page's main container; the model reads the message shown in place of the list.
+    const element = await recordElement(page, "[data-testid=empty-cart]");
+    const fact = await captureFact(page, { ...base, key: "cartItems", modelValue: ["Your cart is empty"], element, mode: "text_list" });
+    expect(fact).toMatchObject({ value: ["Your cart is empty"], provenance: "DOM_VERIFIED", read: { mode: "text_list", itemSelector: '[data-testid="cart-empty"]' } });
+    expect(await readFact(page, element, "text_list", '[data-testid="cart-empty"]')).toMatchObject({ value: ["Your cart is empty"] });
   });
 
   it("without a test id, the row sub-element is found by tag and class", async () => {

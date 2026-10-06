@@ -120,6 +120,7 @@ const FIXTURE_HTML = `<!doctype html>
       Banana   split </li><li>   </li></ul>
   <ul data-testid="order-lines"><li><span class="name">iPhone 17 Pro</span> — $1,199.00</li><li>Subtotal</li><li><span class="name">USB-C
       Cable</span> — $19.00</li><li><span class="name"> </span> — $0.00</li></ul>
+  <main data-testid="main-box"><h1>Your cart</h1><p class="message">Your cart is empty</p><p>Browse</p></main>
   <div data-testid="lines">first line<br>second   line</div>
   <p data-testid="notice">Free   shipping</p>
   <input data-testid="email" value="  a@b.c ">
@@ -167,6 +168,13 @@ describe("helpers.ts DOM reads match the fact reader", () => {
     expect(await helpers.readNumber(locatorFor(page, { strategy: "testId", value: "missing" }), 0)).toBeNull();
     expect(await helpers.readText(locatorFor(page, { strategy: "testId", value: "notice" }), 0)).toBe("Free shipping");
     expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it("readItemTexts matches a row itself too, as the fact reader does", async () => {
+    const ref = refOf("main-box");
+    const expected = (await readFact(page, ref, "text_list", "p.message"))?.value;
+    expect(expected).toEqual(["Your cart is empty"]);
+    expect(await helpers.readItemTexts(locatorFor(page, ref.candidates[0]!), "p.message")).toEqual(expected);
   });
 
   it.each(["order-lines", "cart-items", "notice", "dup"])("%s read through a row sub-element", async (testId) => {

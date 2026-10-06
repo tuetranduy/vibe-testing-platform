@@ -22,7 +22,8 @@ export type FactReadMode = NonNullable<ObservedFact["read"]>["mode"];
  * - count: number of child elements (list items)
  * - value: form field value
  * - text_list: whitespace-collapsed visible text of each child element, empty ones dropped; with an
- *   item selector, the text of the first element it matches inside each child (children without one dropped)
+ *   item selector, the text of each child it matches, else of the first element it matches inside the child
+ *   (children without one dropped)
  */
 
 /**
@@ -122,7 +123,7 @@ export async function readFact(
         const children = Array.from(el.children);
         if (sel !== null) {
           return children
-            .map((c) => c.querySelector(sel))
+            .map((c) => (c.matches(sel) ? c : c.querySelector(sel)))
             .map((n) => (n === null ? "" : n instanceof HTMLElement ? n.innerText : (n.textContent ?? "")));
         }
         const texts = children.length > 0
@@ -164,7 +165,8 @@ async function itemSelectorCandidates(page: Page, element: ElementRef, items: st
     const keys = new Set(wanted.map((w) => w.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase()));
     const out: string[][] = [[], [], [], []];
     for (const row of Array.from(el.children)) {
-      for (const d of Array.from(row.querySelectorAll("*"))) {
+      // The row itself (a message in place of the list, e.g. an empty cart) or an element inside it.
+      for (const d of [row, ...Array.from(row.querySelectorAll("*"))]) {
         const text = d instanceof HTMLElement ? d.innerText : (d.textContent ?? "");
         if (!keys.has(text.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase())) continue;
         const testId = d.getAttribute("data-testid");
