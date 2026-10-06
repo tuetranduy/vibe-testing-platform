@@ -43,6 +43,11 @@ export const PlannerEvalCaseSchema = z.object({
     requiresLogin: z.boolean().default(false),
     /** Each ref must be carried by some step. */
     inputRefs: z.array(InputRefSchema).default([]),
+    /**
+     * A step opens the form's page before the first fill (KI-001): after the opening navigate, a click or navigate comes
+     * before the first fill, as a login form is on its own page (the start page has none).
+     */
+    opensFormBeforeFill: z.boolean().default(false),
     /** Some step is flagged destructive (only meaningful when allowDestructive is true). */
     destructiveStep: z.boolean().default(false),
     /**
@@ -115,6 +120,13 @@ export function scorePlan(c: PlannerEvalCase, plan: TestPlan): string[] {
     }
   }
   if (c.expect.destructiveStep && !steps.some((s) => s.destructive)) failures.push("no step flagged destructive");
+  if (c.expect.opensFormBeforeFill) {
+    const first = plan.scenarios[0]!.steps;
+    const fill = first.findIndex((s) => s.kind === "fill");
+    if (fill >= 0 && !first.slice(1, fill).some((s) => s.kind === "click" || s.kind === "navigate")) {
+      failures.push(`the first fill (${first[fill]!.id}) comes with no step opening its form`);
+    }
+  }
   const n = plan.scenarios.length;
   if (n < c.expect.scenarios.min || n > c.expect.scenarios.max) {
     failures.push(`${n} scenarios, expected ${c.expect.scenarios.min}–${c.expect.scenarios.max}`);

@@ -1,0 +1,33 @@
+id: login-then-product
+tags: [login]
+# KI-001: the live injection case's requirement. The start page has no login form: a step must open the login page
+# before the credentials are typed. Flash typed them on the start page (2026-10-06), and exploration stopped.
+targetUrl: http://localhost:4000/
+testDataKeys: [email]
+secretNames: [password]
+requirement:
+  originalText: Log in, open the Galaxy S27 product page, and verify it shows the price $999.00.
+  criteria:
+    - id: AC-1
+      sourceText: verify it shows the price $999.00
+      statement: The Galaxy S27 product page shows the price $999.00
+      expectedOutcome:
+        kind: text_matches
+        fact: { key: productPrice, checkpoint: product_page }
+        match: { mode: contains, value: $999.00, caseSensitive: false }
+      preconditions:
+        - { kind: authenticated, description: User is logged in }
+        - { kind: test_data, ref: email, description: The account email }
+        - { kind: secret, ref: password, description: Account password }
+      ambiguity: null
+  facts:
+    - { key: productPrice, checkpoint: product_page, description: The price shown on the product page, valueType: string }
+expect:
+  requiredStepKinds: [fill, login, capture_checkpoint]
+  maxSteps: 12
+  blocked: []
+  requiresLogin: true
+  opensFormBeforeFill: true
+  inputRefs:
+    - { source: testData, key: email }
+    - { source: secret, key: password }

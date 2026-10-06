@@ -443,8 +443,8 @@ green on DeepSeek) and KI-025 / KI-036 (they need the branch pushed to GitHub) a
 - **To close:** `pnpm eval planner` on every offered model (with KI-026), plus a golden case that needs two scenarios.
 - **Resolved for `deepseek-flash` (2026-10-06):** the golden case exists (planner case 15, signed-out and signed-in), and
   the planner eval now scores every other case on exactly one scenario, so a split where none is needed counts as
-  splitting too eagerly. On Flash: case 15 planned as 2 scenarios in 6 of 7 runs (once as 1), and none of the 102
-  one-scenario plans was split (`evals/BASELINE.md`); `deepseek-v4-pro` also passed case 15 with thinking off. The live suite does not
+  splitting too eagerly. On Flash, over 10 runs: case 15 planned as 2 scenarios in 8 (twice as 1), and 1 of the 150
+  one-scenario plans was split (search-results, as 2) (`evals/BASELINE.md`); `deepseek-v4-pro` also passed case 15 with thinking off. The live suite does not
   cover it: its two-scenario spec (`platform-v11`) runs in CI mode only (scripted plan). The other offered models are
   still unscored: they need paid keys (KI-026).
 
