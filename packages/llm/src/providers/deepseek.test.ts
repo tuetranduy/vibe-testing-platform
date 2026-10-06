@@ -137,10 +137,11 @@ describe("DeepSeekTransport", () => {
     expect(res.text).toBe('{"name":"x"}');
   });
 
-  it("an empty answer (null content) gets the client's correction round, without sending the empty turn back", async () => {
-    const replies = [json(200, okResponse(null)), json(200, okResponse('{"name":"x"}'))];
+  it("an empty answer (null or blank content) is retried as the same request, not corrected (KI-001)", async () => {
+    // DeepSeek's JSON Output "may occasionally return empty content"; two in a row once failed a live run.
+    const replies = [json(200, okResponse(null)), json(200, okResponse("  ")), json(200, okResponse('{"name":"x"}'))];
     const { fn, seen } = fakeFetch(() => replies.shift()!);
-    const llm = new LlmClient({ transport: new DeepSeekTransport({ apiKey: "sk-ds-test", fetch: fn }), model: "deepseek-flash" });
+    const llm = new LlmClient({ transport: new DeepSeekTransport({ apiKey: "sk-ds-test", fetch: fn }), model: "deepseek-flash", retry: { maxRetries: 3, baseDelayMs: 1 } });
 
     const { data } = await llm.generateJson({
       system: "",
@@ -153,7 +154,12 @@ describe("DeepSeekTransport", () => {
     });
 
     expect(data).toEqual({ name: "x" });
-    expect((seen[1]!.body.messages as { role: string }[]).map((m) => m.role)).toEqual(["system", "user", "user"]);
+    expect(seen).toHaveLength(3);
+    for (const req of seen) expect((req.body.messages as { role: string }[]).map((m) => m.role)).toEqual(["system", "user"]);
+
+    const err = await failure(new DeepSeekTransport({ apiKey: "sk-ds-test", fetch: fakeFetch(() => json(200, okResponse(null))).fn }));
+    expect(err).toMatchObject({ retryable: true });
+    expect((err as Error).message).toMatch(/empty answer/i);
   });
 
   it("finish_reason length returns the partial text, so the client's correction round handles it", async () => {
