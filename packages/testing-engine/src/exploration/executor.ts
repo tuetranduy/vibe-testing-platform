@@ -757,7 +757,11 @@ class ExplorationRun {
     for (const request of requests) {
       const mode = this.modeFor(request);
       let element: ElementRef | null = null;
-      if (mode) element = (await this.locate(step, this.locateInstruction(request)))?.ref ?? null;
+      if (mode) {
+        element = (await this.locate(step, this.locateInstruction(request)))?.ref ?? null;
+        // A list's container not found: once more, as the element that shows it (KI-001).
+        if (!element && request.valueType === "string_list") element = (await this.locate(step, `Find the element that shows: ${request.description}`))?.ref ?? null;
+      }
       const input: FactCaptureInput = { key: request.key, checkpoint, stepId, modelValue: values[request.key] ?? null, element, mode };
       captured.push(
         await this.recorder.captureFact(this.page, input).catch((err: unknown) => {

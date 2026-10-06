@@ -1009,6 +1009,25 @@ describe("runExploration (fake explorer)", () => {
     expect(typed.fills).toEqual([]);
   });
 
+  it("a list fact whose container is not found is looked for once more as the element that shows it (KI-001)", async () => {
+    const { ctx } = fakeCtx();
+    const list = { selector: "xpath=/html[1]/body[1]/main[1]/ul[1]", description: "Cart items list", method: null, arguments: [] };
+    const session = new FakeSession({
+      extract: () => ({ cartItems: ["iPhone 17 Pro"] }),
+      observe: (instruction) => (instruction.startsWith("Find the element that shows: The products listed in the cart") ? [list] : []),
+    });
+    const { recorder, captures } = fakeRecorder();
+    const cartItems = { key: "cartItems", checkpoint: "cart_page", description: "The products listed in the cart", valueType: "string_list" as const };
+    const plan = planOf(step("navigate", "Open"), step("capture_checkpoint", "Read the cart", { checkpoint: "cart_page" }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([cartItems]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    const observes = outcome.steps.filter((s) => s.kind === "observe").map((s) => [s.instruction.split(":")[0], s.outcome]);
+    expect(observes).toEqual([
+      ["Find the list or container whose items are", "FAILED"],
+      ["Find the element that shows", "SUCCESS"],
+    ]);
+    expect(captures[0]).toMatchObject({ key: "cartItems", element: { candidates: [{ selector: list.selector }] }, mode: "text_list" });
+  });
+
   it("a wait_for whose element never appears is recorded as failed and exploration goes on (KI-001)", async () => {
     // e.g. "Wait for the cart page to load": no element to find, but the page is there. The checkpoint's facts
     // decide the criteria; a step that needed the missing element fails on its own.
