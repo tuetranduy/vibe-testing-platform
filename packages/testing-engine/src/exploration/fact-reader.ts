@@ -202,11 +202,14 @@ async function readList(page: Page, element: ElementRef, modelValue: FactValue):
 
 /** How many levels up from the located element a text the model read may come from. */
 const MAX_TEXT_ANCESTORS = 3;
+/** How many elements inside the located one are compared with a text the model read. */
+const MAX_TEXT_DESCENDANTS = 500;
 
 /**
  * The located element's text when it equals the model's; otherwise the nearest ancestor (at most
- * MAX_TEXT_ANCESTORS up) whose whole text does, recorded as the fact's element (KI-001: the model reads
- * "Signed in as qa@demo.test" where the element it points at holds only the address). Exact (normalized) matching
+ * MAX_TEXT_ANCESTORS up) whose whole text does (the model reads "Signed in as qa@demo.test" where the element it
+ * points at holds only the address), else the outermost element inside it whose whole text does (the explorer points
+ * at a product card, the model reads its name) — recorded as the fact's element (KI-001). Exact (normalized) matching
  * still decides provenance. Null when the element cannot be read.
  */
 async function readText(page: Page, element: ElementRef, modelValue: FactValue): Promise<DomReading | null> {
@@ -221,14 +224,25 @@ async function readText(page: Page, element: ElementRef, modelValue: FactValue):
     return out;
   }, MAX_TEXT_ANCESTORS);
   const level = texts.findIndex((t) => factValuesEqual(modelValue, collapse(t)));
-  if (level < 0) return reading;
-  const handle = await locator.evaluateHandle((el, up) => {
-    let node: Element = el;
-    for (let i = 0; i <= up; i++) node = node.parentElement ?? node;
-    return node;
-  }, level);
-  const ancestor = await recordElement(page, handle.asElement()!);
-  const read = await readFact(page, ancestor, "text");
+  let handle;
+  if (level >= 0) {
+    handle = await locator.evaluateHandle((el, up) => {
+      let node: Element = el;
+      for (let i = 0; i <= up; i++) node = node.parentElement ?? node;
+      return node;
+    }, level);
+  } else {
+    // Document order: an element comes before the elements inside it, so the first match is the outermost.
+    const inner = await locator.evaluate(
+      (el, max) => Array.from(el.querySelectorAll("*")).slice(0, max).map((n) => (n instanceof HTMLElement ? n.innerText : (n.textContent ?? ""))),
+      MAX_TEXT_DESCENDANTS,
+    );
+    const at = inner.findIndex((t) => factValuesEqual(modelValue, collapse(t)));
+    if (at < 0) return reading;
+    handle = await locator.evaluateHandle((el, i) => el.querySelectorAll("*")[i]!, at);
+  }
+  const found = await recordElement(page, handle.asElement()!);
+  const read = await readFact(page, found, "text");
   return read && factValuesEqual(modelValue, read.value) ? { value: read.value, read: { element: read.element, mode: "text" } } : reading;
 }
 

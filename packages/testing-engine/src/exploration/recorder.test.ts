@@ -34,6 +34,7 @@ const FIXTURE_HTML = `<!doctype html>
     <li><b class="title">Galaxy S27</b> <i class="price">$899.00</i></li>
   </ul>
   <main data-testid="empty-cart"><h1>Your cart</h1><p data-testid="cart-empty">Your cart is empty</p><p><a href="/products">Browse products</a></p></main>
+  <article data-testid="product"><h1><span>Pixel 11</span></h1><p>$799.00</p><p>A phone.</p><button type="button">Add Pixel</button></article>
   <section><p>Signed in as <strong data-testid="account-email">qa@demo.test</strong></p></section>
   <p data-testid="notice">Free   shipping</p>
   <p data-testid="hidden-note" style="display:none">Secret sale</p>
@@ -273,6 +274,19 @@ describe("captureFact / captureCheckpoint (provenance)", () => {
       const other = await captureFact(page, { ...base, key: "accountLine", modelValue, element, mode: "text" });
       expect(other).toMatchObject({ value: modelValue, provenance: "MODEL_EXTRACTED", domValue: "qa@demo.test", read: { element } });
     }
+  });
+
+  it("a text the model read inside the located element: the element inside that holds it is recorded (DOM_VERIFIED)", async () => {
+    // The explorer points at the whole product card; the model reads the product name only (KI-001).
+    const element = await recordElement(page, "[data-testid=product]");
+    const fact = await captureFact(page, { ...base, key: "productName", modelValue: "pixel 11", element, mode: "text" });
+    expect(fact).toMatchObject({ value: "Pixel 11", provenance: "DOM_VERIFIED", read: { mode: "text" } });
+    // The outermost element holding exactly that text (the h1, not its span).
+    expect(fact.read!.element.candidates[fact.read!.element.chosenIndex]).toMatchObject({ strategy: "role", role: "heading", name: "Pixel 11" });
+    expect(ObservedFactSchema.parse(fact)).toEqual(fact);
+
+    const partial = await captureFact(page, { ...base, key: "productName", modelValue: "Pixel", element, mode: "text" });
+    expect(partial).toMatchObject({ provenance: "MODEL_EXTRACTED", read: { element } });
   });
 
   it("a boolean fact without an explicit visible mode stays MODEL_EXTRACTED even when the element is visible (R24)", async () => {
