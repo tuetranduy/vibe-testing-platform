@@ -33,6 +33,7 @@ const FIXTURE_HTML = `<!doctype html>
     <li><b class="title">Pixel 11</b> <i class="price">$799.00</i></li>
     <li><b class="title">Galaxy S27</b> <i class="price">$899.00</i></li>
   </ul>
+  <section><p>Signed in as <strong data-testid="account-email">qa@demo.test</strong></p></section>
   <p data-testid="notice">Free   shipping</p>
   <p data-testid="hidden-note" style="display:none">Secret sale</p>
 </body></html>`;
@@ -237,6 +238,22 @@ describe("captureFact / captureCheckpoint (provenance)", () => {
       expect(fact).toMatchObject({ value: modelValue, provenance: "MODEL_EXTRACTED", read: { element, mode: "text_list" } });
       expect(fact.read).not.toHaveProperty("itemSelector");
       expect((fact.domValue as string[])[0]).toBe("iPhone 17 Pro — Qty 1 — $1,199.00");
+    }
+  });
+
+  it("a text the model read from around the located element: the ancestor whose text it is is recorded (DOM_VERIFIED)", async () => {
+    // The model reads "Signed in as qa@demo.test"; the element it points at holds only the address (KI-001).
+    const element = await recordElement(page, "[data-testid=account-email]");
+    const fact = await captureFact(page, { ...base, key: "accountLine", modelValue: "signed in as  QA@demo.test", element, mode: "text" });
+    expect(fact).toMatchObject({ value: "Signed in as qa@demo.test", provenance: "DOM_VERIFIED", modelValue: "signed in as  QA@demo.test", read: { mode: "text" } });
+    expect(fact.read!.element).not.toEqual(element);
+    expect(await readFact(page, fact.read!.element, "text")).toMatchObject({ value: "Signed in as qa@demo.test" });
+    expect(ObservedFactSchema.parse(fact)).toEqual(fact);
+
+    // Only an exact (normalized) match: part of the line, or more than any ancestor holds, stays MODEL_EXTRACTED.
+    for (const modelValue of ["Signed in as", "Shop Signed in as qa@demo.test and more"]) {
+      const other = await captureFact(page, { ...base, key: "accountLine", modelValue, element, mode: "text" });
+      expect(other).toMatchObject({ value: modelValue, provenance: "MODEL_EXTRACTED", domValue: "qa@demo.test", read: { element } });
     }
   });
 
