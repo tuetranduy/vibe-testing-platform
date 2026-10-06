@@ -113,7 +113,7 @@ class FakeSession implements ExplorerSession {
 }
 
 interface FakeRecorderOptions {
-  /** Accessibility facts per selector (default: a button named "Add to cart"). */
+  /** Accessibility facts per selector (default: no role, named "Add to cart"; a field or a button only when a test says so). */
   describe?: (selector: string) => { role: string | null; name: string | null; text: string | null };
   /** DOM readings per fact key (default: equal to the model value). */
   dom?: Record<string, unknown>;
@@ -128,7 +128,7 @@ function fakeRecorder(opts: FakeRecorderOptions = {}) {
   const ref = (selector: string): ElementRef => ({ candidates: [{ strategy: "xpath", selector }], chosenIndex: 0, framePath: [] });
   const recorder: RecorderPort = {
     async describe(_page, selector) {
-      return opts.describe?.(selector) ?? { role: "button", name: "Add to cart", text: "Add to cart" };
+      return opts.describe?.(selector) ?? { role: null, name: "Add to cart", text: "Add to cart" };
     },
     async record(_page, selector) {
       if (opts.unique && !opts.unique(selector)) throw new Error("recorder: selector must match exactly one element (matched 0)");
@@ -148,6 +148,12 @@ function fakeRecorder(opts: FakeRecorderOptions = {}) {
   };
   return { recorder, fills, selects, captures };
 }
+
+/** A search on the fake page: each attempt observes the field (el[1], el[3], …), then its Search button (el[2], …). */
+const searchRoles = (selector: string) => {
+  const n = Number(/el\[(\d+)\]$/.exec(selector)?.[1] ?? 0);
+  return n % 2 === 1 ? { role: "searchbox", name: "Search products", text: null } : { role: "button", name: "Search", text: "Search" };
+};
 
 function memoryStore() {
   const steps: ExplorationStep[] = [];
@@ -406,7 +412,8 @@ describe("runExploration (fake explorer)", () => {
       actOn: () => ({ message: `logged in with ${SECRET}` }),
     });
     const { recorder, fills } = fakeRecorder({
-      describe: () => ({ role: "button", name: "Log in", text: `Log in ${SECRET}` }),
+      // f[1] and f[2] are the email and password fields, f[3] the Log in button.
+      describe: (selector) => (/f\[[12]\]$/.test(selector) ? { role: "textbox", name: "Email or password", text: null } : { role: "button", name: "Log in", text: `Log in ${SECRET}` }),
       dom: { greeting: `Welcome back, ${SECRET}` },
     });
     const mem = memoryStore();
@@ -727,7 +734,7 @@ describe("runExploration (fake explorer)", () => {
   it("search: our code fills the query (literal inputRef), then the submit control is clicked", async () => {
     const { ctx } = fakeCtx();
     const session = new FakeSession();
-    const { recorder, fills } = fakeRecorder({ describe: () => ({ role: "button", name: "Search", text: "Search" }) });
+    const { recorder, fills } = fakeRecorder({ describe: searchRoles });
     const plan = planOf(step("navigate", "Open"), step("search", "Search for the product", { inputRef: { source: "literal", key: "iPhone 17 Pro" } }));
     const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
     expect(summary(outcome.steps)).toEqual([
@@ -772,7 +779,7 @@ describe("runExploration (fake explorer)", () => {
     const session = new FakeSession({ actOn: (_el, n) => (n === 0 ? { success: false, message: "submit did nothing" } : {}) });
     const mem = memoryStore();
     const plan = planOf(step("navigate", "Open"), step("search", "Search for the product", { inputRef: { source: "literal", key: "iPhone 17 Pro" } }));
-    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder({ describe: () => ({ role: "button", name: "Search", text: "Search" }) }).recorder });
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder({ describe: searchRoles }).recorder });
 
     expect(outcome.stopReason).toBe("COMPLETED");
     expect(summary(outcome.steps)).toEqual([
@@ -940,6 +947,27 @@ describe("runExploration (fake explorer)", () => {
     expect(failed.steps.filter((s) => s.kind === "act").map((s) => [s.outcome, s.onGoldenPath])).toEqual([
       ["SUCCESS", false],
       ["SUCCESS", false],
+    ]);
+  });
+
+  it("a fill that finds a button asks once more for the text field itself (KI-001)", async () => {
+    // "Search the shop for the term entered in the search field": the explorer returned the Search button twice.
+    const { ctx } = fakeCtx();
+    const button = { selector: "xpath=/html[1]/body[1]/form[1]/button[1]", description: "Search", method: "click", arguments: [] };
+    const field = { selector: "xpath=/html[1]/body[1]/form[1]/input[1]", description: "Search products", method: "fill", arguments: [] };
+    const session = new FakeSession({
+      observe: (instruction) => (instruction.startsWith("Find the text field to type into") ? [field] : instruction.startsWith("Find the button that submits") ? [button] : [button]),
+    });
+    const roles: Record<string, string> = { [button.selector]: "button", [field.selector]: "searchbox" };
+    const { recorder, fills } = fakeRecorder({ describe: (selector) => ({ role: roles[selector] ?? "button", name: null, text: null }) });
+    const plan = planOf(step("navigate", "Open"), step("search", "Search the shop for the term entered in the search field", { inputRef: { source: "literal", key: "iPhone" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(fills).toEqual([{ selector: field.selector, value: "iPhone" }]);
+    expect(outcome.steps.filter((s) => s.kind === "observe").map((s) => s.instruction.split(":")[0])).toEqual([
+      "Search the shop for the term entered in the search field",
+      "Find the text field to type into, not a button or link",
+      "Find the button that submits this search, not the text field the query was typed into",
     ]);
   });
 

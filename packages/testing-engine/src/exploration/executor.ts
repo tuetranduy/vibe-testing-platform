@@ -635,6 +635,13 @@ class ExplorationRun {
       located = opened;
     }
     if (!located) return "failed";
+    // A button is never the field (the explorer returned a search's Search button for its query, KI-001): ask once
+    // for the text field itself.
+    if (located.info.role === "button") {
+      const field = await this.locate(step, `Find the text field to type into, not a button or link: ${step.description}`);
+      if (!field || field.info.role === "button" || field.info.role === "link") return "failed";
+      located = field;
+    }
     // A link is the way to the field (e.g. "Search the catalog" on a page without a search box points at the
     // Products link, KI-001): follow it once, then look for the field on that page. Never type into a link.
     if (located.info.role === "link") {
