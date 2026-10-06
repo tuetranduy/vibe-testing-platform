@@ -662,10 +662,13 @@ describe("runExploration (fake explorer)", () => {
     const plan = planOf(step("navigate", "Open"), step("click", "Click Add to cart"), step("capture_checkpoint", "Capture", { checkpoint: "after_add" }));
     const outcome = await runExploration(ctx, { plan, requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
     expect(outcome.stopReason).toBe("COMPLETED");
+    // Each attempt: the element, then the way to it (KI-001); nothing found either time.
     expect(summary(outcome.steps)).toEqual([
       [0, "navigate", "PS-1", "SUCCESS", true],
       [1, "observe", "PS-2", "FAILED", false],
       [2, "observe", "PS-2", "FAILED", false],
+      [3, "observe", "PS-2", "FAILED", false],
+      [4, "observe", "PS-2", "FAILED", false],
     ]);
     expect(outcome.facts).toEqual([]);
     expect(session.ops()).not.toContain("extract");
@@ -938,6 +941,34 @@ describe("runExploration (fake explorer)", () => {
       ["SUCCESS", false],
       ["SUCCESS", false],
     ]);
+  });
+
+  it("a click with nothing to click on the page asks once for the way there, follows it and clicks (KI-001)", async () => {
+    // After logging in, the plan clicks a product link the account page does not show; the Products link leads to it.
+    const { ctx } = fakeCtx();
+    const products = { selector: "xpath=/html[1]/body[1]/header[1]/a[1]", description: "Products link", method: "click", arguments: [] };
+    const product = { selector: "xpath=/html[1]/body[1]/main[1]/a[3]", description: "Galaxy S27", method: "click", arguments: [] };
+    let onProducts = false;
+    const session = new FakeSession({
+      observe: (instruction) => (instruction.startsWith("Find the link or button that leads to") ? [products] : onProducts ? [product] : []),
+      actOn: (el) => {
+        if (el.selector === products.selector) onProducts = true;
+        return {};
+      },
+    });
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the Galaxy S27 product link"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "FAILED", false],
+      [2, "observe", "PS-2", "SUCCESS", false],
+      [3, "act", "PS-2", "SUCCESS", true],
+      [4, "observe", "PS-2", "SUCCESS", false],
+      [5, "act", "PS-2", "SUCCESS", true],
+    ]);
+    expect(outcome.steps[2]!.instruction).toBe("Find the link or button that leads to where you can: Click the Galaxy S27 product link");
+    expect(session.calls.filter((c) => c.op === "actOn").map((c) => (c.arg as { selector: string }).selector)).toEqual([products.selector, product.selector]);
   });
 
   it("a fill with no field on the page asks once for the way to its form, opens it and fills there (KI-001)", async () => {

@@ -57,7 +57,8 @@ import { describeElement, elementAction, fillElement, recordElement, selectEleme
  *                destructive actions allowed, a destructive element only for a destructive step) → `actOn(element)` with method `click` and no
  *                arguments (deterministic, zero model calls; model-chosen arguments are never
  *                replayed). `other` may keep a non-value method (hover, double click, scroll into
- *                view). Recorded: `observe` + `act`.
+ *                view). Recorded: `observe` + `act`. Nothing to click on the page: the explorer is asked once for
+ *                the link or button that leads there, which is clicked (policy-checked) before looking again.
  * - fill         Value from `inputRef` (testData / secret via `ctx.secrets.get` / literal) →
  *                `observe(description)` → policy check → the recorder's deterministic `fill`. An observed link
  *                (the way to the field) is clicked once (policy-checked, recorded `act`) and the field observed
@@ -560,7 +561,17 @@ class ExplorationRun {
    * nothing, so the attempt fails instead of recording a search that never ran.
    */
   private async act(step: PlannedStep, observeInstruction = step.description, searchField?: string): Promise<Attempt> {
-    const located = await this.locate(step, observeInstruction);
+    let located = await this.locate(step, observeInstruction);
+    // Nothing to click on this page (e.g. a product link after the login opened the account page, KI-001): ask once
+    // for the way there, follow it (policy-checked) and look again. Not for a search's submit control.
+    if (!located && searchField === undefined && observeInstruction === step.description) {
+      const instruction = `Find the link or button that leads to where you can: ${step.description}`;
+      const way = await this.locate(step, instruction);
+      if (!way) return "failed";
+      const followed = await this.click(step, instruction, way);
+      if (followed !== "ok") return followed;
+      located = await this.locate(step, observeInstruction);
+    }
     if (!located) return "failed";
     const instruction = observeInstruction;
     if (searchField !== undefined && located.element.selector === searchField) {
