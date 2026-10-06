@@ -416,6 +416,8 @@ describe("planTest — model contract (one correction round, then ContractError)
       ContractError,
     );
     expect(lastCorrection(transport)).toMatch(/2 login steps.*at most one/);
+    // The correction says how to log in again (KI-001: Flash re-planned two logins after "at most one" alone).
+    expect(lastCorrection(transport)).toMatch(/to log in again .*start a new scenario/i);
   });
 
   it("more than 50 steps → correction → ContractError", async () => {
