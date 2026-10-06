@@ -896,6 +896,45 @@ describe("runExploration (fake explorer)", () => {
     expect(plain.calls.find((c) => c.op === "extract")!.arg as string).not.toMatch(/in place of the list/);
   });
 
+  it("a fill that finds a link (the way to the field) follows it once and fills the field there (KI-001)", async () => {
+    // e.g. "Search the catalog" on a page without a search box: the explorer points at the "Products" link.
+    const { ctx } = fakeCtx();
+    const link = { selector: "xpath=/html[1]/body[1]/header[1]/a[1]", description: "Products link", method: "click", arguments: [] };
+    const field = { selector: "xpath=/html[1]/body[1]/form[1]/input[1]", description: "Search products", method: "fill", arguments: [] };
+    const submit = { selector: "xpath=/html[1]/body[1]/form[1]/button[1]", description: "Search", method: "click", arguments: [] };
+    const session = new FakeSession({ observe: (instruction, n) => (instruction.startsWith("Find the button") ? [submit] : n === 0 ? [link] : [field]) });
+    const roles: Record<string, string> = { [link.selector]: "link", [field.selector]: "searchbox", [submit.selector]: "button" };
+    const { recorder, fills } = fakeRecorder({ describe: (selector) => ({ role: roles[selector] ?? "button", name: null, text: null }) });
+    const plan = planOf(step("navigate", "Open"), step("search", "Search the catalog for the Galaxy S27", { inputRef: { source: "literal", key: "Galaxy S27" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "SUCCESS", false],
+      [2, "act", "PS-2", "SUCCESS", true],
+      [3, "observe", "PS-2", "SUCCESS", false],
+      [4, "fill", "PS-2", "SUCCESS", true],
+      [5, "observe", "PS-2", "SUCCESS", false],
+      [6, "act", "PS-2", "SUCCESS", true],
+    ]);
+    expect(fills).toEqual([{ selector: field.selector, value: "Galaxy S27" }]);
+    expect((session.calls.filter((c) => c.op === "actOn")[0]!.arg as { selector: string }).selector).toBe(link.selector);
+
+    // A link again on the next page: the fill fails as before (no second hop).
+    const { ctx: ctx2 } = fakeCtx();
+    const loop = new FakeSession({ observe: () => [link] });
+    const failed = await runExploration(ctx2, { plan, requirement: requirementWith([]), session: loop, budget: ctx2.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(failed.steps.filter((s) => s.kind === "fill").map((s) => [s.outcome, s.error])).toEqual([
+      ["FAILED", "The field resolved to a link again after following one"],
+      ["FAILED", "The field resolved to a link again after following one"],
+    ]);
+    // One hop per attempt (a step gets one retry); a failed search attempt's steps are not on the golden path.
+    expect(failed.steps.filter((s) => s.kind === "act").map((s) => [s.outcome, s.onGoldenPath])).toEqual([
+      ["SUCCESS", false],
+      ["SUCCESS", false],
+    ]);
+  });
+
   it("a wait_for whose element never appears is recorded as failed and exploration goes on (KI-001)", async () => {
     // e.g. "Wait for the cart page to load": no element to find, but the page is there. The checkpoint's facts
     // decide the criteria; a step that needed the missing element fails on its own.

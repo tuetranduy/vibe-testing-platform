@@ -59,7 +59,9 @@ import { describeElement, elementAction, fillElement, recordElement, selectEleme
  *                replayed). `other` may keep a non-value method (hover, double click, scroll into
  *                view). Recorded: `observe` + `act`.
  * - fill         Value from `inputRef` (testData / secret via `ctx.secrets.get` / literal) →
- *                `observe(description)` → policy check → the recorder's deterministic `fill`.
+ *                `observe(description)` → policy check → the recorder's deterministic `fill`. An observed link
+ *                (the way to the field) is clicked once (policy-checked, recorded `act`) and the field observed
+ *                again there; a second link fails the attempt.
  *                Recorded: `observe` + `fill` (with `inputRef`, never the value). The model never
  *                types: no value is ever passed to `act()` / `actOn()`.
  * - select       With `inputRef`: like `fill`, but the recorder selects the option (recorded as kind
@@ -570,6 +572,11 @@ class ExplorationRun {
       });
       return "failed";
     }
+    return this.click(step, instruction, located);
+  }
+
+  /** Clicks a located element: the action policy first, then the explorer; recorded as an `act` step. */
+  private async click(step: PlannedStep, instruction: string, located: Located): Promise<Attempt> {
     await this.enforcePolicy(step, instruction, located, "act");
 
     await this.reserve();
@@ -604,8 +611,31 @@ class ExplorationRun {
 
   /** `field`, when given, receives the selector of the element filled. */
   private async fill(step: PlannedStep, value: string, how: "fill" | "select", field?: { selector?: string }): Promise<Attempt> {
-    const located = await this.locate(step, step.description);
+    let located = await this.locate(step, step.description);
     if (!located) return "failed";
+    // A link is the way to the field (e.g. "Search the catalog" on a page without a search box points at the
+    // Products link, KI-001): follow it once, then look for the field on that page. Never type into a link.
+    if (located.info.role === "link") {
+      const followed = await this.click(step, step.description, located);
+      if (followed !== "ok") return followed;
+      located = await this.locate(step, step.description);
+      if (!located) return "failed";
+      if (located.info.role === "link") {
+        await this.reserve();
+        await this.record({
+          plannedStepId: step.id,
+          kind: "fill",
+          instruction: step.description,
+          element: located.ref,
+          inputRef: step.inputRef ?? null,
+          urlBefore: this.url(),
+          startedAt: this.ctx.now(),
+          outcome: "FAILED",
+          error: "The field resolved to a link again after following one",
+        });
+        return "failed";
+      }
+    }
     if (field) field.selector = located.element.selector;
     await this.enforcePolicy(step, step.description, located, "fill");
 
