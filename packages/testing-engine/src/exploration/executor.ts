@@ -63,6 +63,8 @@ import { describeElement, elementAction, fillElement, recordElement, selectEleme
  *                (the way to the field) is clicked once (policy-checked, recorded `act`) and the field observed
  *                again there; a second link fails the attempt. A secret the model finds no field for goes into
  *                the page's only visible password field (recorded `observe`, no model call), if there is exactly one.
+ *                No field at all: the explorer is asked once for the link or button that opens the form, which is
+ *                clicked (policy-checked) before the field is looked for again.
  *                Recorded: `observe` + `fill` (with `inputRef`, never the value). The model never
  *                types: no value is ever passed to `act()` / `actOn()`.
  * - select       With `inputRef`: like `fill`, but the recorder selects the option (recorded as kind
@@ -614,9 +616,13 @@ class ExplorationRun {
 
   /** `field`, when given, receives the selector of the element filled. */
   private async fill(step: PlannedStep, value: string, how: "fill" | "select", field?: { selector?: string }): Promise<Attempt> {
-    let located = await this.locate(step, step.description);
-    // A secret the model finds no field for: the page's only visible password field, found without the model (KI-001).
-    if (!located && step.inputRef?.source === "secret") located = await this.onlyPasswordField(step);
+    let located = await this.findField(step);
+    // No field on this page (e.g. credentials planned on the start page, KI-001): ask once for the way to its form.
+    if (!located) {
+      const opened = await this.openForm(step);
+      if (typeof opened === "string") return opened;
+      located = opened;
+    }
     if (!located) return "failed";
     // A link is the way to the field (e.g. "Search the catalog" on a page without a search box points at the
     // Products link, KI-001): follow it once, then look for the field on that page. Never type into a link.
@@ -668,6 +674,27 @@ class ExplorationRun {
     }
     await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true });
     return "ok";
+  }
+
+  /** The fill's field: the explorer's answer, else, for a secret, the page's only visible password field (KI-001). */
+  private async findField(step: PlannedStep): Promise<Located | null> {
+    const located = await this.locate(step, step.description);
+    if (located || step.inputRef?.source !== "secret") return located;
+    return this.onlyPasswordField(step);
+  }
+
+  /**
+   * When a fill finds no field on the page: the link or button that opens its page or form, clicked (policy-checked,
+   * a recorded act), then the field looked for there. Once per attempt; null when nothing opens it or the field is
+   * still missing, an Attempt when the click itself did not succeed.
+   */
+  private async openForm(step: PlannedStep): Promise<Located | null | Exclude<Attempt, "ok">> {
+    const instruction = `Find the link or button that opens the page or form with the field for: ${step.description}`;
+    const way = await this.locate(step, instruction);
+    if (!way) return null;
+    const clicked = await this.click(step, instruction, way);
+    if (clicked !== "ok") return clicked;
+    return this.findField(step);
   }
 
   /**

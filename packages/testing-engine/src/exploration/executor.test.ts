@@ -940,6 +940,43 @@ describe("runExploration (fake explorer)", () => {
     ]);
   });
 
+  it("a fill with no field on the page asks once for the way to its form, opens it and fills there (KI-001)", async () => {
+    // The plan types the email on the start page; the login form is behind the "Log in" link.
+    const { ctx } = fakeCtx({ testData: { email: "qa@demo.test" } });
+    const login = { selector: "xpath=/html[1]/body[1]/header[1]/a[2]", description: "Log in link", method: "click", arguments: [] };
+    const email = { selector: "xpath=/html[1]/body[1]/form[1]/input[1]", description: "Email", method: "fill", arguments: [] };
+    let opened = false;
+    const session = new FakeSession({
+      observe: (instruction) => (instruction.startsWith("Find the link or button that opens") ? [login] : opened ? [email] : []),
+      actOn: () => {
+        opened = true;
+        return {};
+      },
+    });
+    const roles: Record<string, string> = { [login.selector]: "link", [email.selector]: "textbox" };
+    const { recorder, fills } = fakeRecorder({ describe: (selector) => ({ role: roles[selector] ?? "button", name: null, text: null }) });
+    const plan = planOf(step("navigate", "Open"), step("fill", "Type the email into the login email field", { inputRef: { source: "testData", key: "email" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "FAILED", false],
+      [2, "observe", "PS-2", "SUCCESS", false],
+      [3, "act", "PS-2", "SUCCESS", true],
+      [4, "observe", "PS-2", "SUCCESS", false],
+      [5, "fill", "PS-2", "SUCCESS", true],
+    ]);
+    expect(outcome.steps[2]!.instruction).toBe("Find the link or button that opens the page or form with the field for: Type the email into the login email field");
+    expect(fills).toEqual([{ selector: email.selector, value: "qa@demo.test" }]);
+
+    // Nothing that opens it either: the attempt fails with one extra lookup, no click.
+    const { ctx: ctx2 } = fakeCtx({ testData: { email: "qa@demo.test" } });
+    const nothing = new FakeSession({ observe: () => [] });
+    const failed = await runExploration(ctx2, { plan, requirement: requirementWith([]), session: nothing, budget: ctx2.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(nothing.ops().filter((o) => o === "actOn")).toEqual([]);
+    expect(failed.steps.filter((s) => s.kind === "observe").map((s) => s.outcome)).toEqual(["FAILED", "FAILED", "FAILED", "FAILED"]);
+  });
+
   it("a secret fill the model finds no field for uses the page's only visible password field (KI-001)", async () => {
     // Flash answered "no element" for "Type the user's password into the password field" on a login page.
     const plan = planOf(step("navigate", "Open"), step("fill", "Type the password into the password field", { inputRef: { source: "secret", key: "password" } }));
