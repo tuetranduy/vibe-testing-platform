@@ -61,7 +61,8 @@ import { describeElement, elementAction, fillElement, recordElement, selectEleme
  * - fill         Value from `inputRef` (testData / secret via `ctx.secrets.get` / literal) →
  *                `observe(description)` → policy check → the recorder's deterministic `fill`. An observed link
  *                (the way to the field) is clicked once (policy-checked, recorded `act`) and the field observed
- *                again there; a second link fails the attempt.
+ *                again there; a second link fails the attempt. A secret the model finds no field for goes into
+ *                the page's only visible password field (recorded `observe`, no model call), if there is exactly one.
  *                Recorded: `observe` + `fill` (with `inputRef`, never the value). The model never
  *                types: no value is ever passed to `act()` / `actOn()`.
  * - select       With `inputRef`: like `fill`, but the recorder selects the option (recorded as kind
@@ -189,6 +190,8 @@ export async function clearBrowserState(page: Page, targetUrl: string): Promise<
 const MAX_ATTEMPTS = 2; // one retry per planned step
 const WAIT_FOR_POLLS = 3;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
+/** A secret fill's fallback when the model finds no field: the page's only visible password field. */
+const PASSWORD_FIELD = 'input[type="password"] >> visible=true';
 /**
  * How a list fact reads a message shown in place of its list (KI-001): as the list's only item, as the fact
  * reader reads that message's element (`text_list`), so an empty cart is evidence a "contains" check can FAIL on.
@@ -612,6 +615,8 @@ class ExplorationRun {
   /** `field`, when given, receives the selector of the element filled. */
   private async fill(step: PlannedStep, value: string, how: "fill" | "select", field?: { selector?: string }): Promise<Attempt> {
     let located = await this.locate(step, step.description);
+    // A secret the model finds no field for: the page's only visible password field, found without the model (KI-001).
+    if (!located && step.inputRef?.source === "secret") located = await this.onlyPasswordField(step);
     if (!located) return "failed";
     // A link is the way to the field (e.g. "Search the catalog" on a page without a search box points at the
     // Products link, KI-001): follow it once, then look for the field on that page. Never type into a link.
@@ -665,6 +670,35 @@ class ExplorationRun {
     return "ok";
   }
 
+  /**
+   * The page's only visible password field, located deterministically and recorded as an `observe` without a model
+   * call; null when there is not exactly one. Only for a fill that types a secret: our recorder still types it, and
+   * the action policy still checks the field.
+   */
+  private async onlyPasswordField(step: PlannedStep): Promise<Located | null> {
+    let ref: ElementRef;
+    let info: Located["info"];
+    try {
+      ref = await this.recorder.record(this.page, PASSWORD_FIELD);
+      info = await this.recorder.describe(this.page, PASSWORD_FIELD);
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      return null;
+    }
+    await this.reserve();
+    await this.record({
+      plannedStepId: step.id,
+      kind: "observe",
+      instruction: `${step.description} (the page's only password field)`,
+      urlBefore: this.url(),
+      startedAt: this.ctx.now(),
+      outcome: "SUCCESS",
+      element: ref,
+      llm: null,
+    });
+    return { element: { selector: PASSWORD_FIELD, description: "the page's only password field", method: "fill", arguments: [] }, ref, info };
+  }
+
   private async checkpoint(step: PlannedStep): Promise<Attempt> {
     const checkpoint = step.checkpoint!;
     const requests = this.input.requirement.facts.filter((f) => f.checkpoint === checkpoint);
@@ -675,7 +709,7 @@ class ExplorationRun {
       await this.reserve();
       const startedAt = this.ctx.now();
       const instruction = [
-        "Read these values from the current page. Use null for a value that is not shown.",
+        "Read these values from the current page: the text the page shows, never element ids. Use null for a value that is not shown.",
         ...(requests.some((r) => r.valueType === "string_list") ? [LIST_IN_PLACE_RULE] : []),
         ...requests.map((r) => `- ${r.key}: ${r.description} (${r.valueType})`),
       ].join("\n");

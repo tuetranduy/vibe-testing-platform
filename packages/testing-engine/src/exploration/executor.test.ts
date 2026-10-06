@@ -117,6 +117,8 @@ interface FakeRecorderOptions {
   describe?: (selector: string) => { role: string | null; name: string | null; text: string | null };
   /** DOM readings per fact key (default: equal to the model value). */
   dom?: Record<string, unknown>;
+  /** Whether a selector matches exactly one element (default: every selector does). */
+  unique?: (selector: string) => boolean;
 }
 
 function fakeRecorder(opts: FakeRecorderOptions = {}) {
@@ -129,6 +131,7 @@ function fakeRecorder(opts: FakeRecorderOptions = {}) {
       return opts.describe?.(selector) ?? { role: "button", name: "Add to cart", text: "Add to cart" };
     },
     async record(_page, selector) {
+      if (opts.unique && !opts.unique(selector)) throw new Error("recorder: selector must match exactly one element (matched 0)");
       return ref(selector);
     },
     async fill(_page, selector, value) {
@@ -886,6 +889,8 @@ describe("runExploration (fake explorer)", () => {
     await runExploration(ctx, { plan, requirement: requirementWith([cartItems, cartCount]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
     const extract = session.calls.find((c) => c.op === "extract")!.arg as string;
     expect(extract).toMatch(/message in place of the list .* its only item/i);
+    // Stagehand's element ids ("0-128") are not page text (KI-001).
+    expect(extract).toMatch(/the text the page shows, never element ids/i);
     const observes = session.calls.filter((c) => c.op === "observe").map((c) => c.arg as string);
     expect(observes.find((o) => o.includes("The products listed in the cart"))).toMatch(/or the message shown in its place/i);
     expect(observes.find((o) => o.includes("The cart badge count"))).not.toMatch(/in its place/);
@@ -933,6 +938,38 @@ describe("runExploration (fake explorer)", () => {
       ["SUCCESS", false],
       ["SUCCESS", false],
     ]);
+  });
+
+  it("a secret fill the model finds no field for uses the page's only visible password field (KI-001)", async () => {
+    // Flash answered "no element" for "Type the user's password into the password field" on a login page.
+    const plan = planOf(step("navigate", "Open"), step("fill", "Type the password into the password field", { inputRef: { source: "secret", key: "password" } }));
+    const noModelAnswer = () => new FakeSession({ observe: () => [] });
+
+    const { ctx } = fakeCtx({ secrets: { password: SECRET } });
+    const { recorder, fills } = fakeRecorder({ describe: () => ({ role: "textbox", name: "Password", text: null }) });
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session: noModelAnswer(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "FAILED", false],
+      [2, "observe", "PS-2", "SUCCESS", false],
+      [3, "fill", "PS-2", "SUCCESS", true],
+    ]);
+    expect(outcome.steps[2]).toMatchObject({ instruction: expect.stringContaining("the page's only password field"), llm: null });
+    expect(fills).toEqual([{ selector: 'input[type="password"] >> visible=true', value: SECRET }]);
+
+    // Not exactly one password field, or a value that is not a secret: no fallback, the fill fails as before.
+    const { ctx: two } = fakeCtx({ secrets: { password: SECRET } });
+    const several = fakeRecorder({ unique: (selector) => !selector.includes("password") });
+    const none = await runExploration(two, { plan, requirement: requirementWith([]), session: noModelAnswer(), budget: two.budgetSignal(1) }, { store: memoryStore().store, recorder: several.recorder });
+    expect(several.fills).toEqual([]);
+    expect(none.steps.filter((s) => s.kind === "fill")).toEqual([]);
+
+    const { ctx: data } = fakeCtx({ testData: { email: "qa@demo.test" } });
+    const typed = fakeRecorder();
+    const emailPlan = planOf(step("navigate", "Open"), step("fill", "Type the email", { inputRef: { source: "testData", key: "email" } }));
+    await runExploration(data, { plan: emailPlan, requirement: requirementWith([]), session: noModelAnswer(), budget: data.budgetSignal(1) }, { store: memoryStore().store, recorder: typed.recorder });
+    expect(typed.fills).toEqual([]);
   });
 
   it("a wait_for whose element never appears is recorded as failed and exploration goes on (KI-001)", async () => {
