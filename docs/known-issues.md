@@ -46,7 +46,7 @@ green on DeepSeek) and KI-025 / KI-036 (they need the branch pushed to GitHub) a
 | KI-028 | Low | Audit | Revealing a secret-bearing artifact is only a log line | Resolved `6026592` (V1.1) |
 | KI-029 | Low | Isolation | The rerun runner is a worker child process; its image was never built | Resolved `1e2081d`, `ca9ef74` |
 | KI-030 | Low | Docs | Stale plan copy in `Claude outputs/`; architecture doc never added | Resolved `08d29b0` |
-| KI-031 | Medium | LLM quality | The planner's multi-scenario prompt (V1.1) has never run against a real model | Open (needs paid keys) |
+| KI-031 | Medium | LLM quality | The planner's multi-scenario prompt (V1.1) has never run against a real model | Resolved for DeepSeek Flash (2026-10-06); other models with KI-026 |
 | KI-032 | Low | Exploration | The exploration cache trusts a lookup whose locator still matches | Resolved `66f5afd` |
 | KI-033 | Low | Secrets | Saved credential profiles are decrypted by the API at run creation | Closed: decision (2026-09-30) |
 | KI-034 | Low | Users | Sessions: no list, no "sign out everywhere" short of a password change | Resolved `9a5bfa0` |
@@ -441,6 +441,12 @@ green on DeepSeek) and KI-025 / KI-036 (they need the branch pushed to GitHub) a
   two-scenario rerun pass, but no real model has produced a plan with this prompt: it may split too eagerly (costing
   time) or never.
 - **To close:** `pnpm eval planner` on every offered model (with KI-026), plus a golden case that needs two scenarios.
+- **Resolved for `deepseek-flash` (2026-10-06):** the golden case exists (planner case 15, signed-out and signed-in), and
+  the planner eval now scores every other case on exactly one scenario, so a split where none is needed counts as
+  splitting too eagerly. On Flash: case 15 planned as 2 scenarios in both runs, and none of the 28 one-scenario plans
+  was split (`evals/BASELINE.md`); `deepseek-v4-pro` also passed case 15 with thinking off. The live suite does not
+  cover it: its two-scenario spec (`platform-v11`) runs in CI mode only (scripted plan). The other offered models are
+  still unscored: they need paid keys (KI-026).
 
 ## KI-032 — The exploration cache trusts a lookup whose locator still matches
 - **Severity:** Low.

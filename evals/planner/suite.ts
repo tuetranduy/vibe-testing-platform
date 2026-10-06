@@ -45,8 +45,11 @@ export const PlannerEvalCaseSchema = z.object({
     inputRefs: z.array(InputRefSchema).default([]),
     /** Some step is flagged destructive (only meaningful when allowDestructive is true). */
     destructiveStep: z.boolean().default(false),
-    /** How many scenarios the plan may have (KI-031); absent: not checked. */
-    scenarios: z.object({ min: z.number().int().min(1), max: z.number().int().min(1) }).optional(),
+    /**
+     * How many scenarios the plan may have (KI-031). Default exactly one: only a case whose criteria need different
+     * starting states may split, so a split anywhere else is scored as splitting too eagerly.
+     */
+    scenarios: z.object({ min: z.number().int().min(1), max: z.number().int().min(1) }).default({ min: 1, max: 1 }),
   }),
 });
 export type PlannerEvalCase = z.infer<typeof PlannerEvalCaseSchema>;
@@ -107,7 +110,7 @@ export function scorePlan(c: PlannerEvalCase, plan: TestPlan): string[] {
   }
   if (c.expect.destructiveStep && !steps.some((s) => s.destructive)) failures.push("no step flagged destructive");
   const n = plan.scenarios.length;
-  if (c.expect.scenarios && (n < c.expect.scenarios.min || n > c.expect.scenarios.max)) {
+  if (n < c.expect.scenarios.min || n > c.expect.scenarios.max) {
     failures.push(`${n} scenarios, expected ${c.expect.scenarios.min}–${c.expect.scenarios.max}`);
   }
   return failures;
