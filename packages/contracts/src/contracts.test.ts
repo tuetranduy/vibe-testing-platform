@@ -205,6 +205,25 @@ describe("NormalizedRequirementSchema", () => {
     expect(r.success).toBe(true);
   });
 
+  it("a text check compares with a literal value or a test data key's value, exactly one (KI-001)", () => {
+    const withMatch = (match: Record<string, unknown>) => {
+      const req = requirement() as NormalizedRequirement;
+      (req.criteria[1]!.expectedOutcome as { match: unknown }).match = match;
+      return NormalizedRequirementSchema.safeParse(req);
+    };
+    expect(withMatch({ mode: "contains", testDataKey: "email" }).success).toBe(true);
+    expect(withMatch({ mode: "equals", testDataKey: "firstName", caseSensitive: true }).success).toBe(true);
+    expect(withMatch({ mode: "contains", value: "/cart" }).success).toBe(true);
+    for (const bad of [
+      { mode: "contains" }, // neither
+      { mode: "contains", value: "x", testDataKey: "email" }, // both
+      { mode: "regex", testDataKey: "email" }, // a pattern is always written out
+      { mode: "contains", testDataKey: "not a key" },
+    ]) {
+      expect(withMatch(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
   it("rejects a FactRef that points to an undeclared fact", () => {
     const req = requirement() as NormalizedRequirement;
     (req.criteria[0]!.expectedOutcome as { left: { key: string } }).left.key = "badgeCount";

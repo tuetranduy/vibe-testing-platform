@@ -337,6 +337,13 @@ describe("text_matches", () => {
     expect(statusOf(run(match("equals", "3"), { values: { title: null } }))).toEqual(["INCONCLUSIVE", "FACT_NOT_OBSERVED"]);
   });
 
+  it("a test data key the run has no value for (left unresolved) → BLOCKED / MISSING_TEST_DATA, never evaluated (KI-001)", () => {
+    const keyed = { kind: "text_matches", fact: title, match: { mode: "contains", testDataKey: "email", caseSensitive: false } } as const;
+    const r = run(keyed, { values: { title: "qa@demo.test" } });
+    expect(statusOf(r)).toEqual(["BLOCKED", "MISSING_TEST_DATA"]);
+    expect(r).toMatchObject({ expected: 'Page title cart page contains the test data value "email"', actual: 'The test data value "email" was not provided' });
+  });
+
   it("builds expected / actual from templates", () => {
     expect(run(match("contains", "confirmed"), { values: { title: "Order confirmed" } })).toMatchObject({
       expected: 'Page title cart page contains "confirmed"',
@@ -616,6 +623,34 @@ describe("provenance and output", () => {
   });
 });
 
+describe("verifyStage and test data values (KI-001)", () => {
+  it("judges a text check against the run's value for its test data key", async () => {
+    const { verifyStage } = await import("./verify-stage");
+    const keyed = { kind: "text_matches" as const, fact: { key: "accountEmail", checkpoint: "account_page" }, match: { mode: "contains" as const, testDataKey: "email", caseSensitive: false } };
+    const requirement: NormalizedRequirement = {
+      runId: "run_1",
+      revision: 1,
+      originalText: "The account page shows the user's email.",
+      criteria: [{ ...criterion(keyed), id: "AC-1", sourceText: "The account page shows the user's email." }],
+      facts: [{ key: "accountEmail", checkpoint: "account_page", description: "Signed-in email", valueType: "string" }],
+      confirmedAt: "2026-10-05T10:00:00.000Z",
+    };
+    const plan: TestPlan = {
+      runId: "run_1",
+      requirementRevision: 1,
+      scenarios: [{ id: "SC-1", title: "a", criterionIds: ["AC-1"], steps: [{ id: "PS-1", kind: "capture_checkpoint", description: "Capture", checkpoint: "account_page", criterionIds: ["AC-1"], destructive: false }] }],
+      blockedCriteria: [],
+      stopConditions: [],
+    };
+    const shown = (value: string): ObservedFact => ({ key: "accountEmail", checkpoint: "account_page", value, provenance: "DOM_VERIFIED", read: { element: { candidates: [{ strategy: "testId", value: "e" }], chosenIndex: 0, framePath: [] }, mode: "text" }, stepId: "s1" });
+    const judge = (testData: Record<string, string>, value: string) =>
+      verifyStage({ redact: (v: unknown) => v, request: { testData } } as unknown as Parameters<typeof verifyStage>[0], requirement, plan, { steps: [], facts: [shown(value)], stopReason: "COMPLETED" })[0]!;
+    expect(judge({ email: "qa@demo.test" }, "Signed in as qa@demo.test")).toMatchObject({ status: "PASS", expected: 'Account email account page contains "qa@demo.test"' });
+    expect(judge({ email: "qa@demo.test" }, "Signed in as other@demo.test")).toMatchObject({ status: "FAIL" });
+    expect(judge({}, "Signed in as qa@demo.test")).toMatchObject({ status: "BLOCKED", reason: "MISSING_TEST_DATA" });
+  });
+});
+
 describe("verifyStage with several scenarios (V1.1 F9)", () => {
   it("judges each criterion on its own scenario's stop reason and steps", async () => {
     const { verifyStage } = await import("./verify-stage");
@@ -645,7 +680,7 @@ describe("verifyStage with several scenarios (V1.1 F9)", () => {
       stopConditions: [],
     };
     const bannerFact: ObservedFact = { key: "banner", checkpoint: "home", value: true, provenance: "DOM_VERIFIED", read: { element: { candidates: [{ strategy: "testId", value: "b" }], chosenIndex: 0, framePath: [] }, mode: "visible" }, stepId: "s1" };
-    const ctx = { redact: (v: unknown) => v } as unknown as Parameters<typeof verifyStage>[0];
+    const ctx = { redact: (v: unknown) => v, request: { testData: {} } } as unknown as Parameters<typeof verifyStage>[0];
     const results = verifyStage(ctx, requirement, plan, {
       steps: [],
       facts: [bannerFact],

@@ -167,6 +167,12 @@ describe("applyCriteriaEdit", () => {
       ["facts", 0],
     ],
     [
+      "a literal replaced by a test data key (KI-001)",
+      () =>
+        bodyWith("AC-2", (c) => ({ ...c, expectedOutcome: { ...outcomeOf(c, "text_matches"), match: { mode: "contains" as const, testDataKey: "email", caseSensitive: false } } })),
+      ["criteria", 1, "expectedOutcome"],
+    ],
+    [
       "an edited regex that does not compile",
       () =>
         bodyWith("AC-2", (c) => ({ ...c, expectedOutcome: { ...outcomeOf(c, "text_matches"), match: { mode: "regex" as const, value: "(", caseSensitive: false } } })),
@@ -178,6 +184,21 @@ describe("applyCriteriaEdit", () => {
     if (r.ok) return;
     expect(r.code).toBe("VALIDATION_FAILED");
     expect(r.issues.map((i) => i.path)).toContainEqual(path);
+  });
+
+  it("a check against a test data value keeps its key; its mode and case can change (KI-001)", () => {
+    const keyed = criterion("AC-2", { kind: "text_matches", fact: ref("message", "after_add"), match: { mode: "contains", testDataKey: "greeting", caseSensitive: false } });
+    const l = { ...latest(), criteria: latest().criteria.map((c) => (c.id === "AC-2" ? keyed : c)) };
+    const withMatch = (match: Record<string, unknown>) => ({ criteria: l.criteria.map((c) => (c.id === "AC-2" ? { ...c, expectedOutcome: { ...c.expectedOutcome, match } } : c)), facts: l.facts }) as never;
+
+    const exact = applyCriteriaEdit(l, withMatch({ mode: "equals", testDataKey: "greeting", caseSensitive: true }));
+    expect(exact.ok).toBe(true);
+    if (exact.ok) expect(exact.criteria[1]!.statement).toBe("Confirmation text (at “after add”) is exactly the test data value “greeting” (case-sensitive).");
+
+    for (const match of [{ mode: "contains", value: "added", caseSensitive: false }, { mode: "contains", testDataKey: "nickname", caseSensitive: false }]) {
+      const r = applyCriteriaEdit(l, withMatch(match));
+      expect(r.ok, JSON.stringify(match)).toBe(false);
+    }
   });
 
   it("reports rule violations before a wording-only change", () => {

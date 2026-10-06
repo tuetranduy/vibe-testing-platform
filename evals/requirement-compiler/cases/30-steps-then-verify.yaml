@@ -1,0 +1,15 @@
+id: steps-then-verify
+tags: [login, steps]
+# KI-001: the live injection case's requirement. "Log in" and "open the product page" are the way to what is verified
+# (the price), not criteria of their own; Flash made "the user logs in" an AI-judged criterion, so the run could never
+# PASS (2026-10-05).
+input: Log in, open the Galaxy S27 product page, and verify it shows the price $999.00.
+testDataKeys: [email]
+secretNames: [password]
+expect:
+  criteriaCount: { min: 1, max: 1 }
+  requiredOutcomeKinds:
+    - text_matches
+  forbiddenOutcomeKinds: [semantic]
+  mustFlagAmbiguous: false
+  mustNotFlagAmbiguous: true

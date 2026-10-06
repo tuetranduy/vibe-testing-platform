@@ -761,6 +761,19 @@ describe("createGenerateTestStage", () => {
     expect(published).toEqual([]);
   });
 
+  it("a text check's test data key is compiled as the run's value, kept in run-data.json (KI-001)", async () => {
+    const saved: { dataJson: string; source: string }[] = [];
+    const stage = createGenerateTestStage({ store: () => ({ save: async (t) => void saved.push(t) }) });
+    const input = stageInput();
+    const keyed = input.requirement.criteria.map((c) =>
+      c.id === "AC-3" ? { ...c, expectedOutcome: { kind: "text_matches" as const, fact: { key: "message", checkpoint: "after_add" }, match: { mode: "contains" as const, testDataKey: "greeting", caseSensitive: false } } } : c,
+    );
+    const test = await stage(ctxWith({ greeting: "Added to" }, []), { ...input, requirement: { ...input.requirement, criteria: keyed } });
+    expect(test?.compiledCriteria).toContain("AC-3");
+    expect(dataOf(saved[0]!.dataJson).criteria["AC-3"]).toMatchObject({ value: "Added to" });
+    expect(saved[0]!.source).not.toContain("Added to");
+  });
+
   it("nothing compilable → no generated test (null), nothing persisted", async () => {
     const saved: unknown[] = [];
     const stage = createGenerateTestStage({ store: () => ({ save: async (t) => void saved.push(t) }) });

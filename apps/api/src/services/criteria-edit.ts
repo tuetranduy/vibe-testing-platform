@@ -40,8 +40,10 @@ const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
 function fixedParts(o: ExpectedOutcome): unknown {
   switch (o.kind) {
     case "visible":
-    case "text_matches":
       return { kind: o.kind, fact: o.fact };
+    case "text_matches":
+      // A check against a test data value (KI-001) keeps its key: only a literal value is edited.
+      return { kind: o.kind, fact: o.fact, testDataKey: o.match.testDataKey ?? null };
     case "numeric_compare":
       return { kind: o.kind, left: o.left, right: typeof o.right === "number" ? "literal" : o.right };
     case "numeric_delta":
@@ -102,7 +104,7 @@ export function applyCriteriaEdit(latest: NormalizedRequirement, body: Pick<Norm
 
     const outcome = c.expectedOutcome;
     if (!same(outcome, before.expectedOutcome)) {
-      if (outcome.kind === "text_matches" && outcome.match.mode === "regex" && !compiles(outcome.match.value, outcome.match.caseSensitive)) {
+      if (outcome.kind === "text_matches" && outcome.match.mode === "regex" && !compiles(outcome.match.value ?? "", outcome.match.caseSensitive)) {
         invalid.push({ path: at("expectedOutcome", "match", "value"), message: "Not a valid pattern" });
         return;
       }

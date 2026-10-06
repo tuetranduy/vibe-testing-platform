@@ -120,13 +120,13 @@ export async function readTextList(locator: Locator, waitMs = READ_TIMEOUT_MS): 
   return items.map(collapse).filter(Boolean);
 }
 
-/** The text of the first itemSelector match inside each child element, collapsed; children without one dropped. */
+/** The text of each child element itemSelector matches, else of its first match inside the child, collapsed; children without one dropped. */
 export async function readItemTexts(locator: Locator, itemSelector: string, waitMs = READ_TIMEOUT_MS): Promise<string[] | null> {
   if (!(await single(locator, waitMs))) return null;
   const items = await locator.evaluate(
     (el, sel) =>
       Array.from(el.children)
-        .map((c) => c.querySelector(sel))
+        .map((c) => (c.matches(sel) ? c : c.querySelector(sel)))
         .map((n) => (n === null ? "" : n instanceof HTMLElement ? n.innerText : (n.textContent ?? ""))),
     itemSelector,
   );

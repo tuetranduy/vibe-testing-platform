@@ -20,23 +20,43 @@ export type PostValidation = { ok: true; draft: RequirementDraft } | { ok: false
  * Assemble the draft (ids AC-1…n), rewrite invented thresholds to `semantic`, then validate the
  * result with the shared schema. Schema issues (sourceText not verbatim, undeclared FactRef, …) are
  * returned for a correction round; the threshold rewrite is never a reason to retry.
+ *
+ * A text check against a test data value (KI-001) must name test data, never a secret (a correction round), and
+ * gets that key's `test_data` precondition when the model left it out, so a run without the value is BLOCKED.
  */
 export function postValidate(
   output: Pick<CompilerOutput, "criteria" | "facts">,
-  source: { originalText: string; testData: Record<string, TestDataValue> },
+  source: { originalText: string; testData: Record<string, TestDataValue>; secretNames?: readonly string[] },
 ): PostValidation {
   const assembled: RequirementDraft = {
     originalText: source.originalText,
     criteria: output.criteria.map((c, i) => ({ ...c, id: `AC-${i + 1}`, critical: true })),
     facts: output.facts,
   };
-  const draft = replaceUnstatedThresholds(assembled, statedNumbers(source.originalText, source.testData));
+  const draft = withTestDataPreconditions(replaceUnstatedThresholds(assembled, statedNumbers(source.originalText, source.testData)));
+  const secretIssues = draft.criteria.flatMap((c, i) => {
+    const key = c.expectedOutcome.kind === "text_matches" ? c.expectedOutcome.match.testDataKey : undefined;
+    return key !== undefined && (source.secretNames ?? []).includes(key)
+      ? [`criteria.${i}.expectedOutcome.match.testDataKey: "${key}" is a secret; a secret is never compared or shown, only test data`]
+      : [];
+  });
+  if (secretIssues.length > 0) return { ok: false, issues: secretIssues };
   const parsed = NormalizedRequirementSchema.safeParse({ ...draft, runId: "draft", revision: 1, confirmedAt: null });
   if (!parsed.success) {
     return { ok: false, issues: parsed.error.issues.map((i) => `${i.path.map(String).join(".") || "(root)"}: ${i.message}`) };
   }
   const { runId: _r, revision: _v, confirmedAt: _c, ...validated } = parsed.data;
   return { ok: true, draft: validated };
+}
+
+/** A text check's test data key comes with that key's `test_data` precondition (added when missing). */
+function withTestDataPreconditions(draft: RequirementDraft): RequirementDraft {
+  const criteria = draft.criteria.map((c): AcceptanceCriterion => {
+    const key = c.expectedOutcome.kind === "text_matches" ? c.expectedOutcome.match.testDataKey : undefined;
+    if (key === undefined || c.preconditions.some((p) => p.kind === "test_data" && p.ref === key)) return c;
+    return { ...c, preconditions: [...c.preconditions, { kind: "test_data", ref: key, description: `The test data value “${key}”` }] };
+  });
+  return { ...draft, criteria };
 }
 
 /**
@@ -79,7 +99,8 @@ function numbersIn(outcome: ExpectedOutcome): number[] {
     case "numeric_delta":
       return [outcome.delta];
     case "text_matches":
-      return outcome.match.mode === "regex" ? [] : numbersInText(outcome.match.value);
+      // A test data value is the user's, never invented.
+      return outcome.match.mode === "regex" || outcome.match.value === undefined ? [] : numbersInText(outcome.match.value);
     case "collection_contains":
       return typeof outcome.item === "string" ? numbersInText(outcome.item) : [];
     case "visible":

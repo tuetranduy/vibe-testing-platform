@@ -32,6 +32,12 @@ describe("describeExpectedOutcome", () => {
     );
   });
 
+  it("text_matches against a test data key names the key, never a value (KI-001)", () => {
+    expect(text({ kind: "text_matches", fact: at("heading", "results"), match: { mode: "contains", testDataKey: "email", caseSensitive: false } })).toBe(
+      "Search results heading (at “results”) contains the test data value “email” (ignoring case).",
+    );
+  });
+
   it("numeric_compare: every operator, against a fact or a number", () => {
     const left = at("cartCount", "after_add");
     const cases = [

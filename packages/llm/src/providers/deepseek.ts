@@ -168,9 +168,13 @@ function toResponse(data: ChatCompletionResponse, requestedModel: string): LlmTr
       retryable: reason === "insufficient_system_resource",
     });
   }
+  // JSON Output "may occasionally return empty content" (DeepSeek's documentation): the same request is retried,
+  // as for an overloaded server, rather than corrected; a correction round once got a second empty answer (KI-001).
+  const text = choice.message?.content ?? "";
+  if (text.trim() === "") throw new LlmTransportError(`The model returned an empty answer (${reason ?? "no finish reason"})`, { retryable: true });
   const u = data.usage ?? {};
   return {
-    text: choice.message?.content ?? "",
+    text,
     model: data.model ?? requestedModel,
     usage: { inputTokens: u.prompt_tokens ?? 0, outputTokens: u.completion_tokens ?? 0 },
   };

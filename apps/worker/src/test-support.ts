@@ -276,7 +276,8 @@ export function fakeExploration(opts: { facts?: Record<string, FakeFactValue> } 
   };
   const ref = { candidates: [{ strategy: "xpath" as const, selector: "/html[1]/body[1]/button[1]" }], chosenIndex: 0, framePath: [] };
   const recorder: RecorderPort = {
-    describe: async () => ({ role: "button", name: "Continue", text: "Continue" }),
+    // No role: this page answers every lookup, fields included, with the same element.
+    describe: async () => ({ role: null, name: "Continue", text: "Continue" }),
     record: async () => ref,
     fill: async () => void log.push("fill"),
     select: async () => void log.push("select"),

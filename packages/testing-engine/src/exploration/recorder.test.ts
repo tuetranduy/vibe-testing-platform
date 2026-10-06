@@ -33,6 +33,9 @@ const FIXTURE_HTML = `<!doctype html>
     <li><b class="title">Pixel 11</b> <i class="price">$799.00</i></li>
     <li><b class="title">Galaxy S27</b> <i class="price">$899.00</i></li>
   </ul>
+  <main data-testid="empty-cart"><h1>Your cart</h1><p data-testid="cart-empty">Your cart is empty</p><p><a href="/products">Browse products</a></p></main>
+  <article data-testid="product"><h1><span>Pixel 11</span></h1><p>$799.00</p><p>A phone.</p><button type="button">Add Pixel</button></article>
+  <section><p>Signed in as <strong data-testid="account-email">qa@demo.test</strong></p></section>
   <p data-testid="notice">Free   shipping</p>
   <p data-testid="hidden-note" style="display:none">Secret sale</p>
 </body></html>`;
@@ -142,6 +145,15 @@ describe("elementAction (what a cached element does, KI-032)", () => {
 });
 
 describe("fillElement (our code fills; values never go through the model)", () => {
+  it("the executor's password-field fallback selector finds the only visible one and fills it (KI-001)", async () => {
+    await page.setContent(`<form><input type="password" name="hidden" style="display:none"><label>Password <input type="password" name="pw"></label></form>`);
+    const selector = 'input[type="password"] >> visible=true';
+    const ref = await recordElement(page, selector);
+    expect(ref.candidates[ref.chosenIndex]).toMatchObject({ strategy: "role", role: "textbox", name: "Password" });
+    await fillElement(page, selector, "pw-value");
+    expect(await page.locator('input[name="pw"]').inputValue()).toBe("pw-value");
+  });
+
   it("fills the located field deterministically", async () => {
     await fillElement(page, "xpath=/html[1]/body[1]/input[1]", "s3cret-value");
     expect(await page.locator("#email").inputValue()).toBe("s3cret-value");
@@ -223,6 +235,14 @@ describe("captureFact / captureCheckpoint (provenance)", () => {
     expect(ObservedFactSchema.parse(fact)).toEqual(fact);
   });
 
+  it("a row itself can be the item: a message in place of the list (an empty cart) is read alone (KI-001)", async () => {
+    // The explorer points at the page's main container; the model reads the message shown in place of the list.
+    const element = await recordElement(page, "[data-testid=empty-cart]");
+    const fact = await captureFact(page, { ...base, key: "cartItems", modelValue: ["Your cart is empty"], element, mode: "text_list" });
+    expect(fact).toMatchObject({ value: ["Your cart is empty"], provenance: "DOM_VERIFIED", read: { mode: "text_list", itemSelector: '[data-testid="cart-empty"]' } });
+    expect(await readFact(page, element, "text_list", '[data-testid="cart-empty"]')).toMatchObject({ value: ["Your cart is empty"] });
+  });
+
   it("without a test id, the row sub-element is found by tag and class", async () => {
     const element = await recordElement(page, "[data-testid=plain-lines]");
     const fact = await captureFact(page, { ...base, key: "titles", modelValue: ["Pixel 11", "Galaxy S27"], element, mode: "text_list" });
@@ -238,6 +258,35 @@ describe("captureFact / captureCheckpoint (provenance)", () => {
       expect(fact.read).not.toHaveProperty("itemSelector");
       expect((fact.domValue as string[])[0]).toBe("iPhone 17 Pro — Qty 1 — $1,199.00");
     }
+  });
+
+  it("a text the model read from around the located element: the ancestor whose text it is is recorded (DOM_VERIFIED)", async () => {
+    // The model reads "Signed in as qa@demo.test"; the element it points at holds only the address (KI-001).
+    const element = await recordElement(page, "[data-testid=account-email]");
+    const fact = await captureFact(page, { ...base, key: "accountLine", modelValue: "signed in as  QA@demo.test", element, mode: "text" });
+    expect(fact).toMatchObject({ value: "Signed in as qa@demo.test", provenance: "DOM_VERIFIED", modelValue: "signed in as  QA@demo.test", read: { mode: "text" } });
+    expect(fact.read!.element).not.toEqual(element);
+    expect(await readFact(page, fact.read!.element, "text")).toMatchObject({ value: "Signed in as qa@demo.test" });
+    expect(ObservedFactSchema.parse(fact)).toEqual(fact);
+
+    // Only an exact (normalized) match: part of the line, or more than any ancestor holds, stays MODEL_EXTRACTED.
+    for (const modelValue of ["Signed in as", "Shop Signed in as qa@demo.test and more"]) {
+      const other = await captureFact(page, { ...base, key: "accountLine", modelValue, element, mode: "text" });
+      expect(other).toMatchObject({ value: modelValue, provenance: "MODEL_EXTRACTED", domValue: "qa@demo.test", read: { element } });
+    }
+  });
+
+  it("a text the model read inside the located element: the element inside that holds it is recorded (DOM_VERIFIED)", async () => {
+    // The explorer points at the whole product card; the model reads the product name only (KI-001).
+    const element = await recordElement(page, "[data-testid=product]");
+    const fact = await captureFact(page, { ...base, key: "productName", modelValue: "pixel 11", element, mode: "text" });
+    expect(fact).toMatchObject({ value: "Pixel 11", provenance: "DOM_VERIFIED", read: { mode: "text" } });
+    // The outermost element holding exactly that text (the h1, not its span).
+    expect(fact.read!.element.candidates[fact.read!.element.chosenIndex]).toMatchObject({ strategy: "role", role: "heading", name: "Pixel 11" });
+    expect(ObservedFactSchema.parse(fact)).toEqual(fact);
+
+    const partial = await captureFact(page, { ...base, key: "productName", modelValue: "Pixel", element, mode: "text" });
+    expect(partial).toMatchObject({ provenance: "MODEL_EXTRACTED", read: { element } });
   });
 
   it("a boolean fact without an explicit visible mode stays MODEL_EXTRACTED even when the element is visible (R24)", async () => {

@@ -416,6 +416,8 @@ describe("planTest — model contract (one correction round, then ContractError)
       ContractError,
     );
     expect(lastCorrection(transport)).toMatch(/2 login steps.*at most one/);
+    // The correction says how to log in again (KI-001: Flash re-planned two logins after "at most one" alone).
+    expect(lastCorrection(transport)).toMatch(/to log in again .*start a new scenario/i);
   });
 
   it("more than 50 steps → correction → ContractError", async () => {
@@ -769,3 +771,12 @@ function cartPlanAsScenarios() {
   const { title, steps, stopConditions } = cartPlan();
   return { scenarios: [{ title, steps }], stopConditions };
 }
+
+describe("PlannerOutputSchema: stop conditions are optional (KI-001)", () => {
+  it("a plan without stopConditions parses with none, instead of failing the run", async () => {
+    const { PlannerOutputSchema } = await import("./model-output");
+    const scenarios = [{ title: "Add to cart", steps: [{ kind: "navigate", description: "Open the shop", inputRef: null, checkpoint: null, criterionIds: [], destructive: false }] }];
+    expect(PlannerOutputSchema.parse({ scenarios })).toMatchObject({ stopConditions: [] });
+    expect(PlannerOutputSchema.parse({ scenarios, stopConditions: ["Login fails"] })).toMatchObject({ stopConditions: ["Login fails"] });
+  });
+});

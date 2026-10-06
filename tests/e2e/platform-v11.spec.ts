@@ -116,7 +116,9 @@ describe("V1.1 F8 — exploration cache", () => {
     const off = await service.create({ ...body, options: { ...body.options, useExplorationCache: false } });
     expect(await service.finished(off)).toMatchObject({ lifecycle: "COMPLETED", verdict: "PASSED" });
     expect(await store.rowsOf(off)).not.toMatch(/"cacheHit": ?true/);
-  });
+    // Three full runs one after another: a real model takes about a minute each (61 + 70 + 59 s on DeepSeek Flash),
+    // past the suite's 180 s per test, and a test cut off leaves its run going into the next spec (KI-001).
+  }, stack.mode === "live" ? 420_000 : undefined);
 });
 
 describe("V1.1 F9 — several scenarios", () => {

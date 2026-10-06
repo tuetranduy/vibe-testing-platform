@@ -75,6 +75,23 @@ describe("CheckEditor", () => {
     });
   });
 
+  it("text check against a test data value: mode and case only, the key shown and kept (KI-001)", async () => {
+    const { onSave, user } = setup({ kind: "text_matches", fact: ref("message", "after_add"), match: { mode: "contains", testDataKey: "greeting", caseSensitive: false } });
+    expect(screen.queryByLabelText(/^text$/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/compared with the test data value/i)).toHaveTextContent("greeting");
+    const mode = screen.getByLabelText(/how it matches/i);
+    expect([...mode.querySelectorAll("option")].map((o) => o.getAttribute("value"))).toEqual(["contains", "equals"]);
+    await user.selectOptions(mode, "equals");
+    await user.click(screen.getByLabelText(/match case/i));
+    expect(screen.getByText("Confirmation text (at “after add”) is exactly the test data value “greeting” (case-sensitive).")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /save check/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      kind: "text_matches",
+      fact: ref("message", "after_add"),
+      match: { mode: "equals", testDataKey: "greeting", caseSensitive: true },
+    });
+  });
+
   it("refuses a regex that does not compile, and empty text", async () => {
     const { onSave, user } = setup({ kind: "text_matches", fact: ref("message", "after_add"), match: { mode: "regex", value: "^added", caseSensitive: false } });
     const value = screen.getByLabelText(/^pattern$/i);

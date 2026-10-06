@@ -27,9 +27,10 @@ function sentence(outcome: ExpectedOutcome, facts: readonly FactRequest[]): stri
     case "visible":
       return `${fact(outcome.fact)} is ${outcome.expected ? "visible" : "not visible"}.`;
     case "text_matches": {
-      const { mode, value, caseSensitive } = outcome.match;
+      const { mode, value, testDataKey, caseSensitive } = outcome.match;
       const how = mode === "equals" ? "is exactly" : mode === "contains" ? "contains" : "matches the pattern";
-      return `${fact(outcome.fact)} ${how} ${quoted(value)} (${caseSensitive ? "case-sensitive" : "ignoring case"}).`;
+      const what = testDataKey !== undefined ? `the test data value ${quoted(testDataKey)}` : quoted(value ?? "");
+      return `${fact(outcome.fact)} ${how} ${what} (${caseSensitive ? "case-sensitive" : "ignoring case"}).`;
     }
     case "numeric_compare": {
       const right = typeof outcome.right === "number" ? String(outcome.right) : fact(outcome.right);

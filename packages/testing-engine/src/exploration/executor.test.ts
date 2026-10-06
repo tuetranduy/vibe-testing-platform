@@ -113,10 +113,14 @@ class FakeSession implements ExplorerSession {
 }
 
 interface FakeRecorderOptions {
-  /** Accessibility facts per selector (default: a button named "Add to cart"). */
+  /** Accessibility facts per selector (default: no role, named "Add to cart"; a field or a button only when a test says so). */
   describe?: (selector: string) => { role: string | null; name: string | null; text: string | null };
   /** DOM readings per fact key (default: equal to the model value). */
   dom?: Record<string, unknown>;
+  /** Whether a selector matches exactly one element (default: every selector does). */
+  unique?: (selector: string) => boolean;
+  /** DOM readings per located element's selector (ahead of `dom`). */
+  readings?: Record<string, unknown>;
 }
 
 function fakeRecorder(opts: FakeRecorderOptions = {}) {
@@ -126,9 +130,10 @@ function fakeRecorder(opts: FakeRecorderOptions = {}) {
   const ref = (selector: string): ElementRef => ({ candidates: [{ strategy: "xpath", selector }], chosenIndex: 0, framePath: [] });
   const recorder: RecorderPort = {
     async describe(_page, selector) {
-      return opts.describe?.(selector) ?? { role: "button", name: "Add to cart", text: "Add to cart" };
+      return opts.describe?.(selector) ?? { role: null, name: "Add to cart", text: "Add to cart" };
     },
     async record(_page, selector) {
+      if (opts.unique && !opts.unique(selector)) throw new Error("recorder: selector must match exactly one element (matched 0)");
       return ref(selector);
     },
     async fill(_page, selector, value) {
@@ -139,12 +144,20 @@ function fakeRecorder(opts: FakeRecorderOptions = {}) {
     },
     async captureFact(_page, input) {
       captures.push(input);
-      const dom = input.element && input.mode ? { value: (opts.dom?.[input.key] ?? input.modelValue) as never, read: { element: input.element, mode: input.mode } } : null;
+      const at = input.element ? (input.element.candidates[0] as { selector?: string }).selector : undefined;
+      const reading = at !== undefined && opts.readings && Object.hasOwn(opts.readings, at) ? opts.readings[at] : (opts.dom?.[input.key] ?? input.modelValue);
+      const dom = input.element && input.mode ? { value: reading as never, read: { element: input.element, mode: input.mode } } : null;
       return factFromReadings({ key: input.key, checkpoint: input.checkpoint, stepId: input.stepId, modelValue: input.modelValue, dom });
     },
   };
   return { recorder, fills, selects, captures };
 }
+
+/** A search on the fake page: each attempt observes the field (el[1], el[3], …), then its Search button (el[2], …). */
+const searchRoles = (selector: string) => {
+  const n = Number(/el\[(\d+)\]$/.exec(selector)?.[1] ?? 0);
+  return n % 2 === 1 ? { role: "searchbox", name: "Search products", text: null } : { role: "button", name: "Search", text: "Search" };
+};
 
 function memoryStore() {
   const steps: ExplorationStep[] = [];
@@ -403,7 +416,8 @@ describe("runExploration (fake explorer)", () => {
       actOn: () => ({ message: `logged in with ${SECRET}` }),
     });
     const { recorder, fills } = fakeRecorder({
-      describe: () => ({ role: "button", name: "Log in", text: `Log in ${SECRET}` }),
+      // f[1] and f[2] are the email and password fields, f[3] the Log in button.
+      describe: (selector) => (/f\[[12]\]$/.test(selector) ? { role: "textbox", name: "Email or password", text: null } : { role: "button", name: "Log in", text: `Log in ${SECRET}` }),
       dom: { greeting: `Welcome back, ${SECRET}` },
     });
     const mem = memoryStore();
@@ -659,10 +673,13 @@ describe("runExploration (fake explorer)", () => {
     const plan = planOf(step("navigate", "Open"), step("click", "Click Add to cart"), step("capture_checkpoint", "Capture", { checkpoint: "after_add" }));
     const outcome = await runExploration(ctx, { plan, requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
     expect(outcome.stopReason).toBe("COMPLETED");
+    // Each attempt: the element, then the way to it (KI-001); nothing found either time.
     expect(summary(outcome.steps)).toEqual([
       [0, "navigate", "PS-1", "SUCCESS", true],
       [1, "observe", "PS-2", "FAILED", false],
       [2, "observe", "PS-2", "FAILED", false],
+      [3, "observe", "PS-2", "FAILED", false],
+      [4, "observe", "PS-2", "FAILED", false],
     ]);
     expect(outcome.facts).toEqual([]);
     expect(session.ops()).not.toContain("extract");
@@ -721,7 +738,7 @@ describe("runExploration (fake explorer)", () => {
   it("search: our code fills the query (literal inputRef), then the submit control is clicked", async () => {
     const { ctx } = fakeCtx();
     const session = new FakeSession();
-    const { recorder, fills } = fakeRecorder({ describe: () => ({ role: "button", name: "Search", text: "Search" }) });
+    const { recorder, fills } = fakeRecorder({ describe: searchRoles });
     const plan = planOf(step("navigate", "Open"), step("search", "Search for the product", { inputRef: { source: "literal", key: "iPhone 17 Pro" } }));
     const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
     expect(summary(outcome.steps)).toEqual([
@@ -766,7 +783,7 @@ describe("runExploration (fake explorer)", () => {
     const session = new FakeSession({ actOn: (_el, n) => (n === 0 ? { success: false, message: "submit did nothing" } : {}) });
     const mem = memoryStore();
     const plan = planOf(step("navigate", "Open"), step("search", "Search for the product", { inputRef: { source: "literal", key: "iPhone 17 Pro" } }));
-    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder({ describe: () => ({ role: "button", name: "Search", text: "Search" }) }).recorder });
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder({ describe: searchRoles }).recorder });
 
     expect(outcome.stopReason).toBe("COMPLETED");
     expect(summary(outcome.steps)).toEqual([
@@ -873,6 +890,259 @@ describe("runExploration (fake explorer)", () => {
       [1, "observe", "PS-2", "FAILED", false],
       [2, "observe", "PS-2", "SUCCESS", false],
     ]);
+  });
+
+  it("a list fact's reads say that a message shown in place of the list (e.g. an empty cart) is what it lists (KI-001)", async () => {
+    // In CI mode an empty cart reads as ["Your cart is empty"], the message in the list's place, so a check that the
+    // cart contains an item FAILs; a model that answers null instead leaves it FACT_NOT_OBSERVED.
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({ extract: () => ({ cartItems: ["Your cart is empty"], cartCount: 1 }) });
+    const cartItems = { key: "cartItems", checkpoint: "cart_page", description: "The products listed in the cart", valueType: "string_list" as const };
+    const cartCount = { key: "cartCount", checkpoint: "cart_page", description: "The cart badge count", valueType: "number" as const };
+    const plan = planOf(step("navigate", "Open"), step("capture_checkpoint", "Read the cart", { checkpoint: "cart_page" }));
+    await runExploration(ctx, { plan, requirement: requirementWith([cartItems, cartCount]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    const extract = session.calls.find((c) => c.op === "extract")!.arg as string;
+    expect(extract).toMatch(/message in place of the list .* its only item/i);
+    // Stagehand's element ids ("0-128") are not page text (KI-001).
+    expect(extract).toMatch(/the text the page shows, never element ids/i);
+    const observes = session.calls.filter((c) => c.op === "observe").map((c) => c.arg as string);
+    expect(observes.find((o) => o.includes("The products listed in the cart"))).toMatch(/or the message shown in its place/i);
+    expect(observes.find((o) => o.includes("The cart badge count"))).not.toMatch(/in its place/);
+
+    // Without a list fact, the extract keeps its one rule.
+    const plain = new FakeSession({ extract: () => ({ cartCount: 1 }) });
+    await runExploration(ctx, { plan, requirement: requirementWith([{ ...cartCount, checkpoint: "cart_page" }]), session: plain, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(plain.calls.find((c) => c.op === "extract")!.arg as string).not.toMatch(/in place of the list/);
+  });
+
+  it("a fill that finds a link (the way to the field) follows it once and fills the field there (KI-001)", async () => {
+    // e.g. "Search the catalog" on a page without a search box: the explorer points at the "Products" link.
+    const { ctx } = fakeCtx();
+    const link = { selector: "xpath=/html[1]/body[1]/header[1]/a[1]", description: "Products link", method: "click", arguments: [] };
+    const field = { selector: "xpath=/html[1]/body[1]/form[1]/input[1]", description: "Search products", method: "fill", arguments: [] };
+    const submit = { selector: "xpath=/html[1]/body[1]/form[1]/button[1]", description: "Search", method: "click", arguments: [] };
+    const session = new FakeSession({ observe: (instruction, n) => (instruction.startsWith("Find the button") ? [submit] : n === 0 ? [link] : [field]) });
+    const roles: Record<string, string> = { [link.selector]: "link", [field.selector]: "searchbox", [submit.selector]: "button" };
+    const { recorder, fills } = fakeRecorder({ describe: (selector) => ({ role: roles[selector] ?? "button", name: null, text: null }) });
+    const plan = planOf(step("navigate", "Open"), step("search", "Search the catalog for the Galaxy S27", { inputRef: { source: "literal", key: "Galaxy S27" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "SUCCESS", false],
+      [2, "act", "PS-2", "SUCCESS", true],
+      [3, "observe", "PS-2", "SUCCESS", false],
+      [4, "fill", "PS-2", "SUCCESS", true],
+      [5, "observe", "PS-2", "SUCCESS", false],
+      [6, "act", "PS-2", "SUCCESS", true],
+    ]);
+    expect(fills).toEqual([{ selector: field.selector, value: "Galaxy S27" }]);
+    expect((session.calls.filter((c) => c.op === "actOn")[0]!.arg as { selector: string }).selector).toBe(link.selector);
+
+    // A link again on the next page: the fill fails as before (no second hop).
+    const { ctx: ctx2 } = fakeCtx();
+    const loop = new FakeSession({ observe: () => [link] });
+    const failed = await runExploration(ctx2, { plan, requirement: requirementWith([]), session: loop, budget: ctx2.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(failed.steps.filter((s) => s.kind === "fill").map((s) => [s.outcome, s.error])).toEqual([
+      ["FAILED", "The field resolved to a link again after following one"],
+      ["FAILED", "The field resolved to a link again after following one"],
+    ]);
+    // One hop per attempt (a step gets one retry); a failed search attempt's steps are not on the golden path.
+    expect(failed.steps.filter((s) => s.kind === "act").map((s) => [s.outcome, s.onGoldenPath])).toEqual([
+      ["SUCCESS", false],
+      ["SUCCESS", false],
+    ]);
+  });
+
+  it("a fill that finds a button asks once more for the text field itself (KI-001)", async () => {
+    // "Search the shop for the term entered in the search field": the explorer returned the Search button twice.
+    const { ctx } = fakeCtx();
+    const button = { selector: "xpath=/html[1]/body[1]/form[1]/button[1]", description: "Search", method: "click", arguments: [] };
+    const field = { selector: "xpath=/html[1]/body[1]/form[1]/input[1]", description: "Search products", method: "fill", arguments: [] };
+    const session = new FakeSession({
+      observe: (instruction) => (instruction.startsWith("Find the text field to type into") ? [field] : instruction.startsWith("Find the button that submits") ? [button] : [button]),
+    });
+    const roles: Record<string, string> = { [button.selector]: "button", [field.selector]: "searchbox" };
+    const { recorder, fills } = fakeRecorder({ describe: (selector) => ({ role: roles[selector] ?? "button", name: null, text: null }) });
+    const plan = planOf(step("navigate", "Open"), step("search", "Search the shop for the term entered in the search field", { inputRef: { source: "literal", key: "iPhone" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(fills).toEqual([{ selector: field.selector, value: "iPhone" }]);
+    expect(outcome.steps.filter((s) => s.kind === "observe").map((s) => s.instruction.split(":")[0])).toEqual([
+      "Search the shop for the term entered in the search field",
+      "Find the text field to type into, not a button or link",
+      "Find the button that submits this search, not the text field the query was typed into",
+    ]);
+  });
+
+  it("a click with nothing to click on the page asks once for the way there, follows it and clicks (KI-001)", async () => {
+    // After logging in, the plan clicks a product link the account page does not show; the Products link leads to it.
+    const { ctx } = fakeCtx();
+    const products = { selector: "xpath=/html[1]/body[1]/header[1]/a[1]", description: "Products link", method: "click", arguments: [] };
+    const product = { selector: "xpath=/html[1]/body[1]/main[1]/a[3]", description: "Galaxy S27", method: "click", arguments: [] };
+    let onProducts = false;
+    const session = new FakeSession({
+      observe: (instruction) => (instruction.startsWith("Find the link or button that leads to") ? [products] : onProducts ? [product] : []),
+      actOn: (el) => {
+        if (el.selector === products.selector) onProducts = true;
+        return {};
+      },
+    });
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the Galaxy S27 product link"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "FAILED", false],
+      [2, "observe", "PS-2", "SUCCESS", false],
+      [3, "act", "PS-2", "SUCCESS", true],
+      [4, "observe", "PS-2", "SUCCESS", false],
+      [5, "act", "PS-2", "SUCCESS", true],
+    ]);
+    expect(outcome.steps[2]!.instruction).toBe("Find the link or button that leads to where you can: Click the Galaxy S27 product link");
+    expect(session.calls.filter((c) => c.op === "actOn").map((c) => (c.arg as { selector: string }).selector)).toEqual([products.selector, product.selector]);
+  });
+
+  it("a fill with no field on the page asks once for the way to its form, opens it and fills there (KI-001)", async () => {
+    // The plan types the email on the start page; the login form is behind the "Log in" link.
+    const { ctx } = fakeCtx({ testData: { email: "qa@demo.test" } });
+    const login = { selector: "xpath=/html[1]/body[1]/header[1]/a[2]", description: "Log in link", method: "click", arguments: [] };
+    const email = { selector: "xpath=/html[1]/body[1]/form[1]/input[1]", description: "Email", method: "fill", arguments: [] };
+    let opened = false;
+    const session = new FakeSession({
+      observe: (instruction) => (instruction.startsWith("Find the link or button that opens") ? [login] : opened ? [email] : []),
+      actOn: () => {
+        opened = true;
+        return {};
+      },
+    });
+    const roles: Record<string, string> = { [login.selector]: "link", [email.selector]: "textbox" };
+    const { recorder, fills } = fakeRecorder({ describe: (selector) => ({ role: roles[selector] ?? "button", name: null, text: null }) });
+    const plan = planOf(step("navigate", "Open"), step("fill", "Type the email into the login email field", { inputRef: { source: "testData", key: "email" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "FAILED", false],
+      [2, "observe", "PS-2", "SUCCESS", false],
+      [3, "act", "PS-2", "SUCCESS", true],
+      [4, "observe", "PS-2", "SUCCESS", false],
+      [5, "fill", "PS-2", "SUCCESS", true],
+    ]);
+    expect(outcome.steps[2]!.instruction).toBe("Find the link or button that opens the page or form with the field for: Type the email into the login email field");
+    expect(fills).toEqual([{ selector: email.selector, value: "qa@demo.test" }]);
+
+    // Nothing that opens it either: the attempt fails with one extra lookup, no click.
+    const { ctx: ctx2 } = fakeCtx({ testData: { email: "qa@demo.test" } });
+    const nothing = new FakeSession({ observe: () => [] });
+    const failed = await runExploration(ctx2, { plan, requirement: requirementWith([]), session: nothing, budget: ctx2.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(nothing.ops().filter((o) => o === "actOn")).toEqual([]);
+    expect(failed.steps.filter((s) => s.kind === "observe").map((s) => s.outcome)).toEqual(["FAILED", "FAILED", "FAILED", "FAILED"]);
+  });
+
+  it("a secret fill the model finds no field for uses the page's only visible password field (KI-001)", async () => {
+    // Flash answered "no element" for "Type the user's password into the password field" on a login page.
+    const plan = planOf(step("navigate", "Open"), step("fill", "Type the password into the password field", { inputRef: { source: "secret", key: "password" } }));
+    const noModelAnswer = () => new FakeSession({ observe: () => [] });
+
+    const { ctx } = fakeCtx({ secrets: { password: SECRET } });
+    const { recorder, fills } = fakeRecorder({ describe: () => ({ role: "textbox", name: "Password", text: null }) });
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session: noModelAnswer(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "FAILED", false],
+      [2, "observe", "PS-2", "SUCCESS", false],
+      [3, "fill", "PS-2", "SUCCESS", true],
+    ]);
+    expect(outcome.steps[2]).toMatchObject({ instruction: expect.stringContaining("the page's only password field"), llm: null });
+    expect(fills).toEqual([{ selector: 'input[type="password"] >> visible=true', value: SECRET }]);
+
+    // Not exactly one password field, or a value that is not a secret: no fallback, the fill fails as before.
+    const { ctx: two } = fakeCtx({ secrets: { password: SECRET } });
+    const several = fakeRecorder({ unique: (selector) => !selector.includes("password") });
+    const none = await runExploration(two, { plan, requirement: requirementWith([]), session: noModelAnswer(), budget: two.budgetSignal(1) }, { store: memoryStore().store, recorder: several.recorder });
+    expect(several.fills).toEqual([]);
+    expect(none.steps.filter((s) => s.kind === "fill")).toEqual([]);
+
+    const { ctx: data } = fakeCtx({ testData: { email: "qa@demo.test" } });
+    const typed = fakeRecorder();
+    const emailPlan = planOf(step("navigate", "Open"), step("fill", "Type the email", { inputRef: { source: "testData", key: "email" } }));
+    await runExploration(data, { plan: emailPlan, requirement: requirementWith([]), session: noModelAnswer(), budget: data.budgetSignal(1) }, { store: memoryStore().store, recorder: typed.recorder });
+    expect(typed.fills).toEqual([]);
+  });
+
+  it("a click located on an element that cannot be clicked (a status badge) asks once more for the link or button (KI-001)", async () => {
+    // "Open the cart page from the cart indicator link": the explorer returned the "Cart (1)" badge, a status element.
+    const { ctx } = fakeCtx();
+    const badge = { selector: "xpath=/html[1]/body[1]/header[1]/span[2]", description: "Cart (1)", method: "click", arguments: [] };
+    const link = { selector: "xpath=/html[1]/body[1]/header[1]/nav[1]/a[2]", description: "Cart", method: "click", arguments: [] };
+    const session = new FakeSession({ observe: (instruction) => (instruction.startsWith("Find the link or button to click") ? [link] : [badge]) });
+    const roles: Record<string, string> = { [badge.selector]: "status", [link.selector]: "link" };
+    const { recorder } = fakeRecorder({ describe: (selector) => ({ role: roles[selector] ?? null, name: null, text: null }) });
+    const plan = planOf(step("navigate", "Open"), step("click", "Open the cart page from the cart indicator link"));
+    await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(session.calls.filter((c) => c.op === "actOn").map((c) => (c.arg as { selector: string }).selector)).toEqual([link.selector]);
+    expect(session.calls.filter((c) => c.op === "observe").map((c) => (c.arg as string).split(":")[0])).toEqual([
+      "Open the cart page from the cart indicator link",
+      "Find the link or button to click, not text, a heading or a status",
+    ]);
+  });
+
+  it("a fact whose located element has nothing to read is looked for once more as the element that shows it itself (KI-001)", async () => {
+    // "Number shown in the cart badge/link": the explorer returned the Cart link, whose text has no number.
+    const { ctx } = fakeCtx();
+    const link = { selector: "xpath=/html[1]/body[1]/header[1]/nav[1]/a[2]", description: "Cart", method: null, arguments: [] };
+    const badge = { selector: "xpath=/html[1]/body[1]/header[1]/span[2]", description: "Cart (0)", method: null, arguments: [] };
+    const session = new FakeSession({
+      extract: () => ({ cartCount: 0 }),
+      observe: (instruction) => (instruction.startsWith("Find the element whose own text shows") ? [badge] : [link]),
+    });
+    const { recorder } = fakeRecorder({ readings: { [link.selector]: null, [badge.selector]: 0 } });
+    const plan = planOf(step("navigate", "Open"), step("capture_checkpoint", "Read the badge", { checkpoint: "after_add" }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.facts.find((f) => f.key === "cartCount")).toMatchObject({ value: 0, provenance: "DOM_VERIFIED", read: { element: { candidates: [{ selector: badge.selector }] } } });
+  });
+
+  it("a value the model read as null where the located element shows one is read once more, alone (KI-001)", async () => {
+    // Extract said "not shown" while the explorer located the product link; the page reads "iPhone 17 Pro" there.
+    const { ctx } = fakeCtx();
+    let extracts = 0;
+    const session = new FakeSession({ extract: () => (++extracts === 1 ? { productName: null, cartCount: 1 } : { productName: "iPhone 17 Pro" }) });
+    const { recorder } = fakeRecorder({ dom: { productName: "iPhone 17 Pro" } });
+    const facts = [
+      { key: "productName", checkpoint: "results", description: "Name of the selected product", valueType: "string" as const },
+      { key: "cartCount", checkpoint: "results", description: "Cart badge count", valueType: "number" as const },
+    ];
+    const plan = planOf(step("navigate", "Open"), step("capture_checkpoint", "Read the results", { checkpoint: "results" }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith(facts), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.facts.filter((f) => f.key !== "url").map((f) => [f.key, f.value, f.provenance])).toEqual([
+      ["productName", "iPhone 17 Pro", "DOM_VERIFIED"],
+      ["cartCount", 1, "DOM_VERIFIED"],
+    ]);
+    const asked = session.calls.filter((c) => c.op === "extract").map((c) => c.arg as string);
+    expect(asked).toHaveLength(2);
+    expect(asked[1]).toContain("- productName: Name of the selected product (string)");
+    expect(asked[1]).not.toContain("cartCount");
+  });
+
+  it("a list fact whose container is not found is looked for once more as the element that shows it (KI-001)", async () => {
+    const { ctx } = fakeCtx();
+    const list = { selector: "xpath=/html[1]/body[1]/main[1]/ul[1]", description: "Cart items list", method: null, arguments: [] };
+    const session = new FakeSession({
+      extract: () => ({ cartItems: ["iPhone 17 Pro"] }),
+      observe: (instruction) => (instruction.startsWith("Find the element that shows: The products listed in the cart") ? [list] : []),
+    });
+    const { recorder, captures } = fakeRecorder();
+    const cartItems = { key: "cartItems", checkpoint: "cart_page", description: "The products listed in the cart", valueType: "string_list" as const };
+    const plan = planOf(step("navigate", "Open"), step("capture_checkpoint", "Read the cart", { checkpoint: "cart_page" }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([cartItems]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    const observes = outcome.steps.filter((s) => s.kind === "observe").map((s) => [s.instruction.split(":")[0], s.outcome]);
+    expect(observes).toEqual([
+      ["Find the list or container whose items are", "FAILED"],
+      ["Find the element that shows", "SUCCESS"],
+    ]);
+    expect(captures[0]).toMatchObject({ key: "cartItems", element: { candidates: [{ selector: list.selector }] }, mode: "text_list" });
   });
 
   it("a wait_for whose element never appears is recorded as failed and exploration goes on (KI-001)", async () => {

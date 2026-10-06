@@ -84,7 +84,9 @@ export function validatePlanOutput(
     });
     const logins = scenario.steps.flatMap((s, i) => (s.kind === "login" ? [at(si, i)] : []));
     if (logins.length > 1) {
-      issues.push(`${logins.length} login steps (${logins.join(", ")}): at most one step per scenario may submit the credentials`);
+      issues.push(
+        `${logins.length} login steps (${logins.join(", ")}): at most one step per scenario may submit the credentials; to log in again (e.g. to check that a deleted account can no longer sign in), start a new scenario, which begins signed out`,
+      );
     }
   });
 

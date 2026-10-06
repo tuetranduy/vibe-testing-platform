@@ -1,0 +1,31 @@
+id: login-then-account
+tags: [login]
+# KI-001: the live suite's account requirement. A login opens the account page; Flash planned "Open the account page
+# from the user menu or account link if not already shown", which found nothing to click (2026-10-06).
+testDataKeys: [email]
+secretNames: [password]
+requirement:
+  originalText: Log in and verify the account page shows the user's email
+  criteria:
+    - id: AC-1
+      sourceText: verify the account page shows the user's email
+      statement: The account page shows the user's email
+      expectedOutcome:
+        kind: text_matches
+        fact: { key: accountEmail, checkpoint: account_page }
+        match: { mode: contains, testDataKey: email, caseSensitive: false }
+      preconditions:
+        - { kind: authenticated, description: User is logged in }
+        - { kind: test_data, ref: email, description: The account email }
+        - { kind: secret, ref: password, description: Account password }
+      ambiguity: null
+  facts:
+    - { key: accountEmail, checkpoint: account_page, description: The email shown on the account page, valueType: string }
+expect:
+  requiredStepKinds: [fill, login, capture_checkpoint]
+  maxSteps: 10
+  blocked: []
+  requiresLogin: true
+  inputRefs:
+    - { source: testData, key: email }
+    - { source: secret, key: password }

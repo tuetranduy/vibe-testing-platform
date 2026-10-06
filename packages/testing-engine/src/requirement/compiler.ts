@@ -48,7 +48,7 @@ export type CompiledRequirement = RequirementDraft & { insights: RequirementInsi
 export async function compileRequirement(llm: RequirementLlm, input: CompileRequirementInput): Promise<CompiledRequirement> {
   // A blank requirement is surveyed, never compiled: analysis only runs on a chosen text.
   if (input.originalText.trim() === "") throw new ContractError("The requirement is empty: there is nothing to compile");
-  const source = { originalText: input.originalText, testData: input.testData };
+  const source = { originalText: input.originalText, testData: input.testData, secretNames: input.secretNames };
   const pages = input.site?.pages ?? [];
   const screenshot = pages.length > 0 ? (input.site?.screenshot ?? null) : null;
   const text = buildRequirementPrompt({

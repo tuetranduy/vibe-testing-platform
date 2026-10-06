@@ -2,7 +2,7 @@
 import { URL_FACT_KEY, type ElementRef, type FactRequest, type FactValue, type ObservedFact } from "@platform/contracts";
 import type { Page } from "playwright-core";
 import { factValuesEqual, parseNumber } from "../shared/fact-values";
-import { resolveElement } from "./recorder";
+import { recordElement, resolveElement } from "./recorder";
 
 export { factValuesEqual, parseNumber } from "../shared/fact-values";
 
@@ -22,7 +22,8 @@ export type FactReadMode = NonNullable<ObservedFact["read"]>["mode"];
  * - count: number of child elements (list items)
  * - value: form field value
  * - text_list: whitespace-collapsed visible text of each child element, empty ones dropped; with an
- *   item selector, the text of the first element it matches inside each child (children without one dropped)
+ *   item selector, the text of each child it matches, else of the first element it matches inside the child
+ *   (children without one dropped)
  */
 
 /**
@@ -122,7 +123,7 @@ export async function readFact(
         const children = Array.from(el.children);
         if (sel !== null) {
           return children
-            .map((c) => c.querySelector(sel))
+            .map((c) => (c.matches(sel) ? c : c.querySelector(sel)))
             .map((n) => (n === null ? "" : n instanceof HTMLElement ? n.innerText : (n.textContent ?? "")));
         }
         const texts = children.length > 0
@@ -164,7 +165,8 @@ async function itemSelectorCandidates(page: Page, element: ElementRef, items: st
     const keys = new Set(wanted.map((w) => w.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase()));
     const out: string[][] = [[], [], [], []];
     for (const row of Array.from(el.children)) {
-      for (const d of Array.from(row.querySelectorAll("*"))) {
+      // The row itself (a message in place of the list, e.g. an empty cart) or an element inside it.
+      for (const d of [row, ...Array.from(row.querySelectorAll("*"))]) {
         const text = d instanceof HTMLElement ? d.innerText : (d.textContent ?? "");
         if (!keys.has(text.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase())) continue;
         const testId = d.getAttribute("data-testid");
@@ -198,12 +200,60 @@ async function readList(page: Page, element: ElementRef, modelValue: FactValue):
   return fallback;
 }
 
+/** How many levels up from the located element a text the model read may come from. */
+const MAX_TEXT_ANCESTORS = 3;
+/** How many elements inside the located one are compared with a text the model read. */
+const MAX_TEXT_DESCENDANTS = 500;
+
+/**
+ * The located element's text when it equals the model's; otherwise the nearest ancestor (at most
+ * MAX_TEXT_ANCESTORS up) whose whole text does (the model reads "Signed in as qa@demo.test" where the element it
+ * points at holds only the address), else the outermost element inside it whose whole text does (the explorer points
+ * at a product card, the model reads its name) — recorded as the fact's element (KI-001). Exact (normalized) matching
+ * still decides provenance. Null when the element cannot be read.
+ */
+async function readText(page: Page, element: ElementRef, modelValue: FactValue): Promise<DomReading | null> {
+  const own = await readFact(page, element, "text");
+  if (!own) return null;
+  const reading: DomReading = { value: own.value, read: { element: own.element, mode: "text" } };
+  if (typeof modelValue !== "string" || factValuesEqual(modelValue, own.value)) return reading;
+  const { locator } = await resolveElement(page, element);
+  const texts = await locator.evaluate((el, levels) => {
+    const out: string[] = [];
+    for (let node = el.parentElement; node && node !== document.body && out.length < levels; node = node.parentElement) out.push(node.innerText);
+    return out;
+  }, MAX_TEXT_ANCESTORS);
+  const level = texts.findIndex((t) => factValuesEqual(modelValue, collapse(t)));
+  let handle;
+  if (level >= 0) {
+    handle = await locator.evaluateHandle((el, up) => {
+      let node: Element = el;
+      for (let i = 0; i <= up; i++) node = node.parentElement ?? node;
+      return node;
+    }, level);
+  } else {
+    // Document order: an element comes before the elements inside it, so the first match is the outermost.
+    const inner = await locator.evaluate(
+      (el, max) => Array.from(el.querySelectorAll("*")).slice(0, max).map((n) => (n instanceof HTMLElement ? n.innerText : (n.textContent ?? ""))),
+      MAX_TEXT_DESCENDANTS,
+    );
+    const at = inner.findIndex((t) => factValuesEqual(modelValue, collapse(t)));
+    if (at < 0) return reading;
+    handle = await locator.evaluateHandle((el, i) => el.querySelectorAll("*")[i]!, at);
+  }
+  const found = await recordElement(page, handle.asElement()!);
+  const read = await readFact(page, found, "text");
+  return read && factValuesEqual(modelValue, read.value) ? { value: read.value, read: { element: read.element, mode: "text" } } : reading;
+}
+
 /** Reads the DOM at the recorded element and applies the provenance rules. */
 export async function captureFact(page: Page, input: FactCaptureInput): Promise<ObservedFact> {
   let dom: DomReading | null = null;
   const mode = input.mode;
   if (input.element && mode === "text_list") {
     dom = await readList(page, input.element, input.modelValue).catch(() => null);
+  } else if (input.element && mode === "text") {
+    dom = await readText(page, input.element, input.modelValue).catch(() => null);
   } else if (input.element && mode) {
     const reading = await readFact(page, input.element, mode).catch(() => null);
     if (reading) dom = { value: reading.value, read: { element: reading.element, mode } };

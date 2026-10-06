@@ -57,9 +57,16 @@ import { describeElement, elementAction, fillElement, recordElement, selectEleme
  *                destructive actions allowed, a destructive element only for a destructive step) → `actOn(element)` with method `click` and no
  *                arguments (deterministic, zero model calls; model-chosen arguments are never
  *                replayed). `other` may keep a non-value method (hover, double click, scroll into
- *                view). Recorded: `observe` + `act`.
+ *                view). Recorded: `observe` + `act`. An element that cannot be clicked (a status, a heading, …)
+ *                gets one more lookup for the link or button itself. Nothing to click on the page: the explorer is asked once for
+ *                the link or button that leads there, which is clicked (policy-checked) before looking again.
  * - fill         Value from `inputRef` (testData / secret via `ctx.secrets.get` / literal) →
- *                `observe(description)` → policy check → the recorder's deterministic `fill`.
+ *                `observe(description)` → policy check → the recorder's deterministic `fill`. An observed link
+ *                (the way to the field) is clicked once (policy-checked, recorded `act`) and the field observed
+ *                again there; a second link fails the attempt. A secret the model finds no field for goes into
+ *                the page's only visible password field (recorded `observe`, no model call), if there is exactly one.
+ *                No field at all: the explorer is asked once for the link or button that opens the form, which is
+ *                clicked (policy-checked) before the field is looked for again.
  *                Recorded: `observe` + `fill` (with `inputRef`, never the value). The model never
  *                types: no value is ever passed to `act()` / `actOn()`.
  * - select       With `inputRef`: like `fill`, but the recorder selects the option (recorded as kind
@@ -74,7 +81,10 @@ import { describeElement, elementAction, fillElement, recordElement, selectEleme
  *                when the DOM agrees, else MODEL_EXTRACTED). Read mode = `modeForValueType`, except
  *                a boolean is read as `visible` only when a `visible` outcome references that
  *                (key, checkpoint), else it has no DOM read (Ruling R24). The reserved `url` fact
- *                comes first. Then a screenshot artifact. Recorded: `extract`, `observe`s, and the
+ *                comes first. A located element with nothing to read (no number, empty text) gets one more
+ *                lookup for the element that shows the value itself. A value the model read as null where its located element shows one is
+ *                extracted once more, alone (the DOM reading must still equal the answer). Then a
+ *                screenshot artifact. Recorded: `extract`, `observe`s, and the
  *                `checkpoint` step the facts point at (`stepId`, `artifactIds`).
  * - wait_for     Bounded poll: up to 3 `observe`s, `pollIntervalMs` apart, within the budget. An element that
  *                never appears does not stop exploration (KI-001: models plan waits for a page "to load", which
@@ -187,6 +197,16 @@ export async function clearBrowserState(page: Page, targetUrl: string): Promise<
 const MAX_ATTEMPTS = 2; // one retry per planned step
 const WAIT_FOR_POLLS = 3;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
+/** Roles of elements a click step never targets: they show something, they do nothing when clicked (KI-001). */
+const NOT_CLICKABLE = new Set(["status", "heading", "paragraph", "img", "list", "listitem", "note", "alert", "log", "marquee", "timer", "article", "region", "banner", "contentinfo", "main"]);
+/** A secret fill's fallback when the model finds no field: the page's only visible password field. */
+const PASSWORD_FIELD = 'input[type="password"] >> visible=true';
+/**
+ * How a list fact reads a message shown in place of its list (KI-001): as the list's only item, as the fact
+ * reader reads that message's element (`text_list`), so an empty cart is evidence a "contains" check can FAIL on.
+ */
+const LIST_IN_PLACE_RULE =
+  "For a list (string_list): when the page shows a message in place of the list (e.g. that it is empty), give that message as its only item; null only when neither the list nor such a message is shown.";
 const LOAD_SETTLE_TIMEOUT_MS = 10_000;
 /** `other` steps may keep these observed methods (none takes a value); everything else clicks. */
 const SAFE_OTHER_METHODS = new Set(["click", "doubleClick", "hover", "scrollIntoView"]);
@@ -547,8 +567,25 @@ class ExplorationRun {
    * nothing, so the attempt fails instead of recording a search that never ran.
    */
   private async act(step: PlannedStep, observeInstruction = step.description, searchField?: string): Promise<Attempt> {
-    const located = await this.locate(step, observeInstruction);
+    let located = await this.locate(step, observeInstruction);
+    // Nothing to click on this page (e.g. a product link after the login opened the account page, KI-001): ask once
+    // for the way there, follow it (policy-checked) and look again. Not for a search's submit control.
+    if (!located && searchField === undefined && observeInstruction === step.description) {
+      const instruction = `Find the link or button that leads to where you can: ${step.description}`;
+      const way = await this.locate(step, instruction);
+      if (!way) return "failed";
+      const followed = await this.click(step, instruction, way);
+      if (followed !== "ok") return followed;
+      located = await this.locate(step, observeInstruction);
+    }
     if (!located) return "failed";
+    // An element that cannot be clicked (e.g. the "Cart (1)" status badge for "Open the cart page", KI-001): ask once
+    // for the link or button itself.
+    if (located.info.role !== null && NOT_CLICKABLE.has(located.info.role)) {
+      const target = await this.locate(step, `Find the link or button to click, not text, a heading or a status: ${step.description}`);
+      if (!target || (target.info.role !== null && NOT_CLICKABLE.has(target.info.role))) return "failed";
+      located = target;
+    }
     const instruction = observeInstruction;
     if (searchField !== undefined && located.element.selector === searchField) {
       await this.reserve();
@@ -564,6 +601,11 @@ class ExplorationRun {
       });
       return "failed";
     }
+    return this.click(step, instruction, located);
+  }
+
+  /** Clicks a located element: the action policy first, then the explorer; recorded as an `act` step. */
+  private async click(step: PlannedStep, instruction: string, located: Located): Promise<Attempt> {
     await this.enforcePolicy(step, instruction, located, "act");
 
     await this.reserve();
@@ -598,8 +640,44 @@ class ExplorationRun {
 
   /** `field`, when given, receives the selector of the element filled. */
   private async fill(step: PlannedStep, value: string, how: "fill" | "select", field?: { selector?: string }): Promise<Attempt> {
-    const located = await this.locate(step, step.description);
+    let located = await this.findField(step);
+    // No field on this page (e.g. credentials planned on the start page, KI-001): ask once for the way to its form.
+    if (!located) {
+      const opened = await this.openForm(step);
+      if (typeof opened === "string") return opened;
+      located = opened;
+    }
     if (!located) return "failed";
+    // A button is never the field (the explorer returned a search's Search button for its query, KI-001): ask once
+    // for the text field itself.
+    if (located.info.role === "button") {
+      const field = await this.locate(step, `Find the text field to type into, not a button or link: ${step.description}`);
+      if (!field || field.info.role === "button" || field.info.role === "link") return "failed";
+      located = field;
+    }
+    // A link is the way to the field (e.g. "Search the catalog" on a page without a search box points at the
+    // Products link, KI-001): follow it once, then look for the field on that page. Never type into a link.
+    if (located.info.role === "link") {
+      const followed = await this.click(step, step.description, located);
+      if (followed !== "ok") return followed;
+      located = await this.locate(step, step.description);
+      if (!located) return "failed";
+      if (located.info.role === "link") {
+        await this.reserve();
+        await this.record({
+          plannedStepId: step.id,
+          kind: "fill",
+          instruction: step.description,
+          element: located.ref,
+          inputRef: step.inputRef ?? null,
+          urlBefore: this.url(),
+          startedAt: this.ctx.now(),
+          outcome: "FAILED",
+          error: "The field resolved to a link again after following one",
+        });
+        return "failed";
+      }
+    }
     if (field) field.selector = located.element.selector;
     await this.enforcePolicy(step, step.description, located, "fill");
 
@@ -629,6 +707,56 @@ class ExplorationRun {
     return "ok";
   }
 
+  /** The fill's field: the explorer's answer, else, for a secret, the page's only visible password field (KI-001). */
+  private async findField(step: PlannedStep): Promise<Located | null> {
+    const located = await this.locate(step, step.description);
+    if (located || step.inputRef?.source !== "secret") return located;
+    return this.onlyPasswordField(step);
+  }
+
+  /**
+   * When a fill finds no field on the page: the link or button that opens its page or form, clicked (policy-checked,
+   * a recorded act), then the field looked for there. Once per attempt; null when nothing opens it or the field is
+   * still missing, an Attempt when the click itself did not succeed.
+   */
+  private async openForm(step: PlannedStep): Promise<Located | null | Exclude<Attempt, "ok">> {
+    const instruction = `Find the link or button that opens the page or form with the field for: ${step.description}`;
+    const way = await this.locate(step, instruction);
+    if (!way) return null;
+    const clicked = await this.click(step, instruction, way);
+    if (clicked !== "ok") return clicked;
+    return this.findField(step);
+  }
+
+  /**
+   * The page's only visible password field, located deterministically and recorded as an `observe` without a model
+   * call; null when there is not exactly one. Only for a fill that types a secret: our recorder still types it, and
+   * the action policy still checks the field.
+   */
+  private async onlyPasswordField(step: PlannedStep): Promise<Located | null> {
+    let ref: ElementRef;
+    let info: Located["info"];
+    try {
+      ref = await this.recorder.record(this.page, PASSWORD_FIELD);
+      info = await this.recorder.describe(this.page, PASSWORD_FIELD);
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      return null;
+    }
+    await this.reserve();
+    await this.record({
+      plannedStepId: step.id,
+      kind: "observe",
+      instruction: `${step.description} (the page's only password field)`,
+      urlBefore: this.url(),
+      startedAt: this.ctx.now(),
+      outcome: "SUCCESS",
+      element: ref,
+      llm: null,
+    });
+    return { element: { selector: PASSWORD_FIELD, description: "the page's only password field", method: "fill", arguments: [] }, ref, info };
+  }
+
   private async checkpoint(step: PlannedStep): Promise<Attempt> {
     const checkpoint = step.checkpoint!;
     const requests = this.input.requirement.facts.filter((f) => f.checkpoint === checkpoint);
@@ -636,37 +764,42 @@ class ExplorationRun {
 
     let values: Record<string, FactValue> = {};
     if (requests.length > 0) {
-      await this.reserve();
-      const startedAt = this.ctx.now();
-      const instruction = [
-        "Read these values from the current page. Use null for a value that is not shown.",
-        ...requests.map((r) => `- ${r.key}: ${r.description} (${r.valueType})`),
-      ].join("\n");
-      const schema = z.object(Object.fromEntries(requests.map((r) => [r.key, valueSchema(r.valueType)])));
-      const base = { plannedStepId: step.id, kind: "extract" as const, instruction, urlBefore: this.url(), startedAt };
-      try {
-        const extracted = await this.session.extract(this.redactString(instruction), schema);
-        values = extracted.data as Record<string, FactValue>;
-        await this.record({ ...base, outcome: "SUCCESS", llm: extracted.llm });
-      } catch (err) {
-        this.rethrowIfFatal(err);
-        await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
-        return "failed";
-      }
+      const extracted = await this.extract(step, requests);
+      if (!extracted) return "failed";
+      values = extracted;
     }
 
     const captured: ObservedFact[] = [urlFact(this.page, { checkpoint, stepId })];
     for (const request of requests) {
       const mode = this.modeFor(request);
       let element: ElementRef | null = null;
-      if (mode) element = (await this.locate(step, this.locateInstruction(request)))?.ref ?? null;
-      const input: FactCaptureInput = { key: request.key, checkpoint, stepId, modelValue: values[request.key] ?? null, element, mode };
-      captured.push(
-        await this.recorder.captureFact(this.page, input).catch((err: unknown) => {
+      if (mode) {
+        element = (await this.locate(step, this.locateInstruction(request)))?.ref ?? null;
+        // A list's container not found: once more, as the element that shows it (KI-001).
+        if (!element && request.valueType === "string_list") element = (await this.locate(step, `Find the element that shows: ${request.description}`))?.ref ?? null;
+      }
+      const capture = (modelValue: FactValue) =>
+        this.recorder.captureFact(this.page, { key: request.key, checkpoint, stepId, modelValue, element, mode }).catch((err: unknown) => {
           this.rethrowIfFatal(err);
-          return factFromReadings({ key: input.key, checkpoint, stepId, modelValue: input.modelValue, dom: null });
-        }),
-      );
+          return factFromReadings({ key: request.key, checkpoint, stepId, modelValue, dom: null });
+        });
+      let fact = await capture(values[request.key] ?? null);
+      // The located element has nothing to read (e.g. the Cart link for "number in the cart badge", KI-001): look once
+      // more for the element that shows the value itself; the reading must still equal the model's (D2).
+      if (mode && fact.provenance === "MODEL_EXTRACTED" && fact.modelValue !== null && fact.read && (fact.domValue === null || fact.domValue === "")) {
+        const own = await this.locate(step, `Find the element whose own text shows it, not a link or button that leads to it: ${request.description}`);
+        if (own) {
+          element = own.ref;
+          fact = await capture(values[request.key] ?? null);
+        }
+      }
+      // The model said "not shown" where the element it located shows a value (KI-001): ask for that value once more,
+      // alone; the DOM reading must still equal the answer (D2).
+      if (fact.provenance === "MODEL_EXTRACTED" && fact.modelValue === null && fact.domValue !== undefined && fact.domValue !== null) {
+        const again = await this.extract(step, [request]);
+        if (again && again[request.key] !== null && again[request.key] !== undefined) fact = await capture(again[request.key]!);
+      }
+      captured.push(fact);
     }
 
     await this.reserve();
@@ -686,6 +819,28 @@ class ExplorationRun {
     });
     for (const fact of captured) await this.saveFact(fact);
     return "ok";
+  }
+
+  /** One `extract` of these facts' model values, recorded; null when it failed (recorded FAILED). */
+  private async extract(step: PlannedStep, requests: readonly FactRequest[]): Promise<Record<string, FactValue> | null> {
+    await this.reserve();
+    const startedAt = this.ctx.now();
+    const instruction = [
+      "Read these values from the current page: the text the page shows, never element ids. Use null for a value that is not shown.",
+      ...(requests.some((r) => r.valueType === "string_list") ? [LIST_IN_PLACE_RULE] : []),
+      ...requests.map((r) => `- ${r.key}: ${r.description} (${r.valueType})`),
+    ].join("\n");
+    const schema = z.object(Object.fromEntries(requests.map((r) => [r.key, valueSchema(r.valueType)])));
+    const base = { plannedStepId: step.id, kind: "extract" as const, instruction, urlBefore: this.url(), startedAt };
+    try {
+      const extracted = await this.session.extract(this.redactString(instruction), schema);
+      await this.record({ ...base, outcome: "SUCCESS", llm: extracted.llm });
+      return extracted.data as Record<string, FactValue>;
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
+      return null;
+    }
   }
 
   /** Polls for the step's element; whether it appeared or not, exploration goes on (see the header). */
@@ -850,7 +1005,7 @@ class ExplorationRun {
 
   private locateInstruction(request: FactRequest): string {
     return request.valueType === "string_list"
-      ? `Find the list or container whose items are: ${request.description}`
+      ? `Find the list or container whose items are: ${request.description} (or the message shown in its place, e.g. that it is empty)`
       : `Find the element that shows: ${request.description}`;
   }
 

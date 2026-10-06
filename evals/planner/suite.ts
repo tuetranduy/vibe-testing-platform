@@ -43,10 +43,18 @@ export const PlannerEvalCaseSchema = z.object({
     requiresLogin: z.boolean().default(false),
     /** Each ref must be carried by some step. */
     inputRefs: z.array(InputRefSchema).default([]),
+    /**
+     * A step opens the form's page before the first fill (KI-001): after the opening navigate, a click or navigate comes
+     * before the first fill, as a login form is on its own page (the start page has none).
+     */
+    opensFormBeforeFill: z.boolean().default(false),
     /** Some step is flagged destructive (only meaningful when allowDestructive is true). */
     destructiveStep: z.boolean().default(false),
-    /** How many scenarios the plan may have (KI-031); absent: not checked. */
-    scenarios: z.object({ min: z.number().int().min(1), max: z.number().int().min(1) }).optional(),
+    /**
+     * How many scenarios the plan may have (KI-031). Default exactly one: only a case whose criteria need different
+     * starting states may split, so a split anywhere else is scored as splitting too eagerly.
+     */
+    scenarios: z.object({ min: z.number().int().min(1), max: z.number().int().min(1) }).default({ min: 1, max: 1 }),
   }),
 });
 export type PlannerEvalCase = z.infer<typeof PlannerEvalCaseSchema>;
@@ -78,6 +86,9 @@ export function loadPlannerCases(dir = CASES_DIR): PlannerEvalCase[] {
   });
 }
 
+/** A step description that only applies sometimes ("… if not already shown", "if needed", "when present"). */
+const CONDITIONAL = /\b(if|unless|when|in case)\b[^.]*\b(not|already|needed|necessary|present|shown|visible|exists?|available|required)\b/i;
+
 /** Score one plan against a case's expectations. */
 export function scorePlan(c: PlannerEvalCase, plan: TestPlan): string[] {
   const failures: string[] = [];
@@ -86,6 +97,9 @@ export function scorePlan(c: PlannerEvalCase, plan: TestPlan): string[] {
   const kinds = new Set(steps.map((s) => s.kind));
   for (const k of c.expect.requiredStepKinds) if (!kinds.has(k)) failures.push(`no ${k} step (got ${[...kinds].join(", ")})`);
   if (steps.length > c.expect.maxSteps) failures.push(`${steps.length} steps > max ${c.expect.maxSteps}`);
+  // Every case: a step is one action that always applies (KI-001: "Open the account page … if not already shown" found
+  // nothing to click once the login had opened it, and exploration stopped).
+  for (const step of steps) if (CONDITIONAL.test(step.description)) failures.push(`conditional step ${step.id}: "${step.description}"`);
 
   const fmt = (xs: { criterionId: string; reason: string }[]) =>
     xs.map((b) => `${b.criterionId}:${b.reason}`).sort().join(", ") || "(none)";
@@ -106,8 +120,15 @@ export function scorePlan(c: PlannerEvalCase, plan: TestPlan): string[] {
     }
   }
   if (c.expect.destructiveStep && !steps.some((s) => s.destructive)) failures.push("no step flagged destructive");
+  if (c.expect.opensFormBeforeFill) {
+    const first = plan.scenarios[0]!.steps;
+    const fill = first.findIndex((s) => s.kind === "fill");
+    if (fill >= 0 && !first.slice(1, fill).some((s) => s.kind === "click" || s.kind === "navigate")) {
+      failures.push(`the first fill (${first[fill]!.id}) comes with no step opening its form`);
+    }
+  }
   const n = plan.scenarios.length;
-  if (c.expect.scenarios && (n < c.expect.scenarios.min || n > c.expect.scenarios.max)) {
+  if (n < c.expect.scenarios.min || n > c.expect.scenarios.max) {
     failures.push(`${n} scenarios, expected ${c.expect.scenarios.min}–${c.expect.scenarios.max}`);
   }
   return failures;
