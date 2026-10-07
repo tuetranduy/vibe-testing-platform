@@ -11,6 +11,7 @@ const softExpect = expect.configure({ soft: true });
 
 test("discovered flow", async ({ page }) => {
   await page.goto(data.targetUrl);
+  await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
   await page.getByRole("link", { name: data.locators.loc1.name, exact: true }).click();
   await page.getByRole("searchbox", { name: data.locators.loc2.name, exact: true }).fill(data.inputs.input1);
   await page.getByRole("link", { name: data.locators.loc3.name, exact: true }).click();

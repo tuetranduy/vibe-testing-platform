@@ -139,6 +139,8 @@ const READ_HELPER: Partial<Record<ReadKind, string>> = {
 
 /** The executor's settle bound before a checkpoint is read. */
 const LOAD_SETTLE_TIMEOUT_MS = 10_000;
+/** The executor's wait for a quiet network after a navigation (KI-044). */
+const NETWORK_QUIET_TIMEOUT_MS = 3_000;
 
 const FLIPPED = { gt: "lt", gte: "lte", lt: "gt", lte: "gte", eq: "eq", neq: "neq" } as const;
 type Operator = keyof typeof FLIPPED;
@@ -349,12 +351,16 @@ class Compiler {
     }
 
     w.line("await page.goto(data.targetUrl);");
+    this.emitQuiet(w);
     let checkpoints = 0;
     (this.golden.get(scenario) ?? []).forEach((step, position) => {
       if (position > cutoff) return;
       switch (step.kind) {
         case "navigate":
-          if (position > 0) w.line(`await page.goto(${this.url(navigateUrl(step)!)});`);
+          if (position > 0) {
+            w.line(`await page.goto(${this.url(navigateUrl(step)!)});`);
+            this.emitQuiet(w);
+          }
           return;
         case "act":
           this.withLocator(w, step.element!, `Step ${step.index} (act)`, (l) => `await ${l}.click();`);
@@ -376,6 +382,11 @@ class Compiler {
           return;
       }
     });
+  }
+
+  /** Like the executor after a navigation: a field typed before the page settles can be emptied by it (KI-044). */
+  private emitQuiet(w: SourceWriter): void {
+    w.line(`await page.waitForLoadState(${lit("networkidle")}, { timeout: ${lit(NETWORK_QUIET_TIMEOUT_MS)} }).catch(() => {});`);
   }
 
   private assemble(bodies: { scenario: string; body: SourceWriter }[]): string {

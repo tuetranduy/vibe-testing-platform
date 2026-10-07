@@ -65,6 +65,7 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-041 | Medium | LLM quality | The requirement compiler's prompt changed without an eval run | Resolved (2026-09-30, `af80be5`) |
 | KI-042 | Low | Recordings | Exploration video and trace have not been recorded in a live run | Resolved (2026-09-30, live DeepSeek run) |
 | KI-043 | Medium | LLM | The DeepSeek provider has not been run against the live API | Resolved (2026-09-30): run live; see KI-001 |
+| KI-044 | High | Exploration | A field typed before the page settles is emptied by the page, and the fill is recorded as a success | Resolved (2026-10-07) |
 
 ---
 
@@ -643,3 +644,20 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
   the `@live` Stagehand smoke (passes on `deepseek-flash`, 16 s) and the live E2E suite (KI-001: not green, for the
   model-quality reasons recorded there). No call reached the 120 s request timeout: V4 Pro's thinking-mode compiles
   took 26 s on average. `INVALID_OUTPUT` was not a failure cause in any eval case.
+
+## KI-044 — A field typed before the page settles is emptied by the page, and the fill is recorded as a success
+- **Severity:** High (a run fails for a reason its report does not show).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (navigate, fill, click),
+  `packages/testing-engine/src/compiler/test-compiler.ts`.
+- **What:** run `run_0muxj1p6g91f1c4436b3a8109` (demoqa.com/register) typed "John" into First Name about 1.6 s after
+  the page's `load`; the page, still starting up, emptied the field again, and Register was clicked without it. The fill
+  step was recorded as SUCCESS: Playwright's fill had worked, the value just did not stay. Reproduced outside the
+  platform: a fill up to ~0.8 s after `load` is always lost, one at 1.6 s or later stays (the worker, slower, has a
+  wider window). The generated test had the same race (`page.goto` then `fill`).
+- **Resolved (2026-10-07):** every navigation now waits, after `load`, for a quiet network (at most 3 s; a page that
+  never goes quiet is not an error), in the executor and in the generated test. Before every click the executor
+  reads back each value typed since the last click or navigation, and types again one the page left empty, recorded
+  as a golden fill "Fill again, the page cleared it: …" of the same planned step (a reformatted value, a field gone
+  from the page and a selection are left alone). Checked against the live page with the real executor and recorder:
+  without either change First Name was empty at the click; with the re-check alone it was typed again; with both the
+  first fill stayed.

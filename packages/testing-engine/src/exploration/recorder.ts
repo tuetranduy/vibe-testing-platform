@@ -271,6 +271,16 @@ export async function fillElement(page: Page, target: ElementTarget, value: stri
 }
 
 /**
+ * What a filled field holds now: null when the selector no longer matches exactly one visible element, or the element
+ * has no value to read (not an input, textarea or select). Reads only; never waits for the element.
+ */
+export async function fieldValue(page: Page, selector: string): Promise<string | null> {
+  const locator = page.locator(selector);
+  if ((await locator.count()) !== 1 || !(await locator.isVisible())) return null;
+  return locator.inputValue({ timeout: 1_000 }).catch(() => null);
+}
+
+/**
  * Deterministic `<select>` choice by our own code (the value comes from test data, a secret or the
  * requirement, never from the model). Matches an option by value or label.
  */

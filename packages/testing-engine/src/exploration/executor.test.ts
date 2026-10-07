@@ -47,6 +47,7 @@ interface FakeSessionScript {
   observe?: (instruction: string, n: number) => Promise<ObservedElement[]> | ObservedElement[];
   actOn?: (el: ObservedElement, n: number) => Promise<Partial<ActResult>> | Partial<ActResult>;
   extract?: (instruction: string) => Promise<unknown> | unknown;
+  waitForLoadState?: (state: string) => Promise<void> | void;
 }
 
 class FakeSession implements ExplorerSession {
@@ -55,6 +56,8 @@ class FakeSession implements ExplorerSession {
   url = "about:blank";
   observeCount = 0;
   actOnCount = 0;
+  /** `page.waitForLoadState` calls, as [state, timeout]. */
+  readonly loadStates: [string, number | undefined][] = [];
   readonly page: Page;
 
   constructor(private readonly script: FakeSessionScript = {}) {
@@ -62,7 +65,10 @@ class FakeSession implements ExplorerSession {
     this.page = {
       url: () => self.url,
       isClosed: () => false,
-      waitForLoadState: async () => {},
+      waitForLoadState: async (state: string, opts?: { timeout?: number }) => {
+        self.loadStates.push([state, opts?.timeout]);
+        await self.script.waitForLoadState?.(state);
+      },
     } as unknown as Page;
   }
 
@@ -543,6 +549,95 @@ describe("runExploration (fake explorer)", () => {
 
     const failed = outcome.steps.find((s) => s.kind === "fill" && s.outcome === "FAILED");
     expect(failed?.error).toBe("element is detached");
+  });
+
+  it("every navigation waits for a quiet network (bounded); a page that never goes quiet is not an error", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({
+      waitForLoadState: (state) => {
+        if (state === "networkidle") throw new Error("Timeout 3000ms exceeded.");
+      },
+    });
+    const plan = planOf(step("navigate", "Open the product page"), step("navigate", "Open https://shop.test/cart"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "navigate", "PS-2", "SUCCESS", true],
+    ]);
+    expect(session.loadStates).toEqual([
+      ["networkidle", 3_000],
+      ["networkidle", 3_000],
+    ]);
+  });
+
+  it("a value the page cleared after it was typed (a form that resets while the page starts up) is typed again before the next click", async () => {
+    const { ctx } = fakeCtx({ testData: { firstName: "John", lastName: "Doe" } });
+    const session = new FakeSession({
+      observe: (instruction, n) => [{ selector: `xpath=/html[1]/body[1]/f[${n + 1}]`, description: `element for ${instruction}`, method: "fill", arguments: [] }],
+    });
+    const { recorder, fills } = fakeRecorder({
+      describe: (selector) => (/f\[3\]$/.test(selector) ? { role: "button", name: "Register", text: "Register" } : { role: "textbox", name: "Name", text: null }),
+    });
+    // The page empties the first name once, after the last name was typed.
+    const page = new Map<string, string>();
+    recorder.fill = async (_page, selector, value) => {
+      fills.push({ selector, value });
+      page.set(selector, value);
+      if (/f\[2\]$/.test(selector)) page.set("xpath=/html[1]/body[1]/f[1]", "");
+    };
+    recorder.value = async (_page, selector) => page.get(selector) ?? null;
+    const plan = planOf(
+      step("navigate", "Open the register page"),
+      step("fill", "Fill in the first name", { inputRef: { source: "testData", key: "firstName" } }),
+      step("fill", "Fill in the last name", { inputRef: { source: "testData", key: "lastName" } }),
+      step("submit", "Click the register button"),
+    );
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(fills.map((f) => f.value)).toEqual(["John", "Doe", "John"]);
+    expect(outcome.steps.filter((s) => s.kind !== "observe").map((s) => [s.kind, s.plannedStepId, s.outcome, s.onGoldenPath, s.instruction])).toEqual([
+      ["navigate", "PS-1", "SUCCESS", true, "Navigate to https://shop.test/products/1"],
+      ["fill", "PS-2", "SUCCESS", true, "Fill in the first name"],
+      ["fill", "PS-3", "SUCCESS", true, "Fill in the last name"],
+      ["fill", "PS-2", "SUCCESS", true, "Fill again, the page cleared it: Fill in the first name"],
+      ["act", "PS-4", "SUCCESS", true, "Click the register button"],
+    ]);
+    const [, first, , again] = outcome.steps.filter((s) => s.kind !== "observe");
+    expect(again).toMatchObject({ element: first!.element, inputRef: { source: "testData", key: "firstName" } });
+  });
+
+  it("only a field left empty is typed again: a reformatted value, a field that is gone, a selection and values typed before an earlier click are left alone", async () => {
+    const { ctx } = fakeCtx({ testData: { phone: "5551234", city: "Hanoi", country: "VN" } });
+    const session = new FakeSession({
+      observe: (instruction, n) => [{ selector: `xpath=/html[1]/body[1]/f[${n + 1}]`, description: `element for ${instruction}`, method: "fill", arguments: [] }],
+    });
+    const { recorder, fills, selects } = fakeRecorder({
+      describe: (selector) => (/f\[[45]\]$/.test(selector) ? { role: "button", name: "Next", text: "Next" } : { role: "textbox", name: "Field", text: null }),
+    });
+    const reads: string[] = [];
+    // f[1] phone: reformatted by the page; f[2] city: gone; f[3] country: a select (never read); f[4], f[5]: the buttons.
+    recorder.value = async (_page, selector) => {
+      reads.push(selector);
+      return { "xpath=/html[1]/body[1]/f[1]": "(555) 1234", "xpath=/html[1]/body[1]/f[3]": "" }[selector] ?? null;
+    };
+    const plan = planOf(
+      step("navigate", "Open the address form"),
+      step("fill", "Fill the phone", { inputRef: { source: "testData", key: "phone" } }),
+      step("fill", "Fill the city", { inputRef: { source: "testData", key: "city" } }),
+      step("select", "Choose the country", { inputRef: { source: "testData", key: "country" } }),
+      step("click", "Click Next"),
+      step("click", "Click Next again"),
+    );
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(fills.map((f) => f.value)).toEqual(["5551234", "Hanoi"]);
+    expect(selects.map((f) => f.value)).toEqual(["VN"]);
+    // Read before the first click only: the phone and the city, never the select.
+    expect(reads).toEqual(["xpath=/html[1]/body[1]/f[1]", "xpath=/html[1]/body[1]/f[2]"]);
   });
 
   it("an action denied by assertActionAllowed (observed element's role/name/text) → BLOCKED_BY_POLICY, not executed, exploration stops", async () => {
