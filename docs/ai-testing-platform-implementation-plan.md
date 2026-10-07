@@ -92,9 +92,10 @@ In priority order. None blocks development; items 1–3 block the V1 release gat
 1. ~~**Live release gate** (KI-001, Task 21 step 6, Milestone E)~~: **passed 2026-10-07** on DeepSeek Flash
    (`LLM_PROVIDER=deepseek LLM_MODEL=deepseek-flash ./scripts/e2e-live-gate.sh`: 27/27 three times in a row); Task 21
    step 6 ticked. The gate has not run on Claude or Gemini.
-2. **Evals for every offered model** (KI-026, KI-018): only `claude-sonnet-5` and `gemini-3.5-flash-lite` are
-   scored; the survey eval has never run; the compiler's current prompt was never fully re-scored. Run `pnpm eval
-   requirement-compiler | planner | survey` per model and record the rows, or hide unscored models in Settings.
+2. **Evals for every offered model** (KI-026, KI-018): both DeepSeek models are scored on all three suites at the
+   current prompts (2026-10-07). The Claude and Gemini models are not (only `claude-sonnet-5` and
+   `gemini-3.5-flash-lite`, at older prompts): run `pnpm eval requirement-compiler | planner | survey` per model with
+   paid keys and record the rows in `evals/BASELINE.md`.
 3. **Milestone C live demo**: `./scripts/milestone-c-demo.sh` against a real model (never completed).
 4. **Repository remote and first CI run** (KI-025): add a remote, push, add the `GEMINI_API_KEY` secret, and fix
    whatever the first run of `.github/workflows/ci.yml` finds (it has not run yet).

@@ -14,7 +14,8 @@ resolved by V1.1 (branch `feat/v1.1`, 2026-09-29), which also recorded KI-031 to
 DeepSeek key, DeepSeek standing in for Gemini where a paid key was needed: all but KI-001 (the live gate, not yet
 green on DeepSeek) and KI-025 / KI-036 (they need the branch pushed to GitHub) are resolved or closed by decision.
 KI-001 was resolved on 2026-10-07 (branch `fix/ki-001-flash`): the live gate passed on DeepSeek Flash. KI-031 was
-resolved for DeepSeek Flash on 2026-10-06.
+resolved for DeepSeek Flash on 2026-10-06. KI-026 was resolved for both DeepSeek models on 2026-10-07 (branch
+`fix/ki-026-deepseek`); the Claude and Gemini models still need paid keys.
 
 | ID | Severity | Area | Summary | Status |
 |---|---|---|---|---|
@@ -43,12 +44,12 @@ resolved for DeepSeek Flash on 2026-10-06.
 | KI-023 | Medium | Deployment | Production starts with the example encryption key and API token | Resolved (2026-09-29) |
 | KI-024 | Medium | Crash recovery | Lost runs are detected only while some worker is alive | Resolved (2026-09-29) |
 | KI-025 | Medium | Process | No CI; the repository has no remote | CI added; remote open |
-| KI-026 | Medium | LLM quality | Most models offered in Settings have never been evaluated | Open (needs paid keys) |
+| KI-026 | Medium | LLM quality | Most models offered in Settings have never been evaluated | Resolved for DeepSeek (2026-10-07); Claude and Gemini need paid keys |
 | KI-027 | Low | Data model | D6: only 4 tables carry `tenant_id`; child rows rely on `run_id` | Resolved `3a61f16` |
 | KI-028 | Low | Audit | Revealing a secret-bearing artifact is only a log line | Resolved `6026592` (V1.1) |
 | KI-029 | Low | Isolation | The rerun runner is a worker child process; its image was never built | Resolved `1e2081d`, `ca9ef74` |
 | KI-030 | Low | Docs | Stale plan copy in `Claude outputs/`; architecture doc never added | Resolved `08d29b0` |
-| KI-031 | Medium | LLM quality | The planner's multi-scenario prompt (V1.1) has never run against a real model | Resolved for DeepSeek Flash (2026-10-06); other models with KI-026 |
+| KI-031 | Medium | LLM quality | The planner's multi-scenario prompt (V1.1) has never run against a real model | Resolved for DeepSeek (Flash 2026-10-06, V4 Pro 2026-10-07); other models with KI-026 |
 | KI-032 | Low | Exploration | The exploration cache trusts a lookup whose locator still matches | Resolved `66f5afd` |
 | KI-033 | Low | Secrets | Saved credential profiles are decrypted by the API at run creation | Closed: decision (2026-09-30) |
 | KI-034 | Low | Users | Sessions: no list, no "sign out everywhere" short of a password change | Resolved `9a5bfa0` |
@@ -401,6 +402,24 @@ resolved for DeepSeek Flash on 2026-10-06.
 - **Status:** not yet scored. The 2026-09-29 attempt on `gemini-3.8-flash` stopped on the free-tier quota (KI-001).
   Needs a billing-enabled Gemini key (the Gemini models) and an `ANTHROPIC_API_KEY` with credit (the Claude models):
   `pnpm eval requirement-compiler`, `planner` and `survey` per model, rows in `evals/BASELINE.md`.
+- **Resolved for DeepSeek (2026-10-07, branch `fix/ki-026-deepseek`):** both DeepSeek models were scored on all three
+  suites at the current prompts (compiler `e448587`, planner `e3873cf`, survey `732f074`); V4 Pro both at its default
+  (thinking high) and with thinking off (`LLM_REASONING=minimal`):
+
+  | Model | Compiler | Planner | Survey |
+  |---|---|---|---|
+  | `deepseek-flash` (high) | 29/31 | 14/17 | 5/6 |
+  | `deepseek-v4-pro` (high) | 30/31 | 15/17 | 4/6 |
+  | `deepseek-v4-pro` (minimal) | 30/31 | 16/17 | 5/6 |
+
+  Each failing case but one failed the same way in an earlier row of `evals/BASELINE.md` (spanish-newsletter
+  as `visible`, search-results blocked `MISSING_TEST_DATA`, sort-by-price over 8 steps, sign-up suggestions not
+  flagged destructive, a fact keyed `url`). The exception: V4 Pro with thinking off planned login-then-product's first
+  fill with no step opening its form, which the executor handles at run time (KI-001). Both V4 Pro settings split case 15 into two scenarios; Flash planned it as one this time
+  (it split it in 8 of 10 runs before, KI-031).
+  The six models never scored (`claude-fable-5-1`, `claude-opus-5-5`, `claude-haiku-4-5`, `gemini-3.8-flash`,
+  `gemini-3.5-flash`, `gemini-3.1-pro-preview`), and `claude-sonnet-5` and `gemini-3.5-flash-lite` at the current
+  prompts, still need an `ANTHROPIC_API_KEY` with credit or a billing-enabled `GEMINI_API_KEY`; they stay in Settings.
 
 ## KI-027 — D6: only 4 tables carry `tenant_id`
 - **Severity:** Low (single tenant today).
@@ -467,7 +486,7 @@ resolved for DeepSeek Flash on 2026-10-06.
   splitting too eagerly. On Flash, over 10 runs: case 15 planned as 2 scenarios in 8 (twice as 1), and 1 of the 150
   one-scenario plans was split (search-results, as 2) (`evals/BASELINE.md`); `deepseek-v4-pro` also passed case 15 with thinking off. The live suite does not
   cover it: its two-scenario spec (`platform-v11`) runs in CI mode only (scripted plan). The other offered models are
-  still unscored: they need paid keys (KI-026).
+  still unscored: they need paid keys (KI-026). `deepseek-v4-pro` split case 15 at thinking high and off on 2026-10-07 (KI-026).
 
 ## KI-032 — The exploration cache trusts a lookup whose locator still matches
 - **Severity:** Low.
