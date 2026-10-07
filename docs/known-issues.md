@@ -66,6 +66,7 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-042 | Low | Recordings | Exploration video and trace have not been recorded in a live run | Resolved (2026-09-30, live DeepSeek run) |
 | KI-043 | Medium | LLM | The DeepSeek provider has not been run against the live API | Resolved (2026-09-30): run live; see KI-001 |
 | KI-044 | High | Exploration | A field typed before the page settles is emptied by the page, and the fill is recorded as a success | Resolved (2026-10-07) |
+| KI-045 | Medium | Recordings | The exploration video shows a gray screen | Resolved (2026-10-07) |
 
 ---
 
@@ -661,3 +662,19 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
   from the page and a selection are left alone). Checked against the live page with the real executor and recorder:
   without either change First Name was empty at the click; with the re-check alone it was typed again; with both the
   first fill stayed.
+
+## KI-045 — The exploration video shows a gray screen
+- **Severity:** Medium (the video, the evidence a person watches first, shows nothing useful).
+- **Where:** `apps/worker/src/sandbox/session-recording.ts`, `apps/worker/src/sandbox/session-hygiene.ts`,
+  `packages/stagehand-adapter/src/stagehand-explorer.ts`.
+- **What:** since the full-HD change (`2c32818`) the video was mostly gray. Reproduced with the sandbox launcher: (1) every
+  checkpoint's full-page screenshot captures beyond the viewport, and while it does the screencast sends frames of the
+  whole page (e.g. 1905×6000), which the video showed as a thin strip on the gray padding; (2) after the first such
+  screenshot the sandbox's first tab lost its full-HD override and shrank to the window's 1920×888 for the rest of the
+  run, so every later frame had a gray band; the same tab sometimes started at 888 too. Encoding and playback were
+  fine (checked in Chromium); the rerun's Playwright video was not affected.
+- **Resolved (2026-10-07):** frames of a full-page capture are skipped (and, for up to 1 s after one, frames smaller
+  than the screen before it), the page is set back to full HD after every full-page screenshot and before recording
+  starts (`restoreViewport` on the sandbox), and frames are scaled to fit and letterboxed in black instead of padded
+  in gray. Covered by a test that records the sandbox browser through full-page screenshots and plays the video in
+  Chromium, sampling the picture every 0.1 s.

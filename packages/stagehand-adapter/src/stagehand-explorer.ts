@@ -200,6 +200,7 @@ class StagehandExplorerSession implements ExplorerSession {
     private readonly signal: AbortSignal,
     private readonly opts: Required<Pick<StagehandExplorerOptions, "operationTimeoutMs" | "navigationTimeoutMs">>,
     onNavigationBlocked: ((listener: (e: NavigationBlock) => void) => () => void) | undefined,
+    private readonly restoreViewport?: () => Promise<void>,
   ) {
     this.unsubscribe = onNavigationBlocked?.((e) => {
       this.blocks.push(e);
@@ -403,7 +404,11 @@ class StagehandExplorerSession implements ExplorerSession {
   }
 
   screenshot(options: { fullPage?: boolean } = {}): Promise<Buffer> {
-    return this.run("screenshot", async () => Buffer.from(await this.page.screenshot({ type: "png", fullPage: options.fullPage === true })));
+    return this.run("screenshot", async () => {
+      const png = Buffer.from(await this.page.screenshot({ type: "png", fullPage: options.fullPage === true }));
+      if (options.fullPage) await this.restoreViewport?.();
+      return png;
+    });
   }
 
   close(): Promise<void> {
@@ -488,6 +493,7 @@ export class StagehandExplorer implements BrowserExplorer {
           navigationTimeoutMs: this.opts.navigationTimeoutMs ?? DEFAULT_NAVIGATION_TIMEOUT_MS,
         },
         handle.onNavigationBlocked?.bind(handle),
+        handle.restoreViewport?.bind(handle),
       );
     } catch (err) {
       // Detach Stagehand whenever it finishes (or failed half-way); the sandbox closes the browser itself.

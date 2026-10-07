@@ -1,5 +1,5 @@
 import { BROWSER_VIEWPORT } from "@platform/testing-engine";
-import type { Browser, BrowserContext, Page } from "playwright-core";
+import type { Browser, BrowserContext, CDPSession, Page } from "playwright-core";
 
 /**
  * Session hygiene for the sandboxed browser: no downloads, no JS dialogs left open
@@ -26,13 +26,26 @@ export async function applySessionHygiene(browser: Browser, context: BrowserCont
   context.on("page", (page) => void fullHd(context, page).catch(() => {}));
 }
 
+/** Each page's full-HD session: the override lasts while it is attached, and is re-sent on it (restoreFullHd). */
+const fullHdSessions = new WeakMap<Page, CDPSession>();
+
 /**
  * The page is a full-HD screen filled by the page (1920×1080 viewport and screen, scale 1), as in a browser in full
  * screen. New headless Chromium keeps room for browser UI in its window, by a different amount on the first tab than
  * on later ones, so the size is set per page. The session stays attached: the override ends when it detaches.
  */
 async function fullHd(context: BrowserContext, page: Page): Promise<void> {
-  const cdp = await context.newCDPSession(page);
+  const cdp = fullHdSessions.get(page) ?? (await context.newCDPSession(page));
+  fullHdSessions.set(page, cdp);
   const { width, height } = BROWSER_VIEWPORT;
   await cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false, screenWidth: width, screenHeight: height });
+}
+
+/**
+ * Sets the page back to full HD. A full-page screenshot (every checkpoint's) emulates the whole page's height on
+ * Playwright's own session and can leave the page at the window's size afterwards (1920×888 on the sandbox's first
+ * tab): the rest of the run, and of its video, was then smaller, with a gray band (2026-10-07).
+ */
+export async function restoreFullHd(page: Page): Promise<void> {
+  await fullHd(page.context(), page);
 }

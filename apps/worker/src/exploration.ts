@@ -111,11 +111,14 @@ export function createExplorationDeps(input: ExplorationDepsInput): ExploreStage
     cache: overrides.cache ?? ((ctx) => createObserveCache(db, ctx.tenantId)),
     // Start-up failures (e.g. Chromium's stderr tail) are logged here; the run records a template message.
     logger: overrides.logger ?? logger,
-    // V1.3: the exploration's video and trace, per the run's options, stored like the rerun's evidence.
+    // V1.3: the exploration's video and trace, per the run's options, stored like the rerun's evidence. The page is set
+    // to full HD again first: its first tab can show the window's smaller size until then (a gray band in the video).
     startRecording:
       overrides.startRecording ??
-      ((ctx, sandbox) =>
-        startSessionRecording(ctx, sandbox.page, { video: videoRecordingOn(ctx.request), trace: traceRecordingOn(ctx.request), logger })),
+      (async (ctx, sandbox) => {
+        await sandbox.restoreViewport?.();
+        return startSessionRecording(ctx, sandbox.page, { video: videoRecordingOn(ctx.request), trace: traceRecordingOn(ctx.request), logger });
+      }),
     recordingStore: overrides.recordingStore ?? ((ctx) => createRerunEvidenceStore({ db, storage, config, metrics: input.metrics }, ctx)),
     ...(overrides.recorder ? { recorder: overrides.recorder } : {}),
     ...(overrides.pollIntervalMs !== undefined ? { pollIntervalMs: overrides.pollIntervalMs } : {}),

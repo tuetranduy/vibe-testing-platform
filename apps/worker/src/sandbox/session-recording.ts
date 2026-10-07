@@ -69,8 +69,9 @@ export function ffmpegArgs(outputFile: string, size: { width: number; height: nu
   return [
     ...`-loglevel error -f image2pipe -avioflags direct -fpsprobesize 0 -probesize 32 -analyzeduration 0 -c:v mjpeg -i pipe:0 -y -an -r ${FPS}`.split(" "),
     ...`-c:v vp8 -qmin 0 -qmax 50 -crf 8 -deadline realtime -speed 8 -b:v 1M -threads 1`.split(" "),
+    // Scaled to fit, then letterboxed in black: a frame of any size fills the picture as far as its shape allows.
     "-vf",
-    `pad=${w}:${h}:0:0:gray,crop=${w}:${h}:0:0`,
+    `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:0:0:black`,
     outputFile,
   ];
 }
@@ -86,6 +87,54 @@ export const MAX_STILL_SECONDS = 3;
 export function framesFor(durationSeconds: number): number {
   const seconds = Math.min(MAX_STILL_SECONDS, Math.max(0, Number.isFinite(durationSeconds) ? durationSeconds : 0));
   return Math.max(1, Math.round(FPS * seconds));
+}
+
+/** What Chromium says about a screencast frame: the size of the area it shows, in CSS pixels. */
+interface FrameMetadata {
+  timestamp?: number;
+  deviceWidth?: number;
+  deviceHeight?: number;
+}
+
+/**
+ * A frame of a full-page screenshot, not of the screen: while a screenshot captures beyond the viewport (every
+ * checkpoint's full-page screenshot), the screencast shows the whole page, e.g. 1905×6000, which the video would show
+ * as a thin strip on gray (2026-10-07). Such a frame is much taller than any screen the video records; it is skipped,
+ * and the screen before it stays on.
+ */
+export function isPageCaptureFrame(metadata: FrameMetadata, size: { width: number; height: number }): boolean {
+  return (metadata.deviceHeight ?? 0) > size.height * 1.25;
+}
+
+/** After a full-page capture, how long the screen before it may stay on while the page gets its size back. */
+export const CAPTURE_SETTLE_SECONDS = 1;
+
+/**
+ * Which screencast frames are the screen: not the frames of a full-page capture, nor, for up to
+ * CAPTURE_SETTLE_SECONDS after one, frames smaller than the screen before it (the page at the window's size until its
+ * viewport is set back) — the screen before the capture stays on instead.
+ */
+export class ScreenFrames {
+  private screen: { width: number; height: number } | null = null;
+  private captureAt: number | null = null;
+
+  constructor(private readonly size: { width: number; height: number }) {}
+
+  keep(metadata: FrameMetadata, at: number): boolean {
+    if (isPageCaptureFrame(metadata, this.size)) {
+      this.captureAt = at;
+      return false;
+    }
+    const width = metadata.deviceWidth ?? 0;
+    const height = metadata.deviceHeight ?? 0;
+    if (this.captureAt !== null) {
+      const smaller = this.screen !== null && (width < this.screen.width || height < this.screen.height);
+      if (smaller && at - this.captureAt < CAPTURE_SETTLE_SECONDS) return false;
+      this.captureAt = null;
+    }
+    this.screen = { width, height };
+    return true;
+  }
 }
 
 /** The page's screencast, encoded by ffmpeg. */
@@ -113,9 +162,11 @@ export class ScreencastVideo {
     try {
       cdp = await page.context().newCDPSession(page);
       const video = new ScreencastVideo(ffmpeg, cdp, outputFile);
-      cdp.on("Page.screencastFrame", (e: { data: string; sessionId: number; metadata: { timestamp?: number } }) => {
+      const screen = new ScreenFrames(size);
+      cdp.on("Page.screencastFrame", (e: { data: string; sessionId: number; metadata: FrameMetadata }) => {
         cdp!.send("Page.screencastFrameAck", { sessionId: e.sessionId }).catch(() => {});
-        video.frame(Buffer.from(e.data, "base64"), e.metadata.timestamp ?? Date.now() / 1000);
+        const at = e.metadata.timestamp ?? Date.now() / 1000;
+        if (screen.keep(e.metadata, at)) video.frame(Buffer.from(e.data, "base64"), at);
       });
       await cdp.send("Page.startScreencast", { format: "jpeg", quality: 80, maxWidth: size.width, maxHeight: size.height, everyNthFrame: 1 });
       return video;
