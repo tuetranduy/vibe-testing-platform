@@ -8,5 +8,6 @@ export * from "./compiler";
 export * from "./playwright-runner";
 export * from "./evidence";
 export * from "./shared/locator-policy";
+export * from "./shared/viewport";
 export * from "./reporting";
 export * from "./reporting/diagnostics";

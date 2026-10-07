@@ -244,7 +244,7 @@ describe("buildPlaywrightConfig", () => {
         proxy: { server: PROXY },
         trace: "retain-on-failure",
         screenshot: { mode: "only-on-failure", fullPage: true },
-        video: "retain-on-failure",
+        video: { mode: "retain-on-failure" },
         actionTimeout: 10_000,
         navigationTimeout: 30_000,
       },
@@ -261,11 +261,24 @@ describe("buildPlaywrightConfig", () => {
     expect(JSON.stringify(config)).not.toContain("no-sandbox");
   });
 
+  it("the rerun is full HD: a 1920×1080 viewport, window and screen, and its video at that size", () => {
+    const config = load(buildPlaywrightConfig({ proxyUrl: PROXY, testTimeoutMs: 1000, actionTimeoutMs: 1000, record: { video: true, trace: false } }));
+    expect(config.use).toMatchObject({
+      viewport: { width: 1920, height: 1080 },
+      screen: { width: 1920, height: 1080 },
+      deviceScaleFactor: 1,
+      video: { mode: "on", size: { width: 1920, height: 1080 } },
+    });
+    expect(config.use.launchOptions.args).toContain("--window-size=1920,1080");
+    const failingOnly = load(buildPlaywrightConfig({ proxyUrl: PROXY, testTimeoutMs: 1000, actionTimeoutMs: 1000 }));
+    expect(failingOnly.use.video).toEqual({ mode: "retain-on-failure", size: { width: 1920, height: 1080 } });
+  });
+
   it("with record (V1.3), a passing test keeps its video and / or trace too", () => {
     const both = load(buildPlaywrightConfig({ proxyUrl: PROXY, testTimeoutMs: 1000, actionTimeoutMs: 1000, record: { video: true, trace: true } }));
-    expect(both.use).toMatchObject({ trace: "on", video: "on", screenshot: { mode: "only-on-failure", fullPage: true } });
+    expect(both.use).toMatchObject({ trace: "on", video: { mode: "on" }, screenshot: { mode: "only-on-failure", fullPage: true } });
     const videoOnly = load(buildPlaywrightConfig({ proxyUrl: PROXY, testTimeoutMs: 1000, actionTimeoutMs: 1000, record: { video: true, trace: false } }));
-    expect(videoOnly.use).toMatchObject({ trace: "retain-on-failure", video: "on" });
+    expect(videoOnly.use).toMatchObject({ trace: "retain-on-failure", video: { mode: "on" } });
   });
 
   it.each(["http://localhost:1234", "https://127.0.0.1:1234", "http://10.0.0.1:3128", "http://127.0.0.1", "http://127.0.0.1:1234/x", "socks5://127.0.0.1:1080"])(

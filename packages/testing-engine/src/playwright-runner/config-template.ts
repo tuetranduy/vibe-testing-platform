@@ -1,3 +1,4 @@
+import { BROWSER_VIEWPORT, BROWSER_WINDOW_ARGS } from "../shared/viewport";
 import { GLOBAL_SETUP_FILE } from "./guard-template";
 import { OUTPUT_DIR } from "./result-parser";
 
@@ -41,6 +42,7 @@ export const RERUN_CHROMIUM_ARGS: readonly string[] = [
   "--disable-domain-reliability",
   "--disable-sync",
   "--no-pings",
+  ...BROWSER_WINDOW_ARGS,
 ];
 
 export const DEFAULT_NAVIGATION_TIMEOUT_MS = 30_000;
@@ -89,7 +91,11 @@ export function buildPlaywrightConfig(input: PlaywrightConfigInput): string {
       proxy: { server: input.proxyUrl },
       trace: input.record?.trace ? "on" : "retain-on-failure",
       screenshot: { mode: "only-on-failure", fullPage: true },
-      video: input.record?.video ? "on" : "retain-on-failure",
+      // Full HD, as exploration: the page, its screen and the video (Playwright scales a video to 800×800 otherwise).
+      viewport: { ...BROWSER_VIEWPORT },
+      screen: { ...BROWSER_VIEWPORT },
+      deviceScaleFactor: 1,
+      video: { mode: input.record?.video ? "on" : "retain-on-failure", size: { ...BROWSER_VIEWPORT } },
       actionTimeout: input.actionTimeoutMs,
       navigationTimeout: navigationTimeoutMs,
       acceptDownloads: false,
