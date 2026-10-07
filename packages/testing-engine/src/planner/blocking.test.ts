@@ -29,8 +29,6 @@ function input(criteria: AcceptanceCriterion[], steps: PlannedStep[], extra: Par
     criteria,
     steps,
     targetUrl: "https://shop.example.com",
-    testDataKeys: [],
-    secretNames: [],
     policy: { allowDestructive: false },
     ...extra,
   };
@@ -39,7 +37,7 @@ function input(criteria: AcceptanceCriterion[], steps: PlannedStep[], extra: Par
 const reasons = (r: ReturnType<typeof applyBlocking>) => r.blockedCriteria.map((b) => [b.criterionId, b.reason]);
 
 describe("applyBlocking", () => {
-  it("precedence: MISSING_SECRET before MISSING_TEST_DATA before DESTRUCTIVE_ACTION_NOT_AUTHORIZED", () => {
+  it("a secret or test data value nobody provided never blocks (it is generated at fill time); a destructive step still does", () => {
     n = 0;
     const steps = [
       s("fill", "Enter the email", { inputRef: { source: "testData", key: "email" } }),
@@ -47,13 +45,9 @@ describe("applyBlocking", () => {
       s("click", "Click Delete account"),
       s("capture_checkpoint", "Capture", { checkpoint: "done" }),
     ];
-    expect(reasons(applyBlocking(input([criterion("AC-1", "done")], steps)))).toEqual([["AC-1", "MISSING_SECRET"]]);
-    expect(reasons(applyBlocking(input([criterion("AC-1", "done")], steps, { secretNames: ["password"] })))).toEqual([
-      ["AC-1", "MISSING_TEST_DATA"],
-    ]);
-    expect(
-      reasons(applyBlocking(input([criterion("AC-1", "done")], steps, { secretNames: ["password"], testDataKeys: ["email"] }))),
-    ).toEqual([["AC-1", "DESTRUCTIVE_ACTION_NOT_AUTHORIZED"]]);
+    expect(reasons(applyBlocking(input([criterion("AC-1", "done")], steps)))).toEqual([["AC-1", "DESTRUCTIVE_ACTION_NOT_AUTHORIZED"]]);
+    const fills = steps.slice(0, 2).concat(steps[3]!);
+    expect(applyBlocking(input([criterion("AC-1", "done")], fills)).blockedCriteria).toEqual([]);
   });
 
   it("steps after a criterion's last needed checkpoint do not affect it", () => {
@@ -65,7 +59,7 @@ describe("applyBlocking", () => {
       s("capture_checkpoint", "Capture after", { checkpoint: "after" }),
     ];
     const r = applyBlocking(input([criterion("AC-1", "home"), criterion("AC-2", "after")], steps));
-    expect(reasons(r)).toEqual([["AC-2", "MISSING_SECRET"]]);
+    expect(reasons(r)).toEqual([["AC-2", "DESTRUCTIVE_ACTION_NOT_AUTHORIZED"]]);
     expect(r.steps.map((x) => x.id)).toEqual(["PS-1", "PS-2"]);
   });
 
@@ -88,18 +82,17 @@ describe("applyBlocking", () => {
     expect(r.steps.map((x) => x.id)).toEqual(["PS-1"]);
   });
 
-  it("a semantic criterion no step references depends on the whole scenario: a missing secret blocks it", () => {
+  it("a semantic criterion no step references depends on the whole scenario: a missing secret does not block it", () => {
     n = 0;
     const steps = [
       s("navigate", "Open the login page"),
       s("fill", "Enter the password", { inputRef: { source: "secret", key: "password" } }),
       s("login", "Click Log in"),
     ];
-    expect(reasons(applyBlocking(input([criterion("AC-1", null)], steps)))).toEqual([["AC-1", "MISSING_SECRET"]]);
-    expect(reasons(applyBlocking(input([criterion("AC-1", null)], steps, { secretNames: ["password"] })))).toEqual([]);
+    expect(reasons(applyBlocking(input([criterion("AC-1", null)], steps)))).toEqual([]);
   });
 
-  it("a test_data precondition without a ref, or with an unknown key, blocks MISSING_TEST_DATA", () => {
+  it("test_data and secret preconditions never block, with or without a ref, provided or not", () => {
     n = 0;
     const steps = [s("capture_checkpoint", "Capture", { checkpoint: "home" })];
     const r = applyBlocking(
@@ -108,15 +101,12 @@ describe("applyBlocking", () => {
           criterion("AC-1", "home", [{ kind: "test_data", description: "Some order" }]),
           criterion("AC-2", "home", [{ kind: "test_data", ref: "orderNumber", description: "Order number" }]),
           criterion("AC-3", "home", [{ kind: "test_data", ref: "sku", description: "SKU" }]),
+          criterion("AC-4", "home", [{ kind: "secret", ref: "admin_token", description: "Admin token" }]),
         ],
         steps,
-        { testDataKeys: ["sku"] },
       ),
     );
-    expect(reasons(r)).toEqual([
-      ["AC-1", "MISSING_TEST_DATA"],
-      ["AC-2", "MISSING_TEST_DATA"],
-    ]);
+    expect(reasons(r)).toEqual([]);
   });
 
   it("literal inputRefs never block", () => {

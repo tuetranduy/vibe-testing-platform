@@ -37,8 +37,6 @@ requirement:
     - { key: subtotal, checkpoint: after_add, description: Cart subtotal, valueType: number }
 expect:
   requiredStepKinds: [fill]
-  blocked:
-    - { criterionId: AC-1, reason: MISSING_TEST_DATA }
-    - { criterionId: AC-2, reason: MISSING_TEST_DATA }
+  blocked: [] # since 2026-10-07 a missing test data value is generated when filled, never blocked
   inputRefs:
     - { source: testData, key: quantity }

@@ -74,8 +74,6 @@ export async function planTest(llm: RequirementLlm, input: PlanTestInput): Promi
       criteria: requirement.criteria.filter((c) => s.criterionIds.includes(c.id)),
       steps: s.steps,
       targetUrl: input.targetUrl,
-      testDataKeys: input.testDataKeys,
-      secretNames: input.secretNames,
       policy: input.policy,
       fallbackStepId: validated.scenarios.length === 1 ? "PS-1" : `PS-${++fallback}`,
     });
