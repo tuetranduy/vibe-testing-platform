@@ -255,6 +255,19 @@ describe("compilePlaywrightTest: the discovered flow (snapshot)", () => {
     expect(dataOf(out.dataJson).inputs.input1).toBe("42");
   });
 
+  it("every page.goto waits, like the executor's navigation, for a quiet network (bounded, best effort)", () => {
+    const steps = flow(
+      { kind: "navigate", plannedStepId: "PS-1", instruction: `Navigate to ${TARGET}` },
+      { kind: "navigate", plannedStepId: "PS-2", instruction: `Navigate to ${TARGET}cart`, urlAfter: `${TARGET}cart` },
+      { kind: "checkpoint", plannedStepId: "PS-3" },
+    );
+    const facts = [fact("cartCount", "st_cp_2", 1, "number", byTestId("cart-count"))];
+    const out = compile({ steps, facts, requirement: requirementOf([criterion("AC-1", { kind: "numeric_compare", left: after, operator: "eq", right: 1 })]) });
+    const quiet = 'await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});';
+    expect(out.source).toContain(`await page.goto(data.targetUrl);\n  ${quiet}\n  await page.goto(data.urls.url1);\n  ${quiet}\n`);
+    expect(checkGeneratedSource(out.source)).toEqual([]);
+  });
+
   it("a later navigate step replays as page.goto to its URL from run-data.json", () => {
     const steps = flow(
       { kind: "navigate", plannedStepId: "PS-1", instruction: `Navigate to ${TARGET}` },
@@ -267,7 +280,7 @@ describe("compilePlaywrightTest: the discovered flow (snapshot)", () => {
       facts,
       requirement: requirementOf([criterion("AC-1", { kind: "numeric_compare", left: after, operator: "eq", right: 1 })]),
     });
-    expect(out.source).toContain("await page.goto(data.targetUrl);\n  await page.goto(data.urls.url1);");
+    expect(out.source).toMatch(/await page\.goto\(data\.targetUrl\);\n.*\n {2}await page\.goto\(data\.urls\.url1\);/);
     expect(dataOf(out.dataJson).urls.url1).toBe(`${TARGET}cart`);
     expect(out.source).toContain('.toBeCloseTo(data.criteria["AC-1"].right, 9)');
   });

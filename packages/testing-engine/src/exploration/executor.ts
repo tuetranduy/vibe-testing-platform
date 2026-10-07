@@ -35,7 +35,7 @@ import { actionPolicyFor, isDestructiveStep } from "../shared/action-policy";
 import { captureFact, factFromReadings, modeForValueType, urlFact, type FactCaptureInput, type FactReadMode } from "./fact-reader";
 import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
 import { createInputGenerator, type FieldFacts, type InputGenerator } from "./input-generator";
-import { describeElement, describeField, elementAction, fillElement, recordElement, selectElementOption } from "./recorder";
+import { describeElement, describeField, elementAction, fieldValue, fillElement, recordElement, selectElementOption } from "./recorder";
 
 /**
  * Exploration executor (Task 14): runs the confirmed plan's scenarios (V1.1 F9: in order, each from a clean
@@ -138,6 +138,8 @@ export interface RecorderPort {
   captureFact(page: Page, input: FactCaptureInput): Promise<ObservedFact>;
   /** What a field asks for, for a value nobody provided (2026-10-07). Absent: the generator sees only the step. */
   describeField?(page: Page, selector: string): Promise<FieldFacts>;
+  /** What a filled field holds now, null when it cannot be read (fieldValue). Absent: typed values are never re-checked. */
+  value?(page: Page, selector: string): Promise<string | null>;
 }
 
 export const playwrightRecorder: RecorderPort = {
@@ -151,6 +153,7 @@ export const playwrightRecorder: RecorderPort = {
   select: (page, selector, value) => selectElementOption(page, selector, value),
   captureFact: (page, input) => captureFact(page, input),
   describeField: (page, selector) => describeField(page, selector),
+  value: (page, selector) => fieldValue(page, selector),
 };
 
 export interface ExplorationInput {
@@ -214,6 +217,12 @@ const PASSWORD_FIELD = 'input[type="password"] >> visible=true';
 const LIST_IN_PLACE_RULE =
   "For a list (string_list): when the page shows a message in place of the list (e.g. that it is empty), give that message as its only item; null only when neither the list nor such a message is shown.";
 const LOAD_SETTLE_TIMEOUT_MS = 10_000;
+/**
+ * How long a navigation waits, after `load`, for the network to go quiet (2026-10-07): a page that renders its form
+ * from scripts still loading can empty a field typed into before then (demoqa's register page empties its first
+ * field 1-2.5 s after `load`). A page that never goes quiet (polling, ads) costs this much and is not an error.
+ */
+const NETWORK_QUIET_TIMEOUT_MS = 3_000;
 /** `other` steps may keep these observed methods (none takes a value); everything else clicks. */
 const SAFE_OTHER_METHODS = new Set(["click", "doubleClick", "hover", "scrollIntoView"]);
 /** Term matching regardless of what the run allows: what the step and the element are, not what may run. */
@@ -258,6 +267,14 @@ interface Located {
   element: ObservedElement;
   ref: ElementRef;
   info: { role: string | null; name: string | null; text: string | null };
+}
+
+/** A value our recorder typed since the last click or navigation, re-checked before the next click. */
+interface Typed {
+  step: PlannedStep;
+  located: Located;
+  value: string;
+  generatedValue?: string;
 }
 
 export function newStepId(): string {
@@ -347,6 +364,8 @@ class ExplorationRun {
   private readonly inputs: InputGenerator;
   /** Values generated for this run, by `source:key`: made once, reused by every later fill of the key. */
   private readonly generated = new Map<string, string>();
+  /** Values typed since the last click or navigation (2026-10-07). */
+  private typed: Typed[] = [];
 
   constructor(
     private readonly ctx: StageContext,
@@ -565,6 +584,7 @@ class ExplorationRun {
     const startedAt = this.ctx.now();
     const urlBefore = this.url();
     const base = { plannedStepId: step?.id ?? null, kind: "navigate" as const, instruction: `Navigate to ${url}`, urlBefore, startedAt };
+    this.typed = [];
     try {
       await this.session.navigate(this.redactString(url));
     } catch (err) {
@@ -576,6 +596,7 @@ class ExplorationRun {
       await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
       return "failed";
     }
+    await this.page.waitForLoadState("networkidle", { timeout: NETWORK_QUIET_TIMEOUT_MS }).catch(() => {});
     await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true });
     return "ok";
   }
@@ -626,6 +647,9 @@ class ExplorationRun {
   /** Clicks a located element: the action policy first, then the explorer; recorded as an `act` step. */
   private async click(step: PlannedStep, instruction: string, located: Located): Promise<Attempt> {
     await this.enforcePolicy(step, instruction, located, "act");
+    await this.retypeCleared();
+    // The click may change or replace the form: what was typed before it is not checked again.
+    this.typed = [];
 
     await this.reserve();
     const startedAt = this.ctx.now();
@@ -723,7 +747,42 @@ class ExplorationRun {
       return "failed";
     }
     await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true });
+    if (how === "fill") this.typed.push({ step, located, value, ...(generated ? { generatedValue: generated.value } : {}) });
     return "ok";
+  }
+
+  /**
+   * Types again, before a click, a value the page emptied after our recorder typed it (2026-10-07): a page still
+   * starting up can reset its form (KI-044), and the click would then submit it without the value. Only a field now
+   * empty is typed again; one the page reformatted, one gone from the page and a selection are left alone. Recorded
+   * as a golden fill of the same planned step, so the generated test types it again at the same point.
+   */
+  private async retypeCleared(): Promise<void> {
+    if (!this.recorder.value) return;
+    for (const typed of this.typed) {
+      if (typed.value === "") continue;
+      const now = await this.recorder.value(this.page, typed.located.element.selector).catch(() => null);
+      if (now !== "") continue;
+      await this.reserve();
+      const base = {
+        plannedStepId: typed.step.id,
+        kind: "fill" as const,
+        instruction: `Fill again, the page cleared it: ${typed.step.description}`,
+        element: typed.located.ref,
+        inputRef: typed.step.inputRef ?? null,
+        urlBefore: this.url(),
+        startedAt: this.ctx.now(),
+        ...(typed.generatedValue !== undefined ? { generatedValue: typed.generatedValue } : {}),
+      };
+      try {
+        await this.recorder.fill(this.page, typed.located.element.selector, typed.value);
+      } catch (err) {
+        this.rethrowIfFatal(err);
+        await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
+        continue;
+      }
+      await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true });
+    }
   }
 
   /** The fill's field: the explorer's answer, else, for a secret, the page's only visible password field (KI-001). */

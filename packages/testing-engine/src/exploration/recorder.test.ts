@@ -3,7 +3,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LOCATOR_STRATEGY_ORDER } from "../shared/locator-policy";
 import { captureCheckpoint, captureFact, modeForValueType, readFact } from "./fact-reader";
-import { describeElement, describeField, elementAction, fillElement, recordElement } from "./recorder";
+import { describeElement, describeField, elementAction, fieldValue, fillElement, recordElement } from "./recorder";
 
 /**
  * Real Chromium (Playwright's build, launched headless without a proxy) on a static fixture
@@ -157,6 +157,21 @@ describe("fillElement (our code fills; values never go through the model)", () =
   it("fills the located field deterministically", async () => {
     await fillElement(page, "xpath=/html[1]/body[1]/input[1]", "s3cret-value");
     expect(await page.locator("#email").inputValue()).toBe("s3cret-value");
+  });});
+
+describe("fieldValue (what a filled field holds now, KI-044)", () => {
+  it("reads a field the page emptied after it was filled; null for a field that is gone, hidden or holds no value", async () => {
+    await page.setContent(`<input id="first"><input id="gone" style="display:none"><div id="text">Hello</div><select id="size"><option>S</option><option>M</option></select>`);
+    await fillElement(page, "#first", "John");
+    expect(await fieldValue(page, "#first")).toBe("John");
+    // The page resets its form while it starts up.
+    await page.evaluate(() => void ((document.getElementById("first") as HTMLInputElement).value = ""));
+    expect(await fieldValue(page, "#first")).toBe("");
+    expect(await fieldValue(page, "#gone")).toBeNull();
+    expect(await fieldValue(page, "#missing")).toBeNull();
+    expect(await fieldValue(page, "#text")).toBeNull();
+    expect(await fieldValue(page, "input")).toBeNull(); // more than one match
+    expect(await fieldValue(page, "#size")).toBe("S");
   });
 });
 

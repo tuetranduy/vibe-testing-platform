@@ -59,6 +59,7 @@ const ALLOWED_STRINGS: ReadonlySet<string> = new Set([
   ...ALLOWED_IMPORTS,
   "discovered flow",
   "load",
+  "networkidle",
   "",
   "i",
   "contains",
