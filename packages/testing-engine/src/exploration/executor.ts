@@ -34,7 +34,7 @@ import type { StageContext } from "../orchestrator/stages";
 import { actionPolicyFor, isDestructiveStep } from "../shared/action-policy";
 import { captureFact, factFromReadings, modeForValueType, urlFact, type FactCaptureInput, type FactReadMode } from "./fact-reader";
 import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
-import type { FieldFacts } from "./input-generator";
+import { createInputGenerator, type FieldFacts, type InputGenerator } from "./input-generator";
 import { describeElement, describeField, elementAction, fillElement, recordElement, selectElementOption } from "./recorder";
 
 /**
@@ -165,6 +165,8 @@ export interface ExplorationInput {
 export interface ExplorationDeps {
   store: ExplorationStore;
   recorder?: RecorderPort;
+  /** Makes the values nobody provided (2026-10-07); default `createInputGenerator(ctx.llm)`. */
+  inputs?: InputGenerator;
   /** Delay between `wait_for` polls. */
   pollIntervalMs?: number;
   /** Cached element lookups from earlier runs (V1.1 F8); absent: every lookup asks the explorer. */
@@ -245,7 +247,12 @@ interface StepDraft {
   startedAt: Date;
   artifactIds?: string[];
   llm?: LlmStepUsage | null;
+  /** A fill's value that nobody provided (2026-10-07). */
+  generatedValue?: string;
 }
+
+/** What the generator is told about a field the recorder cannot describe. */
+const NO_FIELD_FACTS: FieldFacts = { tag: "input", type: null, name: null, label: null, placeholder: null, autocomplete: null, maxLength: null, min: null, max: null, pattern: null, options: [] };
 
 interface Located {
   element: ObservedElement;
@@ -337,6 +344,9 @@ class ExplorationRun {
   private readonly sensitivity: ArtifactSensitivity = "STANDARD";
   private readonly max: number;
   private readonly visibleFacts: Set<string>;
+  private readonly inputs: InputGenerator;
+  /** Values generated for this run, by `source:key`: made once, reused by every later fill of the key. */
+  private readonly generated = new Map<string, string>();
 
   constructor(
     private readonly ctx: StageContext,
@@ -346,6 +356,7 @@ class ExplorationRun {
     const { request } = ctx;
     this.session = input.session;
     this.recorder = deps.recorder ?? playwrightRecorder;
+    this.inputs = deps.inputs ?? createInputGenerator(ctx.llm);
     this.policy = actionPolicyFor(request);
     this.max = request.options.maxExplorationSteps;
     this.multiScenario = input.plan.scenarios.length > 1;
@@ -500,10 +511,12 @@ class ExplorationRun {
   }
 
   /** The value for a fill; a missing secret / test data key is never invented (BLOCKED_BY_POLICY). */
-  private async resolveInput(step: PlannedStep): Promise<string> {
+  /**
+   * The value a fill types: the run's test data or secret, or the requirement's literal. Null when nobody provided it
+   * (2026-10-07): the fill then generates one from the field it located (`generatedInput`), so nothing is blocked.
+   */
+  private async resolveInput(step: PlannedStep): Promise<string | null> {
     const ref = step.inputRef;
-    let value: string | undefined;
-    let missing: BlockReason | null = null;
     if (!ref) {
       await this.reserve();
       await this.record({
@@ -517,32 +530,34 @@ class ExplorationRun {
       });
       throw new Stop("COMPLETED");
     }
-    if (ref.source === "secret") {
-      value = this.ctx.secrets.get(ref.key);
-      if (value === undefined) missing = "MISSING_SECRET";
-    } else if (ref.source === "testData") {
+    if (ref.source === "secret") return this.ctx.secrets.get(ref.key) ?? null;
+    if (ref.source === "testData") {
       const data = this.ctx.request.testData;
-      if (Object.hasOwn(data, ref.key)) value = String(data[ref.key] ?? "");
-      else missing = "MISSING_TEST_DATA";
-    } else {
-      value = ref.key;
+      return Object.hasOwn(data, ref.key) ? String(data[ref.key] ?? "") : null;
     }
-    if (missing || value === undefined) {
-      await this.reserve();
-      await this.record({
-        plannedStepId: step.id,
-        kind: "fill",
-        instruction: step.description,
-        inputRef: ref,
-        urlBefore: this.url(),
-        outcome: "BLOCKED_BY_POLICY",
-        blockReason: missing ?? "MISSING_TEST_DATA",
-        error: `${ref.source === "secret" ? "Secret" : "Test data key"} "${ref.key}" was not provided`,
-        startedAt: this.ctx.now(),
-      });
-      throw new Stop("BLOCKED_BY_POLICY");
-    }
-    return value;
+    return ref.key;
+  }
+
+  /** A value nobody provided, for the located field: one generator call per `source:key` in the run, reused after. */
+  private async generatedInput(step: PlannedStep, located: Located): Promise<{ value: string; llm: LlmStepUsage | null }> {
+    const ref = step.inputRef!;
+    const source = ref.source === "secret" ? "secret" : "testData";
+    const id = `${source}:${ref.key}`;
+    const known = this.generated.get(id);
+    if (known !== undefined) return { value: known, llm: null };
+    const field = (await this.recorder.describeField?.(this.page, located.element.selector).catch(() => null)) ?? NO_FIELD_FACTS;
+    const out = await this.inputs.generate({
+      source,
+      key: ref.key,
+      stepDescription: step.description,
+      field,
+      runId: this.ctx.runId,
+      signal: this.input.budget,
+      deadlineAt: this.ctx.deadlineAt,
+      redact: this.ctx.redact,
+    });
+    this.generated.set(id, out.value);
+    return out;
   }
 
   private async navigate(url: string, step: PlannedStep | null): Promise<Attempt> {
@@ -643,7 +658,7 @@ class ExplorationRun {
   }
 
   /** `field`, when given, receives the selector of the element filled. */
-  private async fill(step: PlannedStep, value: string, how: "fill" | "select", field?: { selector?: string }): Promise<Attempt> {
+  private async fill(step: PlannedStep, provided: string | null, how: "fill" | "select", field?: { selector?: string }): Promise<Attempt> {
     let located = await this.findField(step);
     // No field on this page (e.g. credentials planned on the start page, KI-001): ask once for the way to its form.
     if (!located) {
@@ -684,6 +699,8 @@ class ExplorationRun {
     }
     if (field) field.selector = located.element.selector;
     await this.enforcePolicy(step, step.description, located, "fill");
+    const generated = provided === null ? await this.generatedInput(step, located) : null;
+    const value = provided ?? generated!.value;
 
     await this.reserve();
     const startedAt = this.ctx.now();
@@ -695,6 +712,7 @@ class ExplorationRun {
       inputRef: step.inputRef ?? null,
       urlBefore: this.url(),
       startedAt,
+      ...(generated ? { generatedValue: generated.value, llm: generated.llm } : {}),
     };
     try {
       if (how === "fill") await this.recorder.fill(this.page, located.element.selector, value);
@@ -1122,6 +1140,7 @@ class ExplorationRun {
       artifactIds: draft.artifactIds ?? [],
       llm: draft.llm ?? null,
       ...(this.multiScenario ? { scenarioId: this.scenarioId } : {}),
+      ...(draft.generatedValue !== undefined ? { generatedValue: draft.generatedValue } : {}),
     }) as ExplorationStep;
     return ExplorationStepSchema.parse({
       ...redacted,

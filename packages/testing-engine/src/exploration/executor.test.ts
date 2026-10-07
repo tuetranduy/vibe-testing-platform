@@ -27,6 +27,7 @@ import { describe, expect, it } from "vitest";
 import type { ZodType } from "zod";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
 import { runExploration, type ExplorationStore, type RecorderPort } from "./executor";
+import type { FieldFacts, InputGenerator, InputRequest } from "./input-generator";
 import { factFromReadings, type FactCaptureInput } from "./fact-reader";
 import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
 
@@ -37,6 +38,7 @@ import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-c
 const SECRET = "Sup3r-Secret-Value!";
 const TARGET = "https://shop.test/products/1";
 const USAGE = { model: "fake-model", inputTokens: 100, outputTokens: 10, cacheHit: null };
+const FIELD: FieldFacts = { tag: "input", type: "text", name: null, label: null, placeholder: null, autocomplete: null, maxLength: null, min: null, max: null, pattern: null, options: [] };
 
 type Call = { op: "navigate" | "observe" | "act" | "actOn" | "extract" | "screenshot" | "close"; arg: unknown };
 
@@ -453,7 +455,7 @@ describe("runExploration (fake explorer)", () => {
 
   it("a full-page screenshot that fails falls back to the viewport; neither → artifact.omitted, the step still recorded", async () => {
     const { ctx, events } = fakeCtx();
-    const plan = planOf(step("navigate", "Open the login page"), step("fill", "Fill the password field", { inputRef: { source: "secret", key: "password" } }));
+    const plan = planOf(step("navigate", "Open the account page"), step("click", "Click the big red button", { destructive: true }));
     const run = async (fail: (o?: { fullPage?: boolean }) => boolean) => {
       const session = new FakeSession();
       const shoot = session.screenshot.bind(session);
@@ -477,29 +479,54 @@ describe("runExploration (fake explorer)", () => {
     expect(events.filter((e) => e.type === "artifact.omitted").at(-1)?.message).toBe("Screenshot where exploration was blocked could not be taken");
   });
 
-  it.each([
-    ["secret", "MISSING_SECRET"],
-    ["testData", "MISSING_TEST_DATA"],
-  ] as const)("a %s inputRef that was not provided is never invented: BLOCKED_BY_POLICY / %s and exploration stops", async (source, reason) => {
-    const { ctx } = fakeCtx();
-    const session = new FakeSession();
-    const { recorder, fills } = fakeRecorder();
-    const plan = planOf(
-      step("navigate", "Open the login page"),
-      step("fill", "Fill the password field", { inputRef: { source, key: "password" } }),
-      step("login", "Click Log in"),
-    );
-    const mem = memoryStore();
-    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder });
+  it.each(["secret", "testData"] as const)(
+    "a %s inputRef nobody provided is generated from its field once it is located, filled, and recorded on the step",
+    async (source) => {
+      const { ctx } = fakeCtx();
+      const session = new FakeSession({
+        observe: (instruction, n) => [{ selector: `xpath=/html[1]/body[1]/f[${n + 1}]`, description: `field for ${instruction}`, method: "fill", arguments: [] }],
+      });
+      const { recorder, fills } = fakeRecorder({ describe: (sel) => (/f\[1\]$/.test(sel) ? { role: "textbox", name: "Password", text: null } : { role: "button", name: "Log in", text: "Log in" }) });
+      const fields: string[] = [];
+      recorder.describeField = async (_page, selector) => (fields.push(selector), { ...FIELD, type: "password", label: "Password" });
+      const requests: InputRequest[] = [];
+      const inputs: InputGenerator = { generate: async (req) => (requests.push(req), { value: "Gen-Pass-1!aB", llm: USAGE }) };
+      const plan = planOf(
+        step("navigate", "Open the login page"),
+        step("fill", "Fill the password field", { inputRef: { source, key: "password" } }),
+        step("login", "Click Log in"),
+      );
+      const mem = memoryStore();
+      const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder, inputs });
 
-    expect(outcome.stopReason).toBe("BLOCKED_BY_POLICY");
-    expect(outcome.steps.at(-1)).toMatchObject({ kind: "fill", plannedStepId: "PS-2", outcome: "BLOCKED_BY_POLICY", blockReason: reason, onGoldenPath: false });
-    expect(fills).toEqual([]);
-    // V1.3: where it was blocked is kept as evidence — a full-page screenshot on the blocked step.
-    expect(session.ops()).toEqual(["navigate", "screenshot", "close"]);
-    expect(session.calls.find((c) => c.op === "screenshot")?.arg).toEqual({ fullPage: true });
-    expect(outcome.steps.at(-1)!.artifactIds).toEqual(["art_1"]);
-    expect(mem.screenshots.map((s) => s.fileName)).toEqual(["blocked-step-2.png"]);
+      expect(outcome.stopReason).toBe("COMPLETED");
+      expect(fills).toEqual([{ selector: "xpath=/html[1]/body[1]/f[1]", value: "Gen-Pass-1!aB" }]);
+      expect(fields).toEqual(["xpath=/html[1]/body[1]/f[1]"]);
+      expect(requests).toMatchObject([{ source, key: "password", stepDescription: "Fill the password field", field: { type: "password", label: "Password" } }]);
+      expect(outcome.steps.find((s) => s.kind === "fill")).toMatchObject({ outcome: "SUCCESS", onGoldenPath: true, inputRef: { source, key: "password" }, generatedValue: "Gen-Pass-1!aB", llm: USAGE });
+      expect(outcome.steps.some((s) => s.outcome === "BLOCKED_BY_POLICY")).toBe(false);
+    },
+  );
+
+  it("a generated value is made once per key and reused by a later fill of it, in another scenario too; a provided value is not generated", async () => {
+    const { ctx } = fakeCtx({ testData: { email: "qa@demo.test" } });
+    const session = new FakeSession({
+      observe: (instruction, n) => [{ selector: `xpath=/html[1]/body[1]/f[${n + 1}]`, description: `field for ${instruction}`, method: "fill", arguments: [] }],
+    });
+    const { recorder, fills } = fakeRecorder({ describe: () => ({ role: "textbox", name: "Field", text: null }) });
+    let calls = 0;
+    const inputs: InputGenerator = { generate: async () => ({ value: `generated-${++calls}`, llm: null }) };
+    const signUp = [step("navigate", "Open sign up"), step("fill", "Fill the email", { inputRef: { source: "testData", key: "email" } }), step("fill", "Choose a password", { inputRef: { source: "secret", key: "password" } })];
+    const logIn = [step("navigate", "Open log in"), step("fill", "Fill the password", { inputRef: { source: "secret", key: "password" } })];
+    const plan: TestPlan = { ...planOf(...signUp), scenarios: [
+      { id: "SC-1", title: "Sign up", criterionIds: [], steps: signUp },
+      { id: "SC-2", title: "Log in", criterionIds: [], steps: logIn },
+    ] };
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder, inputs, resetSession: async () => {} });
+
+    expect(calls).toBe(1);
+    expect(fills.map((f) => f.value)).toEqual(["qa@demo.test", "generated-1", "generated-1"]);
+    expect(outcome.steps.filter((s) => s.kind === "fill").map((s) => s.generatedValue ?? null)).toEqual([null, "generated-1", "generated-1"]);
   });
 
   it("a failed fill with an empty value keeps the error text readable (no [REDACTED] between characters)", async () => {
