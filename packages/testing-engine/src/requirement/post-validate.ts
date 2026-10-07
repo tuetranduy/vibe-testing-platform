@@ -61,7 +61,7 @@ function withTestDataPreconditions(draft: RequirementDraft): RequirementDraft {
 
 /**
  * Any non-zero number in an expected outcome that the requirement (or a testData value) does not state is an
- * invented threshold: the outcome becomes `semantic` (AI-judged, never PASS/FAIL) and is flagged.
+ * invented threshold: the outcome becomes `semantic` (judged by AI from what the page shows) and is flagged.
  * Facts only the rewritten outcomes used are dropped.
  */
 export function replaceUnstatedThresholds(draft: RequirementDraft, stated: Set<number>): RequirementDraft {

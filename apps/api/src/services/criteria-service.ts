@@ -127,9 +127,15 @@ export class CriteriaService {
     await this.addTestData(runId, run.request.testData, parsed.data.testData);
     const confirmed = await this.requirements.confirm(runId, latest.revision);
 
+    // An unclear (`semantic`) criterion is judged by AI from what the page shows (2026-10-07); it stays Inconclusive
+    // only when the page cannot decide it.
     const warnings = confirmed.criteria
       .filter((c) => c.ambiguity !== null || c.expectedOutcome.kind === "semantic")
-      .map((c) => `Criterion ${c.id} will be reported as Inconclusive`);
+      .map((c) =>
+        c.expectedOutcome.kind === "semantic"
+          ? `Criterion ${c.id} is unclear: AI will judge it from what the page shows`
+          : `Criterion ${c.id} will be reported as Inconclusive`,
+      );
 
     await this.publisher().publish({
       runId,

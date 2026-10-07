@@ -34,8 +34,10 @@ import { describeExpected, evaluateRule, factLabel } from "./rules";
  *     as its urlBefore → BLOCKED / LOGIN_FAILED, for criteria with a
  *     checkpoint planned after the login step. A FAILED login step is
  *     not LOGIN_FAILED (Ruling R25); it falls through to 5.
- *  4. `semantic` outcome                                          → INCONCLUSIVE / AMBIGUOUS_CRITERION when the
- *                                                                   criterion has an ambiguity, else AI_JUDGED_ONLY (D3).
+ *  4. `semantic` outcome (2026-10-07, replaces D3): its latest SUCCESS `judge` step's judgment of what the page
+ *     showed → PASS (relevant, HOLDS) / FAIL (relevant, DOES_NOT_HOLD), `aiJudged`, the observed result as `actual`.
+ *     No judgment, or one that could not decide (not relevant, CANNOT_TELL) → INCONCLUSIVE / AMBIGUOUS_CRITERION
+ *     when the criterion has an ambiguity, else AI_JUDGED_ONLY.
  *  5. A required fact was not recorded (never FAIL):
  *     - exploration ended on a BLOCKED_BY_POLICY step             → BLOCKED, that step's blockReason
  *                                                                   (TARGET_BLOCKED_BY_POLICY when it has none);
@@ -96,9 +98,14 @@ export function verifyCriterion(input: VerifyCriterionInput): ProvisionalResult 
   const login = failedLogin(refs, plannedSteps, steps, input.facts);
   if (login) return result("BLOCKED", "LOGIN_FAILED", `Login step ${login.stepId} succeeded but the page stayed at ${login.page}`);
 
-  // 4. Only a model could judge this one.
+  // 4. Only a model could judge this one: from what the exploration saw.
   if (outcome.kind === "semantic") {
-    return { ...result("INCONCLUSIVE", criterion.ambiguity ? "AMBIGUOUS_CRITERION" : "AI_JUDGED_ONLY", null), factRefs: [] };
+    const judgment = steps.findLast((s) => s.kind === "judge" && s.outcome === "SUCCESS" && s.judgment?.criterionId === criterion.id)?.judgment;
+    if (judgment?.relevant && judgment.verdict !== "CANNOT_TELL") {
+      return { ...result(judgment.verdict === "HOLDS" ? "PASS" : "FAIL", null, judgment.observed), factRefs: [], aiJudged: true };
+    }
+    const actual = !judgment ? null : judgment.relevant ? judgment.observed : `The page did not show it: ${judgment.observed}`;
+    return { ...result("INCONCLUSIVE", criterion.ambiguity ? "AMBIGUOUS_CRITERION" : "AI_JUDGED_ONLY", actual), factRefs: [] };
   }
 
   // 5. A required fact was never recorded.

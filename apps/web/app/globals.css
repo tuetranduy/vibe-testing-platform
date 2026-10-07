@@ -3713,6 +3713,11 @@ a.running-card:hover {
 .confirmation-no {
   color: var(--text-muted);
 }
+/* An unclear criterion judged by AI from the page (2026-10-07). */
+.confirmation-ai,
+.confirmation-ai .icon {
+  color: var(--info);
+}
 
 .ai-note {
   display: flex;

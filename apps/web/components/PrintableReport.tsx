@@ -173,7 +173,7 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
               </div>
               {c.aiNote && (
                 <div>
-                  <dt>AI note (never a status)</dt>
+                  <dt>{c.verdictSource === "AI_JUDGMENT" ? "AI reasoning" : "AI note (never a status)"}</dt>
                   <dd>{c.aiNote}</dd>
                 </div>
               )}

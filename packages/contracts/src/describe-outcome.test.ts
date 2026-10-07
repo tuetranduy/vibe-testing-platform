@@ -85,7 +85,7 @@ describe("describeExpectedOutcome", () => {
 
   it("semantic: judged by AI only, ends Inconclusive", () => {
     expect(text({ kind: "semantic", description: "The page responds quickly" })).toBe(
-      "Judged by AI only, so it ends Inconclusive: “The page responds quickly”.",
+      "Judged by AI from what the page shows: “The page responds quickly”.",
     );
   });
 

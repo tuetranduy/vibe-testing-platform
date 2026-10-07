@@ -57,7 +57,7 @@ describe("CriteriaReview", () => {
     const check = (card: HTMLElement) => within(card).getByRole("group", { name: /what will be checked/i });
     expect(check(cards[0]!)).toHaveTextContent("Cart badge count (at “after add”) is greater than Cart badge count (at “before add”).");
     expect(check(cards[1]!)).toHaveTextContent("Cart badge count (at “after add”) is exactly 1 more than Cart badge count (at “before add”).");
-    expect(check(cards[2]!)).toHaveTextContent("Judged by AI only, so it ends Inconclusive: “The page responds quickly”.");
+    expect(check(cards[2]!)).toHaveTextContent("Judged by AI from what the page shows: “The page responds quickly”.");
     expect(screen.queryByText(/rewording changes the description only/i)).not.toBeInTheDocument();
   });
 

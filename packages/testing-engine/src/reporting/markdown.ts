@@ -52,6 +52,7 @@ function duration(ms: number | null): string {
 function confirmation(c: CriterionResult): string {
   if (c.verdictSource === "PLAYWRIGHT_RERUN") return "Confirmed by the Playwright rerun";
   if (c.verdictSource === "EXPLORATION_ONLY") return "Not confirmed by a rerun: read from the page while exploring";
+  if (c.verdictSource === "AI_JUDGMENT") return "Judged by AI from what the page showed while exploring: the criterion is unclear, so the actual result was judged against it";
   return c.reason ? STATUS_REASON_TEXT[c.reason] : "No reason was recorded";
 }
 
@@ -129,7 +130,7 @@ export function renderReportMarkdown(report: TestReport, compared: MarkdownCompa
     push(`- **How it was decided:** ${escapeMarkdown(confirmation(c))}`);
     push(`- **Expected:** ${escapeMarkdown(c.expected)}`);
     push(`- **Actual:** ${c.actual ? escapeMarkdown(c.actual) : "—"}`);
-    if (c.aiNote) push(`- **AI note (never a status):** ${escapeMarkdown(c.aiNote)}`);
+    if (c.aiNote) push(`- **${c.verdictSource === "AI_JUDGMENT" ? "AI reasoning" : "AI note (never a status)"}:** ${escapeMarkdown(c.aiNote)}`);
     if (c.evidenceArtifactIds.length > 0) push(`- **Evidence:** ${c.evidenceArtifactIds.map(escapeMarkdown).join(", ")}`);
     push("");
   }

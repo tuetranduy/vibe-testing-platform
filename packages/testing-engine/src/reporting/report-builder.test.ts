@@ -21,6 +21,7 @@ import { DiagnosticsOutputSchema, createDiagnostics, type DiagnosticsLlm } from 
 import {
   createReportBuilder,
   createReportStage,
+  reconcileCriteria,
   type Diagnostics,
   type LlmUsageRow,
   type PersistedRunSources,
@@ -604,5 +605,30 @@ describe("buildReport (the API's report over persisted data, Ruling R36)", () =>
       nonCritical: { total: 0, notPassed: 0 },
     });
     expect(report.usage).toEqual({ llmCalls: 0, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 });
+  });
+});
+
+describe("reconcileCriteria: an unclear criterion judged from the page (2026-10-07)", () => {
+  const semantic = requirementOf([criterion("AC-1", { kind: "semantic", description: "The cart page looks tidy" })]);
+  const judgeStep = (verdict: "HOLDS" | "DOES_NOT_HOLD"): ExplorationStep => ({
+    ...step(9, "PS-1", ["art_judge"], false),
+    kind: "judge",
+    judgment: { criterionId: "AC-1", relevant: true, verdict, observed: "Items line up in one column", reasoning: "Read as: aligned and uncluttered" },
+  });
+
+  it("PASS from the judgment → AI_JUDGMENT, the judge's reasoning as aiNote, its screenshot first in the evidence", () => {
+    const [r] = reconcileCriteria({
+      requirement: semantic,
+      plan,
+      steps: [...STEPS, judgeStep("HOLDS")],
+      facts: [],
+      results: [{ criterionId: "AC-1", status: "PASS", reason: null, factRefs: [], expected: "The cart page looks tidy", actual: "Items line up in one column", aiJudged: true }],
+      rerun: null,
+      recordingArtifactIds: ["art_video"],
+    });
+    expect(r).toMatchObject({ status: "PASS", verdictSource: "AI_JUDGMENT", reason: null, aiNote: "Read as: aligned and uncluttered", rerunOutcome: "UNAVAILABLE" });
+    expect(r!.evidenceArtifactIds[0]).toBe("art_judge");
+    expect(r!.evidenceArtifactIds.at(-1)).toBe("art_video");
+    expect(r!.relatedStepIds[0]).toBe(judgeStep("HOLDS").id);
   });
 });

@@ -67,6 +67,7 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-043 | Medium | LLM | The DeepSeek provider has not been run against the live API | Resolved (2026-09-30): run live; see KI-001 |
 | KI-044 | High | Exploration | A field typed before the page settles is emptied by the page, and the fill is recorded as a success | Resolved (2026-10-07) |
 | KI-045 | Medium | Recordings | The exploration video shows a gray screen | Resolved (2026-10-07) |
+| KI-046 | Medium | LLM quality | The unclear-criterion judge's prompt has no eval suite | Open |
 
 ---
 
@@ -678,3 +679,14 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
   starts (`restoreViewport` on the sandbox), and frames are scaled to fit and letterboxed in black instead of padded
   in gray. Covered by a test that records the sandbox browser through full-page screenshots and plays the video in
   Chromium, sampling the picture every 0.1 s.
+
+## KI-046 — The unclear-criterion judge's prompt has no eval suite
+- **Severity:** Medium (it now decides PASS / FAIL for `semantic` criteria, D3 as amended 2026-10-07).
+- **Where:** `packages/testing-engine/src/exploration/judge.ts` (`JUDGE_SYSTEM_PROMPT`), called by the executor.
+- **What:** the judge is tested against recorded answers (schema, the "not relevant → cannot tell" rule, what the
+  prompt carries), not against a model: how often it calls a page relevant, and how strict it reads vague words, is
+  unmeasured. The judge sees the screen (viewport) and the page's text, not content further down the page as an
+  image; a model without image input (`deepseek-v4-pro`) judges from the text alone. Each judgment is one more recorded
+  step: it counts toward `maxExplorationSteps`.
+- **To close:** an eval suite of pages with a known answer (relevant / holds / does not hold / irrelevant), run on
+  each provider, scores recorded in `evals/BASELINE.md`.

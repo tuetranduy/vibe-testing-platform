@@ -258,7 +258,8 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
           )}
           {(unclear > 0 || aiJudged > 0) && (
             <p className="hint">
-              <Icon name="info" /> Unclear and model-judged criteria will be reported as Inconclusive.
+              <Icon name="info" /> Model-judged criteria are judged by AI from what the page shows; unclear checks may be reported as
+              Inconclusive.
             </p>
           )}
           {startingOver === null ? (

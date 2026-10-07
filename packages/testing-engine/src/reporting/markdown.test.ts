@@ -137,7 +137,7 @@ describe("renderReportMarkdown (V1.1 F6)", () => {
     expect(md).toContain("- **Actual:** Stayed at 0 \\| Rerun: expected 1");
     expect(md).toContain("- **Evidence:** art\\_trace");
     expect(md).toContain("### AC-2 — INCONCLUSIVE (non-critical)");
-    expect(md).toContain("- **How it was decided:** This can only be judged by the AI model, so it gets no pass or fail");
+    expect(md).toContain("- **How it was decided:** Only the AI can judge this, and what the page showed did not decide it");
     expect(md).toContain("- **AI note (never a status):** Looks fine");
   });
 

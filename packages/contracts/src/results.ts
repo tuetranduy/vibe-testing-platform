@@ -3,7 +3,8 @@ import { CriterionIdSchema, FactRefSchema } from "./common";
 import { ExplorationStepSchema, ObservedFactSchema } from "./exploration";
 import { BlockReasonSchema, CriterionStatusSchema, InconclusiveReasonSchema } from "./run";
 
-export const VerdictSourceSchema = z.enum(["PLAYWRIGHT_RERUN", "EXPLORATION_ONLY"]);
+/** AI_JUDGMENT (2026-10-07): an unclear (`semantic`) criterion judged by a model from what the exploration saw. */
+export const VerdictSourceSchema = z.enum(["PLAYWRIGHT_RERUN", "EXPLORATION_ONLY", "AI_JUDGMENT"]);
 export type VerdictSource = z.infer<typeof VerdictSourceSchema>;
 
 export const StatusReasonSchema = z.union([BlockReasonSchema, InconclusiveReasonSchema]);
@@ -16,6 +17,8 @@ export const ProvisionalResultSchema = z.object({
   factRefs: z.array(FactRefSchema),
   expected: z.string().max(1000), // human-readable, template-built
   actual: z.string().max(1000).nullable(),
+  /** The status is a model's judgment of what the exploration saw (2026-10-07; `semantic` criteria only). */
+  aiJudged: z.boolean().optional(),
 });
 export type ProvisionalResult = z.infer<typeof ProvisionalResultSchema>;
 
@@ -28,7 +31,7 @@ export const CriterionResultSchema = ProvisionalResultSchema.extend({
   provisional: ProvisionalResultSchema.pick({ status: true, reason: true }),
   evidenceArtifactIds: z.array(z.string()),
   relatedStepIds: z.array(z.string()),
-  aiNote: z.string().max(1000).nullable(), // semantic judge note (D3); never affects status
+  aiNote: z.string().max(1000).nullable(), // semantic criteria: the model's reasoning or comment; the status comes from the judgment step
   /** From the criterion (V1.1): a non-critical result never changes the run's verdict. Rows before V1.1: true. */
   critical: z.boolean().default(true),
 }).refine((r) => (r.status === "PASS" || r.status === "FAIL") === (r.verdictSource !== null), {
