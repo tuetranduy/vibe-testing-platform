@@ -54,8 +54,22 @@ export const ExplorationStepSchema = z.object({
   llm: LlmStepUsageSchema.nullable(),
   /** The scenario the step ran in (V1.1 F9); absent on steps recorded before V1.1: SC-1. */
   scenarioId: z.string().regex(/^SC-[1-5]$/).optional(),
+  /**
+   * The value a fill typed that nobody provided: generated from the field for its `inputRef` (test data or a secret,
+   * 2026-10-07). Absent or null: the value was provided (or the step is not a fill).
+   */
+  generatedValue: z.string().max(1000).nullable().optional(),
 });
 export type ExplorationStep = z.infer<typeof ExplorationStepSchema>;
+
+/** A value the run generated because nobody provided it (2026-10-07), with the first fill step that typed it. */
+export const GeneratedInputSchema = z.object({
+  source: z.enum(["testData", "secret"]),
+  key: z.string().min(1).max(200),
+  value: z.string().max(1000),
+  stepId: z.string(),
+});
+export type GeneratedInput = z.infer<typeof GeneratedInputSchema>;
 
 /** A step's scenario (SC-1 for steps recorded before V1.1). */
 export const stepScenario = (step: Pick<ExplorationStep, "scenarioId">): string => step.scenarioId ?? "SC-1";

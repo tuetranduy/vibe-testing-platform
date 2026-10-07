@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CriterionIdSchema, IsoDateTime } from "./common";
 import { NormalizedRequirementSchema } from "./requirement";
+import { GeneratedInputSchema } from "./exploration";
 import { CriterionResultSchema, NotCompiledSchema } from "./results";
 import { ErrorCategorySchema, RunLifecycleSchema, RunVerdictSchema } from "./run";
 
@@ -38,6 +39,8 @@ export const TestReportSchema = z.object({
     .object({ status: z.enum(["PASSED", "FAILED", "ERRORED"]), durationMs: z.number().int() })
     .nullable(),
   diagnostics: z.array(z.object({ criterionId: CriterionIdSchema.nullable(), summary: z.string().max(2000) })),
+  /** Values nobody provided that exploration generated and filled (2026-10-07). */
+  generatedInputs: z.array(GeneratedInputSchema).default([]),
   usage: z.object({
     llmCalls: z.number().int(),
     inputTokens: z.number().int(),

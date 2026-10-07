@@ -52,6 +52,13 @@ describe("ExplorationStepRepository", () => {
     expect(await repo.listByRun("run_other")).toEqual([]);
   });
 
+  it("keeps a fill's generated value (2026-10-07)", async () => {
+    const run = await newRun();
+    const repo = new ExplorationStepRepository(tdb.db);
+    await repo.insert(stepOf(run.id, 0, { kind: "fill", inputRef: { source: "secret", key: "password" }, generatedValue: "Gen-Pass-1!aB" }));
+    expect((await repo.listByRun(run.id))[0]).toMatchObject({ inputRef: { source: "secret", key: "password" }, generatedValue: "Gen-Pass-1!aB" });
+  });
+
   it("rejects invalid JSON on write and on read (contracts)", async () => {
     const run = await newRun();
     const repo = new ExplorationStepRepository(tdb.db);
