@@ -293,14 +293,52 @@ describe("V1.3: the live-site analysis, suggested test data and blocked evidence
       ...siteAnalysis,
       testData: [...siteAnalysis.testData, { key: "city", value: "Springfield", description: "City", source: "GENERATED" as const }],
       appliedKeys: [],
+      pageContents: [],
     });
     const stages = createFakeStages();
     let appliedBeforePlanning = -1;
     const plan = stages.plan;
-    stages.plan = async (ctx, requirement) => ((appliedBeforePlanning = p.applied.length), plan(ctx, requirement));
+    stages.plan = async (ctx, requirement, site) => ((appliedBeforePlanning = p.applied.length), plan(ctx, requirement, site));
     await runExecution(context({ ...request("A user can register with an email address."), testData: { city: "Oslo" } }), p.ports, stages);
     expect(p.applied).toEqual([{ email: "qa.abc123@example.com" }]); // the user's own city is kept
     expect(appliedBeforePlanning).toBe(1);
+  });
+
+  it("the planner gets the pages the analysis read, to plan the way to each control (KI-048)", async () => {
+    const p = ports("PLANNING");
+    p.ports.getConfirmedRequirement = async () => ({
+      ...(await createFakeStages().analyze(context(request("A user can register with an email address.")))),
+      runId: "run_1",
+      revision: 1,
+      confirmedAt: "2026-09-30T10:00:00.000Z",
+    });
+    const login = {
+      url: "https://shop.example.com/login",
+      inventory: { title: "Login", description: "", headings: [], links: [], forms: [], buttons: ["Login", "New User"] },
+    };
+    p.ports.getSiteAnalysis = async () => ({ ...siteAnalysis, testData: [], appliedKeys: [], pageContents: [login] });
+    const stages = createFakeStages();
+    const seen: unknown[] = [];
+    const plan = stages.plan;
+    stages.plan = async (ctx, requirement, site) => (seen.push(site), plan(ctx, requirement, site));
+    await runExecution(context(request("A user can register with an email address.")), p.ports, stages);
+    expect(seen).toEqual([[login]]);
+  });
+
+  it("without a site analysis the planner gets no pages", async () => {
+    const p = ports("PLANNING");
+    p.ports.getConfirmedRequirement = async () => ({
+      ...(await createFakeStages().analyze(context(request("A user can register with an email address.")))),
+      runId: "run_1",
+      revision: 1,
+      confirmedAt: "2026-09-30T10:00:00.000Z",
+    });
+    const stages = createFakeStages();
+    const seen: unknown[] = [];
+    const plan = stages.plan;
+    stages.plan = async (ctx, requirement, site) => (seen.push(site), plan(ctx, requirement, site));
+    await runExecution(context(request("A user can register with an email address.")), p.ports, stages);
+    expect(seen).toEqual([[]]);
   });
 
   it("every criterion blocked: the evidence captured instead of exploring reaches the report", async () => {

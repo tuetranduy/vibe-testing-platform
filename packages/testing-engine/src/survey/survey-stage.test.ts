@@ -20,18 +20,23 @@ interface FakePage {
   fail?: string;
   /** Where the page lands after goto. */
   landsOn?: string;
+  /** Its network never goes quiet (ads, polling): waiting for that times out. */
+  busy?: boolean;
 }
 
 /** A scripted site behind a fake sandbox page: goto by path, one inventory per page, no browser. */
 function fakeSite(site: Record<string, FakePage>, opts: { onGoto?: (path: string) => void; log?: string[] } = {}) {
   let current = "about:blank";
   const gotos: { url: string; timeout: number | undefined }[] = [];
+  /** What the survey did to the page, in order. */
+  const calls: string[] = [];
   const listeners = new Set<(e: { url: string; reason: string }) => void>();
   const page = {
     url: () => current,
     async goto(url: string, o?: { timeout?: number }) {
       gotos.push({ url, timeout: o?.timeout });
       const path = new URL(url).pathname;
+      calls.push(`goto ${path}`);
       opts.onGoto?.(path);
       const p = site[path];
       if (!p) throw new Error("page.goto: net::ERR_NAME_NOT_RESOLVED");
@@ -43,8 +48,14 @@ function fakeSite(site: Record<string, FakePage>, opts: { onGoto?: (path: string
       current = p.landsOn ?? url;
       return { status: () => p.status ?? 200 };
     },
+    async waitForLoadState(state: string, o?: { timeout?: number }) {
+      const path = new URL(current).pathname;
+      calls.push(`wait ${state} ${o?.timeout} ${path}`);
+      if (site[path]?.busy) throw new Error(`page.waitForLoadState: Timeout ${o?.timeout}ms exceeded.`);
+    },
     async evaluate() {
       const p = site[new URL(current).pathname];
+      calls.push(`read ${new URL(current).pathname}`);
       return { title: p?.title ?? "", description: "", headings: [], links: p?.links ?? [], forms: [], buttons: [] };
     },
     async screenshot() {
@@ -60,7 +71,7 @@ function fakeSite(site: Record<string, FakePage>, opts: { onGoto?: (path: string
     },
     close,
   };
-  return { sandbox, close, gotos };
+  return { sandbox, close, gotos, calls };
 }
 
 const answer = {
@@ -209,6 +220,26 @@ describe("survey stage", () => {
     await createSurveyStage({ openSandbox: async () => site.sandbox, store: () => store })(ctx);
     expect(new Set(site.gotos.map((g) => g.timeout))).toEqual(new Set([SURVEY_PAGE_TIMEOUT_MS]));
     expect(SURVEY_PAGE_TIMEOUT_MS).toBe(20_000);
+  });
+
+  it("reads a page once its network is quiet (a single-page app renders after `load`), at most 3 s, busy or not", async () => {
+    const { ctx, events, store } = setup();
+    // /cart's network never goes quiet (ads): the wait times out and the page is read anyway.
+    const site = fakeSite({ "/": HOME, "/products": { title: "Products · Demo Shop" }, "/cart": { title: "Your cart · Demo Shop", busy: true } });
+    await createSurveyStage({ openSandbox: async () => site.sandbox, store: () => store })(ctx);
+    expect(site.calls.slice(0, 9)).toEqual([
+      "goto /",
+      "wait networkidle 3000 /",
+      "read /",
+      "goto /products",
+      "wait networkidle 3000 /products",
+      "read /products",
+      "goto /cart",
+      "wait networkidle 3000 /cart",
+      "read /cart",
+    ]);
+    const cart = events.find((e) => e.type === "page.surveyed" && e.payload.path === "/cart");
+    expect(cart?.payload).toMatchObject({ status: "READ" });
   });
 
   it("a page that does not load, or lands off the allowed hosts, is SKIPPED and the survey goes on", async () => {

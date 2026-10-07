@@ -1,0 +1,391 @@
+# KI-048 (run_0muxw7z9b62ec85ca946b2687, demoqa.com/books): the planner, which never saw the site, planned
+# "Click the 'New User' button" on the start page; it is only on /login, opened by the "Login" button. The pages are
+# demoqa's /books and /login as the survey's inventory script read them on 2026-10-07; the criteria are the run's.
+id: register-from-store
+tags:
+  - login
+  - site-pages
+targetUrl: https://demoqa.com/books
+testDataKeys:
+  - newUserUsername
+secretNames: []
+requirement:
+  originalText: go to this page, create new account, then login using that new account, then go to Book Store, go to Git Pocket Guide book and
+    add book to collection
+  criteria:
+    - id: AC-1
+      critical: true
+      ambiguity: null
+      statement: User can create a new account successfully.
+      sourceText: create new account
+      preconditions:
+        - ref: newUserUsername
+          kind: test_data
+          description: Username/email for the new account
+        - ref: newUserPassword
+          kind: secret
+          description: Password for the new account
+      expectedOutcome:
+        fact:
+          key: registration_success_message
+          checkpoint: after_registration
+        kind: visible
+        expected: true
+    - id: AC-2
+      critical: true
+      ambiguity: null
+      statement: User can log in with the newly created account.
+      sourceText: login using that new account
+      preconditions:
+        - ref: newUserUsername
+          kind: test_data
+          description: Username/email for the new account
+        - ref: newUserPassword
+          kind: secret
+          description: Password for the new account
+      expectedOutcome:
+        fact:
+          key: profile_page_visible
+          checkpoint: after_login
+        kind: visible
+        expected: true
+    - id: AC-3
+      critical: true
+      ambiguity: null
+      statement: User can navigate to the Book Store page.
+      sourceText: go to Book Store
+      preconditions:
+        - kind: authenticated
+          description: User is logged in
+      expectedOutcome:
+        fact:
+          key: book_store_heading
+          checkpoint: book_store_page
+        kind: visible
+        expected: true
+    - id: AC-4
+      critical: true
+      ambiguity: null
+      statement: User can open the Git Pocket Guide book detail page.
+      sourceText: go to Git Pocket Guide book
+      preconditions:
+        - kind: authenticated
+          description: User is logged in
+      expectedOutcome:
+        fact:
+          key: book_title
+          checkpoint: book_detail_page
+        kind: text_matches
+        match:
+          mode: equals
+          value: Git Pocket Guide
+          caseSensitive: false
+    - id: AC-5
+      critical: true
+      ambiguity: null
+      statement: User can add the Git Pocket Guide book to their collection.
+      sourceText: add book to collection
+      preconditions:
+        - kind: authenticated
+          description: User is logged in
+      expectedOutcome:
+        item: Git Pocket Guide
+        kind: collection_contains
+        match: contains
+        collection:
+          key: profile_collection
+          checkpoint: profile_page_after_add
+  facts:
+    - key: registration_success_message
+      valueType: boolean
+      checkpoint: after_registration
+      description: Success message shown after creating account
+    - key: profile_page_visible
+      valueType: boolean
+      checkpoint: after_login
+      description: Profile page or welcome message visible after login
+    - key: book_store_heading
+      valueType: boolean
+      checkpoint: book_store_page
+      description: Book Store page heading visible
+    - key: book_title
+      valueType: string
+      checkpoint: book_detail_page
+      description: Title of the book on the detail page
+    - key: profile_collection
+      valueType: string_list
+      checkpoint: profile_page_after_add
+      description: List of books in the user's collection on Profile page
+pages:
+  - url: https://demoqa.com/books
+    inventory:
+      title: demosite
+      description: ""
+      headings: []
+      links:
+        - text: ""
+          url: https://demoqa.com/
+          area: nav
+        - text: Text Box
+          url: https://demoqa.com/text-box
+          area: main
+        - text: Check Box
+          url: https://demoqa.com/checkbox
+          area: main
+        - text: Radio Button
+          url: https://demoqa.com/radio-button
+          area: main
+        - text: Web Tables
+          url: https://demoqa.com/webtables
+          area: main
+        - text: Buttons
+          url: https://demoqa.com/buttons
+          area: main
+        - text: Links
+          url: https://demoqa.com/links
+          area: main
+        - text: Broken Links - Images
+          url: https://demoqa.com/broken
+          area: main
+        - text: Upload and Download
+          url: https://demoqa.com/upload-download
+          area: main
+        - text: Dynamic Properties
+          url: https://demoqa.com/dynamic-properties
+          area: main
+        - text: Practice Form
+          url: https://demoqa.com/automation-practice-form
+          area: main
+        - text: Browser Windows
+          url: https://demoqa.com/browser-windows
+          area: main
+        - text: Alerts
+          url: https://demoqa.com/alerts
+          area: main
+        - text: Frames
+          url: https://demoqa.com/frames
+          area: main
+        - text: Nested Frames
+          url: https://demoqa.com/nestedframes
+          area: main
+        - text: Modal Dialogs
+          url: https://demoqa.com/modal-dialogs
+          area: main
+        - text: Accordian
+          url: https://demoqa.com/accordian
+          area: main
+        - text: Auto Complete
+          url: https://demoqa.com/auto-complete
+          area: main
+        - text: Date Picker
+          url: https://demoqa.com/date-picker
+          area: main
+        - text: Slider
+          url: https://demoqa.com/slider
+          area: main
+        - text: Progress Bar
+          url: https://demoqa.com/progress-bar
+          area: main
+        - text: Tabs
+          url: https://demoqa.com/tabs
+          area: main
+        - text: Tool Tips
+          url: https://demoqa.com/tool-tips
+          area: main
+        - text: Menu
+          url: https://demoqa.com/menu
+          area: main
+        - text: Select Menu
+          url: https://demoqa.com/select-menu
+          area: main
+        - text: Sortable
+          url: https://demoqa.com/sortable
+          area: main
+        - text: Selectable
+          url: https://demoqa.com/selectable
+          area: main
+        - text: Resizable
+          url: https://demoqa.com/resizable
+          area: main
+        - text: Droppable
+          url: https://demoqa.com/droppable
+          area: main
+        - text: Dragabble
+          url: https://demoqa.com/dragabble
+          area: main
+        - text: Login
+          url: https://demoqa.com/login
+          area: main
+        - text: Book Store
+          url: https://demoqa.com/books
+          area: main
+        - text: Profile
+          url: https://demoqa.com/profile
+          area: main
+        - text: Book Store API
+          url: https://demoqa.com/swagger
+          area: main
+        - text: Git Pocket Guide
+          url: https://demoqa.com/books
+          area: main
+        - text: Learning JavaScript Design Patterns
+          url: https://demoqa.com/books
+          area: main
+        - text: Designing Evolvable Web APIs with ASP.NET
+          url: https://demoqa.com/books
+          area: main
+        - text: Speaking JavaScript
+          url: https://demoqa.com/books
+          area: main
+        - text: You Don't Know JS
+          url: https://demoqa.com/books
+          area: main
+        - text: Programming JavaScript Applications
+          url: https://demoqa.com/books
+          area: main
+        - text: Eloquent JavaScript, Second Edition
+          url: https://demoqa.com/books
+          area: main
+        - text: Understanding ECMAScript 6
+          url: https://demoqa.com/books
+          area: main
+      forms: []
+      buttons:
+        - Login
+        - Previous
+        - Next
+  - url: https://demoqa.com/login
+    inventory:
+      title: demosite
+      description: ""
+      headings:
+        - level: 1
+          text: Login
+        - level: 2
+          text: Welcome,
+      links:
+        - text: ""
+          url: https://demoqa.com/
+          area: nav
+        - text: Text Box
+          url: https://demoqa.com/text-box
+          area: main
+        - text: Check Box
+          url: https://demoqa.com/checkbox
+          area: main
+        - text: Radio Button
+          url: https://demoqa.com/radio-button
+          area: main
+        - text: Web Tables
+          url: https://demoqa.com/webtables
+          area: main
+        - text: Buttons
+          url: https://demoqa.com/buttons
+          area: main
+        - text: Links
+          url: https://demoqa.com/links
+          area: main
+        - text: Broken Links - Images
+          url: https://demoqa.com/broken
+          area: main
+        - text: Upload and Download
+          url: https://demoqa.com/upload-download
+          area: main
+        - text: Dynamic Properties
+          url: https://demoqa.com/dynamic-properties
+          area: main
+        - text: Practice Form
+          url: https://demoqa.com/automation-practice-form
+          area: main
+        - text: Browser Windows
+          url: https://demoqa.com/browser-windows
+          area: main
+        - text: Alerts
+          url: https://demoqa.com/alerts
+          area: main
+        - text: Frames
+          url: https://demoqa.com/frames
+          area: main
+        - text: Nested Frames
+          url: https://demoqa.com/nestedframes
+          area: main
+        - text: Modal Dialogs
+          url: https://demoqa.com/modal-dialogs
+          area: main
+        - text: Accordian
+          url: https://demoqa.com/accordian
+          area: main
+        - text: Auto Complete
+          url: https://demoqa.com/auto-complete
+          area: main
+        - text: Date Picker
+          url: https://demoqa.com/date-picker
+          area: main
+        - text: Slider
+          url: https://demoqa.com/slider
+          area: main
+        - text: Progress Bar
+          url: https://demoqa.com/progress-bar
+          area: main
+        - text: Tabs
+          url: https://demoqa.com/tabs
+          area: main
+        - text: Tool Tips
+          url: https://demoqa.com/tool-tips
+          area: main
+        - text: Menu
+          url: https://demoqa.com/menu
+          area: main
+        - text: Select Menu
+          url: https://demoqa.com/select-menu
+          area: main
+        - text: Sortable
+          url: https://demoqa.com/sortable
+          area: main
+        - text: Selectable
+          url: https://demoqa.com/selectable
+          area: main
+        - text: Resizable
+          url: https://demoqa.com/resizable
+          area: main
+        - text: Droppable
+          url: https://demoqa.com/droppable
+          area: main
+        - text: Dragabble
+          url: https://demoqa.com/dragabble
+          area: main
+        - text: Login
+          url: https://demoqa.com/login
+          area: main
+        - text: Book Store
+          url: https://demoqa.com/books
+          area: main
+        - text: Profile
+          url: https://demoqa.com/profile
+          area: main
+        - text: Book Store API
+          url: https://demoqa.com/swagger
+          area: main
+      forms:
+        - name: userForm
+          fields:
+            - label: ""
+              type: text
+              placeholder: UserName
+            - label: ""
+              type: password
+              placeholder: Password
+          submit: ""
+      buttons:
+        - Login
+        - New User
+expect:
+  requiredStepKinds:
+    - fill
+    - login
+    - capture_checkpoint
+  maxSteps: 30
+  blocked: []
+  reaches:
+    - step: New User
+      via: login

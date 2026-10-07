@@ -216,7 +216,14 @@ export function createAnalyzeStage(deps: AnalyzeStageDeps = {}): (ctx: StageCont
     });
     return {
       ...draft,
-      siteAnalysis: { status: site.status, reason: site.reason, pages: site.pages, checks: insights.checks, testData: insights.testData },
+      siteAnalysis: {
+        status: site.status,
+        reason: site.reason,
+        pages: site.pages,
+        checks: insights.checks,
+        testData: insights.testData,
+        pageContents: site.read,
+      },
     };
   };
 }

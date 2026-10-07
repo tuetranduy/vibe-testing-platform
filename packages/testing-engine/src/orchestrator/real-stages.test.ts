@@ -113,13 +113,13 @@ describe("createRealStages: the run's model client (StageContext.llm)", () => {
   it("analyze and plan call the run's client", async () => {
     const { calls, client } = recording();
     await expect(stagesWith().analyze(runCtx(client))).rejects.toThrow("stopped after the call");
-    await expect(stagesWith().plan(runCtx(client), requirement)).rejects.toThrow("stopped after the call");
+    await expect(stagesWith().plan(runCtx(client), requirement, [])).rejects.toThrow("stopped after the call");
     expect(calls).toEqual(["ANALYZING_REQUIREMENT", "PLANNING"]);
   });
 
   it("a run without a client (the fake engine's choice) fails with ContractError before any model call", async () => {
     await expect(stagesWith().analyze(runCtx(null))).rejects.toBeInstanceOf(ContractError);
-    await expect(stagesWith().plan(runCtx(null), requirement)).rejects.toBeInstanceOf(ContractError);
+    await expect(stagesWith().plan(runCtx(null), requirement, [])).rejects.toBeInstanceOf(ContractError);
   });
 });
 

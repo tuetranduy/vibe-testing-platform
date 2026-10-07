@@ -5,6 +5,7 @@ import {
   type NormalizedRequirement,
   type ProvisionalResult,
   type RunLifecycle,
+  type SitePage,
   type StoredTestRunRequest,
   type TestPlan,
 } from "@platform/contracts";
@@ -241,6 +242,19 @@ function setup(...replies: FakeReply[]) {
 
 const DENY: ActionPolicy = { allowDestructive: false };
 
+/** A page the analysis read: demoqa's login page, where "New User" opens the registration form (KI-048). */
+const LOGIN_PAGE: SitePage = {
+  url: "https://shop.example.com/login",
+  inventory: {
+    title: "Login",
+    description: "",
+    headings: [{ level: 1, text: "Login" }],
+    links: [{ text: "Book Store", url: "https://shop.example.com/books", area: "nav" }],
+    forms: [{ name: "userForm", fields: [{ label: "UserName :", type: "text", placeholder: "UserName" }], submit: "" }],
+    buttons: ["Login", "New User"],
+  },
+};
+
 const input = (requirement: NormalizedRequirement, extra: Partial<PlanTestInput> = {}): PlanTestInput => ({
   runId: "run_1",
   requirement,
@@ -311,6 +325,24 @@ describe("planTest — scenario", () => {
     for (const s of ["AC-1", "AC-4", "before_add", "after_add", "cart_page", "quantity", "password", "https://shop.example.com"]) {
       expect(sent).toContain(s);
     }
+  });
+
+  it("the prompt carries the pages the analysis read, as untrusted data, and the rule to plan the way to a control (KI-048)", async () => {
+    const { llm, transport } = setup({ json: cartPlan() });
+    await planTest(llm, input(cartRequirement(), { sitePages: [LOGIN_PAGE] }));
+    const prompt = transport.requests[0]!.messages[0]!.content as string;
+    expect(prompt).toContain("<<<PAGES");
+    expect(prompt).toContain(JSON.stringify([LOGIN_PAGE]));
+    expect(prompt).toContain("PAGES>>>");
+    expect(transport.requests[0]!.system).toMatch(/on another page/);
+  });
+
+  it("without pages the prompt says none were read", async () => {
+    const { llm, transport } = setup({ json: cartPlan() });
+    await planTest(llm, input(cartRequirement()));
+    const prompt = transport.requests[0]!.messages[0]!.content as string;
+    expect(prompt).not.toContain("<<<PAGES");
+    expect(prompt).toContain("No pages of the website were read");
   });
 });
 
@@ -609,23 +641,29 @@ describe("actionPolicyFor (D9, amended 2026-09-28)", () => {
 describe("createPlanStage", () => {
   it("production without a confirmed host blocks destructive steps even when allowDestructiveActions is on", async () => {
     const { llm } = setup({ json: deletePlan() });
-    const plan = await createPlanStage()({ ...stageContext(storedRequest("production", true)), llm }, deleteRequirement());
+    const plan = await createPlanStage()({ ...stageContext(storedRequest("production", true)), llm }, deleteRequirement(), []);
     expect(blocked(plan)).toEqual([["AC-2", "DESTRUCTIVE_ACTION_NOT_AUTHORIZED"]]);
     expect(plan.blockedCriteria[0]!.detail).toContain("destructive actions are not allowed for this run (allowDestructiveActions is off)");
   });
 
   it("production with the host confirmed plans the destructive step unblocked", async () => {
     const { llm } = setup({ json: deletePlan() });
-    const plan = await createPlanStage()({ ...stageContext(storedRequest("production", true, {}, "shop.example.com")), llm }, deleteRequirement());
+    const plan = await createPlanStage()({ ...stageContext(storedRequest("production", true, {}, "shop.example.com")), llm }, deleteRequirement(), []);
     expect(plan.blockedCriteria).toEqual([]);
     expect(plan.scenarios[0]!.steps[3]!.destructive).toBe(true);
+  });
+
+  it("plans with the pages it is given", async () => {
+    const { llm, transport } = setup({ json: cartPlan() });
+    await createPlanStage()({ ...stageContext(storedRequest("staging", false)), llm }, cartRequirement(), [LOGIN_PAGE]);
+    expect(transport.requests[0]!.messages[0]!.content as string).toContain("New User");
   });
 
   it("reads testData keys (not values) and secret names from the context", async () => {
     const secret = "pw-Stage-Secret-5";
     const { llm, transport } = setup({ json: loginPlan() });
     const ctx = stageContext(storedRequest("staging", false, { email: "alice.tester@example.com" }), { password: secret });
-    const plan = await createPlanStage()({ ...ctx, llm }, loginRequirement());
+    const plan = await createPlanStage()({ ...ctx, llm }, loginRequirement(), []);
     expect(plan.blockedCriteria).toEqual([]);
     const sent = sentText(transport);
     expect(sent).toContain("email");
@@ -683,7 +721,7 @@ function realPlanStages(llm: LlmClient) {
   const report = { store: () => ({ saveDiagnostics: async () => {}, llmUsage: async () => [] }) };
   const real = createRealStages({ survey: { openSandbox: async () => ({}) as never, store: () => ({}) as never }, exploration: unused, generateTest: { store: () => ({ save: async () => {} }) }, runTest: noRerun, report });
   // The plan stage runs on the run's client, as the worker's context gives it (StageContext.llm).
-  return { ...real, plan: (ctx: StageContext, requirement: NormalizedRequirement) => real.plan({ ...ctx, llm }, requirement), explore: fake.explore };
+  return { ...real, plan: (ctx: StageContext, requirement: NormalizedRequirement, site: SitePage[]) => real.plan({ ...ctx, llm }, requirement, site), explore: fake.explore };
 }
 
 describe("plan stage behind runExecution (real planner, fake later stages)", () => {

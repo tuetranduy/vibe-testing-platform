@@ -34,6 +34,7 @@ function fakeSite(site: Record<string, { title: string; links?: SurveyLink[]; fa
       current = url;
       return { status: () => 200 };
     },
+    async waitForLoadState() {},
     async evaluate() {
       const p = site[new URL(current).pathname];
       return { title: p?.title ?? "", description: "", headings: [], links: p?.links ?? [], forms: [], buttons: [] };
@@ -163,6 +164,13 @@ describe("analyze stage against the live site (V1.3)", () => {
       { key: "email", value: "new.visitor@example.com", description: "A fresh address", source: "GENERATED" },
       { key: "firstName", value: "Alex", description: "First name for the account", source: "GENERATED" },
     ]);
+    // Kept for the planner (KI-048): each page read and what it showed.
+    expect(result.siteAnalysis!.pageContents!.map((p) => [p.url, p.inventory.title])).toEqual([
+      [`${ORIGIN}/`, SITE["/"]!.title],
+      [`${ORIGIN}/register`, SITE["/register"]!.title],
+      [`${ORIGIN}/account`, SITE["/account"]!.title],
+      [`${ORIGIN}/about`, SITE["/about"]!.title],
+    ]);
   });
 
   it("a sandbox that does not start → UNAVAILABLE; the requirement is still compiled, without pages", async () => {
@@ -175,7 +183,7 @@ describe("analyze stage against the live site (V1.3)", () => {
         store: h.store,
       },
     })(h.ctx);
-    expect(result.siteAnalysis).toMatchObject({ status: "UNAVAILABLE", reason: "The browser could not be started", pages: [], checks: [] });
+    expect(result.siteAnalysis).toMatchObject({ status: "UNAVAILABLE", reason: "The browser could not be started", pages: [], checks: [], pageContents: [] });
     expect(result.siteAnalysis!.testData.map((t) => t.key)).toEqual(["email", "firstName"]);
     expect(JSON.stringify(h.transport.requests[0]!.messages)).not.toContain("<<<PAGES");
   });

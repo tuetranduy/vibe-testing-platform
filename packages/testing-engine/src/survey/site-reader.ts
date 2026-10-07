@@ -52,6 +52,9 @@ export interface SiteRead {
 
 type PageRead = { ok: true; url: URL; raw: RawPageInventory } | { ok: false; reason: string };
 
+/** How long a loaded page gets for its network to go quiet before it is read (as the explorer's navigate). */
+const NETWORK_QUIET_TIMEOUT_MS = 3_000;
+
 const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
@@ -109,6 +112,11 @@ export async function readSite(ctx: StageContext, opts: ReadSiteOptions): Promis
       if (status >= 400) return { ok: false, reason: `answered ${status}` };
       const landed = new URL(sandbox.page.url());
       if (!isAllowedPageHost(landed, start, additional)) return { ok: false, reason: "left the allowed hosts" };
+      // A single-page app renders after `load` (demoqa.com/books listed no books): wait for its data, but a page
+      // whose network never goes quiet (ads, polling) is read anyway.
+      await race(sandbox.page.waitForLoadState("networkidle", { timeout: NETWORK_QUIET_TIMEOUT_MS }), limit).catch((err: unknown) => {
+        if (limit.aborted) throw err;
+      });
       const raw = parseRawInventory(await race(sandbox.page.evaluate(INVENTORY_SCRIPT), limit));
       return { ok: true, url: landed, raw };
     } catch (err) {
