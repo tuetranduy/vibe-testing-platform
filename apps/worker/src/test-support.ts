@@ -247,7 +247,8 @@ export interface FakeFactValue {
 export function fakeExploration(opts: { facts?: Record<string, FakeFactValue> } = {}): { deps: Partial<ExploreStageDeps>; log: string[] } {
   const log: string[] = [];
   let url = "about:blank";
-  const page = { url: () => url, isClosed: () => false, waitForLoadState: async () => {} } as unknown as Page;
+  // A page that starts no requests: a click's are waited for through on/off (KI-049).
+  const page = { url: () => url, isClosed: () => false, waitForLoadState: async () => {}, mainFrame: () => null, on: () => {}, off: () => {} } as unknown as Page;
   const session: ExplorerSession = {
     page,
     async navigate(u) {

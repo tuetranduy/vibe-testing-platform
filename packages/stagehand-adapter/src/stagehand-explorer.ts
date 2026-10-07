@@ -7,6 +7,7 @@ import { BrowserProviderError, CancelledError, EngineError } from "@platform/con
 import type { ZodType } from "zod";
 import {
   ExplorerSessionClosedError,
+  ExplorerTransientError,
   NavigationBlockedError,
   type ActResult,
   type BrowserExplorer,
@@ -120,8 +121,12 @@ export function toExplorerError(err: unknown, what: string): unknown {
     return err;
   }
   const message = err instanceof Error ? err.message : String(err);
-  return new BrowserProviderError(`${what} failed: ${message.split("\n")[0]!.slice(0, 500)}`, { cause: err });
+  const text = `${what} failed: ${message.split("\n")[0]!.slice(0, 500)}`;
+  return TRANSIENT.test(message) ? new ExplorerTransientError(text, { cause: err }) : new BrowserProviderError(text, { cause: err });
 }
+
+/** A lost CDP session or page script context, as after a page change (KI-051): see ExplorerTransientError. */
+const TRANSIENT = /Session with given id not found|Cannot find context with specified id|Execution context was destroyed/;
 
 /** Rejects as soon as the signal fires; `work` keeps running (its owner is torn down separately). */
 function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {

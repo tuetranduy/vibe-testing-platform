@@ -38,6 +38,7 @@ const TARGETS: ScriptTarget[] = [
   { when: "fill the password field", role: "textbox", name: "Password", method: "fill" },
   { when: "click the log in button", role: "button", name: "Log in", method: "click" },
   { when: "click the red button in the danger zone", role: "button", name: "Delete account", method: "click" },
+  { when: "click the subscribe button", role: "button", name: "Subscribe", method: "click" },
 ];
 
 const CHROMIUM_EXE = chromium.executablePath();
@@ -215,6 +216,27 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
         expect.arrayContaining(["Exploration video stored", "Exploration trace stored"]),
       );
       expect(events.some((e) => e.type === "artifact.omitted")).toBe(false);
+    },
+    180_000,
+  );
+
+  it(
+    "a click's background request completes before the next step navigates away (KI-049)",
+    async () => {
+      // /newsletter's Subscribe button posts a fetch the shop answers after 800 ms (demoqa's Register and Login); the
+      // shop counts a subscription only when its answer was sent, so a navigation that cancels the fetch counts none.
+      const { run, ctx, explore } = await setup({ targetPath: "/newsletter" });
+      const before = shop.server.demoShop.subscriptions;
+      const plan = planOf(run.id, [
+        planned(1, "navigate", "Open the newsletter page"),
+        planned(2, "click", "Click the Subscribe button", { criterionIds: ["AC-1"] }),
+        planned(3, "navigate", "Open /products"),
+      ]);
+
+      const outcome = await explore(ctx, plan, addToCartRequirement(run.id));
+
+      expect(outcome.stopReason).toBe("COMPLETED");
+      expect(shop.server.demoShop.subscriptions - before).toBe(1);
     },
     180_000,
   );

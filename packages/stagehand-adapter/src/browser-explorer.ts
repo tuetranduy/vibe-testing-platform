@@ -1,3 +1,4 @@
+import { BrowserProviderError } from "@platform/contracts";
 import type { LlmClient } from "@platform/llm";
 import type { Page } from "playwright-core";
 import type { ZodType } from "zod";
@@ -98,6 +99,12 @@ export class NavigationBlockedError extends Error {
 export class ExplorerSessionClosedError extends Error {
   override readonly name = "ExplorerSessionClosedError";
 }
+
+/**
+ * The explorer briefly lost the page (its CDP session or the page's script context, right after a page change,
+ * KI-051): the same call may work once the page settles. Still a browser provider failure for everything else.
+ */
+export class ExplorerTransientError extends BrowserProviderError {}
 
 /**
  * One exploration session on one page. Operations are serialized; each result carries the model
