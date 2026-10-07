@@ -48,7 +48,9 @@ export type IconName =
   | "activity"
   | "gear"
   | "logout"
-  | "command";
+  | "command"
+  | "sparkle"
+  | "gauge";
 
 const PATHS: Record<IconName, ReactNode> = {
   check: <path d="M4 10.5l4 4 8-9" />,
@@ -228,6 +230,14 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   activity: <path d="M2.5 10h3l2-5 4 10 2-5h4" />,
+  sparkle: <path d="M10 2.5l1.7 4.6 4.8 1.9-4.8 1.9L10 15.5l-1.7-4.6L3.5 9l4.8-1.9zM15.5 13.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" />,
+  gauge: (
+    <>
+      <path d="M3.3 14.5a7.5 7.5 0 1113.4 0" />
+      <path d="M10 11l3.2-3.6" />
+      <circle cx="10" cy="11.5" r="1" fill="currentColor" stroke="none" />
+    </>
+  ),
   gear: (
     <>
       <circle cx="10" cy="10" r="2.5" />

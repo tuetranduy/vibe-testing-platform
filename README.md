@@ -446,7 +446,8 @@ Each proposed criterion shows its wording and *what will be checked*. You can ad
   "add a key"), its reasoning level ("Model default (…)", or low / medium / high — and minimal on the Gemini Flash
   models; DeepSeek models take minimal (thinking off), low and high), and the selected model's price per million tokens.
 
-A test can pick another model or level under the new-test form's Advanced options. Each run records the provider,
+A test can pick another model or level with the Model and Reasoning chips in the new-test form's requirement box (beside
+them, the Actions chip allows destructive actions, like Claude Code's permission mode). Each run records the provider,
 model and reasoning level it was created with, in this order: the test's own choice, else the defaults saved in
 Settings, else the environment (`LLM_PROVIDER`, `LLM_MODEL` or the provider's default model, and
 `LLM_REASONING`, else `GEMINI_THINKING_LEVEL` for Gemini). Changing Settings never changes a run already created; the run page shows the
