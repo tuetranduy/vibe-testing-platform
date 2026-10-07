@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { useArtifactUrl } from "../lib/artifacts";
 import type { ScreenshotRef } from "../lib/progress-reducer";
 import { Icon } from "./Icon";
+import { ImageLightbox } from "./ImageLightbox";
 import { formatTime } from "./format";
 
 interface Props {
@@ -10,9 +12,10 @@ interface Props {
   screenshot: ScreenshotRef | null;
 }
 
-/** The latest screenshot of a running run, fetched through the proxy. */
+/** The latest screenshot of a running run, fetched through the proxy; a click shows it at full size. */
 export function LiveEvidence({ runId, screenshot }: Props) {
   const { state, onLoadError } = useArtifactUrl(screenshot ? { runId, artifactId: screenshot.artifactId } : null);
+  const [zoomed, setZoomed] = useState(false);
 
   return (
     <section className="ink evidence" aria-labelledby="evidence-title">
@@ -29,8 +32,11 @@ export function LiveEvidence({ runId, screenshot }: Props) {
         </div>
       ) : state.status === "ready" ? (
         <figure className="evidence-figure">
-          {/* Short-lived signed URL: an error means it expired, so fetch a fresh one. */}
-          <img src={state.url} alt={screenshot.message} onError={onLoadError} />
+          <button type="button" className="artifact-zoom" aria-label={`View full size: ${screenshot.message}`} onClick={() => setZoomed(true)}>
+            {/* Short-lived signed URL: an error means it expired, so fetch a fresh one. */}
+            <img src={state.url} alt={screenshot.message} onError={onLoadError} />
+          </button>
+          {zoomed && <ImageLightbox src={state.url} alt={screenshot.message} caption={screenshot.message} onClose={() => setZoomed(false)} onError={onLoadError} />}
           <figcaption>
             <span>{screenshot.message}</span>
             <time dateTime={screenshot.timestamp}>{formatTime(screenshot.timestamp)}</time>

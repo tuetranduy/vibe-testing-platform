@@ -4040,6 +4040,32 @@ a.running-card:hover {
   font-weight: 500;
   width: fit-content;
 }
+/* "View full size" is a button that reads as a link. */
+button.artifact-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+button.artifact-link:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+/* A screenshot is a button: a click opens it at full size (ImageLightbox). */
+.artifact-zoom {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: zoom-in;
+}
 .artifact-hidden {
   display: flex;
   flex-direction: column;
@@ -5157,4 +5183,81 @@ body:has(.print-report)::before {
   max-height: 70vh;
   object-fit: contain;
   object-position: top;
+}
+
+/* ---------- Image lightbox (a screenshot at full size, over the page) ---------- */
+
+.lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  background: rgb(0 0 0 / 0.82);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: fade-in var(--dur) var(--ease);
+}
+.lightbox {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+}
+.lightbox-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  color: #f4f4f5;
+}
+.lightbox-caption {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lightbox-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgb(255 255 255 / 0.22);
+  border-radius: var(--radius);
+  background: rgb(255 255 255 / 0.08);
+  color: #f4f4f5;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.lightbox-button:hover {
+  background: rgb(255 255 255 / 0.18);
+}
+.lightbox-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 16px 16px;
+  text-align: center;
+}
+/* Fit to width: a tall full-page screenshot scrolls down. */
+.lightbox-image {
+  display: inline-block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+  vertical-align: top;
+  cursor: zoom-in;
+}
+.lightbox-image-actual {
+  max-width: none;
+  cursor: zoom-out;
 }

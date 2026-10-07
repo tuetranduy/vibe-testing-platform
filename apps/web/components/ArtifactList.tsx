@@ -5,6 +5,7 @@ import { useState, type MouseEvent } from "react";
 import { useArtifactUrl } from "../lib/artifacts";
 import type { ArtifactInfo } from "../lib/progress-reducer";
 import { Icon, type IconName } from "./Icon";
+import { ImageLightbox } from "./ImageLightbox";
 import { formatTime } from "./format";
 
 const TYPE_LABEL: Record<ArtifactType, string> = {
@@ -39,8 +40,8 @@ interface Props {
 }
 
 /**
- * The artifact viewer: screenshots inline (with a full-size link), videos playable inline, traces and
- * other files as downloads. Signed URLs come from the shared helper (lib/artifacts.ts).
+ * The artifact viewer: screenshots inline (a click opens one at full size over the page), videos playable inline,
+ * traces and other files as downloads. Signed URLs come from the shared helper (lib/artifacts.ts).
  */
 export function ArtifactList({ runId, artifactIds, artifacts, emptyText = "No evidence was captured." }: Props) {
   if (artifactIds.length === 0) return <p className="muted">{emptyText}</p>;
@@ -56,6 +57,7 @@ export function ArtifactList({ runId, artifactIds, artifacts, emptyText = "No ev
 function ArtifactItem({ runId, artifactId, info }: { runId: string; artifactId: string; info: ArtifactInfo | null }) {
   const { state, onLoadError } = useArtifactUrl({ runId, artifactId });
   const [refreshed, setRefreshed] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
   const label = info ? TYPE_LABEL[info.type] : "Artifact";
   const caption = info?.message ?? `Artifact ${artifactId}`;
 
@@ -78,17 +80,20 @@ function ArtifactItem({ runId, artifactId, info }: { runId: string; artifactId: 
   } else if (state.status === "ready" && info?.type === "SCREENSHOT") {
     body = (
       <>
-        {/* Short-lived signed URL: an error means it expired, so fetch a fresh one. */}
-        <img className="artifact-image" src={state.url} alt={caption} onError={onLoadError} />
-        <a className="artifact-link" href={state.url} target="_blank" rel="noopener noreferrer" onClick={guardExpiry}>
-          <Icon name="external" /> Open full size
-        </a>
+        <button type="button" className="artifact-zoom" aria-label={`View full size: ${caption}`} onClick={() => setZoomed(true)}>
+          {/* Short-lived signed URL: an error means it expired, so fetch a fresh one. */}
+          <img className="artifact-image" src={state.url} alt={caption} onError={onLoadError} />
+        </button>
+        <button type="button" className="artifact-link" onClick={() => setZoomed(true)}>
+          <Icon name="image" /> View full size
+        </button>
+        {zoomed && <ImageLightbox src={state.url} alt={caption} caption={caption} onClose={() => setZoomed(false)} onError={onLoadError} />}
       </>
     );
   } else if (state.status === "ready" && info?.type === "VIDEO") {
     body = (
       <>
-        <video className="artifact-video" src={state.url} controls preload="metadata" aria-label={caption} onError={onLoadError} />
+        <video className="artifact-video" src={state.url} controls playsInline preload="metadata" aria-label={caption} onError={onLoadError} />
         <a className="artifact-link" href={state.url} download onClick={guardExpiry}>
           <Icon name="download" /> Download video
         </a>

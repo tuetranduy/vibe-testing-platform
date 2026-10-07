@@ -31,7 +31,8 @@ describe("ArtifactList", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("loads a STANDARD screenshot automatically and links to the full-size image", async () => {
+  it("loads a STANDARD screenshot automatically; a click opens it at full size over the page, never in a new tab", async () => {
+    const user = userEvent.setup();
     const fetch = urlFetch();
     render(
       <ArtifactList runId="run_1" artifactIds={["art_1"]} artifacts={known(info("art_1", "SCREENSHOT", "STANDARD", "Screenshot saved at checkpoint after_add"))} />,
@@ -39,9 +40,17 @@ describe("ArtifactList", () => {
     const img = await screen.findByRole("img", { name: /checkpoint after_add/i });
     expect(img).toHaveAttribute("src", "https://s3.test/file-1");
     expect(urls(fetch)).toEqual(["/api/v1/test-runs/run_1/artifacts/art_1/url"]);
-    const open = screen.getByRole("link", { name: /open full size/i });
-    expect(open).toHaveAttribute("href", "https://s3.test/file-1");
-    expect(open).toHaveAttribute("rel", expect.stringContaining("noopener"));
+    expect(document.querySelector("a[target=_blank]")).toBeNull();
+
+    await user.click(img);
+    const dialog = screen.getByRole("dialog", { name: /checkpoint after_add/i });
+    expect(within(dialog).getByRole("img")).toHaveAttribute("src", "https://s3.test/file-1");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^view full size$/i }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(urls(fetch)).toHaveLength(1);
   });
 
   it("loads a SECRET_BEARING artifact (recorded before 2026-10-07) straight away: nothing is hidden behind a reveal", async () => {
