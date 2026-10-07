@@ -158,6 +158,7 @@ export async function createRunContext(
     async saveSiteAnalysis(analysis) {
       await new SiteAnalysisRepository(deps.db).save(run.id, analysis);
     },
+    getSiteAnalysis: () => new SiteAnalysisRepository(deps.db).get(run.id),
     async applyTestData(values) {
       const testData = await runs.mergeTestData(run.id, values);
       ctx.request = { ...ctx.request, testData };

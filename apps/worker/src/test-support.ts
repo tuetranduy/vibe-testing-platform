@@ -176,11 +176,16 @@ export async function seedRun(
     requirement?: string;
     /** The run's target (the rerun's navigation guard allows its host); default https://shop.example.com. */
     targetUrl?: string;
+    testData?: StoredTestRunRequest["testData"];
   } = {},
 ): Promise<TestRun> {
   const runs = new RunRepository(h.tdb.db);
   const secrets = opts.secrets ?? {};
-  const stored = { ...request(opts.options, Object.keys(secrets)), ...(opts.targetUrl ? { targetUrl: opts.targetUrl } : {}) };
+  const stored = {
+    ...request(opts.options, Object.keys(secrets)),
+    ...(opts.targetUrl ? { targetUrl: opts.targetUrl } : {}),
+    ...(opts.testData ? { testData: opts.testData } : {}),
+  };
   const run = await runs.create({
     tenantId: TEST_TENANT_ID,
     targetUrl: stored.targetUrl,

@@ -669,6 +669,7 @@ function executionPorts(requirement: NormalizedRequirement) {
     },
     saveSiteAnalysis: async () => {},
     applyTestData: async () => {},
+    getSiteAnalysis: async () => null,
   };
   return { ports, events, transitions, saved: () => saved, results: () => results };
 }

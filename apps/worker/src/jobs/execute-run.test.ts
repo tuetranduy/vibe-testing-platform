@@ -1,4 +1,4 @@
-import { EventRepository, ResultRepository, RunRepository, SecretRepository } from "@platform/db";
+import { EventRepository, ResultRepository, RunRepository, SecretRepository, SiteAnalysisRepository } from "@platform/db";
 import { encryptSecret } from "@platform/security";
 import { ModelProviderError } from "@platform/testing-engine";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -49,6 +49,26 @@ describe("execute-run happy paths", () => {
     const final = (await eventsOf(h, run.id)).filter((e) => e.type === "criterion.evaluated");
     expect(final.map((e) => (e.payload as { provisional: boolean }).provisional)).toEqual([true, true, false, false]);
     expect(await new SecretRepository(h.tdb.db).listActive(run.id)).toHaveLength(0);
+  });
+
+  it("takes the suggested test data the user did not accept or give before planning (2026-10-07)", async () => {
+    const run = await seedRun(h, { lifecycle: "PLANNING", testData: { city: "Oslo" } });
+    await new SiteAnalysisRepository(h.tdb.db).save(run.id, {
+      status: "READ",
+      reason: null,
+      pages: [],
+      checks: [],
+      testData: [
+        { key: "email", value: "qa.abc123@example.com", description: "Email to register with", source: "GENERATED" },
+        { key: "city", value: "Springfield", description: "City", source: "GENERATED" },
+      ],
+    });
+    let seen: Record<string, unknown> = {};
+    const fake = createFakeStages();
+    await executeRunJob(h.deps({ ...fake, plan: async (ctx, requirement) => ((seen = { ...ctx.request.testData }), fake.plan(ctx, requirement)) }), run.id);
+    expect(seen).toEqual({ city: "Oslo", email: "qa.abc123@example.com" });
+    expect((await new RunRepository(h.tdb.db).getById(run.id)).request.testData).toEqual({ city: "Oslo", email: "qa.abc123@example.com" });
+    expect(await new SiteAnalysisRepository(h.tdb.db).get(run.id)).toMatchObject({ appliedKeys: ["email"] });
   });
 
   it("generatePlaywright=false: VERIFYING → GENERATING_REPORT with both generation stages skipped", async () => {

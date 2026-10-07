@@ -311,6 +311,7 @@ function fakePorts() {
     },
     saveSiteAnalysis: async () => {},
     applyTestData: async () => {},
+    getSiteAnalysis: async () => null,
   };
   return { ports, events, saved: () => saved, lifecycle: () => lifecycle };
 }
