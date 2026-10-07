@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { GeneratedTestSchema, type GeneratedTest } from "@platform/contracts";
 import type { EngineStages, StageContext } from "../orchestrator/stages";
 import { redactedCause, type FailureLogger } from "../shared/log-cause";
+import { generatedTestData } from "../shared/generated-inputs";
 import { resolveTestDataValues } from "../shared/test-data-values";
 import { assertSafeSource } from "./ast-guard";
 import { compilePlaywrightTest } from "./test-compiler";
@@ -43,8 +44,9 @@ export function createGenerateTestStage(deps: GenerateTestStageDeps): EngineStag
     let test: GeneratedTest;
     try {
       const compiled = compilePlaywrightTest({
-        // A text check's test data key is compiled as the run's value (KI-001), kept in run-data.json like inputs.
-        requirement: resolveTestDataValues(input.requirement, ctx.request.testData),
+        // A text check's test data key is compiled as the run's value (KI-001), kept in run-data.json like inputs: the
+        // value given, else the one a fill generated (2026-10-07).
+        requirement: resolveTestDataValues(input.requirement, { ...generatedTestData(input.exploration.steps), ...ctx.request.testData }),
         plan: input.plan,
         steps: input.exploration.steps,
         facts: input.exploration.facts,

@@ -648,6 +648,13 @@ describe("verifyStage and test data values (KI-001)", () => {
     expect(judge({ email: "qa@demo.test" }, "Signed in as qa@demo.test")).toMatchObject({ status: "PASS", expected: 'Account email account page contains "qa@demo.test"' });
     expect(judge({ email: "qa@demo.test" }, "Signed in as other@demo.test")).toMatchObject({ status: "FAIL" });
     expect(judge({}, "Signed in as qa@demo.test")).toMatchObject({ status: "BLOCKED", reason: "MISSING_TEST_DATA" });
+
+    // 2026-10-07: a value nobody provided that a fill generated is the run's value for its key.
+    const generatedFill = step(0, null, "fill", { inputRef: { source: "testData", key: "email" }, generatedValue: "gen.user@example.com" });
+    const withGenerated = (value: string) =>
+      verifyStage({ redact: (v: unknown) => v, request: { testData: {} } } as unknown as Parameters<typeof verifyStage>[0], requirement, plan, { steps: [generatedFill], facts: [shown(value)], stopReason: "COMPLETED" })[0]!;
+    expect(withGenerated("Signed in as gen.user@example.com")).toMatchObject({ status: "PASS", expected: 'Account email account page contains "gen.user@example.com"' });
+    expect(withGenerated("Signed in as qa@demo.test")).toMatchObject({ status: "FAIL" });
   });
 });
 
