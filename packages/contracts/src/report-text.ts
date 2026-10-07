@@ -17,7 +17,7 @@ export const STATUS_REASON_TEXT: Record<StatusReason, string> = {
   FACT_NOT_OBSERVED: "The information needed to check this was not found on the page",
   UNVERIFIED_EVIDENCE: "The evidence was read by the AI model and could not be confirmed from the page itself",
   DISCOVERY_RERUN_DISAGREE: "Exploring the site and rerunning the generated test gave different results",
-  AI_JUDGED_ONLY: "This can only be judged by the AI model, so it gets no pass or fail",
+  AI_JUDGED_ONLY: "Only the AI can judge this, and what the page showed did not decide it",
   AMBIGUOUS_CRITERION: "The criterion was too ambiguous to check reliably",
   RERUN_NOT_REACHED: "The saved test stopped before it reached this check",
   NOT_IN_GENERATED_TEST: "The saved test has no check for this criterion, so a rerun cannot confirm it",

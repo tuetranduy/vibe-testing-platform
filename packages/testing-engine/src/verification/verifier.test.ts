@@ -2,6 +2,7 @@ import {
   ProvisionalResultSchema,
   type AcceptanceCriterion,
   type BlockedCriterion,
+  type CriterionJudgment,
   type ExpectedOutcome,
   type ExplorationStep,
   type ExplorationStopReason,
@@ -585,6 +586,46 @@ describe("semantic outcome", () => {
 
   it("with non-null ambiguity → INCONCLUSIVE / AMBIGUOUS_CRITERION", () => {
     expect(statusOf(run(semantic, { criterion: { ambiguity } }))).toEqual(["INCONCLUSIVE", "AMBIGUOUS_CRITERION"]);
+  });
+
+  describe("judged from what the exploration saw (2026-10-07)", () => {
+    const judge = (judgment: Omit<CriterionJudgment, "criterionId">, extra: Partial<ExplorationStep> = {}, criterionId = "AC-1") =>
+      step(7, "PS-6", "judge", { onGoldenPath: false, judgment: { criterionId, ...judgment }, ...extra });
+    const withJudge = (...judges: ExplorationStep[]) => [...cartExploration().steps, ...judges.map((j, i) => ({ ...j, index: 7 + i }))];
+    const holds = { relevant: true, verdict: "HOLDS", observed: "A padlock and 'Secure checkout' are shown", reasoning: "Read as: shows trust signals" } as const;
+
+    it("relevant, holds → PASS, marked AI-judged, the observed result as actual", () => {
+      const r = run(semantic, { steps: withJudge(judge(holds)), criterion: { ambiguity } });
+      expect(r).toMatchObject({ status: "PASS", reason: null, aiJudged: true, factRefs: [], actual: holds.observed, expected: semantic.description });
+    });
+
+    it("relevant, does not hold → FAIL", () => {
+      const r = run(semantic, { steps: withJudge(judge({ ...holds, verdict: "DOES_NOT_HOLD", observed: "A raw error page is shown" })) });
+      expect(r).toMatchObject({ status: "FAIL", aiJudged: true, actual: "A raw error page is shown" });
+    });
+
+    it("the latest judgment counts; a FAILED judge step and another criterion's judgment do not", () => {
+      const steps = withJudge(
+        judge({ ...holds, verdict: "DOES_NOT_HOLD" }),
+        judge(holds),
+        judge({ ...holds, verdict: "DOES_NOT_HOLD" }, { outcome: "FAILED" }),
+        judge({ ...holds, verdict: "DOES_NOT_HOLD" }, {}, "AC-2"),
+      );
+      expect(run(semantic, { steps }).status).toBe("PASS");
+    });
+
+    it("a page that does not show the criterion, or a judgment that cannot tell → INCONCLUSIVE with what was seen", () => {
+      const off = run(semantic, { steps: withJudge(judge({ relevant: false, verdict: "CANNOT_TELL", observed: "A login form", reasoning: "-" })), criterion: { ambiguity } });
+      expect(off).toMatchObject({ status: "INCONCLUSIVE", reason: "AMBIGUOUS_CRITERION", actual: "The page did not show it: A login form" });
+      expect(off.aiJudged).toBeUndefined();
+      const unsure = run(semantic, { steps: withJudge(judge({ ...holds, verdict: "CANNOT_TELL", observed: "The page loaded" })) });
+      expect(unsure).toMatchObject({ status: "INCONCLUSIVE", reason: "AI_JUDGED_ONLY", actual: "The page loaded" });
+    });
+
+    it("a judgment never decides a criterion the plan blocked", () => {
+      const r = run(semantic, { steps: withJudge(judge(holds)), blocked: [{ criterionId: "AC-1", reason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED", detail: "x" }] });
+      expect(r.status).toBe("BLOCKED");
+    });
   });
 
   it("ambiguity on a deterministic outcome does not change its evaluation", () => {

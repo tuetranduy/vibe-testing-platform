@@ -5,9 +5,12 @@ import {
   EngineError,
   ExplorationStepSchema,
   ObservedFactSchema,
+  scenarioOfCriterion,
   type ArtifactSensitivity,
   type BlockReason,
+  type AcceptanceCriterion,
   type CachedElement,
+  type CriterionJudgment,
   type ElementRef,
   type ExplorationOutcome,
   type ExplorationStep,
@@ -19,6 +22,7 @@ import {
   type ObservedFact,
   type PlannedStep,
   type TestPlan,
+  type TestScenario,
 } from "@platform/contracts";
 import { assertActionAllowed, type ActionPolicy } from "@platform/security";
 import {
@@ -34,7 +38,9 @@ import type { StageContext } from "../orchestrator/stages";
 import { actionPolicyFor, isDestructiveStep } from "../shared/action-policy";
 import { captureFact, factFromReadings, modeForValueType, urlFact, type FactCaptureInput, type FactReadMode } from "./fact-reader";
 import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
+import { INVENTORY_SCRIPT, parseRawInventory, toPageInventory, type PageInventory } from "../survey/inventory";
 import { createInputGenerator, type FieldFacts, type InputGenerator } from "./input-generator";
+import { JUDGE_TEXT_MAX_CHARS, createCriterionJudge, type CriterionJudge } from "./judge";
 import { describeElement, describeField, elementAction, fieldValue, fillElement, recordElement, selectElementOption } from "./recorder";
 
 /**
@@ -170,6 +176,11 @@ export interface ExplorationDeps {
   recorder?: RecorderPort;
   /** Makes the values nobody provided (2026-10-07); default `createInputGenerator(ctx.llm)`. */
   inputs?: InputGenerator;
+  /**
+   * Judges unclear (`semantic`) criteria from what the page shows (2026-10-07); default `createCriterionJudge(ctx.llm)`.
+   * Null: nothing is judged (they stay inconclusive).
+   */
+  judge?: CriterionJudge | null;
   /** Delay between `wait_for` polls. */
   pollIntervalMs?: number;
   /** Cached element lookups from earlier runs (V1.1 F8); absent: every lookup asks the explorer. */
@@ -223,6 +234,8 @@ const LOAD_SETTLE_TIMEOUT_MS = 10_000;
  * field 1-2.5 s after `load`). A page that never goes quiet (polling, ads) costs this much and is not an error.
  */
 const NETWORK_QUIET_TIMEOUT_MS = 3_000;
+/** The page's visible text, for the judge (a string: see INVENTORY_SCRIPT on why not a function). */
+const VISIBLE_TEXT_SCRIPT = String.raw`(() => String((document.body && document.body.innerText) || "").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim().slice(0, ${JUDGE_TEXT_MAX_CHARS}))()`;
 /** `other` steps may keep these observed methods (none takes a value); everything else clicks. */
 const SAFE_OTHER_METHODS = new Set(["click", "doubleClick", "hover", "scrollIntoView"]);
 /** Term matching regardless of what the run allows: what the step and the element are, not what may run. */
@@ -258,6 +271,8 @@ interface StepDraft {
   llm?: LlmStepUsage | null;
   /** A fill's value that nobody provided (2026-10-07). */
   generatedValue?: string;
+  /** A `judge` step's judgment (2026-10-07). */
+  judgment?: CriterionJudgment;
 }
 
 /** What the generator is told about a field the recorder cannot describe. */
@@ -366,6 +381,7 @@ class ExplorationRun {
   private readonly generated = new Map<string, string>();
   /** Values typed since the last click or navigation (2026-10-07). */
   private typed: Typed[] = [];
+  private readonly judge: CriterionJudge | null;
 
   constructor(
     private readonly ctx: StageContext,
@@ -376,6 +392,7 @@ class ExplorationRun {
     this.session = input.session;
     this.recorder = deps.recorder ?? playwrightRecorder;
     this.inputs = deps.inputs ?? createInputGenerator(ctx.llm);
+    this.judge = deps.judge !== undefined ? deps.judge : createCriterionJudge(ctx.llm);
     this.policy = actionPolicyFor(request);
     this.max = request.options.maxExplorationSteps;
     this.multiScenario = input.plan.scenarios.length > 1;
@@ -416,7 +433,7 @@ class ExplorationRun {
       }
       try {
         if (i > 0) await this.resetSession();
-        await this.exploreScenario(scenario.steps);
+        await this.exploreScenario(scenario);
         stops[scenario.id] = "COMPLETED";
       } catch (err) {
         if (!(err instanceof Stop)) {
@@ -431,19 +448,46 @@ class ExplorationRun {
     return { steps: [...this.steps], facts: [...this.facts], stopReason, ...(this.multiScenario ? { scenarioStops: stops } : {}) };
   }
 
-  /** One scenario: its first action opens the target URL (see the header), then its planned steps. */
-  private async exploreScenario(planned: readonly PlannedStep[]): Promise<void> {
+  /**
+   * One scenario: its first action opens the target URL (see the header), then its planned steps. Its unclear
+   * criteria are judged after the last step that names them (where the planner says their subject is visible), the
+   * others once its last step is done (2026-10-07).
+   */
+  private async exploreScenario(scenario: TestScenario): Promise<void> {
+    const planned = scenario.steps;
     const targetUrl = this.ctx.request.targetUrl;
     const first = planned[0];
     const firstUrl = first?.kind === "navigate" ? urlInDescription(first.description, targetUrl) : null;
     const opensTarget = first?.kind === "navigate" && (firstUrl === null || sameUrl(firstUrl, targetUrl));
+    const judgeAfter = this.judgeSchedule(scenario);
 
     await this.ctx.boundary();
     await this.withRetry(() => this.navigate(targetUrl, opensTarget ? first : null));
+    if (opensTarget) await this.judgeCriteria(first, judgeAfter.get(first.id) ?? []);
     for (const step of planned.slice(opensTarget ? 1 : 0)) {
       await this.ctx.boundary();
       await this.executePlanned(step);
+      await this.judgeCriteria(step, judgeAfter.get(step.id) ?? []);
     }
+    await this.judgeCriteria(null, judgeAfter.get(null) ?? []);
+  }
+
+  /**
+   * The scenario's unclear criteria to judge, by the planned step after which each is judged (null: at the end): the
+   * `semantic` criteria of this scenario the plan does not block, each after the last step naming it.
+   */
+  private judgeSchedule(scenario: TestScenario): Map<string | null, AcceptanceCriterion[]> {
+    const schedule = new Map<string | null, AcceptanceCriterion[]>();
+    if (!this.judge) return schedule;
+    const plan = this.input.plan;
+    const blocked = new Set(plan.blockedCriteria.map((b) => b.criterionId));
+    for (const criterion of this.input.requirement.criteria) {
+      if (criterion.expectedOutcome.kind !== "semantic" || blocked.has(criterion.id)) continue;
+      if (scenarioOfCriterion(plan, criterion.id).id !== scenario.id) continue;
+      const after = scenario.steps.findLast((s) => s.criterionIds.includes(criterion.id))?.id ?? null;
+      schedule.set(after, [...(schedule.get(after) ?? []), criterion]);
+    }
+    return schedule;
   }
 
   /** Clears the browser session before a scenario; a failure is the browser's (the run errs, never guesses). */
@@ -921,6 +965,73 @@ class ExplorationRun {
     }
   }
 
+  /**
+   * Judges unclear criteria on the page as it is now (2026-10-07): one page scan (its structure and visible text) and
+   * one screenshot of the screen (the visual check, kept as the criteria's evidence), then one `judge` step per
+   * criterion with the model's judgment (FAILED when the model fails: the criterion stays inconclusive). Off the golden
+   * path: the generated test never replays it.
+   */
+  private async judgeCriteria(step: PlannedStep | null, criteria: readonly AcceptanceCriterion[]): Promise<void> {
+    if (!this.judge || criteria.length === 0) return;
+    await this.reserve();
+    await this.page.waitForLoadState("load", { timeout: LOAD_SETTLE_TIMEOUT_MS }).catch(() => {});
+    const inventory = await this.readInventory();
+    const text = await this.visibleText();
+    const ids = criteria.map((c) => c.id).join(", ");
+    const shot = await this.capture(`judge-${criteria[0]!.id}.png`, `to judge ${ids}`, false);
+    for (const criterion of criteria) {
+      await this.reserve();
+      const startedAt = this.ctx.now();
+      const urlBefore = this.url();
+      const base = {
+        plannedStepId: step?.id ?? null,
+        kind: "judge" as const,
+        instruction: `Judge ${criterion.id} from what the page shows: ${criterion.statement}`,
+        urlBefore,
+        startedAt,
+        artifactIds: shot.artifactIds,
+      };
+      try {
+        const out = await this.judge.judge({
+          requirement: this.input.requirement.originalText,
+          criterion,
+          stepDescription: step?.description ?? null,
+          url: urlBefore,
+          inventory,
+          text,
+          screenshot: shot.png,
+          runId: this.ctx.runId,
+          signal: this.input.budget,
+          deadlineAt: this.ctx.deadlineAt,
+          redact: this.ctx.redact,
+        });
+        await this.record({ ...base, outcome: "SUCCESS", llm: out.llm, judgment: { criterionId: criterion.id, ...out.judgment } });
+      } catch (err) {
+        this.rethrowIfFatal(err);
+        await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
+      }
+    }
+  }
+
+  /** The page's visible text for the judge (redacted, clipped); empty when it cannot be read. */
+  private async visibleText(): Promise<string> {
+    try {
+      const text: unknown = await this.page.evaluate(VISIBLE_TEXT_SCRIPT);
+      return typeof text === "string" ? String(this.ctx.redact(text)).slice(0, JUDGE_TEXT_MAX_CHARS) : "";
+    } catch {
+      return "";
+    }
+  }
+
+  /** The page's structure for the judge (redacted); null when it cannot be read. */
+  private async readInventory(): Promise<PageInventory | null> {
+    try {
+      return toPageInventory(parseRawInventory(await this.page.evaluate(INVENTORY_SCRIPT)), this.ctx.redact);
+    } catch {
+      return null;
+    }
+  }
+
   /** Polls for the step's element; whether it appeared or not, exploration goes on (see the header). */
   private async waitFor(step: PlannedStep): Promise<void> {
     this.cacheWrites = [];
@@ -1135,8 +1246,13 @@ class ExplorationRun {
    * errors propagate.
    */
   private async screenshot(fileName: string, where: string): Promise<string[]> {
+    return (await this.capture(fileName, where, true)).artifactIds;
+  }
+
+  /** A screenshot, stored and announced: of the full page (else the viewport), or of the viewport only. */
+  private async capture(fileName: string, where: string, fullPageFirst: boolean): Promise<{ artifactIds: string[]; png: Buffer | null }> {
     let png: Buffer | null = null;
-    for (const fullPage of [true, false]) {
+    for (const fullPage of fullPageFirst ? [true, false] : [false]) {
       try {
         png = await this.session.screenshot({ fullPage });
         break;
@@ -1150,7 +1266,7 @@ class ExplorationRun {
         message: `Screenshot ${where} could not be taken`,
         payload: { type: "SCREENSHOT", reason: "The browser could not take the screenshot" },
       });
-      return [];
+      return { artifactIds: [], png: null };
     }
     const { artifactId } = await this.deps.store.saveScreenshot({ png, fileName, sensitivity: this.sensitivity });
     await this.ctx.publish({
@@ -1158,7 +1274,7 @@ class ExplorationRun {
       message: `Screenshot saved ${where}`,
       payload: { artifactId, type: "SCREENSHOT", sensitivity: this.sensitivity },
     });
-    return [artifactId];
+    return { artifactIds: [artifactId], png };
   }
 
   private async record(draft: StepDraft): Promise<ExplorationStep> {
@@ -1200,6 +1316,7 @@ class ExplorationRun {
       llm: draft.llm ?? null,
       ...(this.multiScenario ? { scenarioId: this.scenarioId } : {}),
       ...(draft.generatedValue !== undefined ? { generatedValue: draft.generatedValue } : {}),
+      ...(draft.judgment !== undefined ? { judgment: draft.judgment } : {}),
     }) as ExplorationStep;
     return ExplorationStepSchema.parse({
       ...redacted,

@@ -366,14 +366,14 @@ describe("POST /v1/test-runs/:runId/criteria/confirm", () => {
     expect(confirmed!.message).toBe("Criteria revision 1 confirmed");
   });
 
-  it("warns about criteria that will be reported as Inconclusive", async () => {
+  it("warns about unclear criteria: Inconclusive, or judged by AI from the page (a semantic one)", async () => {
     const runId = await setupAwaitingConfirmation(requirementWithWarnings());
     const res = await confirmCriteria(runId);
     expect(res.statusCode).toBe(202);
     const body = res.json();
     expect(body.warnings).toHaveLength(2);
     expect(body.warnings).toContain("Criterion AC-1 will be reported as Inconclusive");
-    expect(body.warnings).toContain("Criterion AC-2 will be reported as Inconclusive");
+    expect(body.warnings).toContain("Criterion AC-2 is unclear: AI will judge it from what the page shows");
   });
 
   it("returns 409 on a second confirm", async () => {

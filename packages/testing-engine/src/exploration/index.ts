@@ -5,3 +5,4 @@ export * from "./executor";
 export * from "./explore-stage";
 export * from "./observe-cache";
 export * from "./evidence-snapshot";
+export * from "./judge";

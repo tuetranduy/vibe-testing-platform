@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { BROWSER_WINDOW_ARGS } from "@platform/testing-engine";
 import { chromium, type Browser, type Page } from "playwright-core";
-import { applySessionHygiene } from "./session-hygiene";
+import { applySessionHygiene, restoreFullHd } from "./session-hygiene";
 
 /**
  * Launches Chromium ourselves (spike: Stagehand v4 caveats 1–4): detached in its own process
@@ -44,6 +44,8 @@ export interface SandboxedBrowser {
   extensionIds: string[];
   /** The initial page, via `chromium.connectOverCDP(cdpUrl)`. */
   page: Page;
+  /** Sets the page back to its full-HD viewport (after a full-page screenshot, which can drop it). */
+  restoreViewport(): Promise<void>;
   profileDir: string;
   pid: number;
   /** Disconnects, kills the process group, deletes the profile. Idempotent. */
@@ -327,6 +329,7 @@ export async function launchSandboxedBrowser(opts: LaunchSandboxedBrowserOptions
       browserWsUrl,
       extensionIds: extensions.map((e) => e.id),
       page,
+      restoreViewport: () => restoreFullHd(page),
       profileDir,
       pid: child.pid!,
       close,

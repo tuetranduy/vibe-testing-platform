@@ -12,7 +12,7 @@ import {
 export interface ReconcileExtras {
   evidenceArtifactIds: string[];
   relatedStepIds: string[];
-  /** Semantic judge note (D3); never affects the status. */
+  /** Semantic criteria: the judge's reasoning (or diagnostics' comment). Never affects the status. */
   aiNote: string | null;
   /** The criterion's weight (V1.1); absent: critical. Never affects the status, only the verdict. */
   critical?: boolean;
@@ -34,6 +34,10 @@ const refKey = (ref: FactRef) => `${ref.key}@${ref.checkpoint}`;
  * | FAIL          | PASSED                                          | INCONCLUSIVE  | —                | DISCOVERY_RERUN_DISAGREE |
  * | PASS / FAIL   | NOT_REACHED / UNAVAILABLE, all DOM_VERIFIED     | provisional   | EXPLORATION_ONLY | —                        |
  * | PASS / FAIL   | NOT_REACHED / UNAVAILABLE, else                 | INCONCLUSIVE  | —                | UNVERIFIED_EVIDENCE      |
+ * | PASS / FAIL, `aiJudged` | any (never compiled, so NOT_REACHED)  | provisional   | AI_JUDGMENT      | —                        |
+ *
+ * `aiJudged` (2026-10-07): an unclear (`semantic`) criterion judged by a model from what the exploration saw. No
+ * rule and no rerun can check it, so the judgment stands, marked as one.
  *
  * "All DOM_VERIFIED" is strict: the criterion references at least one fact, and every referenced fact
  * was recorded and read from the DOM. A missing fact counts as unverified. When a key@checkpoint was
@@ -69,6 +73,7 @@ interface Decision {
 
 function decide(p: ProvisionalResult, rerun: RerunOutcome, facts: readonly ObservedFact[]): Decision {
   if (p.status === "BLOCKED" || p.status === "INCONCLUSIVE") return { status: p.status, reason: p.reason, verdictSource: null };
+  if (p.aiJudged) return { status: p.status, reason: null, verdictSource: "AI_JUDGMENT" };
 
   const confirms = p.status === "PASS" ? "PASSED" : "ASSERTION_FAILED";
   const contradicts = p.status === "PASS" ? "ASSERTION_FAILED" : "PASSED";

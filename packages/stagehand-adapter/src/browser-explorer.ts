@@ -27,6 +27,11 @@ export interface SandboxedPage {
   page: Page;
   /** Blocked main-frame navigations (the worker's navigation guard). Optional. */
   onNavigationBlocked?(listener: (e: NavigationBlock) => void): () => void;
+  /**
+   * Sets the page back to its emulated viewport after a full-page screenshot, which can drop it (the page then shrank
+   * to the window's size for the rest of the run, and of its video). Optional.
+   */
+  restoreViewport?(): Promise<void>;
 }
 
 /** Per-step model usage (`ExplorationStep.llm`). `cacheHit` is null in V1 (Ruling R21). */

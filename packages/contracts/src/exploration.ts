@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CheckpointSchema, FactKeySchema, IsoDateTime } from "./common";
+import { CheckpointSchema, CriterionIdSchema, FactKeySchema, IsoDateTime } from "./common";
 import { InputRefSchema } from "./plan";
 import { BlockReasonSchema } from "./run";
 
@@ -33,12 +33,28 @@ export const LlmStepUsageSchema = z.object({
   cacheHit: z.boolean().nullable(),
 });
 
+/**
+ * A model's judgment of an unclear (`semantic`) criterion from what the exploration saw (2026-10-07): the page's text
+ * and its screenshot where the criterion's subject is shown. Decides the criterion's status (verifier, rule 4).
+ */
+export const CriterionJudgmentSchema = z.object({
+  criterionId: CriterionIdSchema,
+  /** The page showed what the criterion is about, as the requirement means it. False: nothing to judge it on. */
+  relevant: z.boolean(),
+  verdict: z.enum(["HOLDS", "DOES_NOT_HOLD", "CANNOT_TELL"]),
+  /** What the page actually showed for it: the actual result. */
+  observed: z.string().max(1000),
+  /** Why: how the requirement's words were read, and what on the page decided it. */
+  reasoning: z.string().max(1000),
+});
+export type CriterionJudgment = z.infer<typeof CriterionJudgmentSchema>;
+
 export const ExplorationStepSchema = z.object({
   id: z.string(),
   runId: z.string(),
   index: z.number().int().min(0),
   plannedStepId: z.string().nullable(),
-  kind: z.enum(["navigate", "act", "fill", "observe", "extract", "checkpoint", "screenshot"]),
+  kind: z.enum(["navigate", "act", "fill", "observe", "extract", "checkpoint", "screenshot", "judge"]),
   instruction: z.string().max(1000), // redacted
   element: ElementRefSchema.nullable(),
   inputRef: InputRefSchema.nullable(),
@@ -59,6 +75,8 @@ export const ExplorationStepSchema = z.object({
    * 2026-10-07). Absent or null: the value was provided (or the step is not a fill).
    */
   generatedValue: z.string().max(1000).nullable().optional(),
+  /** A `judge` step's judgment (2026-10-07); absent on every other step, and on a judge step that failed. */
+  judgment: CriterionJudgmentSchema.optional(),
 });
 export type ExplorationStep = z.infer<typeof ExplorationStepSchema>;
 

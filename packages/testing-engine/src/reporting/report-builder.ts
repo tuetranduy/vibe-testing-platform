@@ -112,9 +112,13 @@ export function reconcileCriteria(input: ReconcileCriteriaInput): CriterionResul
 
     const factSteps = new Set(p.factRefs.map((ref) => latestFact.get(refKey(ref))?.stepId).filter((id) => id !== undefined));
     const plannedFor = new Set(planned.filter((s) => s.criterionIds.includes(p.criterionId)).map((s) => s.id));
-    const related = steps.filter(
-      (s) => factSteps.has(s.id) || (s.onGoldenPath && s.plannedStepId !== null && plannedFor.has(s.plannedStepId)),
-    );
+    // An unclear criterion's judge steps (2026-10-07): their screenshot is what it was judged on, so it comes first.
+    const judged = steps.filter((s) => s.kind === "judge" && s.judgment?.criterionId === p.criterionId);
+    const related = [
+      ...judged,
+      ...steps.filter((s) => factSteps.has(s.id) || (s.onGoldenPath && s.plannedStepId !== null && plannedFor.has(s.plannedStepId))),
+    ];
+    const judgment = judged.findLast((s) => s.outcome === "SUCCESS")?.judgment;
     const rerunEvidence = outcome !== "UNAVAILABLE" ? (input.rerun?.artifactIds ?? []) : [];
     const blockedEvidence = p.status === "BLOCKED" ? blockedStepsFor(p.criterionId, steps, input.plan).flatMap((s) => s.artifactIds) : [];
     const evidence = [
@@ -124,7 +128,7 @@ export function reconcileCriteria(input: ReconcileCriteriaInput): CriterionResul
     const result = reconcile(p, outcome, input.facts, {
       evidenceArtifactIds: evidence,
       relatedStepIds: related.map((s) => s.id),
-      aiNote: null,
+      aiNote: judgment ? clip(redact(judgment.reasoning)) : null,
       critical: criticalOf.get(p.criterionId) ?? true,
     });
     const errorText = input.rerun?.errorText?.[p.criterionId];
@@ -448,12 +452,13 @@ export function createReportStage(deps: ReportStageDeps): EngineStages["report"]
       }
     }
 
-    // Notes go only to semantic criteria, and only as `aiNote`: the status fields are copied untouched.
+    // Notes go only to semantic criteria, and only as `aiNote`: the status fields are copied untouched. A judged
+    // criterion keeps the judge's reasoning (the note that goes with its status).
     const semantic = new Set(input.requirement.criteria.filter((c) => c.expectedOutcome.kind === "semantic").map((c) => c.id));
     const notes = new Map(diagnosed.notes.filter((n) => semantic.has(n.criterionId)).map((n) => [n.criterionId, n.note]));
     const criteria = decided.map((c) => {
       const note = notes.get(c.criterionId);
-      return note === undefined ? c : CriterionResultSchema.parse({ ...c, aiNote: clip(String(ctx.redact(note)), MAX_NOTE) });
+      return note === undefined || c.aiNote !== null ? c : CriterionResultSchema.parse({ ...c, aiNote: clip(String(ctx.redact(note)), MAX_NOTE) });
     });
     const findings = diagnosed.findings.map((f) => ({ criterionId: f.criterionId, summary: clip(String(ctx.redact(f.summary)), MAX_FINDING) }));
 

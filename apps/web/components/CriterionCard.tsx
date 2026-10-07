@@ -221,8 +221,9 @@ export function CriterionCard({
         {aiJudged && (
           <div className="note note-info">
             <p>
-              Only a model can judge this, so it will be reported as <strong>Inconclusive</strong>; the model&apos;s opinion is shown as a
-              note, never as a result.
+              No exact value can check this, so AI judges it from what the page actually shows during the test (its text and a
+              screenshot): <strong>Pass</strong> or <strong>Fail</strong> by its judgment, or <strong>Inconclusive</strong> when the page
+              cannot decide it.
             </p>
             <p>Judged by AI only — it can only be removed.</p>
           </div>

@@ -5,7 +5,7 @@ import { useState } from "react";
 import type { ArtifactInfo, StepInfo } from "../lib/progress-reducer";
 import { CriterionDetail } from "./CriterionDetail";
 import { Icon } from "./Icon";
-import { CRITERION_STATUS_UI, VERDICT_SOURCE_TEXT, disagreementText, reasonText, unconfirmedWhy } from "./report-format";
+import { AI_JUDGMENT_TEXT, CRITERION_STATUS_UI, VERDICT_SOURCE_TEXT, disagreementText, reasonText, unconfirmedWhy } from "./report-format";
 import { CriterionStatusBadge } from "./StatusBadge";
 
 interface Props {
@@ -108,11 +108,13 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
             )}
             {decided && r.verdictSource ? (
               <>
-                <span className={`confirmation confirmation-${r.verdictSource === "PLAYWRIGHT_RERUN" ? "yes" : "no"}`}>
+                <span className={`confirmation confirmation-${r.verdictSource === "PLAYWRIGHT_RERUN" ? "yes" : r.verdictSource === "AI_JUDGMENT" ? "ai" : "no"}`}>
                   {r.verdictSource === "PLAYWRIGHT_RERUN" && <Icon name="shield" />}
+                  {r.verdictSource === "AI_JUDGMENT" && <Icon name="note" />}
                   {VERDICT_SOURCE_TEXT[r.verdictSource]}
                 </span>
                 {r.verdictSource === "EXPLORATION_ONLY" && <span className="result-sub">{unconfirmedWhy(r.rerunOutcome)}</span>}
+                {r.verdictSource === "AI_JUDGMENT" && <span className="result-sub">{AI_JUDGMENT_TEXT}</span>}
               </>
             ) : (
               <span className="result-reason">{reasonText(r.reason)}</span>
@@ -123,12 +125,16 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
       </div>
 
       {r.aiNote && (
-        <div role="note" aria-label="AI note" className="ai-note">
+        <div role="note" aria-label={r.verdictSource === "AI_JUDGMENT" ? "AI reasoning" : "AI note"} className="ai-note">
           <p className="ai-note-title">
-            <Icon name="note" /> AI note
+            <Icon name="note" /> {r.verdictSource === "AI_JUDGMENT" ? "AI reasoning" : "AI note"}
           </p>
           <p>{r.aiNote}</p>
-          <p className="hint">The AI model&apos;s opinion. It never sets the status.</p>
+          <p className="hint">
+            {r.verdictSource === "AI_JUDGMENT"
+              ? "Why the AI judged the actual result this way. Check the screenshot it was judged on."
+              : "The AI model's opinion. It never sets the status."}
+          </p>
         </div>
       )}
 

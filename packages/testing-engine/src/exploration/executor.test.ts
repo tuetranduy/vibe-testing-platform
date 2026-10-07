@@ -28,6 +28,7 @@ import type { ZodType } from "zod";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
 import { runExploration, type ExplorationStore, type RecorderPort } from "./executor";
 import type { FieldFacts, InputGenerator, InputRequest } from "./input-generator";
+import type { CriterionJudge, JudgeRequest } from "./judge";
 import { factFromReadings, type FactCaptureInput } from "./fact-reader";
 import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
 
@@ -1507,5 +1508,114 @@ describe("several scenarios (V1.1 F9)", () => {
     const result = await runExploration(ctx, { plan: planOf(step("navigate", "Open")), requirement: requirementWith([]), session: new FakeSession(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
     expect(result.steps[0]).not.toHaveProperty("scenarioId");
     expect(result).not.toHaveProperty("scenarioStops");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Unclear (semantic) criteria judged from the page (2026-10-07)
+// ---------------------------------------------------------------------------------------------
+
+describe("judging unclear criteria from what the page shows", () => {
+  const judged = (verdict: "HOLDS" | "DOES_NOT_HOLD" = "HOLDS") => {
+    const requests: JudgeRequest[] = [];
+    const judge: CriterionJudge = {
+      async judge(req) {
+        requests.push(req);
+        return { judgment: { relevant: true, verdict, observed: "The cart shows 1 item", reasoning: "Read as: the count went up" }, llm: USAGE };
+      },
+    };
+    return { judge, requests };
+  };
+  /** A page with a body to read: the judge's page scan. */
+  const withPage = (session: FakeSession, text = "Cart (1)\nCheckout") => {
+    Object.assign(session.page, {
+      evaluate: async (script: string) => (script.includes("innerText") && !script.includes("headings") ? text : { title: "Cart", headings: [{ level: 1, text: "Your cart" }] }),
+    });
+    return session;
+  };
+
+  it("after the last step that names it: page scan + viewport screenshot, one judge step with the judgment (off the golden path)", async () => {
+    const { ctx } = fakeCtx();
+    const session = withPage(new FakeSession());
+    const mem = memoryStore();
+    const { judge, requests } = judged();
+    const plan = planOf(
+      step("navigate", "Open the product page"),
+      step("click", "Click Add to cart", { criterionIds: ["AC-1"] }),
+      step("click", "Open the cart", { criterionIds: ["AC-1"] }),
+      step("click", "Go back"),
+    );
+
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder().recorder, judge });
+
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "SUCCESS", false],
+      [2, "act", "PS-2", "SUCCESS", true],
+      [3, "observe", "PS-3", "SUCCESS", false],
+      [4, "act", "PS-3", "SUCCESS", true],
+      [5, "judge", "PS-3", "SUCCESS", false], // after "Open the cart", the last step naming AC-1
+      [6, "observe", "PS-4", "SUCCESS", false],
+      [7, "act", "PS-4", "SUCCESS", true],
+    ]);
+    const judgeStep = outcome.steps[5]!;
+    expect(judgeStep).toMatchObject({
+      judgment: { criterionId: "AC-1", relevant: true, verdict: "HOLDS", observed: "The cart shows 1 item" },
+      llm: USAGE,
+      artifactIds: ["art_1"],
+    });
+    expect(mem.screenshots).toMatchObject([{ fileName: "judge-AC-1.png" }]);
+    expect(session.calls.filter((c) => c.op === "screenshot").map((c) => c.arg)).toEqual([{ fullPage: false }]); // what is on screen
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      requirement: "Add iPhone 17 Pro to the cart; the cart count increases.",
+      criterion: { id: "AC-1" },
+      stepDescription: "Open the cart",
+      text: "Cart (1)\nCheckout",
+      inventory: { title: "Cart", headings: [{ level: 1, text: "Your cart" }] },
+    });
+    expect(requests[0]!.screenshot).toBeInstanceOf(Buffer);
+  });
+
+  it("a criterion no step names is judged once the scenario's last step is done", async () => {
+    const { ctx } = fakeCtx();
+    const session = withPage(new FakeSession());
+    const { judge, requests } = judged("DOES_NOT_HOLD");
+    const plan = planOf(step("navigate", "Open the product page"), step("click", "Click Add to cart"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, judge });
+    expect(outcome.steps.at(-1)).toMatchObject({ kind: "judge", plannedStepId: null, judgment: { verdict: "DOES_NOT_HOLD" } });
+    expect(requests[0]!.stepDescription).toBeNull();
+  });
+
+  it("a model failure records a FAILED judge step and exploration goes on; no judge, no judge step; criteria with rules are never judged", async () => {
+    const failing: CriterionJudge = {
+      judge: async () => {
+        throw new Error("model said nonsense");
+      },
+    };
+    const plan = () => planOf(step("navigate", "Open the product page"), step("click", "Click Add to cart", { criterionIds: ["AC-1"] }));
+    const a = fakeCtx();
+    const failed = await runExploration(a.ctx, { plan: plan(), requirement: requirementWith([]), session: withPage(new FakeSession()), budget: a.ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, judge: failing });
+    expect(failed.stopReason).toBe("COMPLETED");
+    expect(failed.steps.at(-1)).toMatchObject({ kind: "judge", outcome: "FAILED", error: "model said nonsense" });
+    expect(failed.steps.at(-1)!.judgment).toBeUndefined();
+
+    const b = fakeCtx();
+    const none = await runExploration(b.ctx, { plan: plan(), requirement: requirementWith([]), session: withPage(new FakeSession()), budget: b.ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, judge: null });
+    expect(none.steps.map((s) => s.kind)).not.toContain("judge");
+
+    const c = fakeCtx();
+    const { judge, requests } = judged();
+    const visible = { kind: "visible", fact: { key: "cartCount", checkpoint: "after_add" }, expected: true } as const;
+    await runExploration(c.ctx, { plan: plan(), requirement: requirementWith([], visible), session: withPage(new FakeSession()), budget: c.ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, judge });
+    expect(requests).toEqual([]);
+  });
+
+  it("a criterion the plan blocked is not judged", async () => {
+    const { ctx } = fakeCtx();
+    const { judge, requests } = judged();
+    const plan = { ...planOf(step("navigate", "Open the product page")), blockedCriteria: [{ criterionId: "AC-1", reason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED" as const, detail: "x" }] };
+    await runExploration(ctx, { plan, requirement: requirementWith([]), session: withPage(new FakeSession()), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, judge });
+    expect(requests).toEqual([]);
   });
 });

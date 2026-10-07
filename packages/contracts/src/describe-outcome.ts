@@ -46,7 +46,7 @@ function sentence(outcome: ExpectedOutcome, facts: readonly FactRequest[]): stri
       return `${fact(outcome.collection)} include an item ${outcome.match === "equals" ? "that is exactly" : "containing"} ${item}.`;
     }
     case "semantic":
-      return `Judged by AI only, so it ends Inconclusive: ${quoted(outcome.description)}.`;
+      return `Judged by AI from what the page shows: ${quoted(outcome.description)}.`;
   }
 }
 

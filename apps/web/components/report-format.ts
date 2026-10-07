@@ -40,11 +40,19 @@ export { STATUS_REASON_TEXT };
 
 export const reasonText = (reason: StatusReason | null): string => (reason ? STATUS_REASON_TEXT[reason] : "No reason was recorded");
 
-/** How a PASS / FAIL was decided (Section 2.3): the rerun confirmed it, or only exploration saw it. */
+/**
+ * How a PASS / FAIL was decided (Section 2.3): the rerun confirmed it, or only exploration saw it, or (an unclear
+ * criterion, 2026-10-07) an AI judged what exploration saw.
+ */
 export const VERDICT_SOURCE_TEXT = {
   PLAYWRIGHT_RERUN: "Confirmed by rerun",
   EXPLORATION_ONLY: "Not confirmed by rerun",
+  AI_JUDGMENT: "AI-judged",
 } as const;
+
+/** What an AI-judged PASS / FAIL means. */
+export const AI_JUDGMENT_TEXT =
+  "The criterion is unclear, so an AI judged the actual result the exploration saw (the page's text and a screenshot) against it.";
 
 /** Why a PASS / FAIL was not confirmed by the rerun (EXPLORATION_ONLY comes with NOT_REACHED or UNAVAILABLE). */
 export function unconfirmedWhy(rerun: RerunOutcome): string {
@@ -75,6 +83,7 @@ export const STEP_KIND_LABEL: Record<ExplorationStep["kind"], string> = {
   extract: "Read",
   checkpoint: "Checkpoint",
   screenshot: "Screenshot",
+  judge: "AI judgment",
 };
 
 /** "42s", "1m 35s", "1h 2m"; "< 1s" under a second; "—" when unknown. */

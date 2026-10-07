@@ -38,7 +38,7 @@ type Row = {
   rerun: RerunOutcome;
   facts: ObservedFact[];
   status: ProvisionalResult["status"];
-  verdictSource: "PLAYWRIGHT_RERUN" | "EXPLORATION_ONLY" | null;
+  verdictSource: "PLAYWRIGHT_RERUN" | "EXPLORATION_ONLY" | "AI_JUDGMENT" | null;
   reason: ProvisionalResult["reason"];
 };
 
@@ -86,6 +86,17 @@ const TABLE: Row[] = [
       status: "INCONCLUSIVE",
       verdictSource: null,
       reason: "UNVERIFIED_EVIDENCE",
+    })),
+  ),
+  ...(["PASS", "FAIL"] as const).flatMap((status) =>
+    OUTCOMES.map((rerun): Row => ({
+      row: `${status}, aiJudged (an unclear criterion judged from the page) | any → ${status}, AI_JUDGMENT`,
+      provisional: { ...provisional(status, null, []), aiJudged: true },
+      rerun,
+      facts: [],
+      status,
+      verdictSource: "AI_JUDGMENT",
+      reason: null,
     })),
   ),
 ];
