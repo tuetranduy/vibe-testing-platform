@@ -143,7 +143,7 @@ describe("POST /v1/test-runs/:runId/suggestions/select", () => {
     expect(events.at(-1)).toMatchObject({ message: "Suggestion S-2 selected (edited)", payload: { suggestionId: "S-2", edited: true } });
   });
 
-  it("a secret value typed into the edit is masked before it is stored (by fingerprint; D7: no decryption in the API)", async () => {
+  it("a secret value typed into the edit is stored as typed (secrets are not redacted)", async () => {
     const runId = await blankRun("AWAITING_SELECTION", { secrets: { password: "hunter2-long-pw" } });
     const res = await select(runId, {
       suggestionId: "S-3",
@@ -151,8 +151,7 @@ describe("POST /v1/test-runs/:runId/suggestions/select", () => {
     });
     expect(res.statusCode).toBe(202);
     const run = await new RunRepository(t.tdb.db).getById(runId);
-    expect(run.request.requirement).toBe("A user signs in with qa@demo.test and [REDACTED] and lands on their account page.");
-    expect(res.body).not.toContain("hunter2-long-pw");
+    expect(run.request.requirement).toBe("A user signs in with qa@demo.test and hunter2-long-pw and lands on their account page.");
   });
 
   it("the suggestion's own text sent back is not an edit", async () => {

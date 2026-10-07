@@ -99,7 +99,7 @@ function setup(opts: { secrets?: Record<string, string>; budget?: AbortSignal; l
     return { json: answer };
   });
   const secrets = opts.secrets ?? {};
-  const redact = createRunRedactor(Object.values(secrets));
+  const redact = createRunRedactor();
   const events: EventDraft[] = [];
   const cleanups: (() => Promise<void> | void)[] = [];
   const shots: { fileName: string; sensitivity: string }[] = [];
@@ -234,12 +234,12 @@ describe("survey stage", () => {
     ]);
   });
 
-  it("saves a screenshot of each page it read, with the run's sensitivity, shows them live, and gives the model the start page's", async () => {
+  it("saves a STANDARD screenshot of each page it read, shows them live, and gives the model the start page's", async () => {
     const { ctx, events, shots, transport, store } = setup({ secrets: { password: "pw-123456" } });
     const site = fakeSite(SITE);
     await createSurveyStage({ openSandbox: async () => site.sandbox, store: () => store })(ctx);
     expect(shots).toHaveLength(4);
-    expect(new Set(shots.map((s) => s.sensitivity))).toEqual(new Set(["SECRET_BEARING"]));
+    expect(new Set(shots.map((s) => s.sensitivity))).toEqual(new Set(["STANDARD"]));
     expect(events.filter((e) => e.type === "artifact.created").map((e) => e.message)).toEqual([
       "Full-page screenshot saved for /",
       "Full-page screenshot saved for /products",

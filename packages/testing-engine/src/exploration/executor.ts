@@ -329,7 +329,8 @@ class ExplorationRun {
   private readonly session: ExplorerSession;
   private readonly recorder: RecorderPort;
   private readonly policy: ActionPolicy;
-  private readonly sensitivity: ArtifactSensitivity;
+  /** Screenshots are never secret-bearing: a run's secrets are no longer redacted (2026-10-07). */
+  private readonly sensitivity: ArtifactSensitivity = "STANDARD";
   private readonly max: number;
   private readonly visibleFacts: Set<string>;
 
@@ -342,7 +343,6 @@ class ExplorationRun {
     this.session = input.session;
     this.recorder = deps.recorder ?? playwrightRecorder;
     this.policy = actionPolicyFor(request);
-    this.sensitivity = ctx.secrets.names.length > 0 || request.secretNames.length > 0 ? "SECRET_BEARING" : "STANDARD";
     this.max = request.options.maxExplorationSteps;
     this.multiScenario = input.plan.scenarios.length > 1;
     this.visibleFacts = new Set(
@@ -697,10 +697,7 @@ class ExplorationRun {
       else await this.recorder.select(this.page, located.element.selector, value);
     } catch (err) {
       this.rethrowIfFatal(err);
-      // The recorder keeps the value out of its errors; redact once more for the run's secrets.
-      const message = firstLine(err);
-      // An empty value would put [REDACTED] between every character; there is nothing to redact.
-      await this.record({ ...base, outcome: "FAILED", error: value === "" ? message : message.split(value).join("[REDACTED]") });
+      await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
       return "failed";
     }
     await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true });

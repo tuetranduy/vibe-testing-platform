@@ -328,13 +328,13 @@ describe("createEngines (Ruling R7: both engines, chosen per run)", () => {
     expect(facts.find((f) => f.key === "cartCount")).toMatchObject({ provenance: "MODEL_EXTRACTED", value: null });
     const artifacts = await new ArtifactRepository(h.tdb.db).listByRun(run.id);
     expect(artifacts).toHaveLength(3);
-    expect(artifacts.every((a) => a.type === "SCREENSHOT" && a.sensitivity === "SECRET_BEARING")).toBe(true);
+    expect(artifacts.every((a) => a.type === "SCREENSHOT" && a.sensitivity === "STANDARD")).toBe(true);
 
     const events = await eventsOf(h, run.id);
     expect(events.filter((e) => e.type === "step.recorded")).toHaveLength(steps.length);
     expect(events.filter((e) => e.type === "fact.observed")).toHaveLength(facts.length);
     expect(events.filter((e) => e.type === "artifact.created").map((e) => e.payload)).toEqual(
-      artifacts.map((a) => ({ artifactId: a.id, type: "SCREENSHOT", sensitivity: "SECRET_BEARING" })),
+      artifacts.map((a) => ({ artifactId: a.id, type: "SCREENSHOT", sensitivity: "STANDARD" })),
     );
     expect(events.every((e) => e.stage !== "EXPLORING" || ["stage.started", "step.recorded", "fact.observed", "artifact.created", "stage.completed"].includes(e.type))).toBe(true);
     expect(exploration.log).toContain("sandbox.close");

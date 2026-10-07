@@ -10,7 +10,6 @@ describe("@platform/security public API", () => {
       "validateTargetUrl",
       "isHostPortAllowlisted",
       "redactByKey",
-      "createValueRedactor",
       "createRunRedactor",
       "isSensitiveKey",
       "REDACTED",
@@ -19,8 +18,6 @@ describe("@platform/security public API", () => {
       "assertActionAllowed",
       "DESTRUCTIVE_TERMS",
       "secretFingerprint",
-      "redactFingerprintedSecrets",
-      "containsFingerprintedSecret",
     ]) {
       expect(security, name).toHaveProperty(name);
     }

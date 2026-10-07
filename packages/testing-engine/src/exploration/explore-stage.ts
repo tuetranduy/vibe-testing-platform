@@ -40,7 +40,7 @@ export interface ExploreStageDeps {
   logger?: { error(obj: object, msg?: string): void; warn?(obj: object, msg?: string): void };
   /** Starts the run's recordings on the sandbox (V1.3); absent, or null returned: nothing is recorded. */
   startRecording?(ctx: StageContext, sandbox: ExplorationSandbox): Promise<SessionRecording | null>;
-  /** Where the recordings are stored (the rerun's evidence store: scrubbed traces, sensitivity by the run's secrets). */
+  /** Where the recordings are stored (the rerun's evidence store). */
   recordingStore?(ctx: StageContext): EvidenceStore;
 }
 
@@ -128,8 +128,7 @@ async function startRecording(ctx: StageContext, deps: ExploreStageDeps, sandbox
 }
 
 /**
- * Stops the recordings and stores them like the rerun's evidence (collectEvidence: traces scrubbed of every
- * secret value, SECRET_BEARING when the run has secrets). A recording that cannot be stopped is omitted;
+ * Stops the recordings and stores them like the rerun's evidence (collectEvidence). A recording that cannot be stopped is omitted;
  * storage failures propagate (infrastructure, like screenshots).
  */
 async function keepRecording(ctx: StageContext, deps: ExploreStageDeps, recording: SessionRecording): Promise<string[]> {
@@ -142,6 +141,5 @@ async function keepRecording(ctx: StageContext, deps: ExploreStageDeps, recordin
     await ctx.publish({ type: "artifact.omitted", message: "Exploration recording omitted", payload: { type: "VIDEO", reason: "The recording could not be finished" } });
     return [];
   }
-  const secretValues = ctx.secrets.names.map((n) => ctx.secrets.get(n)).filter((v): v is string => v !== undefined);
-  return collectEvidence(ctx, files, { store: deps.recordingStore!(ctx), secretValues, origin: "Exploration" });
+  return collectEvidence(ctx, files, { store: deps.recordingStore!(ctx), origin: "Exploration" });
 }

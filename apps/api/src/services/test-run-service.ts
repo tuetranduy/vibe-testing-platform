@@ -167,9 +167,8 @@ export class TestRunService {
     // `llm` is stored as the resolved choice, not the override the request sent.
     const { secrets: _typed, llm: _override, testDataSetId: _set, credentialProfileId: _profile, ...requested } = req;
     const rest = { ...requested, requirement: inline.text, testData };
-    const redact = createRunRedactor(Object.values(secrets));
-    // Secret values can also appear in the requirement text or test data: redact them by key and
-    // value before anything is persisted (D7). The worker only ever sees this redacted copy.
+    // Redacted by key before anything is persisted; secret values are kept as typed (2026-10-07).
+    const redact = createRunRedactor();
     const stored: StoredTestRunRequest = {
       ...(redact(rest) as typeof rest),
       secretNames: Object.keys(secrets).sort(),

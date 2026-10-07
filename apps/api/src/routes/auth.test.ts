@@ -353,37 +353,6 @@ describe("run ownership", () => {
     expect(other.statusCode).toBe(409);
   });
 
-  it("records a reveal durably with the user who made it (KI-028)", async () => {
-    const ann = await session("member", "Revealer");
-    const run = await new RunRepository(t.tdb.db).create({
-      tenantId: TEST_TENANT_ID,
-      targetUrl: "https://shop.example.com",
-      request: storedRequest(),
-      ownerUserId: ann.user.id,
-    });
-    const artifact = await new ArtifactRepository(t.tdb.db).create({
-      tenantId: TEST_TENANT_ID,
-      runId: run.id,
-      type: "SCREENSHOT",
-      objectKey: `k/${run.id}.png`,
-      sha256: "0".repeat(64),
-      bytes: 1,
-      contentType: "image/png",
-      sensitivity: "SECRET_BEARING",
-      expiresAt: new Date(Date.now() + 86_400_000),
-    });
-    const res = await t.app.inject({
-      method: "GET",
-      url: `/v1/test-runs/${run.id}/artifacts/${artifact.id}/url?reveal=true`,
-      headers: ann.headers,
-    });
-    expect(res.statusCode).toBe(200);
-    const rows = await new AuditRepository(t.tdb.db).listByTenant(TEST_TENANT_ID, 1000);
-    expect(rows.find((r) => r.action === "artifact.reveal" && r.runId === run.id)).toMatchObject({
-      userId: ann.user.id,
-      detail: { artifactId: artifact.id, type: "SCREENSHOT" },
-    });
-  });
 });
 
 describe("settings", () => {

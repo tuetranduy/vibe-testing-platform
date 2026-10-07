@@ -301,8 +301,8 @@ export const saveProviderKey = (provider: LlmKeyProvider, apiKey: string | null)
   request(LlmSettingsViewSchema, `${SETTINGS}/keys/${provider}`, { method: "PUT", body: { apiKey } });
 
 /** Prefer `fetchArtifactUrl` (lib/artifacts.ts), which applies the reveal rule. */
-export const getArtifactUrl = (runId: string, artifactId: string, reveal: boolean): Promise<ArtifactUrl> =>
-  request(ArtifactUrlSchema, `${runPath(runId)}/artifacts/${seg(artifactId)}/url${reveal ? "?reveal=true" : ""}`);
+export const getArtifactUrl = (runId: string, artifactId: string): Promise<ArtifactUrl> =>
+  request(ArtifactUrlSchema, `${runPath(runId)}/artifacts/${seg(artifactId)}/url`);
 
 const SUITES = "/api/v1/suites";
 const SUITE_RUNS = "/api/v1/suite-runs";

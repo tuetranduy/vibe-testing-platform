@@ -17,6 +17,12 @@ import { createRealStages } from "../orchestrator/real-stages";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
 import { actionPolicyFor, createPlanStage, planTest, type PlanTestInput } from "./planner";
 
+/** A redactor that masks the given values: the run's redactor is key-based, but the plumbing applies whatever it is given. */
+const maskValues =
+  (...values: string[]) =>
+  (v: unknown): unknown =>
+    JSON.parse(values.reduce((json, s) => json.split(s).join("[REDACTED]"), JSON.stringify(v) ?? "null"));
+
 // ---------------------------------------------------------------------------------------------
 // Fixtures
 
@@ -541,7 +547,7 @@ describe("planTest — secrets", () => {
 
     const plan = await planTest(
       llm,
-      input(req, { testDataKeys: ["email"], secretNames: ["password"], redact: createRunRedactor([secret]) }),
+      input(req, { testDataKeys: ["email"], secretNames: ["password"], redact: maskValues(secret) }),
     );
 
     expect(sentText(transport)).not.toContain(secret);
@@ -562,7 +568,7 @@ function stageContext(request: StoredTestRunRequest, secrets: Record<string, str
     deadlineAt: null,
     budgets: { explorationMs: 1000, rerunMs: 1000 },
     secrets: { names: Object.keys(secrets), get: (n) => secrets[n] },
-    redact: createRunRedactor(Object.values(secrets)),
+    redact: createRunRedactor(),
     publish: async () => {},
     addCleanup: () => {},
     boundary: async () => {},

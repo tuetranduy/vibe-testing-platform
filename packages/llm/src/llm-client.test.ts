@@ -8,6 +8,12 @@ import { createTransport } from "./providers";
 import { LlmTransportError } from "./transport";
 import type { LlmCallRecord } from "./types";
 
+/** A redactor that masks the given values: the run's redactor is key-based, but the plumbing applies whatever it is given. */
+const maskValues =
+  (...values: string[]) =>
+  (v: unknown): unknown =>
+    JSON.parse(values.reduce((json, s) => json.split(s).join("[REDACTED]"), JSON.stringify(v) ?? "null"));
+
 const Answer = z.object({ answer: z.string().min(1), count: z.number().int() });
 
 const identity = (v: unknown) => v;
@@ -244,7 +250,7 @@ describe("LlmClient.generateStructured", () => {
         { role: "user", content: `The password is ${secret}` },
         { role: "user", content: [{ type: "text", text: `again: ${secret}` }] },
       ],
-      redact: createRunRedactor([secret]),
+      redact: maskValues(secret),
       schema: Answer,
     });
     expect(transport.requests).toHaveLength(2); // includes the correction round that echoes model output

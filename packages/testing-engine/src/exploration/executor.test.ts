@@ -21,6 +21,7 @@ import {
   type NavigationBlock,
   type ObservedElement,
 } from "@platform/stagehand-adapter/browser-explorer";
+import { createRunRedactor } from "@platform/security";
 import type { Page } from "playwright-core";
 import { describe, expect, it } from "vitest";
 import type { ZodType } from "zod";
@@ -192,11 +193,8 @@ function fakeCtx(o: CtxOptions = {}) {
   const events: EventDraft[] = [];
   const cleanups: (() => unknown)[] = [];
   const secrets = o.secrets ?? {};
-  const redact = (v: unknown): unknown => {
-    let json = JSON.stringify(v);
-    for (const s of Object.values(secrets)) json = json.split(s).join("[REDACTED]");
-    return json === undefined ? v : JSON.parse(json);
-  };
+  // The run's redactor: key-based only; secret values are kept (2026-10-07).
+  const redact = createRunRedactor();
   const ctx: StageContext = {
     runId: "run_exec",
     tenantId: "t_default",
@@ -407,7 +405,7 @@ describe("runExploration (fake explorer)", () => {
     expect(session.ops()).toEqual(["close"]);
   });
 
-  it("secrets: a fill step with a secret inputRef is filled by the recorder, never by act(); the value appears in no row, event or explorer input", async () => {
+  it("secrets: a fill step with a secret inputRef is filled by the recorder, never by act(); the value is no longer redacted from rows and events", async () => {
     const { ctx, events } = fakeCtx({ secrets: { password: SECRET }, testData: { email: "qa@demo.test" }, targetUrl: "https://shop.test/" });
     const session = new FakeSession({
       observe: (instruction, n) => [{ selector: `xpath=/html[1]/body[1]/f[${n + 1}]`, description: `field for ${instruction}`, method: "fill", arguments: ["model-chosen"] }],
@@ -425,7 +423,7 @@ describe("runExploration (fake explorer)", () => {
       step("navigate", "Open https://shop.test/login"),
       step("fill", "Fill the email field", { inputRef: { source: "testData", key: "email" } }),
       step("fill", "Fill the password field", { inputRef: { source: "secret", key: "password" } }),
-      // Defense in depth: even a description that (wrongly) contains the value is redacted.
+      // A description that contains the value keeps it (secrets are not redacted since 2026-10-07).
       step("login", `Click the Log in button, not the one labelled ${SECRET}`),
       step("capture_checkpoint", "Capture the greeting", { checkpoint: "after_login" }),
     );
@@ -447,13 +445,10 @@ describe("runExploration (fake explorer)", () => {
       ["PS-2", { source: "testData", key: "email" }, true, "SUCCESS"],
       ["PS-3", { source: "secret", key: "password" }, true, "SUCCESS"],
     ]);
-    expect(outcome.steps.find((s) => s.plannedStepId === "PS-4" && s.onGoldenPath)).toMatchObject({ kind: "act", instruction: expect.stringContaining("[REDACTED]") });
-    expect(mem.screenshots.map((s) => s.sensitivity)).toEqual(["SECRET_BEARING"]);
-    expect(events.find((e) => e.type === "artifact.created")?.payload).toMatchObject({ sensitivity: "SECRET_BEARING" });
-
-    const everything = JSON.stringify({ steps: mem.steps, facts: mem.facts, outcome, events, explorer: session.calls });
-    expect(everything).not.toContain(SECRET);
-    expect(everything).toContain("[REDACTED]");
+    expect(outcome.steps.find((s) => s.plannedStepId === "PS-4" && s.onGoldenPath)).toMatchObject({ kind: "act", instruction: expect.stringContaining(SECRET) });
+    expect(mem.screenshots.map((s) => s.sensitivity)).toEqual(["STANDARD"]);
+    expect(events.find((e) => e.type === "artifact.created")?.payload).toMatchObject({ sensitivity: "STANDARD" });
+    expect(JSON.stringify(mem.facts)).toContain(SECRET);
   });
 
   it("a full-page screenshot that fails falls back to the viewport; neither → artifact.omitted, the step still recorded", async () => {

@@ -7,7 +7,7 @@ import {
 } from "@platform/contracts";
 import { EventRepository, RequirementRepository, RunRepository, SecretRepository, SiteAnalysisRepository } from "@platform/db";
 import { createRunEventPublisher, type RunEventPublisher } from "@platform/event-bus";
-import { containsFingerprintedSecret, redactByKey } from "@platform/security";
+import { redactByKey } from "@platform/security";
 import type { RunScope } from "@platform/db";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
@@ -97,15 +97,6 @@ export class CriteriaService {
       throw new HttpError(400, edit.code, message, edit.issues);
     }
 
-    // A check value that is one of the run's secret values would be stored in the revision and shown in
-    // the report. Masking it would change what the check verifies, so the edit is refused instead.
-    const leaked = await this.findSecretValue(runId, edit.criteria);
-    if (leaked) {
-      throw new HttpError(400, "VALIDATION_FAILED", "A check can't contain a value entered as a secret", [
-        { path: leaked, message: "Contains a value entered as a secret; secrets are only typed into the site, never checked for" },
-      ]);
-    }
-
     const updated = await this.requirements.createRevision(runId, { originalText: req.originalText, criteria: edit.criteria, facts: edit.facts });
 
     await this.publisher().publish({
@@ -117,31 +108,6 @@ export class CriteriaService {
     });
 
     return updated;
-  }
-
-  /** Path of the first string in `criteria` that contains one of the run's secret values (by fingerprint). */
-  private async findSecretValue(runId: string, criteria: unknown): Promise<(string | number)[] | null> {
-    const fingerprints = await new SecretRepository(this.deps.db).listFingerprints(runId);
-    if (fingerprints.length === 0) return null;
-    const key = this.deps.config.secretsKey;
-    const walk = (value: unknown, path: (string | number)[]): (string | number)[] | null => {
-      if (typeof value === "string") return containsFingerprintedSecret(value, fingerprints, key) ? path : null;
-      if (Array.isArray(value)) {
-        for (const [i, v] of value.entries()) {
-          const found = walk(v, [...path, i]);
-          if (found) return found;
-        }
-      } else if (value && typeof value === "object") {
-        // The wording is written from the check, so the check's own field is the one to point at.
-        const entries = Object.entries(value).sort(([a], [b]) => Number(a === "statement") - Number(b === "statement"));
-        for (const [k, v] of entries) {
-          const found = walk(v, [...path, k]);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-    return walk(criteria, ["criteria"]);
   }
 
   /**
@@ -188,8 +154,7 @@ export class CriteriaService {
 
   /**
    * V1.3: test data accepted with the confirmation (the suggested values, possibly edited) becomes the run's,
-   * before it is released into execution. A value that is one of the run's secret values is refused (it would
-   * be stored in the clear and typed where test data goes); so is going past the run's test data limit.
+   * before it is released into execution. Going past the run's test data limit is refused.
    */
   private async addTestData(runId: string, current: Record<string, unknown>, values: Record<string, string | number | boolean>): Promise<void> {
     const keys = Object.keys(values);
@@ -198,12 +163,6 @@ export class CriteriaService {
     if (total > MAX_TEST_DATA_ENTRIES) {
       throw new HttpError(400, "VALIDATION_FAILED", `A run has at most ${MAX_TEST_DATA_ENTRIES} test data entries`, [
         { path: ["testData"], message: `At most ${MAX_TEST_DATA_ENTRIES} test data entries in all` },
-      ]);
-    }
-    const leaked = await this.findSecretValue(runId, values);
-    if (leaked) {
-      throw new HttpError(400, "VALIDATION_FAILED", "Test data can't contain a value entered as a secret", [
-        { path: ["testData", ...leaked.slice(1)], message: "Contains a value entered as a secret; enter it as a secret instead" },
       ]);
     }
     await this.runs.mergeTestData(runId, values);

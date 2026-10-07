@@ -2,15 +2,12 @@ import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import type { ArtifactSensitivity, ArtifactType } from "@platform/contracts";
 import type { StageContext } from "../orchestrator/stages";
-import { TraceScrubError, scrubTrace } from "./trace-scrubber";
 
 /**
- * Rerun evidence collector (Task 17, Step 5). For each file the rerun left behind: scrub it if it is
- * a trace → SHA-256 → the store port (worker: `ArtifactStorage.put` + `Artifact` row with the
- * retention of its sensitivity) → `artifact.created`. Every file of a run with secrets is
- * SECRET_BEARING (screenshots and videos cannot be scrubbed; they get the shorter retention).
+ * Rerun evidence collector (Task 17, Step 5). For each file the rerun left behind: SHA-256 → the store
+ * port (worker: `ArtifactStorage.put` + `Artifact` row) → `artifact.created`. Files are stored as they
+ * are and are STANDARD: a run's secrets are no longer removed from traces (2026-10-07).
  *
- * A trace that cannot be scrubbed is never uploaded as is: it is dropped with `artifact.omitted`.
  * Storage failures propagate (infrastructure error, like exploration screenshots).
  *
  * The run signal (cancel / hard deadline) is checked per file, before its upload and before its
@@ -31,7 +28,7 @@ export interface EvidenceUpload {
   fileName: string;
   body: Uint8Array;
   contentType: string;
-  /** Lower-case hex SHA-256 of `body` (what is uploaded, i.e. after scrubbing). */
+  /** Lower-case hex SHA-256 of `body`. */
   sha256: string;
   sensitivity: ArtifactSensitivity;
 }
@@ -43,8 +40,6 @@ export interface EvidenceStore {
 
 export interface CollectEvidenceOptions {
   store: EvidenceStore;
-  /** The run's secret values: removed from traces; any secret makes the evidence SECRET_BEARING. */
-  secretValues: string[];
   /** What produced the files, for the event messages (default "Rerun"; V1.3: "Exploration" recordings). */
   origin?: "Rerun" | "Exploration";
 }
@@ -57,7 +52,7 @@ export async function collectEvidence(
   opts: CollectEvidenceOptions,
 ): Promise<string[]> {
   const aborted = () => ctx.signal?.aborted === true;
-  const sensitivity: ArtifactSensitivity = opts.secretValues.length > 0 ? "SECRET_BEARING" : "STANDARD";
+  const sensitivity: ArtifactSensitivity = "STANDARD";
   const origin = opts.origin ?? "Rerun";
   const omitted = async (type: LocalArtifact["type"], reason: string) => {
     if (!aborted()) await ctx.publish({ type: "artifact.omitted", message: `${origin} ${LABEL[type]} omitted`, payload: { type, reason } });
@@ -74,15 +69,6 @@ export async function collectEvidence(
     } catch {
       await omitted(artifact.type, `The ${origin.toLowerCase()} did not leave this file behind`);
       continue;
-    }
-    if (artifact.type === "TRACE") {
-      try {
-        body = scrubTrace(body, opts.secretValues);
-      } catch (err) {
-        if (!(err instanceof TraceScrubError)) throw err;
-        await omitted("TRACE", "The trace could not be read to remove secrets, so it was not stored");
-        continue;
-      }
     }
     if (aborted()) break;
     const sha256 = createHash("sha256").update(body).digest("hex");

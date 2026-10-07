@@ -6,6 +6,12 @@ import type { PageInventory } from "./inventory";
 import { SURVEY_SYSTEM_PROMPT } from "./prompts";
 import { suggestTests, type SuggestTestsInput } from "./suggest";
 
+/** A redactor that masks the given values: the run's redactor is key-based, but the plumbing applies whatever it is given. */
+const maskValues =
+  (...values: string[]) =>
+  (v: unknown): unknown =>
+    JSON.parse(values.reduce((json, s) => json.split(s).join("[REDACTED]"), JSON.stringify(v) ?? "null"));
+
 function setup(...replies: FakeReply[]) {
   const transport = new FakeTransport().enqueue(...replies);
   const records: LlmCallRecord[] = [];
@@ -67,7 +73,7 @@ describe("suggestTests", () => {
   it("sends names, never values: test data keys and secret names only, and masks secret values the pages showed", async () => {
     const secret = "pw-Very-Secret-77";
     const { llm, transport } = setup({ json: answer() });
-    await suggestTests(llm, input({ pages: [{ url: "https://shop.example.com/", inventory: { ...inventory, title: `Hello ${secret}` } }], redact: createRunRedactor([secret]) }));
+    await suggestTests(llm, input({ pages: [{ url: "https://shop.example.com/", inventory: { ...inventory, title: `Hello ${secret}` } }], redact: maskValues(secret) }));
     const text = sent(transport);
     expect(text).toContain("Secret names available: password");
     expect(text).toContain("Test data keys available: email");

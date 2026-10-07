@@ -78,11 +78,11 @@ export class RerunService {
 
   /**
    * The rerun's stored request: the source's (the same requirement, test data, options and model — for display: no
-   * model is called), redacted by the new secret values too, in case one appears in its text.
+   * model is called), redacted by key.
    */
   rerunRequest(source: TestRun, secrets: Record<string, string>, credentialProfile?: StoredTestRunRequest["credentialProfile"]): StoredTestRunRequest {
     const { credentialProfile: _sourceProfile, rerunOf: _sourceOf, ...inherited } = source.request;
-    const redact = createRunRedactor(Object.values(secrets));
+    const redact = createRunRedactor();
     return {
       ...(redact(inherited) as typeof inherited),
       secretNames: Object.keys(secrets).sort(),
@@ -207,7 +207,7 @@ export class RerunService {
     await this.checkTarget(source.targetUrl);
 
     const stored = this.rerunRequest(source, secrets, credentialProfile);
-    const publisher = this.create.publisher(createRunRedactor(Object.values(secrets)));
+    const publisher = this.create.publisher(createRunRedactor());
 
     let created: CreatedRun;
     try {

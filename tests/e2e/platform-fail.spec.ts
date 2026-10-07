@@ -35,7 +35,7 @@ describe("Task 21 step 2 — FAIL", () => {
 
     // The trace is downloadable through the API.
     const trace = artifacts.find((a) => a.type === "TRACE")!;
-    const signed = await client.artifactUrl(runId, trace.id, trace.sensitivity === "SECRET_BEARING");
+    const signed = await client.artifactUrl(runId, trace.id, false);
     expect((await fetch(signed.url)).status).toBe(200);
   });
 });

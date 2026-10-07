@@ -8,6 +8,12 @@ import { runEventsChannel } from "./channels";
 import { createRunEventPublisher } from "./publisher";
 import { RunEventHub } from "./subscriber";
 
+/** A redactor that masks the given values: the run's redactor is key-based, but the plumbing applies whatever it is given. */
+const maskValues =
+  (...values: string[]) =>
+  (v: unknown): unknown =>
+    JSON.parse(values.reduce((json, s) => json.split(s).join("[REDACTED]"), JSON.stringify(v) ?? "null"));
+
 // A dedicated logical DB by default: tests never touch DB 0, where a developer's worker takes jobs.
 const REDIS_URL = process.env.TEST_REDIS_URL ?? "redis://localhost:6379/15";
 
@@ -71,7 +77,7 @@ describe("createRunEventPublisher", () => {
     const pub = createRunEventPublisher({
       events: new EventRepository(tdb.db),
       redis: fakeRedis,
-      redact: createRunRedactor(["hunter2-long"]),
+      redact: maskValues("hunter2-long"),
     });
     const e = await pub.publish({
       runId: run.id,

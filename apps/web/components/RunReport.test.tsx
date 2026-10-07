@@ -170,7 +170,7 @@ describe("RunReport", () => {
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(await screen.findByRole("img", { name: /after_add/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reveal (may contain entered credentials)" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /download trace/i })).toBeInTheDocument();
   });
 
   it("falls back to the outcome and offers a retry when the report can't be loaded", async () => {

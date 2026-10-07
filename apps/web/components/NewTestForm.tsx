@@ -706,7 +706,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
         <FormSection
           icon="lock"
           title="Secrets"
-          description="Credentials such as a password: encrypted, redacted from all output, deleted when the run ends."
+          description="Credentials such as a password: encrypted at rest and deleted when the run ends. They are shown as typed in the run's evidence and report."
           summary={[profile?.name, secretCount === 0 ? (profile ? null : "None") : plural(secretCount, "secret")].filter(Boolean).join(" + ")}
         >
           {profiles.length > 0 && (

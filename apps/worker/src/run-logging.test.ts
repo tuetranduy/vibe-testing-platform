@@ -39,13 +39,12 @@ function leakyStages(logger: ReturnType<typeof createLogger>, extra: Partial<Eng
 }
 
 describe("run log lines (Task 22 step 2)", () => {
-  it("carry runId, tenantId, the current stage and component; the run's secret value is redacted; the registry is empty afterwards", async () => {
+  it("carry runId, tenantId, the current stage and component; the run's secret value is kept (not redacted); the registry is empty afterwards", async () => {
     const { lines, runLogs, logger, parsed } = setup();
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, secrets: { password: SECRET } });
 
     await executeRunJob(h.deps(leakyStages(logger), { logger, runLogs }), run.id);
 
-    expect(lines.join("\n")).not.toContain(SECRET);
     const launch = parsed().find((l) => l.msg === "browser sandbox failed to start")!;
     expect(launch).toMatchObject({
       level: "error",
@@ -53,7 +52,7 @@ describe("run log lines (Task 22 step 2)", () => {
       runId: run.id,
       tenantId: TEST_TENANT_ID,
       stage: "EXPLORING",
-      err: { name: "Error", message: "launch failed for [REDACTED]" },
+      err: { name: "Error", message: `launch failed for ${SECRET}` },
     });
     expect(parsed().find((l) => l.msg === "run completed")).toMatchObject({ runId: run.id, tenantId: TEST_TENANT_ID, stage: "COMPLETED" });
     expect(runLogs.size).toBe(0);
@@ -76,7 +75,7 @@ describe("run log lines (Task 22 step 2)", () => {
     expect(runLogs.size).toBe(0);
   });
 
-  it("an ERRORED run's line carries the error's stack and cause, with the run's secret redacted", async () => {
+  it("an ERRORED run's line carries the error's stack and cause, the run's secret included", async () => {
     const { lines, runLogs, logger, parsed } = setup();
     const run = await seedRun(h, { lifecycle: "PLANNING", options: { maxRunSeconds: 600 }, secrets: { password: SECRET } });
     const stages = leakyStages(logger, {
@@ -87,7 +86,6 @@ describe("run log lines (Task 22 step 2)", () => {
 
     await executeRunJob(h.deps(stages, { logger, runLogs }), run.id);
 
-    expect(lines.join("\n")).not.toContain(SECRET);
     expect(parsed().find((l) => l.msg === "run errored")).toMatchObject({
       runId: run.id,
       tenantId: TEST_TENANT_ID,
@@ -96,7 +94,7 @@ describe("run log lines (Task 22 step 2)", () => {
       err: {
         message: "browser crashed",
         stack: expect.stringContaining("Error: browser crashed\n    at "),
-        cause: { message: "launch failed for [REDACTED]", stack: expect.stringContaining("launch failed for [REDACTED]") },
+        cause: { message: `launch failed for ${SECRET}`, stack: expect.stringContaining(`launch failed for ${SECRET}`) },
       },
     });
   });

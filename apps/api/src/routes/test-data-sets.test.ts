@@ -73,10 +73,10 @@ describe("POST /v1/test-runs with testDataSetId", () => {
     expect(tooMany.json().issues[0].path).toEqual(["testData"]);
   });
 
-  it("redacts the run's secret values that appear in the set's values", async () => {
+  it("keeps the set's values as given, one that is also a secret value included (secrets are not redacted)", async () => {
     const set = (await call("POST", "/v1/test-data-sets", { name: "Leaky", values: { note: "pw is hunter2-long-secret" } })).json();
     const res = await call("POST", "/v1/test-runs", validBody({ testDataSetId: set.id, secrets: { password: "hunter2-long-secret" } }));
     const [row] = await t.tdb.db.select().from(schema.testRuns).where(eq(schema.testRuns.id, res.json().runId));
-    expect(JSON.stringify(row!.requestJson)).not.toContain("hunter2");
+    expect((row!.requestJson as { testData: Record<string, string> }).testData.note).toBe("pw is hunter2-long-secret");
   });
 });

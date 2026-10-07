@@ -108,7 +108,7 @@ export class SuiteRunService {
     for (const [i, t] of tests.entries()) await this.reruns.checkTarget(t.source.targetUrl, ["entries", i, "targetUrl"]);
 
     const create = new TestRunService(this.deps);
-    const publisher = create.publisher(createRunRedactor(needed.map((n) => given[n]!)));
+    const publisher = create.publisher(createRunRedactor());
     let created: { suiteRun: SuiteRunRow; runs: CreatedRun[] };
     try {
       created = await this.deps.db.transaction(async (tx) => {

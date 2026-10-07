@@ -1,6 +1,5 @@
 import { execFile, spawn } from "node:child_process";
 import path from "node:path";
-import { createValueRedactor } from "@platform/security";
 import type { RunnerProcessInput, RunnerProcessResult, SpawnRunner } from "@platform/testing-engine";
 import type { WorkerLogger } from "../deps";
 
@@ -116,8 +115,7 @@ export function createRunnerSpawn(opts: RunnerSpawnOptions): SpawnRunner {
       const first = await Promise.race([exited, aborted]);
       if (first === "aborted") return await boundedExit(exited, killTimeoutMs);
       if (first.exitCode !== 0 && first.exitCode !== 1) {
-        const redact = createValueRedactor(Object.values(input.env));
-        opts.logger.warn({ exitCode: first.exitCode, signal: first.signal, stderr: redact(stderrTail) }, "Playwright runner exited abnormally");
+        opts.logger.warn({ exitCode: first.exitCode, signal: first.signal, stderr: stderrTail }, "Playwright runner exited abnormally");
       }
       return first;
     } finally {
