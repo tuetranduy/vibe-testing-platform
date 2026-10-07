@@ -2,6 +2,7 @@
 import type { ElementRef, LocatorCandidate } from "@platform/contracts";
 import type { ElementHandle, Locator, Page } from "playwright-core";
 import { candidatesFromDescription, type ElementDescription } from "../shared/locator-policy";
+import type { FieldFacts } from "./input-generator";
 
 /**
  * Recorder (Task 14): turns the element the explorer acted on (Stagehand's `xpath=/…` selector,
@@ -73,6 +74,50 @@ function readDom(el: Element): DomFacts {
     text: text ? text.trim() : null,
     xpath,
     xpathResolves: resolved === el,
+  };
+}
+
+/**
+ * What a field asks for, read from the DOM (no model): what a generated value must suit (2026-10-07). The label is the
+ * field's own <label>, else its aria-label or aria-labelledby text; a select lists at most 50 options.
+ */
+export async function describeField(page: Page, target: ElementTarget, opts: RecorderOptions = {}): Promise<FieldFacts> {
+  const handle = await resolveHandle(page, target, opts);
+  return handle.evaluate(readField);
+}
+
+/** Runs in the page: no named inner functions (keepNames would wrap them in a helper the page lacks). */
+function readField(el: Element): FieldFacts {
+  const text: Record<string, string | null> = {};
+  for (const name of ["type", "name", "placeholder", "autocomplete", "min", "max", "pattern", "aria-label"]) {
+    const v = (el.getAttribute(name) ?? "").replace(/\s+/g, " ").trim();
+    text[name] = v ? v.slice(0, 200) : null;
+  }
+  const field = el as HTMLInputElement;
+  const own = (field.labels?.[0]?.textContent ?? "").replace(/\s+/g, " ").trim();
+  const ids = (el.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean);
+  const byIds = ids.map((id) => document.getElementById(id)?.textContent ?? "").join(" ").replace(/\s+/g, " ").trim();
+  const label = own || text["aria-label"] || byIds || null;
+  const tag = el.tagName.toLowerCase();
+  const maxLength = el.hasAttribute("maxlength") ? Number(el.getAttribute("maxlength")) : NaN;
+  const options =
+    tag === "select"
+      ? Array.from((el as HTMLSelectElement).options)
+          .slice(0, 50)
+          .map((o) => ({ value: o.value, label: (o.label || o.text).replace(/\s+/g, " ").trim() }))
+      : [];
+  return {
+    tag,
+    type: tag === "input" ? (text["type"] ?? "text") : null,
+    name: text["name"] ?? null,
+    label: label ? label.slice(0, 200) : null,
+    placeholder: text["placeholder"] ?? null,
+    autocomplete: text["autocomplete"] ?? null,
+    maxLength: Number.isInteger(maxLength) && maxLength >= 0 ? maxLength : null,
+    min: text["min"] ?? null,
+    max: text["max"] ?? null,
+    pattern: text["pattern"] ?? null,
+    options,
   };
 }
 

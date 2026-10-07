@@ -3,7 +3,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LOCATOR_STRATEGY_ORDER } from "../shared/locator-policy";
 import { captureCheckpoint, captureFact, modeForValueType, readFact } from "./fact-reader";
-import { describeElement, elementAction, fillElement, recordElement } from "./recorder";
+import { describeElement, describeField, elementAction, fillElement, recordElement } from "./recorder";
 
 /**
  * Real Chromium (Playwright's build, launched headless without a proxy) on a static fixture
@@ -320,5 +320,30 @@ describe("captureFact / captureCheckpoint (provenance)", () => {
     const onlyUrl = await captureCheckpoint(page, { checkpoint: "empty", stepId: "step-5", facts: [] });
     expect(onlyUrl).toEqual([{ key: "url", checkpoint: "empty", value: FIXTURE_URL, provenance: "DOM_VERIFIED", read: null, stepId: "step-5" }]);
     for (const f of [...facts, ...onlyUrl]) ObservedFactSchema.parse(f);
+  });
+});
+
+describe("describeField (what a generated value must suit, 2026-10-07)", () => {
+  it("reads a text field's type, name, label, placeholder, autocomplete and limits", async () => {
+    await page.setContent(`<label for="z">ZIP code</label><input id="z" name="zip" type="text" placeholder="12345" autocomplete="postal-code" maxlength="5" pattern="[0-9]{5}">`);
+    expect(await describeField(page, "#z")).toEqual({
+      tag: "input",
+      type: "text",
+      name: "zip",
+      label: "ZIP code",
+      placeholder: "12345",
+      autocomplete: "postal-code",
+      maxLength: 5,
+      min: null,
+      max: null,
+      pattern: "[0-9]{5}",
+      options: [],
+    });
+  });
+
+  it("reads a select's options and an aria-label; a number field's min and max", async () => {
+    await page.setContent(`<select id="c" aria-label="Country"><option value="">Choose…</option><option value="no">Norway</option></select><input id="q" type="number" min="1" max="9">`);
+    expect(await describeField(page, "#c")).toMatchObject({ tag: "select", type: null, label: "Country", options: [{ value: "", label: "Choose…" }, { value: "no", label: "Norway" }] });
+    expect(await describeField(page, "#q")).toMatchObject({ tag: "input", type: "number", min: "1", max: "9", maxLength: null });
   });
 });

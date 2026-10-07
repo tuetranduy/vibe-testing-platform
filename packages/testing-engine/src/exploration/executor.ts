@@ -34,7 +34,8 @@ import type { StageContext } from "../orchestrator/stages";
 import { actionPolicyFor, isDestructiveStep } from "../shared/action-policy";
 import { captureFact, factFromReadings, modeForValueType, urlFact, type FactCaptureInput, type FactReadMode } from "./fact-reader";
 import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
-import { describeElement, elementAction, fillElement, recordElement, selectElementOption } from "./recorder";
+import type { FieldFacts } from "./input-generator";
+import { describeElement, describeField, elementAction, fillElement, recordElement, selectElementOption } from "./recorder";
 
 /**
  * Exploration executor (Task 14): runs the confirmed plan's scenarios (V1.1 F9: in order, each from a clean
@@ -135,6 +136,8 @@ export interface RecorderPort {
   fill(page: Page, selector: string, value: string): Promise<void>;
   select(page: Page, selector: string, value: string): Promise<void>;
   captureFact(page: Page, input: FactCaptureInput): Promise<ObservedFact>;
+  /** What a field asks for, for a value nobody provided (2026-10-07). Absent: the generator sees only the step. */
+  describeField?(page: Page, selector: string): Promise<FieldFacts>;
 }
 
 export const playwrightRecorder: RecorderPort = {
@@ -147,6 +150,7 @@ export const playwrightRecorder: RecorderPort = {
   fill: (page, selector, value) => fillElement(page, selector, value),
   select: (page, selector, value) => selectElementOption(page, selector, value),
   captureFact: (page, input) => captureFact(page, input),
+  describeField: (page, selector) => describeField(page, selector),
 };
 
 export interface ExplorationInput {
