@@ -13,6 +13,7 @@ import {
   InputRefSchema,
   NormalizedRequirementSchema,
   PlannedStepSchema,
+  SitePageSchema,
   type TestPlan,
 } from "@platform/contracts";
 import type { LlmClient } from "@platform/llm";
@@ -31,6 +32,8 @@ export const PlannerEvalCaseSchema = z.object({
   secretNames: z.array(z.string()).default([]),
   /** The run's effective policy (allowDestructiveActions && environment !== production). */
   allowDestructive: z.boolean().default(false),
+  /** The pages the requirement analysis read, as the survey's inventory script reads them (KI-048). Default: none. */
+  pages: z.array(SitePageSchema).max(6).default([]),
   /** A confirmed requirement, written by hand (runId/revision/confirmedAt are filled in). */
   requirement: z.object({ originalText: z.string().min(1), criteria: z.array(z.unknown()).min(1), facts: z.array(z.unknown()) }),
   expect: z.object({
@@ -48,6 +51,11 @@ export const PlannerEvalCaseSchema = z.object({
      * before the first fill, as a login form is on its own page (the start page has none).
      */
     opensFormBeforeFill: z.boolean().default(false),
+    /**
+     * The way to a control (KI-048): the first step whose description mentions `step` comes after one that mentions
+     * `via` (case-insensitive), e.g. the "Login" button, or a navigate to /login, before "New User".
+     */
+    reaches: z.array(z.object({ step: z.string().min(1), via: z.string().min(1) })).default([]),
     /** Some step is flagged destructive (only meaningful when allowDestructive is true). */
     destructiveStep: z.boolean().default(false),
     /**
@@ -127,6 +135,12 @@ export function scorePlan(c: PlannerEvalCase, plan: TestPlan): string[] {
       failures.push(`the first fill (${first[fill]!.id}) comes with no step opening its form`);
     }
   }
+  for (const { step, via } of c.expect.reaches) {
+    const mentions = (s: { description: string }, text: string) => s.description.toLowerCase().includes(text.toLowerCase());
+    const at = steps.findIndex((s) => mentions(s, step));
+    if (at < 0) failures.push(`no step mentions "${step}"`);
+    else if (!steps.slice(0, at).some((s) => mentions(s, via))) failures.push(`"${step}" (${steps[at]!.id}) is not reached via "${via}"`);
+  }
   const n = plan.scenarios.length;
   if (n < c.expect.scenarios.min || n > c.expect.scenarios.max) {
     failures.push(`${n} scenarios, expected ${c.expect.scenarios.min}–${c.expect.scenarios.max}`);
@@ -146,6 +160,7 @@ export async function runPlannerSuite(llm: LlmClient, cases: PlannerEvalCase[], 
         targetUrl: c.targetUrl,
         testDataKeys: c.testDataKeys,
         secretNames: c.secretNames,
+        sitePages: c.pages,
         policy: { allowDestructive: c.allowDestructive },
         signal: AbortSignal.timeout(180_000),
         deadlineAt: null,

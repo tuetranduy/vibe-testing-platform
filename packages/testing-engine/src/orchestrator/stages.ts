@@ -7,6 +7,7 @@ import {
   type ProvisionalResult,
   type RerunResult,
   type SiteAnalysisDraft,
+  type SitePage,
   type StoredTestRunRequest,
   type SuggestionSetDraft,
   type TestEventInput,
@@ -89,7 +90,8 @@ export interface EngineStages {
    */
   survey(ctx: StageContext): Promise<SuggestionSetDraft>;
   analyze(ctx: StageContext): Promise<AnalyzedRequirement>;
-  plan(ctx: StageContext, requirement: NormalizedRequirement): Promise<TestPlan>;
+  /** `site`: the pages the analysis read (KI-048); empty when none were read. */
+  plan(ctx: StageContext, requirement: NormalizedRequirement, site: SitePage[]): Promise<TestPlan>;
   /** Must return (not throw) when the exploration budget or step limit is exhausted. */
   explore(ctx: StageContext, plan: TestPlan, requirement: NormalizedRequirement): Promise<ExplorationOutcome>;
   verify(

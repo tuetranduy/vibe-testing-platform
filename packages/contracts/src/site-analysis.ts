@@ -39,6 +39,29 @@ export type TestDataSuggestion = z.infer<typeof TestDataSuggestionSchema>;
 
 export const MAX_TEST_DATA_SUGGESTIONS = 20;
 
+/** What a model is shown of one page read: its structure, never an input's value (the survey's inventory script). */
+export const PageInventorySchema = z.object({
+  title: z.string().max(200),
+  description: z.string().max(300),
+  headings: z.array(z.object({ level: z.union([z.literal(1), z.literal(2), z.literal(3)]), text: z.string().max(150) })).max(40),
+  links: z.array(z.object({ text: z.string().max(100), url: z.string().max(2048), area: z.enum(["nav", "main"]) })).max(60),
+  forms: z
+    .array(
+      z.object({
+        name: z.string().max(80),
+        fields: z.array(z.object({ label: z.string().max(80), type: z.string().max(20), placeholder: z.string().max(80) })).max(20),
+        submit: z.string().max(60),
+      }),
+    )
+    .max(10),
+  buttons: z.array(z.string().max(60)).max(40),
+});
+export type PageInventory = z.infer<typeof PageInventorySchema>;
+
+/** A page read for the analysis: where it landed (origin + path) and what it showed. */
+export const SitePageSchema = z.object({ url: z.string().max(2048), inventory: PageInventorySchema });
+export type SitePage = z.infer<typeof SitePageSchema>;
+
 export const SiteAnalysisSchema = z.object({
   /**
    * READ: at least the start page was read; UNAVAILABLE: reading it failed (`reason` says why) and the
@@ -52,6 +75,11 @@ export const SiteAnalysisSchema = z.object({
   testData: z.array(TestDataSuggestionSchema).max(MAX_TEST_DATA_SUGGESTIONS),
   /** The suggested keys that became the run's test data (at confirmation, or automatically). */
   appliedKeys: z.array(DataKeySchema).max(MAX_TEST_DATA_SUGGESTIONS).default([]),
+  /**
+   * What the pages read showed (redacted, capped), kept for the planner: it plans the way to each control from
+   * them (KI-048). Empty in an analysis stored before they were kept.
+   */
+  pageContents: z.array(SitePageSchema).max(6).default([]),
 });
 export type SiteAnalysis = z.infer<typeof SiteAnalysisSchema>;
 export type SiteAnalysisDraft = z.input<typeof SiteAnalysisSchema>;

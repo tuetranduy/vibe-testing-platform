@@ -7,7 +7,7 @@ import { FakeTransport, LlmClient } from "@platform/llm";
 import type { Page } from "playwright-core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { ExplorerSessionClosedError, NavigationBlockedError } from "./browser-explorer";
+import { ExplorerSessionClosedError, ExplorerTransientError, NavigationBlockedError } from "./browser-explorer";
 import { GUARDRAIL_SYSTEM_PROMPT, guardrailSystemPrompt } from "./guardrails";
 import {
   DEFAULT_TELEMETRY_ENDPOINT,
@@ -122,6 +122,21 @@ describe("toExplorerError (error categories)", () => {
     expect(toExplorerError("weird", "screenshot")).toBeInstanceOf(BrowserProviderError);
     const timeout = Object.assign(new Error("page.goto: Timeout 30000ms exceeded."), { name: "TimeoutError" });
     expect(toExplorerError(timeout, "navigate")).toBeInstanceOf(BrowserProviderError);
+  });
+
+  it("a lost CDP session or page context after a page change is transient: worth one more try (KI-051)", () => {
+    for (const message of [
+      "-32001 Session with given id not found.",
+      "Protocol error (Runtime.callFunctionOn): Cannot find context with specified id",
+      "Execution context was destroyed, most likely because of a navigation",
+    ]) {
+      const mapped = toExplorerError(new Error(message), "Stagehand observe");
+      expect(mapped).toBeInstanceOf(ExplorerTransientError);
+      expect(mapped).toBeInstanceOf(BrowserProviderError);
+      expect((mapped as Error).message).toBe(`Stagehand observe failed: ${message}`);
+    }
+    expect(toExplorerError(new Error("Target closed"), "Stagehand act")).not.toBeInstanceOf(ExplorerTransientError);
+    expect(toExplorerError(new Error("page.goto: Timeout 30000ms exceeded."), "navigate")).not.toBeInstanceOf(ExplorerTransientError);
   });
 
   it("leaves typed engine errors, cancellation, policy blocks, closed sessions and Zod errors alone", () => {

@@ -179,8 +179,7 @@ export interface ExecutionResult {
  * not give one, so the suggestion is used rather than left for the executor to generate. A value the user gave
  * (at creation or confirmation) is never replaced.
  */
-async function applySuggestedTestData(ctx: StageContext, ports: RunPorts): Promise<void> {
-  const analysis = await ports.getSiteAnalysis();
+async function applySuggestedTestData(ctx: StageContext, ports: RunPorts, analysis: SiteAnalysis | null): Promise<void> {
   const missing = (analysis?.testData ?? []).filter((t) => !Object.hasOwn(ctx.request.testData, t.key));
   if (missing.length > 0) await ports.applyTestData(Object.fromEntries(missing.map((t) => [t.key, t.value])));
 }
@@ -190,11 +189,12 @@ export async function runExecution(ctx: StageContext, ports: RunPorts, stages: E
   const startedAt = ctx.now();
   await ctx.boundary();
   const requirement = await ports.getConfirmedRequirement();
-  await applySuggestedTestData(ctx, ports);
+  const analysis = await ports.getSiteAnalysis();
+  await applySuggestedTestData(ctx, ports, analysis);
 
-  // PLANNING
+  // PLANNING: with the pages the analysis read, so the plan takes the way to each control (KI-048).
   await started(ports, "PLANNING");
-  const plan = await guard(ctx, stages.plan(ctx, requirement));
+  const plan = await guard(ctx, stages.plan(ctx, requirement, analysis?.pageContents ?? []));
   await ports.savePlan(plan);
   const stepCount = plan.scenarios.reduce((n, s) => n + s.steps.length, 0);
   const scenarios = plan.scenarios.length;

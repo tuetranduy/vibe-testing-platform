@@ -21,7 +21,7 @@ export interface DemoShopRequest {
 }
 
 export interface DemoShopServer extends Server {
-  demoShop: { reset(): void; readonly deleteClicks: number; readonly requests: DemoShopRequest[] };
+  demoShop: { reset(): void; readonly deleteClicks: number; readonly subscriptions: number; readonly requests: DemoShopRequest[] };
 }
 
 export interface DemoShopOptions {

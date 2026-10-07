@@ -65,7 +65,7 @@ describe("execute-run happy paths", () => {
     });
     let seen: Record<string, unknown> = {};
     const fake = createFakeStages();
-    await executeRunJob(h.deps({ ...fake, plan: async (ctx, requirement) => ((seen = { ...ctx.request.testData }), fake.plan(ctx, requirement)) }), run.id);
+    await executeRunJob(h.deps({ ...fake, plan: async (ctx, requirement, site) => ((seen = { ...ctx.request.testData }), fake.plan(ctx, requirement, site)) }), run.id);
     expect(seen).toEqual({ city: "Oslo", email: "qa.abc123@example.com" });
     expect((await new RunRepository(h.tdb.db).getById(run.id)).request.testData).toEqual({ city: "Oslo", email: "qa.abc123@example.com" });
     expect(await new SiteAnalysisRepository(h.tdb.db).get(run.id)).toMatchObject({ appliedKeys: ["email"] });

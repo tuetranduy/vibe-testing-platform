@@ -1,4 +1,4 @@
-import { ContractError, TestPlanSchema, type NormalizedRequirement, type StoredTestRunRequest, type TestPlan } from "@platform/contracts";
+import { ContractError, TestPlanSchema, type NormalizedRequirement, type SitePage, type StoredTestRunRequest, type TestPlan } from "@platform/contracts";
 import type { ActionPolicy } from "@platform/security";
 import { requireLlm, type StageContext } from "../orchestrator/stages";
 import type { RequirementLlm } from "../requirement/compiler";
@@ -20,6 +20,8 @@ export interface PlanTestInput {
   secretNames: string[];
   /** Credentials taken from the requirement text (V1.3.1): names only. */
   inlineInputs?: StoredTestRunRequest["inlineInputs"];
+  /** The pages the requirement analysis read (redacted inventories); absent or empty: none were read (KI-048). */
+  sitePages?: SitePage[];
   policy: ActionPolicy;
   signal: AbortSignal;
   deadlineAt?: Date | null;
@@ -48,6 +50,7 @@ export async function planTest(llm: RequirementLlm, input: PlanTestInput): Promi
           testDataKeys: input.testDataKeys,
           secretNames: input.secretNames,
           inlineInputs: input.inlineInputs,
+          sitePages: input.sitePages,
         }),
       },
     ],
@@ -94,9 +97,9 @@ export async function planTest(llm: RequirementLlm, input: PlanTestInput): Promi
   return parsed.data;
 }
 
-/** The real `plan` stage: plans with the run's model client, names, action policy, redactor and deadline. */
-export function createPlanStage(): (ctx: StageContext, requirement: NormalizedRequirement) => Promise<TestPlan> {
-  return async (ctx, requirement) =>
+/** The real `plan` stage: plans with the run's model client, names, the pages read, action policy, redactor and deadline. */
+export function createPlanStage(): (ctx: StageContext, requirement: NormalizedRequirement, site: SitePage[]) => Promise<TestPlan> {
+  return async (ctx, requirement, site) =>
     planTest(requireLlm(ctx), {
       runId: ctx.runId,
       requirement,
@@ -104,6 +107,7 @@ export function createPlanStage(): (ctx: StageContext, requirement: NormalizedRe
       testDataKeys: Object.keys(ctx.request.testData),
       secretNames: ctx.secrets.names,
       inlineInputs: ctx.request.inlineInputs,
+      sitePages: site,
       policy: actionPolicyFor(ctx.request),
       signal: ctx.signal,
       deadlineAt: ctx.deadlineAt,

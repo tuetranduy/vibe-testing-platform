@@ -27,12 +27,13 @@ import {
 import { assertActionAllowed, type ActionPolicy } from "@platform/security";
 import {
   ExplorerSessionClosedError,
+  ExplorerTransientError,
   NavigationBlockedError,
   type ExplorerSession,
   type LlmStepUsage,
   type ObservedElement,
 } from "@platform/stagehand-adapter/browser-explorer";
-import type { Page } from "playwright-core";
+import type { Page, Request as PwRequest } from "playwright-core";
 import { z } from "zod";
 import type { StageContext } from "../orchestrator/stages";
 import { actionPolicyFor, isDestructiveStep } from "../shared/action-policy";
@@ -183,6 +184,8 @@ export interface ExplorationDeps {
   judge?: CriterionJudge | null;
   /** Delay between `wait_for` polls. */
   pollIntervalMs?: number;
+  /** How long a click's own requests may hold the next step (KI-049); default ACTION_REQUESTS_TIMEOUT_MS. */
+  actionRequestsTimeoutMs?: number;
   /** Cached element lookups from earlier runs (V1.1 F8); absent: every lookup asks the explorer. */
   cache?: ObserveCache;
   /**
@@ -234,6 +237,12 @@ const LOAD_SETTLE_TIMEOUT_MS = 10_000;
  * field 1-2.5 s after `load`). A page that never goes quiet (polling, ads) costs this much and is not an error.
  */
 const NETWORK_QUIET_TIMEOUT_MS = 3_000;
+/**
+ * How long the next step waits, after a click, for the fetch / XHR requests the click started (KI-049): a single-page
+ * app's Register or Login is a fetch, not a page load, and a navigation started before it is answered cancels it.
+ */
+const ACTION_REQUESTS_TIMEOUT_MS = 5_000;
+const ACTION_REQUESTS_POLL_MS = 50;
 /** The page's visible text, for the judge (a string: see INVENTORY_SCRIPT on why not a function). */
 const VISIBLE_TEXT_SCRIPT = String.raw`(() => String((document.body && document.body.innerText) || "").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim().slice(0, ${JUDGE_TEXT_MAX_CHARS}))()`;
 /** `other` steps may keep these observed methods (none takes a value); everything else clicks. */
@@ -323,6 +332,29 @@ const sameUrl = (a: string, b: string): boolean => {
     return false;
   }
 };
+
+/** Words that make the name before them the control a step clicks ("the New User button"). */
+const CONTROL_WORDS = new Set(["button", "link", "tab", "icon", "menu", "option", "checkbox", "toggle", "control"]);
+
+/**
+ * Whether a step's description names this control as the one it clicks (KI-050): the element's name in quotes
+ * ("Click 'New User'"), or followed by a control word ("Click the New User button"); any case. A name that only
+ * describes something else is not: "Submit the login form" does not name the Login link, nor "Click the New User
+ * button on the Login page" the Login page.
+ */
+function namesControl(description: string, name: string | null): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+  const phrase = norm(name ?? "");
+  if (phrase.length < 2) return false;
+  const quoted = [...description.matchAll(/["'‘“]([^"'’”]+)["'’”]/g)].map((m) => norm(m[1]!));
+  if (quoted.includes(phrase)) return true;
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const plain = norm(description.replace(/["'‘’“”]/g, " "));
+  for (const m of plain.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${escaped} (\\S+)`, "gu"))) {
+    if (CONTROL_WORDS.has(m[1]!)) return true;
+  }
+  return false;
+}
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -660,6 +692,9 @@ class ExplorationRun {
       if (!way) return "failed";
       const followed = await this.click(step, instruction, way);
       if (followed !== "ok") return followed;
+      // The way there was the step's own control (the model missed it, then chose it as the way, KI-050): its click
+      // did the step, and the page it opened does not have it.
+      if (namesControl(step.description, way.info.name ?? way.info.text)) return "ok";
       located = await this.locate(step, observeInstruction);
     }
     if (!located) return "failed";
@@ -700,16 +735,22 @@ class ExplorationRun {
     const urlBefore = this.url();
     const base = { plannedStepId: step.id, kind: "act" as const, instruction, element: located.ref, urlBefore, startedAt };
     let result;
+    const requests = this.watchRequests();
     try {
-      result = await this.session.actOn(this.safeAction(located.element, step.kind));
-    } catch (err) {
-      this.rethrowIfFatal(err);
-      await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
-      // The click may already have been dispatched before actOn rejected: a failed report can still
-      // follow a dispatched click, so a destructive step gets no retry (repeating it could delete or pay twice).
-      return this.policy.allowDestructive && isDestructiveStep(step) ? "final" : "failed";
+      try {
+        result = await this.session.actOn(this.safeAction(located.element, step.kind));
+      } catch (err) {
+        this.rethrowIfFatal(err);
+        await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
+        // The click may already have been dispatched before actOn rejected: a failed report can still
+        // follow a dispatched click, so a destructive step gets no retry (repeating it could delete or pay twice).
+        return this.policy.allowDestructive && isDestructiveStep(step) ? "final" : "failed";
+      }
+      await this.settle();
+      await requests.settle();
+    } finally {
+      requests.dispose();
     }
-    await this.settle();
     const [block] = result.navigationBlocks;
     if (block) {
       await this.record({ ...base, outcome: "BLOCKED_BY_POLICY", blockReason: block.reason, error: "Navigation blocked by policy", llm: result.llm });
@@ -1055,7 +1096,7 @@ class ExplorationRun {
    * `observe` → first element → ElementRef + accessibility facts. Recorded as an `observe` step. With the
    * cache, a verified earlier lookup replaces the `observe` (see the header).
    */
-  private async locate(step: PlannedStep, instruction: string): Promise<Located | null> {
+  private async locate(step: PlannedStep, instruction: string, retried = false): Promise<Located | null> {
     await this.reserve();
     const startedAt = this.ctx.now();
     const base = { plannedStepId: step.id, kind: "observe" as const, instruction, urlBefore: this.url(), startedAt };
@@ -1079,6 +1120,12 @@ class ExplorationRun {
     } catch (err) {
       this.rethrowIfFatal(err);
       await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
+      // The explorer lost the page for a moment (KI-051): not "nothing here", which would start a recovery that
+      // navigates away. Once the page settles, look once more.
+      if (err instanceof ExplorerTransientError && !retried) {
+        await this.settle();
+        return this.locate(step, instruction, true);
+      }
       return null;
     }
     const element = observed.elements[0];
@@ -1200,6 +1247,44 @@ class ExplorationRun {
 
   private async settle(): Promise<void> {
     await this.page.waitForLoadState("load", { timeout: LOAD_SETTLE_TIMEOUT_MS }).catch(() => {});
+  }
+
+  /**
+   * The fetch / XHR requests the page's own frame starts from now on (a click's, KI-049): `settle()` waits until they
+   * are answered or fail, at most `actionRequestsTimeoutMs`. An iframe's requests (ads) and other resources are not
+   * waited for. `dispose()` stops listening.
+   */
+  private watchRequests(): { settle(): Promise<void>; dispose(): void } {
+    const page = this.page;
+    const pending = new Set<PwRequest>();
+    const onRequest = (r: PwRequest) => {
+      try {
+        if ((r.resourceType() === "fetch" || r.resourceType() === "xhr") && r.frame() === page.mainFrame()) pending.add(r);
+      } catch {
+        // A request without a frame (a service worker's) is not the click's.
+      }
+    };
+    const onDone = (r: PwRequest) => void pending.delete(r);
+    page.on("request", onRequest);
+    page.on("requestfinished", onDone);
+    page.on("requestfailed", onDone);
+    return {
+      settle: async () => {
+        const deadline = Date.now() + (this.deps.actionRequestsTimeoutMs ?? ACTION_REQUESTS_TIMEOUT_MS);
+        while (pending.size > 0 && Date.now() < deadline) {
+          try {
+            await sleep(ACTION_REQUESTS_POLL_MS, this.input.budget);
+          } catch (err) {
+            this.rethrowIfFatal(err);
+          }
+        }
+      },
+      dispose: () => {
+        page.off("request", onRequest);
+        page.off("requestfinished", onDone);
+        page.off("requestfailed", onDone);
+      },
+    };
   }
 
   /** Before any operation that records a step: cancel, budget, step limit. */

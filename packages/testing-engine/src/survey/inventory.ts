@@ -1,26 +1,11 @@
+import type { PageInventory } from "@platform/contracts";
 import { z } from "zod";
 
 /** The model sees at most about this much of each page (JSON bytes). */
 export const INVENTORY_MAX_BYTES = 6_000;
 
-/** What the model is shown of one page: its structure, never an input's value. */
-export const PageInventorySchema = z.object({
-  title: z.string().max(200),
-  description: z.string().max(300),
-  headings: z.array(z.object({ level: z.union([z.literal(1), z.literal(2), z.literal(3)]), text: z.string().max(150) })).max(40),
-  links: z.array(z.object({ text: z.string().max(100), url: z.string().max(2048), area: z.enum(["nav", "main"]) })).max(60),
-  forms: z
-    .array(
-      z.object({
-        name: z.string().max(80),
-        fields: z.array(z.object({ label: z.string().max(80), type: z.string().max(20), placeholder: z.string().max(80) })).max(20),
-        submit: z.string().max(60),
-      }),
-    )
-    .max(10),
-  buttons: z.array(z.string().max(60)).max(40),
-});
-export type PageInventory = z.infer<typeof PageInventorySchema>;
+/** What the model is shown of one page. In contracts: the site analysis stores the pages read for the planner (KI-048). */
+export { PageInventorySchema, type PageInventory } from "@platform/contracts";
 
 /**
  * What INVENTORY_SCRIPT returns. It runs in the page's own world, where page scripts can tamper with
@@ -75,8 +60,10 @@ export const INVENTORY_SCRIPT = String.raw`(() => {
     .filter((h) => h.text);
   const links = Array.from(document.querySelectorAll("a[href]")).slice(0, 300)
     .map((a) => ({ text: textOf(a, 100), url: String(a.href), area: inNav(a) ? "nav" : "main" }));
+  const submits = new Set();
   const forms = Array.from(document.forms).slice(0, 10).map((f) => {
     const submit = f.querySelector("button[type=submit], button:not([type]), input[type=submit]");
+    if (submit) submits.add(submit);
     return {
       name: clean(f.getAttribute("aria-label") || f.getAttribute("name") || f.id || "", 80),
       fields: Array.from(f.querySelectorAll("input, select, textarea"))
@@ -86,8 +73,9 @@ export const INVENTORY_SCRIPT = String.raw`(() => {
       submit: submit ? clean(submit.tagName === "INPUT" ? submit.getAttribute("value") : submit.innerText || submit.textContent, 60) : "",
     };
   });
+  // A form's other buttons are listed too (demoqa's login form holds its "New User" type=button).
   const buttons = Array.from(document.querySelectorAll("button, [role=button], input[type=button]"))
-    .filter((b) => !b.closest("form"))
+    .filter((b) => !submits.has(b))
     .slice(0, 40)
     .map((b) => (b.tagName === "INPUT" ? clean(b.getAttribute("value"), 60) : textOf(b, 60)))
     .filter(Boolean);

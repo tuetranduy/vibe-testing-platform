@@ -15,6 +15,7 @@ import {
 } from "@platform/contracts";
 import {
   ExplorerSessionClosedError,
+  ExplorerTransientError,
   NavigationBlockedError,
   type ActResult,
   type ExplorerSession,
@@ -61,11 +62,30 @@ class FakeSession implements ExplorerSession {
   readonly loadStates: [string, number | undefined][] = [];
   readonly page: Page;
 
+  /** The page's request listeners (`request`, `requestfinished`, `requestfailed`). */
+  readonly listeners = new Map<string, Set<(r: unknown) => void>>();
+  readonly mainFrame = {};
+
+  /** Starts a request on the page (as a click's fetch would); returns its `finish()`. */
+  startRequest(opts: { resourceType?: string; inIframe?: boolean } = {}): () => void {
+    const request = { resourceType: () => opts.resourceType ?? "fetch", frame: () => (opts.inIframe ? {} : this.mainFrame) };
+    for (const l of this.listeners.get("request") ?? []) l(request);
+    return () => {
+      for (const l of this.listeners.get("requestfinished") ?? []) l(request);
+    };
+  }
+
   constructor(private readonly script: FakeSessionScript = {}) {
     const self = this;
     this.page = {
       url: () => self.url,
       isClosed: () => false,
+      mainFrame: () => self.mainFrame,
+      on: (event: string, l: (r: unknown) => void) => {
+        if (!self.listeners.has(event)) self.listeners.set(event, new Set());
+        self.listeners.get(event)!.add(l);
+      },
+      off: (event: string, l: (r: unknown) => void) => void self.listeners.get(event)?.delete(l),
       waitForLoadState: async (state: string, opts?: { timeout?: number }) => {
         self.loadStates.push([state, opts?.timeout]);
         await self.script.waitForLoadState?.(state);
@@ -403,6 +423,46 @@ describe("runExploration (fake explorer)", () => {
       [2, "act", "PS-2", "SUCCESS", true],
     ]);
     expect(session.closed).toBe(true);
+  });
+
+  it("the next step waits for the requests a click started (a single-page app's Register posts a fetch, KI-049)", async () => {
+    const { ctx } = fakeCtx();
+    const log: string[] = [];
+    const session: FakeSession = new FakeSession({
+      actOn: () => {
+        const finish = session.startRequest();
+        setTimeout(() => (log.push("fetch answered"), finish()), 40);
+        return {};
+      },
+      navigate: (url) => void log.push(`navigate ${url}`),
+    });
+    const plan = planOf(step("navigate", "Open the register page"), step("click", "Click Register"), step("navigate", "Open https://shop.test/login"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(log).toEqual([`navigate ${TARGET}`, "fetch answered", "navigate https://shop.test/login"]);
+    expect([...session.listeners.values()].every((ls) => ls.size === 0)).toBe(true); // nothing left listening
+  });
+
+  it("a click's request that never finishes holds the next step only up to the limit", async () => {
+    const { ctx } = fakeCtx();
+    const session: FakeSession = new FakeSession({ actOn: () => (session.startRequest(), {}) });
+    const plan = planOf(step("navigate", "Open the page"), step("click", "Click Subscribe"), step("navigate", "Open https://shop.test/products"));
+    const started = Date.now();
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, actionRequestsTimeoutMs: 50 });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(session.ops().filter((o) => o === "navigate")).toHaveLength(2);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it("only the page's own fetch / XHR requests are waited for: not an iframe's (ads), not an image", async () => {
+    const { ctx } = fakeCtx();
+    const session: FakeSession = new FakeSession({
+      actOn: () => (session.startRequest({ inIframe: true }), session.startRequest({ resourceType: "image" }), {}),
+    });
+    const plan = planOf(step("navigate", "Open the page"), step("click", "Click Subscribe"), step("navigate", "Open https://shop.test/products"));
+    const started = Date.now();
+    await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, actionRequestsTimeoutMs: 5_000 });
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 
   it("an already exhausted budget stops before the first action", async () => {
@@ -1119,6 +1179,109 @@ describe("runExploration (fake explorer)", () => {
     ]);
     expect(outcome.steps[2]!.instruction).toBe("Find the link or button that leads to where you can: Click the Galaxy S27 product link");
     expect(session.calls.filter((c) => c.op === "actOn").map((c) => (c.arg as { selector: string }).selector)).toEqual([products.selector, product.selector]);
+  });
+
+  it("the way there that is the step's own control (the model missed it, then chose it) does the step: it is not looked for again (KI-050)", async () => {
+    // demoqa /login: "Click the New User button" found nothing; the way there was the New User button, which opened
+    // /register. Looking for "New User" again on /register found nothing and exploration stopped.
+    const { ctx } = fakeCtx();
+    const newUser = { selector: "xpath=/html[1]/body[1]/form[1]/button[2]", description: "New User button", method: "click", arguments: [] };
+    const session = new FakeSession({
+      observe: (instruction) => (instruction.startsWith("Find the link or button that leads to") ? [newUser] : []),
+    });
+    const { recorder } = fakeRecorder({ describe: () => ({ role: "button", name: "New User", text: "New User" }) });
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the New User button to open the registration form"), step("navigate", "Open https://shop.test/register"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "FAILED", false],
+      [2, "observe", "PS-2", "SUCCESS", false],
+      [3, "act", "PS-2", "SUCCESS", true],
+      [4, "navigate", "PS-3", "SUCCESS", true],
+    ]);
+  });
+
+  it("a way there the step only names as a place (\"… on the Login page\") is followed, then the control is looked for", async () => {
+    const { ctx } = fakeCtx();
+    const login = { selector: "xpath=/html[1]/body[1]/nav[1]/a[1]", description: "Login link", method: "click", arguments: [] };
+    const newUser = { selector: "xpath=/html[1]/body[1]/form[1]/button[2]", description: "New User button", method: "click", arguments: [] };
+    let onLogin = false;
+    const session = new FakeSession({
+      observe: (instruction) => (instruction.startsWith("Find the link or button that leads to") ? [login] : onLogin ? [newUser] : []),
+      actOn: (el) => {
+        if (el.selector === login.selector) onLogin = true;
+        return {};
+      },
+    });
+    const names: Record<string, string> = { [login.selector]: "Login", [newUser.selector]: "New User" };
+    const { recorder } = fakeRecorder({ describe: (selector) => ({ role: "button", name: names[selector] ?? null, text: null }) });
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the New User button on the Login page"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(session.calls.filter((c) => c.op === "actOn").map((c) => (c.arg as { selector: string }).selector)).toEqual([login.selector, newUser.selector]);
+  });
+
+  it("a way there whose name only describes the step's control (\"Submit the login form\" → the Login link) is not taken for the step", async () => {
+    // demoqa /register (run_0muy3l414c634bc3a426e3f4c): the way there for "Submit the login form" was the sidebar Login
+    // link; taking its click for the login recorded a login that never happened.
+    const { ctx } = fakeCtx();
+    const loginLink = { selector: "xpath=/html[1]/body[1]/nav[1]/a[1]", description: "Login link", method: "click", arguments: [] };
+    const loginButton = { selector: "xpath=/html[1]/body[1]/form[1]/button[1]", description: "Login button", method: "click", arguments: [] };
+    let onLogin = false;
+    const session = new FakeSession({
+      observe: (instruction) => (instruction.startsWith("Find the link or button that leads to") ? [loginLink] : onLogin ? [loginButton] : []),
+      actOn: (el) => {
+        if (el.selector === loginLink.selector) onLogin = true;
+        return {};
+      },
+    });
+    const { recorder } = fakeRecorder({ describe: (selector) => ({ role: selector === loginLink.selector ? "link" : "button", name: "Login", text: "Login" }) });
+    const plan = planOf(step("navigate", "Open"), step("click", "Submit the login form"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(session.calls.filter((c) => c.op === "actOn").map((c) => (c.arg as { selector: string }).selector)).toEqual([loginLink.selector, loginButton.selector]);
+  });
+
+  it("a way there the step names in quotes (\"Click the 'New User' button\") does the step", async () => {
+    const { ctx } = fakeCtx();
+    const newUser = { selector: "xpath=/html[1]/body[1]/form[1]/button[2]", description: "New User button", method: "click", arguments: [] };
+    const session = new FakeSession({ observe: (instruction) => (instruction.startsWith("Find the link or button that leads to") ? [newUser] : []) });
+    const { recorder } = fakeRecorder({ describe: () => ({ role: "button", name: "New User", text: "New User" }) });
+    const plan = planOf(step("navigate", "Open"), step("click", "Open the registration form with 'New User'"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(session.calls.filter((c) => c.op === "actOn")).toHaveLength(1);
+  });
+
+  it("a lookup that loses the page for a moment is tried once more, not taken for \"nothing here\" (KI-051)", async () => {
+    // demoqa /login (run_0muy3l414c634bc3a426e3f4c): the username lookup failed with a lost CDP session; the recovery
+    // then opened the registration form and typed the login there.
+    const { ctx } = fakeCtx({ testData: { username: "qa.user" } });
+    const field = { selector: "xpath=/html[1]/body[1]/form[1]/input[1]", description: "UserName", method: "fill", arguments: [] };
+    let lost = true;
+    const session = new FakeSession({
+      observe: (instruction) => {
+        if (instruction.startsWith("Find the link or button")) throw new Error("no recovery expected");
+        if (lost) {
+          lost = false;
+          throw new ExplorerTransientError("Stagehand observe failed: -32001 Session with given id not found.");
+        }
+        return [field];
+      },
+    });
+    const { recorder, fills } = fakeRecorder({ describe: () => ({ role: "textbox", name: "UserName", text: null }) });
+    const plan = planOf(step("navigate", "Open"), step("fill", "Fill the username field", { inputRef: { source: "testData", key: "username" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "FAILED", false],
+      [2, "observe", "PS-2", "SUCCESS", false],
+      [3, "fill", "PS-2", "SUCCESS", true],
+    ]);
+    expect(outcome.steps[1]!.error).toContain("Session with given id not found");
+    expect(fills.map((f) => f.selector)).toEqual([field.selector]);
   });
 
   it("a fill with no field on the page asks once for the way to its form, opens it and fills there (KI-001)", async () => {

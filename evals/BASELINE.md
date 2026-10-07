@@ -118,7 +118,9 @@ appears; the scenario has at most `expect.maxSteps` steps; the blocked criteria 
 `expect.blocked` exactly (so the model must reference the inputs and mark the destructive steps that
 our deterministic blocking relies on); with `requiresLogin`, a `login` step is preceded by a `fill`
 carrying a secret `inputRef`; every `expect.inputRefs` entry is carried by some step; with
-`destructiveStep`, some step is flagged destructive.
+`destructiveStep`, some step is flagged destructive. A case may give `pages` (what the requirement analysis read, as
+the survey's inventory script reads them; KI-048): with `expect.reaches`, the first step mentioning a control comes
+after a step mentioning the way to it (case 18: "New User" after "Login" on demoqa.com).
 
 ## survey
 

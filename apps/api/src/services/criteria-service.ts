@@ -51,12 +51,16 @@ export class CriteriaService {
     return requirement;
   }
 
-  /** The requirement's analysis against the live site (V1.3); 404 NO_SITE_ANALYSIS until (or unless) there is one. */
-  async siteAnalysis(scope: RunScope, runId: string): Promise<SiteAnalysis> {
+  /**
+   * The requirement's analysis against the live site (V1.3); 404 NO_SITE_ANALYSIS until (or unless) there is one.
+   * What the pages showed is left out: it is kept for the planner (KI-048), and the review needs none of it.
+   */
+  async siteAnalysis(scope: RunScope, runId: string): Promise<Omit<SiteAnalysis, "pageContents">> {
     await this.runs.getRequired(scope, runId);
     const analysis = await new SiteAnalysisRepository(this.deps.db).get(runId);
     if (!analysis) throw new HttpError(404, "NO_SITE_ANALYSIS", "This run has no analysis of the live site");
-    return analysis;
+    const { pageContents: _kept, ...shown } = analysis;
+    return shown;
   }
 
   /**

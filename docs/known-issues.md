@@ -68,6 +68,11 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-044 | High | Exploration | A field typed before the page settles is emptied by the page, and the fill is recorded as a success | Resolved (2026-10-07) |
 | KI-045 | Medium | Recordings | The exploration video shows a gray screen | Resolved (2026-10-07) |
 | KI-046 | Medium | LLM quality | The unclear-criterion judge's prompt has no eval suite | Open |
+| KI-047 | Medium | Survey | The site survey misses a form's other buttons and reads a single-page app before it renders | Resolved (2026-10-07) |
+| KI-048 | High | Planning | The planner never sees the site; a step planned on the wrong page is not recovered | Fixed (2026-10-07); eval pending |
+| KI-049 | High | Exploration | A click's background request is cancelled by the next step's navigation | Resolved for exploration (2026-10-07); generated test open |
+| KI-050 | High | Exploration | The "way there" recovery clicks the step's own target, then looks for it again on the next page | Resolved (2026-10-07) |
+| KI-051 | High | Exploration | A transient explorer error counts as "nothing found" and starts a navigating recovery | Resolved (2026-10-07) |
 
 ---
 
@@ -690,3 +695,81 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
   step: it counts toward `maxExplorationSteps`.
 - **To close:** an eval suite of pages with a known answer (relevant / holds / does not hold / irrelevant), run on
   each provider, scores recorded in `evals/BASELINE.md`.
+
+## KI-047 — The site survey misses a form's other buttons and reads a single-page app before it renders
+- **Severity:** Medium (the requirement analysis is told a page lacks what it shows, and its notes say so).
+- **Where:** `packages/testing-engine/src/survey/inventory.ts` (`INVENTORY_SCRIPT`), `packages/testing-engine/src/survey/site-reader.ts`.
+- **What:** run `run_0muxw7z9b62ec85ca946b2687` (demoqa.com/books, "create an account … add Git Pocket Guide to the
+  collection"): the analysis noted "Login page has no registration link" and "No link to Git Pocket Guide". (1) The
+  inventory listed only buttons outside forms, and a form only its submit button; demoqa's "New User" and "Login" are
+  `type="button"` inside the login form, so neither was seen. (2) Each page was read as soon as `load` fired; demoqa is
+  a React app that fetches its book list after that, so /books was read while it showed "Loading…".
+- **Resolved (2026-10-07):** a form's buttons other than its recorded submit are listed with the page's buttons, and a
+  page is read once its network is quiet, waiting at most 3 s (a page whose network never goes quiet, e.g. ads, is read
+  anyway). Covered by `tests/integration/survey-inventory.test.ts` (real Chromium) and the survey stage's unit tests;
+  checked against the live site (both now show).
+
+## KI-048 — The planner never sees the site; a step planned on the wrong page is not recovered
+- **Severity:** High (the run ends INCONCLUSIVE at its first step though the flow works on the site).
+- **Where:** `packages/testing-engine/src/planner/prompts.ts` (`buildPlannerPrompt`), `packages/testing-engine/src/exploration/executor.ts` (`act`).
+- **What:** same run as KI-047. The plan's second step was "Click the 'New User' button" right after opening /books; on
+  demoqa that button is only on /login, reached with the "Login" button. The planner is given the requirement,
+  criteria, checkpoints and input names, not the survey's pages, so it guessed. The executor's one recovery ("Find the
+  link or button that leads to where you can: …") was answered with no element twice by `deepseek-v4-pro` although a
+  "Login" button was on screen: the model read it literally. The run stopped with every criterion inconclusive.
+- **Fixed (2026-10-07):** the analysis stores what each page read showed (`SiteAnalysis.pageContents`, redacted and
+  capped as the compile call saw it; not returned by `GET /site-analysis`), and execution hands it to the planner,
+  whose prompt carries the pages as untrusted data with a rule: plan each control where the pages show it, first
+  taking the link or button that gets there. An analysis stored before this has no pages: the planner works as before.
+  The executor's recovery is unchanged.
+- **To close:** `pnpm eval planner` on DeepSeek with the new case 18 (`register-from-store`, this run's criteria and
+  demoqa's pages), before and after the prompt change, recorded in `evals/BASELINE.md`.
+
+## KI-049 — A click's background request is cancelled by the next step's navigation
+- **Severity:** High (a registration or login that works on the site is never sent; the run blocks on a "failed" login).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`settle`, called after every click).
+- **What:** run `run_0muxxpv46b8efe7aeabd84e53` (the rerun of KI-047/KI-048's run on demoqa.com, after their fixes): the
+  plan was right (Login → New User → fill → Register → log in → Book Store), but `POST /Account/v1/User` (Register) and
+  `POST /Account/v1/GenerateToken` (Login) have no response in the trace: each click is a fetch on a single-page app,
+  `settle()` waits only for the `load` state (already reached), and the next step's `navigate` (to /login, then to
+  /books) started about 30 ms later and aborted the request. The account was never created, the login stayed on
+  /login, and AC-1 was BLOCKED (LOGIN_FAILED); "Add To Your Collection" was then not found (it shows only when signed in).
+- **Resolved for exploration (2026-10-07):** a click now waits, after `load`, for the fetch / XHR requests the page's own
+  frame started during it to be answered or fail, at most 5 s (`ACTION_REQUESTS_TIMEOUT_MS`); an iframe's requests (ads)
+  and other resources are not waited for. Covered by unit tests (order, the 5 s bound, what is ignored) and by
+  `tests/integration/explore-stage.test.ts` against the demo shop's new `/newsletter` page, whose Subscribe button posts
+  a fetch answered after 800 ms and counted only when answered (0 without the fix, 1 with it).
+- **Still open:** the generated Playwright test (`compiler/test-compiler.ts`) clicks and goes on to the next `goto` the
+  same way, so with "Rerun the generated test" on, the rerun can cancel what exploration let finish and disagree with it.
+  The fix there: wait for the click's responses (e.g. `page.waitForLoadState("networkidle")`, bounded) after each click.
+
+## KI-050 — The "way there" recovery clicks the step's own target, then looks for it again on the next page
+- **Severity:** High (a step that has in fact been done fails, and exploration stops).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`act`: the "Find the link or button that leads to
+  where you can: …" recovery).
+- **What:** run `run_0muy2g5dte6ed983f4f2c2c08` (demoqa.com, after KI-047–KI-049): on /login, the first lookup for
+  "Click the New User button" came back empty although the button was on screen (the trace's frames show it; the
+  model, `deepseek-v4-pro` at low reasoning, missed it). The recovery then chose the "New User" button itself as the
+  way there and clicked it, which opened /register, i.e. it did the step. The executor then looked for "New User" again
+  on /register, found nothing (twice, plus a second recovery), and exploration stopped: AC-1 INCONCLUSIVE.
+- **Resolved (2026-10-07):** when the step's description names the followed element as the control it clicks (its
+  accessible name or text in quotes, "Click 'New User'", or followed by a control word, "Click the New User button"),
+  that click did the step and it is not looked for again. Otherwise the way is followed and the control looked for as
+  before. A first version matched the name anywhere in the description; in `run_0muy3l414c634bc3a426e3f4c` it took the
+  sidebar Login link for "Submit the login form" and recorded a login that never happened, hence the stricter rule.
+  Covered by executor tests: the target as the way (named and quoted), a page the step names, and that false positive.
+
+## KI-051 — A transient explorer error counts as "nothing found" and starts a navigating recovery
+- **Severity:** High (the run goes to the wrong page and types the login into the registration form).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`locate` returns null on any explorer error; `fill`'s
+  "opens the page or form with the field" and `act`'s "way there" recoveries then navigate).
+- **What:** run `run_0muy3l414c634bc3a426e3f4c` (demoqa.com): right after the step that opened /login, the lookup for
+  the username field failed with `Stagehand observe failed: -32001 Session with given id not found` (the explorer's CDP
+  session was briefly gone after the page change; a later `extract` hit the same error once and then worked). The
+  executor treated it as "no field here", asked for the way to the form, clicked "New User" and filled the login
+  credentials into the registration form; the login was then never submitted.
+- **Resolved (2026-10-07):** the adapter reports a lost CDP session or page script context ("Session with given id not
+  found", "Cannot find context with specified id", "Execution context was destroyed") as `ExplorerTransientError` (a
+  `BrowserProviderError`, so nothing else changes), and a lookup that fails with it is recorded and tried once more
+  after the page settles, before any recovery. Covered by an adapter test (which errors are transient) and an executor
+  test (the username lookup of the run, retried and filled on the same page, no recovery).

@@ -232,11 +232,12 @@ function layout(ctx, { title, body, status = 200 }) {
  */
 export function createDemoShopServer(options = {}) {
   const testEndpoints = options.testEndpoints ?? testEndpointsEnabledFromEnv();
-  const state = { sessions: new Map(), deleteClicks: 0, requests: [], requestSeq: 0 };
+  const state = { sessions: new Map(), deleteClicks: 0, subscriptions: 0, requests: [], requestSeq: 0 };
 
   function reset() {
     state.sessions.clear();
     state.deleteClicks = 0;
+    state.subscriptions = 0;
     // The log empties; `seq` keeps counting, so a reader's "after seq N" stays meaningful.
     state.requests.length = 0;
   }
@@ -495,6 +496,34 @@ export function createDemoShopServer(options = {}) {
     });
   }
 
+  // --- newsletter (a single-page-app action: a button that posts a slow fetch) ---
+
+  function newsletter(res, ctx) {
+    page(res, ctx, {
+      title: "Newsletter",
+      body: `<h1>Newsletter</h1>
+    <button type="button" id="subscribe">Subscribe</button>
+    <p role="status" data-testid="subscribe-status"></p>
+    <script>
+      document.getElementById("subscribe").addEventListener("click", () => {
+        fetch("/newsletter/subscribe", { method: "POST" })
+          .then((r) => r.text())
+          .then((t) => { document.querySelector("[data-testid=subscribe-status]").textContent = t; });
+      });
+    </script>`,
+    });
+  }
+
+  /** Answers after 800 ms; counted only when the answer is sent (the browser did not cancel the request). */
+  async function newsletterSubscribe(req, res) {
+    await readBody(req);
+    await sleep(800, res);
+    // The response only: a request is marked destroyed once its body has been read.
+    if (res.destroyed) return;
+    state.subscriptions += 1;
+    send(res, 200, "Subscribed", "text/plain; charset=utf-8");
+  }
+
   // --- dispatcher ------------------------------------------------------------
 
   async function handle(req, res) {
@@ -575,6 +604,7 @@ export function createDemoShopServer(options = {}) {
       if (path === "/external") return external(res, ctx);
       if (path === "/egress-probe") return egressProbe(res, ctx);
       if (path === "/sitemap") return sitemap(res, ctx);
+      if (path === "/newsletter") return newsletter(res, ctx);
       return notFound(res, ctx);
     }
 
@@ -584,6 +614,7 @@ export function createDemoShopServer(options = {}) {
       if (path === "/login") return loginSubmit(req, res, ctx);
       if (path === "/logout") return logout(req, res, ctx);
       if (path === "/account/delete") return accountDelete(req, res, ctx);
+      if (path === "/newsletter/subscribe") return newsletterSubscribe(req, res);
     }
 
     res.writeHead(405, { "Content-Type": "text/plain; charset=utf-8", Allow: "GET, HEAD, POST" });
@@ -605,6 +636,10 @@ export function createDemoShopServer(options = {}) {
     reset,
     get deleteClicks() {
       return state.deleteClicks;
+    },
+    /** Newsletter subscriptions whose answer was sent (a cancelled request is not counted). */
+    get subscriptions() {
+      return state.subscriptions;
     },
     /** Requests so far (method + path, never the query), oldest first. */
     get requests() {

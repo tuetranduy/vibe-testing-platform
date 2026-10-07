@@ -449,6 +449,15 @@ describe("V1.3: the live-site analysis and suggested test data", () => {
     expect(res.json()).toEqual({ ...analysis, appliedKeys: [] });
   });
 
+  it("GET site-analysis leaves out what the pages showed: it is kept for the planner only (KI-048)", async () => {
+    const runId = await setupAwaitingConfirmation();
+    const inventory = { title: "Home", description: "", headings: [], links: [], forms: [], buttons: ["Sign in"] };
+    await new SiteAnalysisRepository(t.tdb.db).save(runId, { ...analysis, pageContents: [{ url: "https://shop.example.com/", inventory }] });
+    const res = await getAnalysis(runId);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ...analysis, appliedKeys: [] });
+  });
+
   it("confirm with test data: the values become the run's (over its own) and the suggested keys are marked applied", async () => {
     const runId = await setupAwaitingConfirmation(baseRequirement(), { testData: { city: "Oslo" } });
     await new SiteAnalysisRepository(t.tdb.db).save(runId, analysis);
