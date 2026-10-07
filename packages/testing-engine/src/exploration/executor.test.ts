@@ -529,7 +529,7 @@ describe("runExploration (fake explorer)", () => {
     expect(outcome.steps.filter((s) => s.kind === "fill").map((s) => s.generatedValue ?? null)).toEqual([null, "generated-1", "generated-1"]);
   });
 
-  it("a failed fill with an empty value keeps the error text readable (no [REDACTED] between characters)", async () => {
+  it("a failed fill with an empty value keeps the error text readable", async () => {
     const { ctx } = fakeCtx({ testData: { note: "" } });
     const session = new FakeSession({
       observe: () => [{ selector: "xpath=/html[1]/body[1]/textarea[1]", description: "note field", method: "fill", arguments: [] }],

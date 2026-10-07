@@ -300,7 +300,7 @@ export const saveLlmDefaults = (defaults: LlmDefaultsInput): Promise<LlmSettings
 export const saveProviderKey = (provider: LlmKeyProvider, apiKey: string | null): Promise<LlmSettingsView> =>
   request(LlmSettingsViewSchema, `${SETTINGS}/keys/${provider}`, { method: "PUT", body: { apiKey } });
 
-/** Prefer `fetchArtifactUrl` (lib/artifacts.ts), which applies the reveal rule. */
+/** Prefer `fetchArtifactUrl` (lib/artifacts.ts), the one place that fetches artifact URLs. */
 export const getArtifactUrl = (runId: string, artifactId: string): Promise<ArtifactUrl> =>
   request(ArtifactUrlSchema, `${runPath(runId)}/artifacts/${seg(artifactId)}/url`);
 

@@ -54,7 +54,8 @@ a false FAIL.
 - **Generated Playwright test:** a generated value is written into `run-data.json` like test data, for a secret ref
   too (it is then not read from `SECRET_*`), so a rerun of the saved test needs nothing typed again for it.
 - **Report:** each exploration step with a `generatedValue` shows it; the report lists the generated inputs (key,
-  secret or test data, value, step) so a FAIL caused by an invented password is explained.
+  secret or test data, value, step) so a result caused by an invented password is explained (a login the site
+  refuses ends `BLOCKED / LOGIN_FAILED`, the verifier's existing reason, as found in the CI E2E run).
 - **Storage:** `exploration_steps.generated_value` (text, nullable; migration). No new table.
 
 ### Prompts and evals

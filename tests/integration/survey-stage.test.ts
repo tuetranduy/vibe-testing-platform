@@ -183,11 +183,11 @@ describe("the survey through the real sandbox (demo shop, scripted model)", () =
       ]);
       expect(JSON.stringify(surveyed)).not.toMatch(/[?#]|example\.org/);
 
-      // A screenshot per page read — SECRET_BEARING (the run has a secret) — announced live.
+      // A screenshot per page read — STANDARD (secrets are not redacted since 2026-10-07) — announced live.
       expect(shots).toHaveLength(5);
       expect(shots.every((png) => png.subarray(1, 4).toString() === "PNG")).toBe(true);
       expect(events.filter((e) => e.type === "artifact.created").map((e) => e.payload)).toEqual(
-        shots.map((_, i) => ({ artifactId: `art_${i + 1}`, type: "SCREENSHOT", sensitivity: "SECRET_BEARING" })),
+        shots.map((_, i) => ({ artifactId: `art_${i + 1}`, type: "SCREENSHOT", sensitivity: "STANDARD" })),
       );
 
       // One model call: the inventories the in-page script read, the start page's screenshot, names never values.

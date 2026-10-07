@@ -15,7 +15,10 @@ DeepSeek key, DeepSeek standing in for Gemini where a paid key was needed: all b
 green on DeepSeek) and KI-025 / KI-036 (they need the branch pushed to GitHub) are resolved or closed by decision.
 KI-001 was resolved on 2026-10-07 (branch `fix/ki-001-flash`): the live gate passed on DeepSeek Flash. KI-031 was
 resolved for DeepSeek Flash on 2026-10-06. KI-026 was resolved for both DeepSeek models on 2026-10-07 (branch
-`fix/ki-026-deepseek`); the Claude and Gemini models still need paid keys.
+`fix/ki-026-deepseek`); the Claude and Gemini models still need paid keys. On 2026-10-07 (branch
+`feat/full-hd-generated-inputs`, spec `docs/superpowers/specs/2026-10-07-generated-inputs-no-redaction-design.md`) a
+run's secrets stopped being redacted and missing inputs stopped blocking, by decision: this reverses KI-022's fix and
+makes KI-028's reveal audit moot (no artifact needs a reveal).
 
 | ID | Severity | Area | Summary | Status |
 |---|---|---|---|---|
@@ -374,6 +377,8 @@ resolved for DeepSeek Flash on 2026-10-06. KI-026 was resolved for both DeepSeek
   text has the value masked before it is stored; a criteria edit containing one is refused (`400`), since masking
   would change the check. Plain form only (the worker still masks encoded forms before model calls); runs created
   before the change have no fingerprints.
+- **Reversed by decision (2026-10-07, `3cd0e1c`):** run secrets are no longer redacted. Edited text, criteria and
+  confirmed test data are stored as typed; fingerprints are still written but nothing reads them.
 
 ## KI-023 — Production starts with the example encryption key and API token
 - **Severity:** Medium.
@@ -445,6 +450,8 @@ resolved for DeepSeek Flash on 2026-10-06. KI-026 was resolved for both DeepSeek
   arrives (V1.1 multi-user login).
 - **Resolved (V1.1, `6026592`):** every reveal writes an `audit_events` row (`artifact.reveal`, the run, the
   artifact and its type) with the user who revealed it.
+- **Moot since 2026-10-07 (`3cd0e1c`):** no artifact needs a reveal, so none is audited; older `SECRET_BEARING`
+  artifacts are served like the rest.
 
 ## KI-029 — The rerun runner is a worker child process; its image was never built
 - **Severity:** Low (the generated source is compiler-emitted and passes the AST guard).

@@ -116,10 +116,10 @@ administrator can revoke anyone's under Settings → API tokens. Token creation 
   (`playwright-core install chromium`, as the worker image does); set `FFMPEG_PATH` to use another. Without one the
   worker logs "exploration video skipped" and records the trace only. Encoding runs one ffmpeg per exploring run
   (VP8, 1 Mbit/s, one thread): size worker CPU for it, or turn video off per run (`options.recordVideo: false`).
-- **Storage.** Videos and traces are ordinary artifacts (`VIDEO`, `TRACE`) with the run's retention; a run with
-  secrets stores them `SECRET_BEARING` (shorter retention, reveal required), and every trace is scrubbed of the
-  secret values before upload. Expect a few MB per run for each; the rerun now keeps its video and trace on success
-  too unless the run turns them off.
+- **Storage.** Videos and traces are ordinary `STANDARD` artifacts (`VIDEO`, `TRACE`) with the standard retention.
+  Since 2026-10-07 they are stored as recorded: a run's secret values are not scrubbed from traces and can appear in
+  screenshots and videos. Expect a few MB per run for each; the rerun keeps its video and trace on success too unless
+  the run turns them off. Videos are 1920×1080.
 - **Temporary files.** Recordings are written under the OS temp directory (`recording-<runId>-*`) and deleted when
   the explore stage ends, whatever its outcome.
 - **Live-site reads.** The analysis (and a fully blocked run's evidence snapshot) opens the run's browser sandbox
@@ -256,10 +256,10 @@ sum(rate(llm_requests_total{status="PROVIDER_ERROR"}[10m])) / clamp_min(sum(rate
 Both processes write one JSON object per line to stdout (`level`, `time`, `component`, `msg`, fields). Every line a
 worker writes about a run it is processing carries `runId`, `tenantId`, `stage` and `component`, whichever code logged
 it (including a run it skips or cannot start). Lines about a run written from outside its job (reaper, retention,
-the queue's job-failure handler) carry `runId` and whatever else is at hand. Two layers of redaction run on every line:
-key-based (`password`, `token`, `authorization`, `cookie`, …) and the run's own redactor, which masks the run's
-secret values in any encoded form, including inside error messages. An `err` field carries the error's name, message,
-`code`, stack and `cause` chain (up to five causes), redacted like the rest of the line; the `run errored` line
+the queue's job-failure handler) carry `runId` and whatever else is at hand. Every line is redacted by key
+(`password`, `token`, `authorization`, `cookie`, …); since 2026-10-07 a run's secret values are not masked, so one
+that reaches an error message is logged as it is. An `err` field carries the error's name, message, `code`, stack and
+`cause` chain (up to five causes), redacted by key like the rest of the line; the `run errored` line
 carries the error that ended the run. Useful filters: all lines of one run
 (`runId`), and errors by `component`. The API's HTTP access log is Fastify's (pino), with the `authorization`,
 `cookie`, `x-session-token` and `x-api-token` headers redacted and request bodies never logged.
@@ -267,8 +267,8 @@ carries the error that ended the run. Useful filters: all lines of one run
 ## Retention
 
 A daily `retention` job (its own queue) deletes expired artifacts, the object first and then its row.
-`expires_at` is set when an artifact is stored: `SECRET_BEARING` after `SECRET_ARTIFACT_RETENTION_DAYS` (7),
-`STANDARD` after `ARTIFACT_RETENTION_DAYS` (30). A failed delete is logged and retried on the next pass. A pass
+`expires_at` is set when an artifact is stored: `STANDARD` after `ARTIFACT_RETENTION_DAYS` (30); `SECRET_BEARING`
+after `SECRET_ARTIFACT_RETENTION_DAYS` (7), which only artifacts stored before 2026-10-07 are. A failed delete is logged and retried on the next pass. A pass
 stops after an hour, even in the middle of a store call that does not return ("retention pass reached its time
 limit" in the log), and leaves the rest to the next pass; S3 calls also fail after 5 s without a connection or 30 s
 of silence. As a backstop, configure an S3 lifecycle rule that expires objects some time after the longest retention

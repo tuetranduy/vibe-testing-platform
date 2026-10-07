@@ -33,6 +33,30 @@ It has not run on Claude or Gemini.
 
 **Real exploration and the Playwright rerun run in the Docker worker, with Chromium's sandbox on** (2026-09-27, [KI-002](docs/known-issues.md#ki-002--chromiums-sandbox-cannot-start-in-the-compose-worker)). Chromium's sandbox needs Linux user namespaces, which Docker's default seccomp profile denies ("No usable sandbox!", runs `ERRORED / BROWSER_PROVIDER`). Of the options — a seccomp profile that permits user namespaces, `cap_add: SYS_ADMIN` (broad), or Chromium's `--no-sandbox` (the browser runs untrusted pages) — the compose `worker` uses the first: [`infra/seccomp/worker.json`](infra/seccomp/README.md) is Docker's default profile plus user, PID and network namespaces for `clone` / `unshare`, with no extra capability. Both exploration's Chromium and the rerun's (launched by `@playwright/test`, `chromiumSandbox: true`) start sandboxed in the container, and `pnpm test:e2e:compose` runs the E2E suite against the compose API and worker. A deployment elsewhere needs the same profile (a Kubernetes `Localhost` profile) and a host that allows unprivileged user namespaces; see the profile's README.
 
+### Generated inputs, no secret redaction, full-HD browser (2026-10-07)
+
+Spec [`docs/superpowers/specs/2026-10-07-generated-inputs-no-redaction-design.md`](docs/superpowers/specs/2026-10-07-generated-inputs-no-redaction-design.md).
+These supersede what the sections below say about missing inputs, redaction and `SECRET_BEARING` artifacts.
+
+- **Every test runs at 1920×1080.** Exploration sets each page's metrics over CDP (a 1920×1080 page on a 1920×1080
+  screen, as a browser in full screen; headless Chromium otherwise opens 800×600), and the rerun sets the same
+  viewport, screen and video size.
+- **A value nobody provided never blocks a check.** Before planning, the requirement compiler's suggested test data
+  is used for every key the run lacks (for a manually confirmed run too). A fill whose test data key or secret still
+  has no value locates its field, reads it from the page (type, label, placeholder, limits, a select's options) and
+  asks the model once for a fitting, obviously fictional value, a password included; without a model or on a failed
+  call a deterministic value is used. The value is reused for the same key in every scenario, stored on the step
+  (`generatedValue`), compared by text checks, written into the saved test's `run-data.json`, and listed in the
+  report ("Generated inputs"). Only `DESTRUCTIVE_ACTION_NOT_AUTHORIZED` blocks at planning now; a text check on a
+  test data key that no step filled is still `BLOCKED / MISSING_TEST_DATA`. A login with a made-up password is
+  tried: when the site refuses it, its criteria end `BLOCKED / LOGIN_FAILED` (the login stayed on its page), not
+  `MISSING_SECRET`.
+- **The run's secrets are no longer redacted.** Their values show as typed in events, step errors, logs, traces,
+  reports and model prompts; traces are stored unscrubbed, new artifacts are `STANDARD`, and no artifact needs a
+  Reveal (the API serves older `SECRET_BEARING` ones without `reveal=true`). Key-based redaction (`authorization`,
+  `cookie`, `token`, `password` fields), the logger's protection of provider keys, encryption at rest and the purge
+  when a run ends are kept; a rerun still asks for the secrets that were typed.
+
 ### V1.3 (2026-09-30)
 
 Evidence and test data, on top of V1.2 (the V1 live gate still applies):

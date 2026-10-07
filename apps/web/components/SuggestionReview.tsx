@@ -167,7 +167,7 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
                         <li key={`${n.kind}-${n.name}`} className={n.missing ? "need need-missing" : "need"}>
                           <Icon name={n.kind === "secret" ? "lock" : "data"} />
                           {n.name}
-                          {n.missing && " — not provided — start it as a separate test to add it"}
+                          {n.missing && " — not provided: the run will make one up (start it as a separate test to give your own)"}
                         </li>
                       ))}
                     </ul>
