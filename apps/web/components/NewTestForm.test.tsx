@@ -434,9 +434,17 @@ describe("NewTestForm starting over from a run", () => {
   });
 });
 
-describe("NewTestForm — destructive actions", () => {
+/** Opens a toolbar chip in the requirement box ("Model: …") and picks one of its options. */
+async function choose(user: ReturnType<typeof userEvent.setup>, chip: RegExp, option: string | RegExp) {
+  await user.click(screen.getByRole("button", { name: chip }));
+  await user.click(screen.getByRole("option", { name: option }));
+}
+
+describe("NewTestForm — destructive actions (the Actions chip)", () => {
   const openAdvanced = (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByText("Advanced options"));
-  const destructive = () => screen.getByLabelText(/allow destructive actions/i);
+  const actions = () => screen.getByRole("button", { name: /^Actions:/ });
+  const allow = (user: ReturnType<typeof userEvent.setup>) => choose(user, /^Actions:/, "Destructive allowed");
+  const block = (user: ReturnType<typeof userEvent.setup>) => choose(user, /^Actions:/, "Safe actions");
   const rerun = () => screen.getByLabelText(/rerun the generated test/i);
   const created = () => json(202, { runId: "run_9", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_9/events" });
   const fill = async (user: ReturnType<typeof userEvent.setup>, url: string) => {
@@ -444,24 +452,28 @@ describe("NewTestForm — destructive actions", () => {
     await user.type(screen.getByLabelText(/requirement/i), "A user can delete a saved address.");
   };
 
-  it("can be allowed in staging and in production, and the summary says so", async () => {
+  it("sits in the requirement box: Safe actions by default; allowing them, in staging or production, colours the chip", async () => {
     const user = userEvent.setup();
     render(<NewTestForm />);
-    expect(screen.getByText("Destructive actions are blocked unless you allow them under Advanced options.")).toBeInTheDocument();
-    await openAdvanced(user);
-    expect(destructive()).toBeEnabled();
+    expect(screen.getByText("Destructive actions are blocked unless you allow them with Actions in the requirement box.")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Model and actions" })).getByRole("button", { name: "Actions: Safe actions" })).toBeInTheDocument();
+    await user.click(actions());
+    expect(screen.getByRole("option", { name: "Destructive allowed" })).toHaveAccessibleDescription(/may create, change or delete data/);
+    await user.click(screen.getByRole("option", { name: "Destructive allowed" }));
+    expect(actions()).toHaveAccessibleName("Actions: Destructive allowed");
+    expect(actions()).toHaveClass("composer-chip-warning");
+    expect(screen.getByText("Destructive actions are allowed for this run (Actions in the requirement box).")).toBeInTheDocument();
     await user.click(screen.getByLabelText("Production"));
-    expect(destructive()).toBeEnabled();
-    await user.click(destructive());
-    expect(screen.getByText("Advanced options").closest("summary")).toHaveTextContent("destructive allowed");
+    expect(actions()).toHaveAccessibleName("Actions: Destructive allowed");
+    expect(screen.getByText("Advanced options").closest("summary")).not.toHaveTextContent("destructive");
   });
 
-  it("turns the rerun off when ticked, says why, warns when it is turned back on, and restores it when unticked", async () => {
+  it("turns the rerun off when allowed, says why, warns when it is turned back on, and restores it when blocked again", async () => {
     const user = userEvent.setup();
     render(<NewTestForm />);
     await openAdvanced(user);
     expect(rerun()).toBeChecked();
-    await user.click(destructive());
+    await allow(user);
     expect(rerun()).not.toBeChecked();
     expect(
       screen.getByText("Rerun is off: it repeats the whole test, so destructive actions would run a second time. You can turn it back on."),
@@ -469,17 +481,17 @@ describe("NewTestForm — destructive actions", () => {
     await user.click(rerun());
     expect(screen.getByText("Destructive actions will run twice: once while exploring and again in the rerun.")).toBeInTheDocument();
     await user.click(rerun());
-    await user.click(destructive());
+    await block(user);
     expect(rerun()).toBeChecked(); // what it was before destructive actions were allowed
   });
 
-  it("keeps the rerun off after unticking when it was off before", async () => {
+  it("keeps the rerun off after blocking again when it was off before", async () => {
     const user = userEvent.setup();
     render(<NewTestForm />);
     await openAdvanced(user);
     await user.click(rerun());
-    await user.click(destructive());
-    await user.click(destructive());
+    await allow(user);
+    await block(user);
     expect(rerun()).not.toBeChecked();
   });
 
@@ -488,7 +500,7 @@ describe("NewTestForm — destructive actions", () => {
     render(<NewTestForm />);
     await openAdvanced(user);
     await user.click(screen.getByLabelText(/generate a playwright test/i));
-    await user.click(destructive());
+    await allow(user);
     expect(screen.queryByText(/rerun is off/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/destructive actions will run twice/i)).not.toBeInTheDocument();
   });
@@ -499,8 +511,7 @@ describe("NewTestForm — destructive actions", () => {
     render(<NewTestForm />);
     await fill(user, "https://Shop.Example.com:8443/");
     await user.click(screen.getByLabelText("Production"));
-    await openAdvanced(user);
-    await user.click(destructive());
+    await allow(user);
     expect(screen.getByText(/this run can create, change or delete real data/i)).toHaveTextContent(
       "This run can create, change or delete real data and place real orders or payments on shop.example.com:8443.",
     );
@@ -516,16 +527,14 @@ describe("NewTestForm — destructive actions", () => {
   it.each([
     ["", "left empty"],
     ["shop.example.com", "without the port"],
-  ])("in production refuses to start with the confirmation %j (%s), on the field, opening Advanced options", async (typed) => {
+  ])("in production refuses to start with the confirmation %j (%s), on the field", async (typed) => {
     const user = userEvent.setup();
     const fetch = mockFetch();
     render(<NewTestForm />);
     await fill(user, "https://shop.example.com:8443");
     await user.click(screen.getByLabelText("Production"));
-    await openAdvanced(user);
-    await user.click(destructive());
+    await allow(user);
     if (typed) await user.type(screen.getByLabelText(/to confirm$/i), typed);
-    await openAdvanced(user); // collapse it: the submit must open it again
     await user.click(screen.getByRole("button", { name: /start test/i }));
     const field = screen.getByLabelText(/to confirm$/i);
     expect(field).toHaveAttribute("aria-invalid", "true");
@@ -540,8 +549,7 @@ describe("NewTestForm — destructive actions", () => {
     render(<NewTestForm />);
     await fill(user, "https://shop.example.com");
     await user.click(screen.getByLabelText("Production"));
-    await openAdvanced(user);
-    await user.click(destructive());
+    await allow(user);
     await user.type(screen.getByLabelText(/to confirm$/i), "shop.example.com");
     await user.clear(screen.getByLabelText(/website url/i));
     await user.type(screen.getByLabelText(/website url/i), "https://other.example.com");
@@ -554,8 +562,7 @@ describe("NewTestForm — destructive actions", () => {
     const user = userEvent.setup();
     render(<NewTestForm />);
     await user.click(screen.getByLabelText("Production"));
-    await openAdvanced(user);
-    await user.click(destructive());
+    await allow(user);
     expect(screen.getByText("Enter the website URL first.")).toBeInTheDocument();
     expect(screen.queryByLabelText(/to confirm$/i)).not.toBeInTheDocument();
   });
@@ -566,8 +573,7 @@ describe("NewTestForm — destructive actions", () => {
     const { container } = render(<NewTestForm />);
     await user.type(screen.getByLabelText(/requirement/i), "A user can delete a saved address.");
     await user.click(screen.getByLabelText("Production"));
-    await openAdvanced(user);
-    await user.click(destructive());
+    await allow(user);
     await user.type(screen.getByLabelText(/website url/i), "not-a-url");
     await user.click(screen.getByRole("button", { name: /start test/i }));
 
@@ -588,8 +594,7 @@ describe("NewTestForm — destructive actions", () => {
     render(<NewTestForm />);
     await fill(user, "https://shop.example.com");
     await user.click(screen.getByLabelText("Production"));
-    await openAdvanced(user);
-    await user.click(destructive());
+    await allow(user);
     await user.type(screen.getByLabelText(/to confirm$/i), "shop.example.com");
     await user.click(screen.getByLabelText("Staging"));
     await user.click(screen.getByRole("button", { name: /start test/i }));
@@ -599,70 +604,79 @@ describe("NewTestForm — destructive actions", () => {
   });
 });
 
-describe("NewTestForm: model and reasoning (Advanced options)", () => {
+describe("NewTestForm: model and reasoning (chips in the requirement box)", () => {
   const created = () => json(202, { runId: "run_3", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_3/events" });
-  const openAdvanced = async (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByText("Advanced options"));
+  const modelChip = () => screen.getByRole("button", { name: /^Model:/ });
+  const reasoningChip = () => screen.queryByRole("button", { name: /^Reasoning:/ });
+  const ready = () => waitFor(() => expect(modelChip()).toBeEnabled());
 
-  it("offers the default model first, then the catalog by provider; a model whose provider has no key is disabled", async () => {
+  it("shows the default model; its menu offers Default first, then the catalog by provider; a model with no key is disabled", async () => {
     const user = userEvent.setup();
     mockFetch();
     render(<NewTestForm />);
-    await openAdvanced(user);
-    const model = screen.getByLabelText("Model");
-    await waitFor(() => expect(model).toBeEnabled());
-    expect(within(model).getAllByRole("option")[0]).toHaveTextContent("Default — Claude Sonnet 5");
-    expect(within(model).getAllByRole("group").map((g) => g.getAttribute("label"))).toEqual(["Anthropic", "Google Gemini", "Development"]);
-    expect(within(model).getByRole("option", { name: "Gemini 3.8 Flash — add a key" })).toBeDisabled();
+    await ready();
+    expect(modelChip()).toHaveAccessibleName("Model: Claude Sonnet 5");
+    await user.click(modelChip());
+    const list = screen.getByRole("listbox", { name: "Model" });
+    expect(within(list).getAllByRole("option")[0]).toHaveAccessibleName("Default (Claude Sonnet 5)");
+    expect(within(list).getAllByRole("group").map((g) => g.getAttribute("aria-label"))).toEqual(["Anthropic", "Google Gemini", "Development"]);
+    const gemini = within(list).getByRole("option", { name: "Gemini 3.8 Flash" });
+    expect(gemini).toHaveAttribute("aria-disabled", "true");
+    expect(gemini).toHaveAccessibleDescription("Add a key in Settings");
   });
 
   it.each([
     ["nothing changed: no llm at all", {}, undefined],
-    ["a model", { model: "claude-opus-5-5" }, { model: "claude-opus-5-5" }],
-    ["a level for the default model", { reasoning: "high" }, { reasoning: "high" }],
-    ["both", { model: "claude-opus-5-5", reasoning: "low" }, { model: "claude-opus-5-5", reasoning: "low" }],
+    ["a model", { model: "Claude Opus 5.5" }, { model: "claude-opus-5-5" }],
+    ["a level for the default model", { reasoning: "High" }, { reasoning: "high" }],
+    ["both", { model: "Claude Opus 5.5", reasoning: "Low" }, { model: "claude-opus-5-5", reasoning: "low" }],
   ] as const)("the body carries llm only for what was changed: %s", async (_what, pick, expected) => {
     const user = userEvent.setup();
     const fetch = mockFetch(created());
     render(<NewTestForm />);
     await fillValid(user);
-    await openAdvanced(user);
-    await waitFor(() => expect(screen.getByLabelText("Model")).toBeEnabled());
-    if ("model" in pick) await user.selectOptions(screen.getByLabelText("Model"), pick.model);
-    if ("reasoning" in pick) await user.selectOptions(screen.getByLabelText("Reasoning"), pick.reasoning);
+    await ready();
+    if ("model" in pick) await choose(user, /^Model:/, pick.model);
+    if ("reasoning" in pick) await choose(user, /^Reasoning:/, pick.reasoning);
     await user.click(screen.getByRole("button", { name: /start test/i }));
     await waitFor(() => expect(push).toHaveBeenCalled());
     expect(bodyOf(fetch).llm).toEqual(expected);
   });
 
-  it("the reasoning options are the chosen model's; a level it lacks goes back to Default", async () => {
+  it("the reasoning levels are the chosen model's; a model that does not reason hides the chip and goes back to Default", async () => {
     const user = userEvent.setup();
-    mockFetch();
+    const fetch = mockFetch(created());
     render(<NewTestForm />);
-    await openAdvanced(user);
-    const reasoning = screen.getByLabelText("Reasoning");
-    await waitFor(() => expect(reasoning).toBeEnabled());
-    expect(within(reasoning).getAllByRole("option").map((o) => o.textContent)).toEqual(["Default", "Low", "Medium", "High"]);
-    await user.selectOptions(reasoning, "high");
-    await user.selectOptions(screen.getByLabelText("Model"), "claude-haiku-4-5");
-    expect(within(reasoning).getAllByRole("option").map((o) => o.textContent)).toEqual(["Default"]);
-    expect(reasoning).toHaveValue("");
+    await fillValid(user);
+    await ready();
+    expect(reasoningChip()).toHaveAccessibleName("Reasoning: Default");
+    await user.click(reasoningChip()!);
+    expect(screen.getAllByRole("option").map((o) => o.querySelector(".composer-option-label")!.textContent)).toEqual(["Default", "Low", "Medium", "High"]);
+    expect(screen.getByRole("option", { name: "Default" })).toHaveAccessibleDescription("Model default (high)");
+    await user.click(screen.getByRole("option", { name: "High" }));
+    expect(reasoningChip()).toHaveAccessibleName("Reasoning: High");
+    await choose(user, /^Model:/, "Claude Haiku 4.5");
+    expect(reasoningChip()).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /start test/i }));
+    await waitFor(() => expect(push).toHaveBeenCalled());
+    expect(bodyOf(fetch).llm).toEqual({ model: "claude-haiku-4-5" });
   });
 
-  it("when the catalog can't be loaded, the selects give way to a notice and the default model is used", async () => {
+  it("when the catalog can't be loaded, the chips give way to a notice and the default model is used", async () => {
     const user = userEvent.setup();
     vi.mocked(getLlmSettings).mockRejectedValue(new Error("down"));
     const fetch = mockFetch(created());
     render(<NewTestForm />);
-    await openAdvanced(user);
     expect(await screen.findByText("Model choices couldn't be loaded; the default model will be used.")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Model")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Model:/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Actions:/ })).toBeInTheDocument();
     await fillValid(user);
     await user.click(screen.getByRole("button", { name: /start test/i }));
     await waitFor(() => expect(push).toHaveBeenCalled());
     expect(bodyOf(fetch)).not.toHaveProperty("llm");
   });
 
-  it("a 422 MODEL_NOT_AVAILABLE on the model lands on the Model field, opening Advanced options", async () => {
+  it("a 422 MODEL_NOT_AVAILABLE on the model lands on the Model chip, with the message under the box", async () => {
     const user = userEvent.setup();
     mockFetch(
       json(422, {
@@ -673,16 +687,13 @@ describe("NewTestForm: model and reasoning (Advanced options)", () => {
     );
     render(<NewTestForm />);
     await fillValid(user);
-    await openAdvanced(user);
-    await waitFor(() => expect(screen.getByLabelText("Model")).toBeEnabled());
-    await user.selectOptions(screen.getByLabelText("Model"), "claude-opus-5-5");
-    await user.click(screen.getByText("Advanced options")); // collapse it again
+    await ready();
+    await choose(user, /^Model:/, "Claude Opus 5.5");
     await user.click(screen.getByRole("button", { name: /start test/i }));
 
-    const model = screen.getByLabelText("Model");
-    await waitFor(() => expect(model).toHaveAttribute("aria-invalid", "true"));
-    expect(model).toHaveAccessibleDescription(/Add a Google Gemini API key in Settings/);
-    expect(model.closest("details")).toHaveAttribute("open");
+    await waitFor(() => expect(modelChip()).toHaveAttribute("aria-invalid", "true"));
+    expect(modelChip()).toHaveAccessibleDescription(/Add a Google Gemini API key in Settings/);
+    expect(modelChip()).toHaveFocus();
     expect(push).not.toHaveBeenCalled();
   });
 
@@ -703,18 +714,18 @@ describe("NewTestForm: model and reasoning (Advanced options)", () => {
     expect(within(banner).getByRole("link", { name: "Open Settings" })).toHaveAttribute("href", "/settings");
   });
 
-  it("the Advanced options summary names an overridden model and level", async () => {
+  it("the chips show the chosen model and level; Advanced options no longer mention them", async () => {
     const user = userEvent.setup();
     mockFetch();
     render(<NewTestForm />);
     const summary = screen.getByText("Advanced options").closest("summary")!;
-    await user.click(summary);
-    await waitFor(() => expect(screen.getByLabelText("Model")).toBeEnabled());
+    await ready();
+    await choose(user, /^Model:/, "Claude Opus 5.5");
+    await choose(user, /^Reasoning:/, "High");
+    expect(modelChip()).toHaveAccessibleName("Model: Claude Opus 5.5");
+    expect(reasoningChip()).toHaveAccessibleName("Reasoning: High");
     expect(summary).toHaveTextContent("40 steps · 5 min · rerun on");
-    await user.selectOptions(screen.getByLabelText("Model"), "claude-opus-5-5");
-    expect(summary).toHaveTextContent("Claude Opus 5.5 · 40 steps · 5 min · rerun on");
-    await user.selectOptions(screen.getByLabelText("Reasoning"), "high");
-    expect(summary).toHaveTextContent("Claude Opus 5.5 · high reasoning · 40 steps · 5 min · rerun on");
+    expect(summary).not.toHaveTextContent("Opus");
   });
 });
 

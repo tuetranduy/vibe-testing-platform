@@ -1661,6 +1661,188 @@ input[type="radio"] {
   border-color: var(--border-strong);
 }
 
+/* The requirement box's toolbar: model, reasoning and actions pickers, as in Claude Code's prompt box. */
+.prompt-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-soft);
+}
+.prompt-toolbar-spacer {
+  flex: 1 1 auto;
+}
+.prompt-toolbar-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-subtle);
+  font-size: 0.8125rem;
+}
+.composer-menu {
+  position: relative;
+  min-width: 0;
+}
+.composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 4px 8px 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.composer-chip:hover:not(:disabled),
+.composer-chip[aria-expanded="true"] {
+  color: var(--text);
+  background: var(--surface-muted);
+  border-color: var(--border);
+}
+.composer-chip:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.composer-chip[aria-invalid="true"] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.composer-chip-warning,
+.composer-chip-warning:hover:not(:disabled),
+.composer-chip-warning[aria-expanded="true"] {
+  color: var(--warning);
+  background: var(--warning-bg);
+  border-color: var(--warning-border);
+}
+.composer-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-chip .icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.composer-chip .composer-chip-chevron {
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.composer-chip[aria-expanded="true"] .composer-chip-chevron {
+  transform: rotate(180deg);
+}
+.composer-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  width: max-content;
+  min-width: 220px;
+  max-width: min(340px, calc(100vw - 32px));
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-lg);
+}
+.composer-popover:focus {
+  outline: none;
+}
+.composer-popover-start {
+  left: 0;
+}
+.composer-popover-end {
+  right: 0;
+}
+.composer-popover ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.composer-group-label {
+  display: block;
+  padding: 8px 10px 4px;
+  color: var(--text-subtle);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.composer-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.composer-option.is-active {
+  background: var(--surface-hover);
+}
+.composer-option[aria-disabled="true"] {
+  color: var(--text-subtle);
+  cursor: default;
+}
+.composer-option-check {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 20px;
+  color: var(--accent, var(--focus));
+}
+.composer-option-check .icon {
+  width: 14px;
+  height: 14px;
+}
+.composer-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.composer-option-hint {
+  color: var(--text-subtle);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+/* Narrow screens: a menu spans the toolbar instead of hanging off its chip, so it never leaves the screen. */
+@media (max-width: 560px) {
+  .prompt-toolbar {
+    position: relative;
+  }
+  .composer-menu {
+    position: static;
+  }
+  .composer-popover,
+  .composer-popover-start,
+  .composer-popover-end {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+  }
+}
+
 .env-row {
   display: flex;
   flex-wrap: wrap;

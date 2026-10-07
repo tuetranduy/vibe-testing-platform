@@ -27,9 +27,9 @@ import {
   listTestDataSets,
 } from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
+import { ComposerMenu, type MenuOption } from "./ComposerMenu";
 import { Icon, type IconName } from "./Icon";
-import { LEVEL_LABEL } from "./llm-format";
-import { ModelOptions } from "./ModelOptions";
+import { LEVEL_LABEL, modelDefaultLabel, modelGroups } from "./llm-format";
 import { plural } from "./report-format";
 
 interface DataRow {
@@ -106,6 +106,20 @@ const fid = {
   credentialProfile: "credentialProfileId",
 };
 
+/** The actions mode, chosen in the requirement box like Claude Code's permission mode. */
+const ACTION_MODES: MenuOption<"safe" | "destructive">[] = [
+  { value: "safe", label: "Safe actions", hint: "Deleting, ordering, paying and other lasting changes are blocked" },
+  { value: "destructive", label: "Destructive allowed", hint: "The test may create, change or delete data, place orders and pay" },
+];
+
+/** What each reasoning level trades, as the Reasoning menu says it. */
+const LEVEL_HINT: Record<Exclude<ReasoningLevel, "default">, string> = {
+  minimal: "Fastest: little or no thinking",
+  low: "Faster and cheaper",
+  medium: "Balanced",
+  high: "Most thorough: slower and costlier",
+};
+
 /** The URL's host as the API compares it (lowercase, with a non-default port), or null while the URL is invalid. */
 function hostOf(url: string): string | null {
   return HttpUrlSchema.safeParse(url).success ? new URL(url).host : null;
@@ -115,12 +129,6 @@ function hostOf(url: string): string | null {
 function llmOverride(model: string, reasoning: ReasoningLevel | ""): LlmOverride | undefined {
   if (!model && !reasoning) return undefined;
   return { ...(model ? { model } : {}), ...(reasoning ? { reasoning } : {}) };
-}
-
-/** "Claude Opus 5.5 · high reasoning": the overridden model and level, for the Advanced options summary. */
-function llmSummary(catalog: Catalog, model: string, reasoning: ReasoningLevel | ""): string | null {
-  const label = model && catalog.status === "ready" ? (catalog.view.models.find((m) => m.id === model)?.label ?? model) : null;
-  return [label, reasoning ? `${reasoning} reasoning` : null].filter(Boolean).join(" · ") || null;
 }
 
 function build(
@@ -396,6 +404,20 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   /** The model the Reasoning select describes: the one chosen, else the default one (when it is in the catalog). */
   const effectiveModel = catalog.status === "ready" ? catalog.view.models.find((m) => m.id === (llmModel || catalog.view.defaults.model)) : undefined;
   const levels = (effectiveModel?.reasoningLevels ?? []).filter((l): l is Exclude<ReasoningLevel, "default"> => l !== "default");
+  const defaults = catalog.status === "ready" ? catalog.view.defaults : null;
+  const modelOptions: MenuOption<string>[] = [
+    { value: "", label: defaults ? `Default (${defaults.label})` : "Default", hint: "The default model in Settings" },
+    ...(catalog.status === "ready"
+      ? modelGroups(catalog.view.models).flatMap((g) =>
+          g.models.map((m) => ({ value: m.id, label: m.label, group: g.label, disabled: !m.available, ...(m.available ? {} : { hint: "Add a key in Settings" }) })),
+        )
+      : []),
+  ];
+  const modelDisplay = (llmModel && catalog.status === "ready" ? catalog.view.models.find((m) => m.id === llmModel)?.label : null) ?? defaults?.label ?? "Default model";
+  const reasoningOptions: MenuOption<ReasoningLevel | "">[] = [
+    { value: "", label: "Default", hint: modelDefaultLabel(effectiveModel) },
+    ...levels.map((l) => ({ value: l, label: LEVEL_LABEL[l], hint: LEVEL_HINT[l] })),
+  ];
   const chooseModel = (id: string) => {
     setLlmModel(id);
     const next = catalog.status === "ready" ? catalog.view.models.find((m) => m.id === (id || catalog.view.defaults.model)) : undefined;
@@ -579,6 +601,53 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
                 ))}
               </div>
             )}
+            <div className="prompt-toolbar" role="group" aria-label="Model and actions">
+              {catalog.status === "failed" ? (
+                <span className="prompt-toolbar-note">
+                  <Icon name="info" /> Model choices couldn&apos;t be loaded; the default model will be used.
+                </span>
+              ) : (
+                <>
+                  <ComposerMenu
+                    id={fid.llm("model")}
+                    label="Model"
+                    icon="sparkle"
+                    value={llmModel}
+                    display={modelDisplay}
+                    options={modelOptions}
+                    onChange={chooseModel}
+                    disabled={catalog.status !== "ready"}
+                    invalid={Boolean(errors[fid.llm("model")])}
+                    describedBy={describedBy(fid.llm("model"))}
+                  />
+                  {levels.length > 0 && (
+                    <ComposerMenu<ReasoningLevel | "">
+                      id={fid.llm("reasoning")}
+                      label="Reasoning"
+                      icon="gauge"
+                      value={llmReasoning}
+                      display={llmReasoning && llmReasoning !== "default" ? LEVEL_LABEL[llmReasoning] : "Default"}
+                      options={reasoningOptions}
+                      onChange={setLlmReasoning}
+                      invalid={Boolean(errors[fid.llm("reasoning")])}
+                      describedBy={describedBy(fid.llm("reasoning"))}
+                    />
+                  )}
+                </>
+              )}
+              <span className="prompt-toolbar-spacer" />
+              <ComposerMenu
+                id={fid.option("allowDestructiveActions")}
+                label="Actions"
+                icon={options.allowDestructiveActions ? "warning" : "shield"}
+                value={options.allowDestructiveActions ? "destructive" : "safe"}
+                display={options.allowDestructiveActions ? "Destructive allowed" : "Safe actions"}
+                options={ACTION_MODES}
+                onChange={(mode) => toggleDestructive(mode === "destructive")}
+                tone={options.allowDestructiveActions ? "warning" : undefined}
+                align="end"
+              />
+            </div>
           </div>
           <p id="requirement-hint" className="hint">
             One behaviour per test works best: name the page, the action, and what you expect to see. Leave it empty and the agent
@@ -594,6 +663,8 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
             </p>
           )}
           {fieldError(fid.requirement)}
+          {fieldError(fid.llm("model"))}
+          {fieldError(fid.llm("reasoning"))}
         </div>
 
         <fieldset className="field">
@@ -614,9 +685,53 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
                 </label>
               ))}
             </div>
-            <p className="hint">Destructive actions are blocked unless you allow them under Advanced options.</p>
+            <p className="hint">
+              {options.allowDestructiveActions
+                ? "Destructive actions are allowed for this run (Actions in the requirement box)."
+                : "Destructive actions are blocked unless you allow them with Actions in the requirement box."}
+            </p>
           </div>
         </fieldset>
+        {options.allowDestructiveActions &&
+          options.generatePlaywright &&
+          (rerunOn ? (
+            <p className="hint hint-warning">
+              <Icon name="warning" /> Destructive actions will run twice: once while exploring and again in the rerun.
+            </p>
+          ) : (
+            <p className="hint">
+              <Icon name="info" /> Rerun is off: it repeats the whole test, so destructive actions would run a second time. You can turn it
+              back on.
+            </p>
+          ))}
+        {environment === "production" && options.allowDestructiveActions && (
+          <div className="danger-panel">
+            {host === null ? (
+              <p>Enter the website URL first.</p>
+            ) : (
+              <>
+                <p>
+                  This run can create, change or delete real data and place real orders or payments on <strong>{host}</strong>.
+                </p>
+                <div className="field">
+                  <label htmlFor={fid.option("confirmProductionHost")}>
+                    Type <strong>{host}</strong> to confirm
+                  </label>
+                  <input
+                    id={fid.option("confirmProductionHost")}
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={options.confirmProductionHost}
+                    onChange={(e) => setOption("confirmProductionHost", e.target.value)}
+                    aria-invalid={errors[fid.option("confirmProductionHost")] ? true : undefined}
+                    aria-describedby={describedBy(fid.option("confirmProductionHost"))}
+                  />
+                  {fieldError(fid.option("confirmProductionHost"))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="form-sections">
@@ -802,52 +917,9 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
         <FormSection
           icon="sliders"
           title="Advanced options"
-          description="Model and reasoning, step and time limits, the Playwright test, confirmation and extra hosts."
-          summary={[llmSummary(catalog, llmModel, llmReasoning), optionsSummary(options)].filter(Boolean).join(" · ")}
+          description="Step and time limits, the Playwright test, recordings, confirmation and extra hosts."
+          summary={optionsSummary(options)}
         >
-          {catalog.status === "failed" ? (
-            <p className="hint">
-              <Icon name="info" /> Model choices couldn&apos;t be loaded; the default model will be used.
-            </p>
-          ) : (
-            <div className="field-pair">
-              <div className="field">
-                <label htmlFor={fid.llm("model")}>Model</label>
-                <select
-                  id={fid.llm("model")}
-                  value={llmModel}
-                  onChange={(e) => chooseModel(e.target.value)}
-                  disabled={catalog.status !== "ready"}
-                  aria-invalid={errors[fid.llm("model")] ? true : undefined}
-                  aria-describedby={describedBy(fid.llm("model"))}
-                >
-                  <option value="">{catalog.status === "ready" ? `Default — ${catalog.view.defaults.label}` : "Default"}</option>
-                  {catalog.status === "ready" && <ModelOptions models={catalog.view.models} />}
-                </select>
-                {fieldError(fid.llm("model"))}
-              </div>
-              <div className="field">
-                <label htmlFor={fid.llm("reasoning")}>Reasoning</label>
-                <select
-                  id={fid.llm("reasoning")}
-                  value={llmReasoning}
-                  onChange={(e) => setLlmReasoning(e.target.value as ReasoningLevel | "")}
-                  disabled={catalog.status !== "ready"}
-                  aria-invalid={errors[fid.llm("reasoning")] ? true : undefined}
-                  aria-describedby={describedBy(fid.llm("reasoning"))}
-                >
-                  <option value="">Default</option>
-                  {levels.map((level) => (
-                    <option key={level} value={level}>
-                      {LEVEL_LABEL[level]}
-                    </option>
-                  ))}
-                </select>
-                {fieldError(fid.llm("reasoning"))}
-              </div>
-            </div>
-          )}
-
           <div className="field-pair">
             <div className="field">
               <label htmlFor={fid.option("maxExplorationSteps")}>Max exploration steps</label>
@@ -920,51 +992,6 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
             />
             Confirm criteria automatically (skip the review step)
           </label>
-          <label className="choice">
-            <input type="checkbox" checked={options.allowDestructiveActions} onChange={(e) => toggleDestructive(e.target.checked)} />
-            Allow destructive actions (create, change or delete data, place orders, pay)
-          </label>
-          {options.allowDestructiveActions &&
-            options.generatePlaywright &&
-            (rerunOn ? (
-              <p className="hint hint-warning">
-                <Icon name="warning" /> Destructive actions will run twice: once while exploring and again in the rerun.
-              </p>
-            ) : (
-              <p className="hint">
-                <Icon name="info" /> Rerun is off: it repeats the whole test, so destructive actions would run a second time. You can turn it
-                back on.
-              </p>
-            ))}
-          {environment === "production" && options.allowDestructiveActions && (
-            <div className="danger-panel">
-              {host === null ? (
-                <p>Enter the website URL first.</p>
-              ) : (
-                <>
-                  <p>
-                    This run can create, change or delete real data and place real orders or payments on <strong>{host}</strong>.
-                  </p>
-                  <div className="field">
-                    <label htmlFor={fid.option("confirmProductionHost")}>
-                      Type <strong>{host}</strong> to confirm
-                    </label>
-                    <input
-                      id={fid.option("confirmProductionHost")}
-                      autoComplete="off"
-                      spellCheck={false}
-                      value={options.confirmProductionHost}
-                      onChange={(e) => setOption("confirmProductionHost", e.target.value)}
-                      aria-invalid={errors[fid.option("confirmProductionHost")] ? true : undefined}
-                      aria-describedby={describedBy(fid.option("confirmProductionHost"))}
-                    />
-                    {fieldError(fid.option("confirmProductionHost"))}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
           <div className="field">
             <label htmlFor={fid.option("additionalAllowedHosts")}>Additional allowed hosts</label>
             <p id="hosts-hint" className="hint">
@@ -1048,7 +1075,6 @@ function optionsSummary(o: Options): string {
     seconds !== null ? (seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds}s`) : null,
     !o.generatePlaywright ? "no Playwright test" : o.rerunGeneratedTest ? "rerun on" : "no rerun",
     o.autoConfirmCriteria ? "auto-confirm" : null,
-    o.allowDestructiveActions ? "destructive allowed" : null,
     o.useExplorationCache ? null : "no cache",
     o.recordVideo ? null : "no video",
     o.recordTrace ? null : "no trace",
