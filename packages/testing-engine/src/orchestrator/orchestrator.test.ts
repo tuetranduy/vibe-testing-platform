@@ -84,6 +84,7 @@ function ports(start: RunLifecycle) {
     saveSuggestions: async (draft) => (saved = SuggestionSetSchema.parse({ ...draft, selected: null })),
     saveSiteAnalysis: async (a) => void siteAnalyses.push(a),
     applyTestData: async (values) => void applied.push(values),
+    getSiteAnalysis: async () => null,
   };
   return {
     ports: p,
@@ -278,6 +279,28 @@ describe("V1.3: the live-site analysis, suggested test data and blocked evidence
     await runAnalysis(context(request("A user can register with an email address.", { autoConfirmCriteria: true })), p.ports, withAnalysis());
     expect(p.applied).toEqual([{ email: "qa.abc123@example.com" }]);
     expect(p.transitions.map(([to]) => to)).toEqual(["ANALYZING_REQUIREMENT", "PLANNING"]);
+  });
+
+  it("execution first takes every suggested value the run still lacks, a manually confirmed run's too (2026-10-07)", async () => {
+    const p = ports("PLANNING");
+    p.ports.getConfirmedRequirement = async () => ({
+      ...(await createFakeStages().analyze(context(request("A user can register with an email address.")))),
+      runId: "run_1",
+      revision: 1,
+      confirmedAt: "2026-09-30T10:00:00.000Z",
+    });
+    p.ports.getSiteAnalysis = async () => ({
+      ...siteAnalysis,
+      testData: [...siteAnalysis.testData, { key: "city", value: "Springfield", description: "City", source: "GENERATED" as const }],
+      appliedKeys: [],
+    });
+    const stages = createFakeStages();
+    let appliedBeforePlanning = -1;
+    const plan = stages.plan;
+    stages.plan = async (ctx, requirement) => ((appliedBeforePlanning = p.applied.length), plan(ctx, requirement));
+    await runExecution(context({ ...request("A user can register with an email address."), testData: { city: "Oslo" } }), p.ports, stages);
+    expect(p.applied).toEqual([{ email: "qa.abc123@example.com" }]); // the user's own city is kept
+    expect(appliedBeforePlanning).toBe(1);
   });
 
   it("every criterion blocked: the evidence captured instead of exploring reaches the report", async () => {

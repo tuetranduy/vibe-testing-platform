@@ -89,9 +89,8 @@ describe("analyze-run", () => {
     const after = await new RunRepository(h.tdb.db).getById(run.id);
     expect(after.lifecycle).toBe("ERRORED");
     expect(after.errorCategory).toBe("MODEL_PROVIDER");
-    expect(after.errorMessage).not.toContain("pw-123456");
     const errored = (await eventsOf(h, run.id)).find((e) => e.type === "run.errored")!;
-    expect(errored.payload).toEqual({ category: "MODEL_PROVIDER", message: "provider 503 for [REDACTED]" });
+    expect(errored.payload).toEqual({ category: "MODEL_PROVIDER", message: "provider 503 for pw-123456" });
     expect(await new SecretRepository(h.tdb.db).listActive(run.id)).toHaveLength(0);
   });
 
@@ -204,7 +203,7 @@ describe("analyze-run: the survey and the selection", () => {
     expect((await eventsOf(h, run.id)).map((e) => e.type)).toEqual(["stage.started", "criteria.proposed", "stage.completed"]);
   });
 
-  it("masks the run's secret values in a selected text before the model sees it, and stores the masked text", async () => {
+  it("a secret value in a selected text reaches the model and the stored text as typed (secrets are not redacted)", async () => {
     const secret = "pw-Sel3cted-Secret";
     const run = await seedRun(h, { lifecycle: "AWAITING_SELECTION", requirement: "", secrets: { password: secret } });
     const edited = `Sign in with the password ${secret} and see the account page.`;
@@ -221,7 +220,7 @@ describe("analyze-run: the survey and the selection", () => {
       }),
       run.id,
     );
-    expect(analysed).toBe("Sign in with the password [REDACTED] and see the account page.");
+    expect(analysed).toBe(edited);
     expect((await new RunRepository(h.tdb.db).getById(run.id)).request.requirement).toBe(analysed);
     expect((await new RequirementRepository(h.tdb.db).getLatest(run.id)).originalText).toBe(analysed);
   });

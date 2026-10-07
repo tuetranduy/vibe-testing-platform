@@ -2,6 +2,12 @@ import { createRunRedactor } from "@platform/security";
 import { describe, expect, it } from "vitest";
 import { INVENTORY_MAX_BYTES, INVENTORY_SCRIPT, capInventory, parseRawInventory, toPageInventory, type RawPageInventory } from "./inventory";
 
+/** A redactor that masks the given values: the run's redactor is key-based, but the plumbing applies whatever it is given. */
+const maskValues =
+  (...values: string[]) =>
+  (v: unknown): unknown =>
+    JSON.parse(values.reduce((json, s) => json.split(s).join("[REDACTED]"), JSON.stringify(v) ?? "null"));
+
 const raw = (patch: Partial<RawPageInventory> = {}): RawPageInventory => ({
   title: "Your cart · Demo Shop",
   description: "",
@@ -48,7 +54,7 @@ describe("toPageInventory", () => {
     const secret = "hunter2-Very-Secret";
     const inventory = toPageInventory(
       raw({ title: `Welcome back ${secret}`, headings: [{ level: 2, text: `Code ${secret}` }], buttons: [`Copy ${secret}`] }),
-      createRunRedactor([secret]),
+      maskValues(secret),
     );
     expect(JSON.stringify(inventory)).not.toContain(secret);
     expect(inventory.title).toBe("Welcome back [REDACTED]");

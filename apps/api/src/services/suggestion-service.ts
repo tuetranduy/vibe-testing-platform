@@ -18,7 +18,7 @@ import {
   type RunScope,
 } from "@platform/db";
 import { createRunEventPublisher, type RunEventPublisher } from "@platform/event-bus";
-import { encryptSecret, redactByKey, redactFingerprintedSecrets, secretFingerprint } from "@platform/security";
+import { encryptSecret, redactByKey, secretFingerprint } from "@platform/security";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 import { NO_VERDICT, observeStage } from "../metrics";
@@ -89,16 +89,11 @@ export class SuggestionService {
     if (!suggestion) throw unknownSuggestion(suggestionId);
     const text = parsed.data.requirement ?? suggestion.requirement;
     const edited = text !== suggestion.requirement;
-    // Secret plaintext never reaches the API (D7): the run's secret values are found by their
-    // fingerprints and masked before the text is stored, so a value typed into the edit never lands
-    // in the database even if no worker ever picks the run up. The worker's run redactor also masks
-    // encoded forms before any model sees it.
     const secretRepo = new SecretRepository(this.deps.db);
-    const fingerprints = await secretRepo.listFingerprints(runId);
     // Credentials written into the chosen text are used, not ignored (V1.3.1), as at creation: passwords become
     // the run's secrets (encrypted here) and leave the text, emails and usernames become its test data.
     const inline = await this.takeInlineInputs(runId, run.request, text, await secretRepo.listNames(runId));
-    const requirement = redactFingerprintedSecrets(redactByKey(inline) as string, fingerprints, this.deps.config.secretsKey);
+    const requirement = redactByKey(inline) as string;
 
     let selected: Awaited<ReturnType<SuggestionRepository["select"]>>;
     try {

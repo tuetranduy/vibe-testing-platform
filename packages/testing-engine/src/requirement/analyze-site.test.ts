@@ -9,6 +9,12 @@ import type { SurveySandbox } from "../survey/site-reader";
 import { createAnalyzeStage, linkRelevance, requirementWords } from "./compiler";
 import { validateInsights } from "./insights";
 
+/** A redactor that masks the given values: the run's redactor is key-based, but the plumbing applies whatever it is given. */
+const maskValues =
+  (...values: string[]) =>
+  (v: unknown): unknown =>
+    JSON.parse(values.reduce((json, s) => json.split(s).join("[REDACTED]"), JSON.stringify(v) ?? "null"));
+
 const ORIGIN = "https://shop.example.com";
 const TEXT = "A visitor can register an account with their email address and sees a welcome message.";
 const link = (text: string, path: string, area: "nav" | "main" = "nav"): SurveyLink => ({ text, url: `${ORIGIN}${path}`, area });
@@ -108,7 +114,7 @@ function setup(req: StoredTestRunRequest, reply: object = answer) {
     deadlineAt: null,
     budgets: { explorationMs: 60_000, rerunMs: 1000 },
     secrets: { names: [], get: () => undefined },
-    redact: createRunRedactor([]),
+    redact: createRunRedactor(),
     publish: async (e) => void events.push(e),
     addCleanup: () => {},
     boundary: async () => {},
@@ -264,7 +270,7 @@ describe("validateInsights", () => {
     const out = validateInsights({
       ...base,
       siteRead: true,
-      redact: createRunRedactor([secret]),
+      redact: maskValues(secret),
       output: { siteChecks: [], testData: [{ key: "email", value: `${secret}@example.com`, description: "", fromSite: false }] },
     });
     expect(JSON.stringify(out)).not.toContain(secret);

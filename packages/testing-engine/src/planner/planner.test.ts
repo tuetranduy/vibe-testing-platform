@@ -17,6 +17,12 @@ import { createRealStages } from "../orchestrator/real-stages";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
 import { actionPolicyFor, createPlanStage, planTest, type PlanTestInput } from "./planner";
 
+/** A redactor that masks the given values: the run's redactor is key-based, but the plumbing applies whatever it is given. */
+const maskValues =
+  (...values: string[]) =>
+  (v: unknown): unknown =>
+    JSON.parse(values.reduce((json, s) => json.split(s).join("[REDACTED]"), JSON.stringify(v) ?? "null"));
+
 // ---------------------------------------------------------------------------------------------
 // Fixtures
 
@@ -397,12 +403,13 @@ describe("planTest — model contract (one correction round, then ContractError)
     expect(lastCorrection(transport)).toMatch(/steps\.4\.inputRef.*required when kind = fill/);
   });
 
-  it("a fill step without an inputRef is corrected once, and the corrected plan still blocks MISSING_SECRET", async () => {
+  it("a fill step without an inputRef is corrected once; the corrected plan's unprovided secret blocks nothing", async () => {
     const bad = loginPlan();
     bad.steps[4]!.inputRef = null;
-    const { llm } = setup({ json: bad }, { json: loginPlan() });
+    const { llm, transport } = setup({ json: bad }, { json: loginPlan() });
     const plan = await planTest(llm, input(loginRequirement(), { testDataKeys: ["email"], secretNames: [] }));
-    expect(blocked(plan)).toEqual([["AC-1", "MISSING_SECRET"]]);
+    expect(transport.requests).toHaveLength(2);
+    expect(blocked(plan)).toEqual([]);
   });
 
   it("more than one login step → correction → ContractError", async () => {
@@ -433,20 +440,11 @@ describe("planTest — model contract (one correction round, then ContractError)
 });
 
 describe("planTest — deterministic blocking", () => {
-  it("inputRef to a secret name that was not provided → MISSING_SECRET for criteria that depend on that step only", async () => {
+  it("inputRefs to a secret and a test data key nobody provided block nothing: the values are generated when filled", async () => {
     const { llm } = setup({ json: loginPlan() });
-    const plan = await planTest(llm, input(loginRequirement(), { testDataKeys: ["email"], secretNames: [] }));
-    expect(blocked(plan)).toEqual([["AC-1", "MISSING_SECRET"]]);
-    expect(plan.blockedCriteria[0]!.detail).toMatch(/password/);
-    // AC-2's checkpoint is captured before the login steps: not affected.
+    const plan = await planTest(llm, input(loginRequirement(), { testDataKeys: [], secretNames: [] }));
+    expect(blocked(plan)).toEqual([]);
     expect(kinds(plan)).toContain("login");
-  });
-
-  it("inputRef to a test data key that was not provided → MISSING_TEST_DATA", async () => {
-    const { llm } = setup({ json: loginPlan() });
-    const plan = await planTest(llm, input(loginRequirement(), { testDataKeys: [], secretNames: ["password"] }));
-    expect(blocked(plan)).toEqual([["AC-1", "MISSING_TEST_DATA"]]);
-    expect(plan.blockedCriteria[0]!.detail).toMatch(/email/);
   });
 
   it("nothing blocked when the secret and test data are provided", async () => {
@@ -455,14 +453,13 @@ describe("planTest — deterministic blocking", () => {
     expect(plan.blockedCriteria).toEqual([]);
   });
 
-  it("a secret precondition that was not provided blocks the criterion even if no step references it", async () => {
+  it("a secret precondition that was not provided does not block the criterion", async () => {
     const out = loginPlan();
     out.steps = out.steps.filter((s) => s.kind !== "fill");
     const { llm } = setup({ json: out });
     const req = loginRequirement([{ kind: "secret", ref: "admin_token", description: "Admin token" }]);
     const plan = await planTest(llm, input(req, { secretNames: ["password"] }));
-    expect(blocked(plan)).toEqual([["AC-1", "MISSING_SECRET"]]);
-    expect(plan.blockedCriteria[0]!.detail).toMatch(/admin_token/);
+    expect(blocked(plan)).toEqual([]);
   });
 
   it("a step that fails assertActionAllowed truncates the scenario; criteria at or after it → DESTRUCTIVE_ACTION_NOT_AUTHORIZED", async () => {
@@ -541,7 +538,7 @@ describe("planTest — secrets", () => {
 
     const plan = await planTest(
       llm,
-      input(req, { testDataKeys: ["email"], secretNames: ["password"], redact: createRunRedactor([secret]) }),
+      input(req, { testDataKeys: ["email"], secretNames: ["password"], redact: maskValues(secret) }),
     );
 
     expect(sentText(transport)).not.toContain(secret);
@@ -562,7 +559,7 @@ function stageContext(request: StoredTestRunRequest, secrets: Record<string, str
     deadlineAt: null,
     budgets: { explorationMs: 1000, rerunMs: 1000 },
     secrets: { names: Object.keys(secrets), get: (n) => secrets[n] },
-    redact: createRunRedactor(Object.values(secrets)),
+    redact: createRunRedactor(),
     publish: async () => {},
     addCleanup: () => {},
     boundary: async () => {},
@@ -672,6 +669,7 @@ function executionPorts(requirement: NormalizedRequirement) {
     },
     saveSiteAnalysis: async () => {},
     applyTestData: async () => {},
+    getSiteAnalysis: async () => null,
   };
   return { ports, events, transitions, saved: () => saved, results: () => results };
 }
@@ -697,7 +695,7 @@ describe("plan stage behind runExecution (real planner, fake later stages)", () 
     expect(kinds(p.saved()!)).toContain("login");
     const created = p.events.find((e) => e.type === "plan.created")!;
     expect(created.message).toBe("Plan created with 8 steps");
-    expect(created.payload).toEqual({ stepCount: 8, blockedCriteria: [{ criterionId: "AC-1", reason: "MISSING_SECRET" }] });
+    expect(created.payload).toEqual({ stepCount: 8, blockedCriteria: [] });
     expect(p.transitions[0]).toBe("EXPLORING");
   });
 
@@ -746,8 +744,8 @@ describe("planTest with several scenarios (V1.1 F9)", () => {
       ["SC-1", "Visitor sees the banner", ["AC-2"], ["PS-1", "PS-2"]],
       ["SC-2", "Customer sees their orders", ["AC-1"], ["PS-3", "PS-4", "PS-5", "PS-6", "PS-7", "PS-8", "PS-9"]],
     ]);
-    // No password secret: only the signed-in scenario's criterion is blocked.
-    expect(plan.blockedCriteria.map((b) => [b.criterionId, b.reason])).toEqual([["AC-1", "MISSING_SECRET"]]);
+    // No password secret: nothing is blocked (it is generated when filled).
+    expect(plan.blockedCriteria).toEqual([]);
   });
 
   it("asks for a correction when a criterion's checkpoints are split across scenarios, or a scenario serves nothing", async () => {

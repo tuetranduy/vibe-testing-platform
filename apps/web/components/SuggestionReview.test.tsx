@@ -43,7 +43,7 @@ describe("SuggestionReview", () => {
     renderReview({ [`GET ${SUGGESTIONS}`]: () => json(200, suggestionsFixture()) });
     const needs = within(await cardOf("Sign in to the account")).getByRole("list", { name: /needs/i });
     const [password, email] = within(needs).getAllByRole("listitem");
-    expect(password).toHaveTextContent("password — not provided — start it as a separate test to add it");
+    expect(password).toHaveTextContent("password — not provided: the run will make one up (start it as a separate test to give your own)");
     expect(email).toHaveTextContent("email");
     expect(email).not.toHaveTextContent(/not provided/);
     expect(within(await cardOf("Search for a product")).queryByRole("list", { name: /needs/i })).not.toBeInTheDocument();

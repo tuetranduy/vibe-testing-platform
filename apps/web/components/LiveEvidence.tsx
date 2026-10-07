@@ -10,11 +10,9 @@ interface Props {
   screenshot: ScreenshotRef | null;
 }
 
-/** The latest screenshot of a running run, fetched through the proxy under the shared reveal rule. */
+/** The latest screenshot of a running run, fetched through the proxy. */
 export function LiveEvidence({ runId, screenshot }: Props) {
-  const { state, reveal, onLoadError } = useArtifactUrl(
-    screenshot ? { runId, artifactId: screenshot.artifactId, sensitivity: screenshot.sensitivity } : null,
-  );
+  const { state, onLoadError } = useArtifactUrl(screenshot ? { runId, artifactId: screenshot.artifactId } : null);
 
   return (
     <section className="ink evidence" aria-labelledby="evidence-title">
@@ -28,14 +26,6 @@ export function LiveEvidence({ runId, screenshot }: Props) {
         <div className="evidence-empty">
           <Icon name="image" />
           <p>No screenshot yet. Screenshots appear here as the run captures checkpoints.</p>
-        </div>
-      ) : state.status === "reveal-required" ? (
-        <div className="evidence-empty">
-          <Icon name="lock" />
-          <p>This screenshot may show entered credentials, so it is hidden until you ask for it.</p>
-          <button type="button" className="button button-on-ink" onClick={reveal}>
-            Reveal screenshot
-          </button>
         </div>
       ) : state.status === "ready" ? (
         <figure className="evidence-figure">

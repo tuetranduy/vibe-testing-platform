@@ -15,6 +15,12 @@ import type { EventDraft, RequirementDraft, StageContext } from "../orchestrator
 import { compileRequirement, createAnalyzeStage } from "./compiler";
 import { THRESHOLD_NOT_STATED } from "./post-validate";
 
+/** A redactor that masks the given values: the run's redactor is key-based, but the plumbing applies whatever it is given. */
+const maskValues =
+  (...values: string[]) =>
+  (v: unknown): unknown =>
+    JSON.parse(values.reduce((json, s) => json.split(s).join("[REDACTED]"), JSON.stringify(v) ?? "null"));
+
 const CART_TEXT = "A user can add a product to the cart. The cart count should increase.";
 
 /** What a well-behaved model returns for CART_TEXT. */
@@ -228,7 +234,7 @@ describe("compileRequirement", () => {
 
     await compileRequirement(llm, {
       ...input(text, { testData: { username: "alice.tester@example.com" }, secretNames: ["admin_password"] }),
-      redact: createRunRedactor([secret]),
+      redact: maskValues(secret),
     });
 
     const sent = sentText(transport);
@@ -251,7 +257,7 @@ function stageContext(request: StoredTestRunRequest, secrets: Record<string, str
     deadlineAt: null,
     budgets: { explorationMs: 1000, rerunMs: 1000 },
     secrets: { names: Object.keys(secrets), get: (n) => secrets[n] },
-    redact: createRunRedactor(Object.values(secrets)),
+    redact: createRunRedactor(),
     publish: async () => {},
     addCleanup: () => {},
     boundary: async () => {},
@@ -305,6 +311,7 @@ function fakePorts() {
     },
     saveSiteAnalysis: async () => {},
     applyTestData: async () => {},
+    getSiteAnalysis: async () => null,
   };
   return { ports, events, saved: () => saved, lifecycle: () => lifecycle };
 }
@@ -328,7 +335,7 @@ describe("analyze stage (real compiler behind runAnalysis)", () => {
     expect(p.lifecycle()).toBe("AWAITING_CONFIRMATION");
   });
 
-  it("the stage reads testData values and secret names from the context, and redacts with the run redactor", async () => {
+  it("the stage reads testData values and secret names from the context; a secret written in the requirement is not redacted", async () => {
     const secret = "pw-Very-Secret-77";
     const { llm, transport } = setup({ json: cartOutput() });
     const ctx = stageContext(storedRequest(`${CART_TEXT} Use password ${secret}.`, { sku: "SKU-4471" }, ["password"]), {
@@ -340,7 +347,7 @@ describe("analyze stage (real compiler behind runAnalysis)", () => {
     const sent = sentText(transport);
     expect(sent).toContain("password");
     expect(sent).toContain("sku");
-    expect(sent).not.toContain(secret);
+    expect(sent).toContain(secret);
     expect(sent).not.toContain("SKU-4471");
   });
 });

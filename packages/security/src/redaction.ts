@@ -34,10 +34,6 @@ export function isSensitiveKey(key: string): boolean {
   return SENSITIVE_SUBSTRINGS.some((s) => k.includes(s));
 }
 
-interface WalkOptions {
-  byKey: boolean;
-  str: ((s: string) => string) | null;
-}
 
 function isOpaque(v: object): boolean {
   return (
@@ -61,29 +57,19 @@ function isOpaque(v: object): boolean {
  *   an object with the same prototype (so `instanceof` still holds and Error
  *   `message`/`stack` are redacted)
  * - Date, RegExp, Buffer/typed arrays, Promise, functions: returned as-is
- * - URL: rebuilt from the redacted href when value redaction is active
+ * - URL: returned as-is
  */
-function walk(input: unknown, opts: WalkOptions): unknown {
+function walk(input: unknown): unknown {
   const seen = new WeakMap<object, unknown>();
 
   const redactSensitive = (v: unknown): unknown => (v === null || v === undefined ? v : REDACTED);
 
   const visit = (v: unknown): unknown => {
-    if (typeof v === "string") return opts.str ? opts.str(v) : v;
     if (v === null || typeof v !== "object") return v;
     if (seen.has(v)) return seen.get(v);
     if (isOpaque(v)) return v;
 
-    if (v instanceof URL) {
-      if (!opts.str) return v;
-      const href = opts.str(v.href);
-      if (href === v.href) return v;
-      try {
-        return new URL(href);
-      } catch {
-        return href;
-      }
-    }
+    if (v instanceof URL) return v;
 
     if (Array.isArray(v)) {
       const out: unknown[] = [];
@@ -96,7 +82,7 @@ function walk(input: unknown, opts: WalkOptions): unknown {
       const out = new Map<unknown, unknown>();
       seen.set(v, out);
       for (const [k, val] of v) {
-        out.set(k, opts.byKey && typeof k === "string" && isSensitiveKey(k) ? redactSensitive(val) : visit(val));
+        out.set(k, typeof k === "string" && isSensitiveKey(k) ? redactSensitive(val) : visit(val));
       }
       return out;
     }
@@ -125,7 +111,7 @@ function walk(input: unknown, opts: WalkOptions): unknown {
           raw = undefined;
         }
       }
-      const value = opts.byKey && typeof key === "string" && isSensitiveKey(key) ? redactSensitive(raw) : visit(raw);
+      const value = typeof key === "string" && isSensitiveKey(key) ? redactSensitive(raw) : visit(raw);
       Object.defineProperty(out, key, {
         value,
         enumerable: desc.enumerable ?? false,
@@ -141,57 +127,13 @@ function walk(input: unknown, opts: WalkOptions): unknown {
 
 /** Redact values stored under sensitive keys (see `SENSITIVE_KEYS` / `isSensitiveKey`), deeply. */
 export function redactByKey(value: unknown): unknown {
-  return walk(value, { byKey: true, str: null });
-}
-
-const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&");
-
-/** Escape a percent-encoded string, matching `%xx` escapes in either hex case. */
-function percentPattern(encoded: string): string {
-  return encoded
-    .split(/(%[0-9A-Fa-f]{2})/)
-    .map((part) =>
-      /^%[0-9A-Fa-f]{2}$/.test(part)
-        ? "%" + [...part.slice(1)].map((c) => (/[0-9]/.test(c) ? c : `[${c.toLowerCase()}${c.toUpperCase()}]`)).join("")
-        : escapeRegex(part),
-    )
-    .join("");
-}
-
-function secretPatterns(secret: string): Array<{ length: number; pattern: string }> {
-  const b64 = Buffer.from(secret, "utf8").toString("base64");
-  const literal = [secret, b64, b64.replace(/=+$/, ""), Buffer.from(secret, "utf8").toString("base64url")];
-  const percent = [encodeURIComponent(secret), new URLSearchParams([["", secret]]).toString().slice(1)];
-  const out = new Map<string, number>();
-  for (const f of literal) if (f) out.set(escapeRegex(f), f.length);
-  for (const f of percent) if (f) out.set(percentPattern(f), f.length);
-  return [...out].map(([pattern, length]) => ({ pattern, length }));
-}
-
-function buildStringRedactor(secretValues: string[]): ((s: string) => string) | null {
-  const patterns = [...new Set(secretValues.filter((s) => typeof s === "string" && s.length > 0))]
-    .flatMap(secretPatterns)
-    // Longest first so that an overlapping shorter secret (or form) never wins.
-    .sort((a, b) => b.length - a.length)
-    .map((p) => p.pattern);
-  if (patterns.length === 0) return null;
-  const re = new RegExp([...new Set(patterns)].join("|"), "g");
-  return (s) => s.replace(re, REDACTED);
+  return walk(value);
 }
 
 /**
- * Redact every occurrence of each secret value — raw, URL-encoded
- * (`encodeURIComponent` and form `+` encoding, either hex case) and base64
- * (standard padded/unpadded and base64url) — inside any string, deeply.
- * Empty secret values are ignored. Object keys are not rewritten.
+ * The run's redactor: key-based redaction (see `redactByKey`). A run's secret values are no longer masked (2026-10-07,
+ * spec 2026-10-07-generated-inputs-no-redaction): they show as typed in events, reports, evidence and prompts.
  */
-export function createValueRedactor(secretValues: string[]): (value: unknown) => unknown {
-  const str = buildStringRedactor(secretValues);
-  return (value) => walk(value, { byKey: false, str });
-}
-
-/** Key-based and value-based redaction in a single pass. Use before persisting, logging, publishing or prompting. */
-export function createRunRedactor(secretValues: string[]): (value: unknown) => unknown {
-  const str = buildStringRedactor(secretValues);
-  return (value) => walk(value, { byKey: true, str });
+export function createRunRedactor(): (value: unknown) => unknown {
+  return redactByKey;
 }

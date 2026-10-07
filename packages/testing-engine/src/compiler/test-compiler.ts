@@ -254,6 +254,7 @@ class Compiler {
         if (problem) return problem;
         const ref = step.inputRef;
         if (!ref) return "has no input reference";
+        if (step.generatedValue != null) return null; // a value nobody provided, generated and typed during exploration
         if (ref.source === "secret" && !(SecretNameSchema.safeParse(ref.key).success && this.input.secretNames.includes(ref.key))) {
           return "fills a secret the run does not provide";
         }
@@ -610,11 +611,14 @@ class Compiler {
     }
   }
 
-  /** The value a fill step types: a secret from the environment, else a run-data input. */
+  /**
+   * The value a fill step types: a secret from the environment, else a run-data input. A value generated during
+   * exploration (nobody provided it, 2026-10-07) is a run-data input too, a secret's included: a rerun needs nothing typed.
+   */
   private inputValue(step: ExplorationStep): string {
     const ref = step.inputRef!;
-    if (ref.source === "secret") return `${this.helper("secret")}(process.env.${ident(secretEnvName(ref.key))})`;
-    const value = ref.source === "testData" ? String(this.input.testData[ref.key] ?? "") : ref.key;
+    if (ref.source === "secret" && step.generatedValue == null) return `${this.helper("secret")}(process.env.${ident(secretEnvName(ref.key))})`;
+    const value = step.generatedValue ?? (ref.source === "testData" ? String(this.input.testData[ref.key] ?? "") : ref.key);
     const key = ident(`input${Object.keys(this.data.inputs).length + 1}`);
     this.data.inputs[key] = value;
     return `data.inputs.${key}`;

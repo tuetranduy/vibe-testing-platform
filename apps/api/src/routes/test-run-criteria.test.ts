@@ -190,7 +190,7 @@ describe("PUT /v1/test-runs/:runId/criteria", () => {
     expect(updated!.message).toBe("Criteria revision 2 saved");
   });
 
-  it("refuses a check value that is one of the run's secret values (found by fingerprint), and stores nothing", async () => {
+  it("accepts a check value that is one of the run's secret values (secrets are not redacted)", async () => {
     const runId = await setupAwaitingConfirmation(baseRequirement(), { secrets: { password: "hunter2-long-pw" } });
     const current = getCriteriaBody(await getCriteria(runId));
     const res = await putCriteria(runId, {
@@ -199,13 +199,10 @@ describe("PUT /v1/test-runs/:runId/criteria", () => {
         i === 1 ? { ...c, expectedOutcome: { ...c.expectedOutcome, match: { mode: "contains", value: "pw hunter2-long-pw", caseSensitive: false } } } : c,
       ),
     });
-    expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({
-      code: "VALIDATION_FAILED",
-      issues: [{ path: ["criteria", 1, "expectedOutcome", "match", "value"] }],
-    });
-    expect((await new RequirementRepository(t.tdb.db).getLatest(runId)).revision).toBe(1);
-    expect(res.body).not.toContain("hunter2-long-pw");
+    expect(res.statusCode).toBe(200);
+    const latest = await new RequirementRepository(t.tdb.db).getLatest(runId);
+    expect(latest.revision).toBe(2);
+    expect(JSON.stringify(latest.criteria[1]!.expectedOutcome)).toContain("pw hunter2-long-pw");
   });
 
   /** "The cart holds 1 item": a numeric check against a literal. */
@@ -463,16 +460,14 @@ describe("V1.3: the live-site analysis and suggested test data", () => {
     expect((await new SiteAnalysisRepository(t.tdb.db).get(runId))!.appliedKeys).toEqual(["email"]);
   });
 
-  it("confirm refuses invalid test data, and a value entered as a secret, without confirming", async () => {
+  it("confirm refuses invalid test data without confirming; a value that is also a secret is accepted", async () => {
     const runId = await setupAwaitingConfirmation(baseRequirement(), { secrets: { password: "pw-Secret-9911" } });
     const invalid = await confirmWith(runId, { testData: { "bad key": "x" } });
     expect(invalid.statusCode).toBe(400);
-    const leaked = await confirmWith(runId, { testData: { email: "pw-Secret-9911" } });
-    expect(leaked.statusCode).toBe(400);
-    expect(leaked.json().issues[0].path).toEqual(["testData", "email"]);
-    const run = await new RunRepository(t.tdb.db).getById(runId);
-    expect(run.lifecycle).toBe("AWAITING_CONFIRMATION");
-    expect(run.request.testData).toEqual({});
+    expect((await new RunRepository(t.tdb.db).getById(runId)).lifecycle).toBe("AWAITING_CONFIRMATION");
+    const same = await confirmWith(runId, { testData: { email: "pw-Secret-9911" } });
+    expect(same.statusCode).toBe(202);
+    expect((await new RunRepository(t.tdb.db).getById(runId)).request.testData).toEqual({ email: "pw-Secret-9911" });
   });
 
   it("confirm refuses going past 50 test data entries", async () => {

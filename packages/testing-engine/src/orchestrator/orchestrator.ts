@@ -8,6 +8,7 @@ import type {
   RerunResult,
   RunLifecycle,
   RunVerdict,
+  SiteAnalysis,
   SiteAnalysisDraft,
   SuggestionSet,
   SuggestionSetDraft,
@@ -47,6 +48,8 @@ export interface RunPorts {
   saveSiteAnalysis(analysis: SiteAnalysisDraft): Promise<void>;
   /** Adds suggested test data to the run (V1.3, auto-confirmed criteria) and records the keys as applied. */
   applyTestData(values: Record<string, TestDataValue>): Promise<void>;
+  /** The run's live-site analysis (V1.3), with its suggested test data; null when there is none. */
+  getSiteAnalysis(): Promise<SiteAnalysis | null>;
 }
 
 /**
@@ -171,11 +174,23 @@ export interface ExecutionResult {
   report: TestReport;
 }
 
+/**
+ * Before planning, every suggested test data value the run still lacks becomes its own (2026-10-07): the user did
+ * not give one, so the suggestion is used rather than left for the executor to generate. A value the user gave
+ * (at creation or confirmation) is never replaced.
+ */
+async function applySuggestedTestData(ctx: StageContext, ports: RunPorts): Promise<void> {
+  const analysis = await ports.getSiteAnalysis();
+  const missing = (analysis?.testData ?? []).filter((t) => !Object.hasOwn(ctx.request.testData, t.key));
+  if (missing.length > 0) await ports.applyTestData(Object.fromEntries(missing.map((t) => [t.key, t.value])));
+}
+
 /** execute-run: PLANNING → … → COMPLETED. Throws on cancel / deadline / infrastructure errors. */
 export async function runExecution(ctx: StageContext, ports: RunPorts, stages: EngineStages): Promise<ExecutionResult> {
   const startedAt = ctx.now();
   await ctx.boundary();
   const requirement = await ports.getConfirmedRequirement();
+  await applySuggestedTestData(ctx, ports);
 
   // PLANNING
   await started(ports, "PLANNING");

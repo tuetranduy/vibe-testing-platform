@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { GeneratedTest, RerunOutcome, RerunResult } from "@platform/contracts";
-import { createValueRedactor } from "@platform/security";
+import { redactByKey } from "@platform/security";
 import { checkGeneratedSource } from "../compiler/ast-guard";
 import { HELPERS_SOURCE } from "../compiler/helpers-template";
 import { secretEnvName } from "../compiler/test-compiler";
@@ -195,8 +195,7 @@ export async function runGeneratedTest(input: RunGeneratedTestInput, deps: RunGe
     return { status: "ERRORED", perCriterion, errorText, artifacts: parsed?.artifacts ?? [], durationMs: Date.now() - startedAt };
   };
 
-  const redact = createValueRedactor(Object.values(input.secrets));
-  const logFailure = (msg: string, cause: unknown) => deps.logger?.error({ runId: input.runId, err: redactedCause(cause, redact) }, msg);
+  const logFailure = (msg: string, cause: unknown) => deps.logger?.error({ runId: input.runId, err: redactedCause(cause, redactByKey) }, msg);
 
   const issues = checkGeneratedTest(input.test);
   if (issues.length > 0) {

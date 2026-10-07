@@ -2,6 +2,12 @@ import { createRunRedactor } from "@platform/security";
 import { describe, expect, it } from "vitest";
 import { createLogger, createRunLogRegistry } from "./logger";
 
+/** A redactor that masks the given values: the run's redactor is key-based, but the plumbing applies whatever it is given. */
+const maskValues =
+  (...values: string[]) =>
+  (v: unknown): unknown =>
+    JSON.parse(values.reduce((json, s) => json.split(s).join("[REDACTED]"), JSON.stringify(v) ?? "null"));
+
 const SECRET = "pw-Logger-Secret-77";
 const at = new Date("2026-09-26T10:00:00.000Z");
 
@@ -29,7 +35,7 @@ describe("createLogger", () => {
   it("a registered run's lines carry tenantId and the current stage, and its secret values are redacted everywhere (fields, err, msg)", () => {
     const runs = createRunLogRegistry();
     const { logger, lines, parsed } = capture({ runs });
-    const release = runs.register("run_1", { tenantId: "t_1", stage: "EXPLORING", redact: createRunRedactor([SECRET]) });
+    const release = runs.register("run_1", { tenantId: "t_1", stage: "EXPLORING", redact: maskValues(SECRET) });
 
     logger.error({ runId: "run_1", detail: `typed ${SECRET}`, err: new Error(`launch failed: ${SECRET}`) }, `saw ${SECRET}`);
     runs.setStage("run_1", "VERIFYING");
@@ -87,7 +93,7 @@ describe("createLogger", () => {
 
   it("err keeps its code, stack and cause chain, redacted like the rest of the line", () => {
     const runs = createRunLogRegistry();
-    runs.register("run_1", { tenantId: "t_1", stage: "EXPLORING", redact: createRunRedactor([SECRET]) });
+    runs.register("run_1", { tenantId: "t_1", stage: "EXPLORING", redact: maskValues(SECRET) });
     const { logger, lines, parsed } = capture({ runs });
     const refused = Object.assign(new Error(`connect ECONNREFUSED for ${SECRET}`), { code: "ECONNREFUSED" });
     const err = new TypeError("fetch failed", { cause: refused });

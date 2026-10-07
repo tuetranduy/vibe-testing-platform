@@ -44,41 +44,19 @@ describe("ArtifactList", () => {
     expect(open).toHaveAttribute("rel", expect.stringContaining("noopener"));
   });
 
-  it("hides a SECRET_BEARING artifact until the user chooses to reveal it", async () => {
-    const user = userEvent.setup();
+  it("loads a SECRET_BEARING artifact (recorded before 2026-10-07) straight away: nothing is hidden behind a reveal", async () => {
     const fetch = urlFetch();
     render(<ArtifactList runId="run_1" artifactIds={["art_2"]} artifacts={known(info("art_2", "SCREENSHOT", "SECRET_BEARING", "Screenshot saved at checkpoint after_login"))} />);
-    const reveal = screen.getByRole("button", { name: "Reveal (may contain entered credentials)" });
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    expect(fetch).not.toHaveBeenCalled();
-
-    await user.click(reveal);
     expect(await screen.findByRole("img", { name: /after_login/ })).toHaveAttribute("src", "https://s3.test/file-1");
-    expect(urls(fetch)).toEqual(["/api/v1/test-runs/run_1/artifacts/art_2/url?reveal=true"]);
+    expect(urls(fetch)).toEqual(["/api/v1/test-runs/run_1/artifacts/art_2/url"]);
+    expect(screen.queryByRole("button", { name: /reveal/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/may contain credentials/i)).not.toBeInTheDocument();
   });
 
-  it("reveals only the artifact the user chose", async () => {
-    const user = userEvent.setup();
-    const fetch = urlFetch();
-    render(
-      <ArtifactList
-        runId="run_1"
-        artifactIds={["art_2", "art_3"]}
-        artifacts={known(info("art_2", "SCREENSHOT", "SECRET_BEARING"), info("art_3", "SCREENSHOT", "SECRET_BEARING"))}
-      />,
-    );
-    const [first] = screen.getAllByRole("button", { name: /reveal/i });
-    await user.click(first!);
-    await screen.findByRole("img");
-    expect(screen.getAllByRole("button", { name: /reveal/i })).toHaveLength(1);
-    expect(urls(fetch)).toEqual(["/api/v1/test-runs/run_1/artifacts/art_2/url?reveal=true"]);
-  });
-
-  it("treats an artifact it knows nothing about as secret-bearing", () => {
+  it("loads an artifact it knows nothing about too", async () => {
     const fetch = urlFetch();
     render(<ArtifactList runId="run_1" artifactIds={["art_x"]} artifacts={known()} />);
-    expect(screen.getByRole("button", { name: "Reveal (may contain entered credentials)" })).toBeInTheDocument();
-    expect(fetch).not.toHaveBeenCalled();
+    await waitFor(() => expect(urls(fetch)).toEqual(["/api/v1/test-runs/run_1/artifacts/art_x/url"]));
   });
 
   it("offers a trace as a download and plays a video inline", async () => {

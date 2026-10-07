@@ -64,4 +64,17 @@ describe("launchSandboxedBrowser", () => {
     ).rejects.toThrow(/Chromium exited during launch/);
     expect(leftovers()).toEqual([]);
   });
+
+  it("the page is full HD: a 1920×1080 viewport at device scale 1", async () => {
+    const browser = await launchSandboxedBrowser({ proxyUrl: "http://127.0.0.1:9", runId: `size-${process.pid}-${Date.now()}` });
+    try {
+      const size = await browser.page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio, screen: [screen.width, screen.height] }));
+      expect(size).toEqual({ width: 1920, height: 1080, dpr: 1, screen: [1920, 1080] });
+      // A page opened later (a popup, a new tab) too.
+      const later = await browser.page.context().newPage();
+      await expect.poll(() => later.evaluate(() => [innerWidth, innerHeight, screen.width, screen.height])).toEqual([1920, 1080, 1920, 1080]);
+    } finally {
+      await browser.close();
+    }
+  });
 });

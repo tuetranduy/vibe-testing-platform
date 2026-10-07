@@ -7,13 +7,9 @@
  * last step that references it in `criterionIds`; if no step references it, it depends on the whole
  * scenario (erring toward blocking). Steps after that point never block it.
  *
- * Reason precedence (first match wins; the order of `BlockReason`):
- *   1. MISSING_SECRET — a secret precondition, or a dependent step's secret inputRef, is not provided;
- *   2. MISSING_TEST_DATA — the same for test data keys;
- *   3. DESTRUCTIVE_ACTION_NOT_AUTHORIZED — a dependent step is at or after the first step the action
- *      policy denies (the scenario is truncated before that step).
- * Missing inputs come first because the user can fix them by supplying the value; the policy is a
- * decision about the run itself.
+ * The one reason: DESTRUCTIVE_ACTION_NOT_AUTHORIZED — a dependent step is at or after the first step the
+ * action policy denies (the scenario is truncated before that step). A secret or test data value nobody
+ * provided never blocks (2026-10-07): the executor generates it from the field when the step fills it.
  */
 import type { AcceptanceCriterion, BlockedCriterion, PlannedStep } from "@platform/contracts";
 import { assertActionAllowed, type ActionPolicy } from "@platform/security";
@@ -25,8 +21,6 @@ export interface BlockingInput {
   /** Validated steps (see validatePlanOutput), in scenario order. */
   steps: PlannedStep[];
   targetUrl: string;
-  testDataKeys: string[];
-  secretNames: string[];
   policy: ActionPolicy;
   /** The id of the one-step fallback when the whole scenario is cut (plan-unique; default PS-1). */
   fallbackStepId?: string;
@@ -38,7 +32,7 @@ export interface BlockingResult {
   blockedCriteria: BlockedCriterion[];
 }
 
-type Block = Omit<BlockedCriterion, "criterionId">;
+type Block = Pick<BlockedCriterion, "detail">;
 
 const MAX_QUOTE = 150;
 const quote = (text: string) => `"${text.length > MAX_QUOTE ? `${text.slice(0, MAX_QUOTE - 1)}…` : text}"`;
@@ -50,16 +44,12 @@ export function applyBlocking(input: BlockingInput): BlockingResult {
   const steps = input.steps.map((s) => ({ ...s, destructive: isDestructiveStep(s) }));
   const stop = firstDisallowed(input.steps, input.policy);
 
-  const provided = { secret: new Set(input.secretNames), testData: new Set(input.testDataKeys) };
   const blockedCriteria: BlockedCriterion[] = [];
-  for (const criterion of input.criteria) {
-    const end = dependencyEnd(criterion, steps);
-    const deps = steps.slice(0, end + 1);
-    const block =
-      missingInput(criterion, deps, "secret", provided.secret) ??
-      missingInput(criterion, deps, "testData", provided.testData) ??
-      (stop && end >= stop.index ? { reason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED" as const, detail: stop.detail } : null);
-    if (block) blockedCriteria.push({ criterionId: criterion.id, reason: block.reason, detail: block.detail.slice(0, 500) });
+  if (stop) {
+    for (const criterion of input.criteria) {
+      if (dependencyEnd(criterion, steps) < stop.index) continue;
+      blockedCriteria.push({ criterionId: criterion.id, reason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED", detail: stop.detail.slice(0, 500) });
+    }
   }
 
   const kept = stop ? steps.slice(0, stop.index) : steps;
@@ -96,29 +86,6 @@ function firstDisallowed(steps: PlannedStep[], policy: ActionPolicy): { index: n
     }
     if (step.destructive && !policy.allowDestructive) {
       return { index, detail: `${step.id} ${quote(step.description)} was marked destructive by the planner; ${NOT_AUTHORIZED}` };
-    }
-  }
-  return null;
-}
-
-function missingInput(
-  criterion: AcceptanceCriterion,
-  deps: PlannedStep[],
-  source: "secret" | "testData",
-  provided: Set<string>,
-): Block | null {
-  const reason = source === "secret" ? "MISSING_SECRET" : "MISSING_TEST_DATA";
-  const what = source === "secret" ? "Secret" : "Test data key";
-  const preconditionKind = source === "secret" ? "secret" : "test_data";
-
-  for (const p of criterion.preconditions) {
-    if (p.kind !== preconditionKind) continue;
-    if (!p.ref) return { reason, detail: `A precondition needs a ${what.toLowerCase()} but names none: ${quote(p.description)}` };
-    if (!provided.has(p.ref)) return { reason, detail: `${what} ${quote(p.ref)} was not provided (required by a precondition)` };
-  }
-  for (const step of deps) {
-    if (step.inputRef?.source === source && !provided.has(step.inputRef.key)) {
-      return { reason, detail: `${what} "${step.inputRef.key}" was not provided (used by ${step.id})` };
     }
   }
   return null;

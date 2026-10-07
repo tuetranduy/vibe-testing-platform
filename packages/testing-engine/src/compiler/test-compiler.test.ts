@@ -557,6 +557,18 @@ describe("compilePlaywrightTest: injection safety", () => {
     expect(checkGeneratedSource(out.source)).toEqual([]);
   });
 
+  it.each([
+    ["secret", "password", "Gen-Pass-1!aB"],
+    ["testData", "email", "gen.user@example.com"],
+  ] as const)("a %s fill whose value was generated (nobody provided it) replays that value from run-data.json (2026-10-07)", (source, key, value) => {
+    const steps = shopFlow({ fill: { element: byRole("textbox", "Field"), inputRef: { source, key }, generatedValue: value } });
+    const out = compile({ steps, secretNames: [], testData: {} });
+    expect(out.compiledCriteria.length).toBeGreaterThan(0);
+    expect(out.source).not.toContain("process.env");
+    expect(Object.values((JSON.parse(out.dataJson) as { inputs: Record<string, string> }).inputs)).toContain(value);
+    expect(out.source).not.toContain(value);
+  });
+
   it("a secret fill the run has no secret for → the flow is not replayable", () => {
     const steps = shopFlow({ fill: { inputRef: { source: "secret", key: "password" } } });
     const out = compile({ steps, secretNames: [] });

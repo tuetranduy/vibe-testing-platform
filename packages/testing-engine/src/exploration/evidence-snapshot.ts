@@ -53,7 +53,7 @@ export function createCaptureEvidenceStage(deps: CaptureEvidenceDeps): (ctx: Sta
         return omitted("The start page could not be loaded");
       }
       const store = deps.store(ctx);
-      const sensitivity = screenshotSensitivity(ctx);
+      const sensitivity = screenshotSensitivity();
       const { artifactId } = await store.saveScreenshot({ png, fileName: "blocked-start-page.png", sensitivity });
       await ctx.publish({
         type: "artifact.created",

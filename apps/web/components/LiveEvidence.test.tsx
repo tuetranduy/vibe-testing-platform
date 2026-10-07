@@ -34,18 +34,12 @@ describe("LiveEvidence", () => {
     expect(String(fetch.mock.calls[0]![0])).toBe("/api/v1/test-runs/run_1/artifacts/art_1/url");
   });
 
-  it("asks before revealing a SECRET_BEARING screenshot", async () => {
-    const user = userEvent.setup();
+  it("loads a SECRET_BEARING screenshot (recorded before 2026-10-07) without asking", async () => {
     const fetch = urlFetch();
     render(<LiveEvidence runId="run_1" screenshot={shot("art_2", "SECRET_BEARING")} />);
-    expect(screen.getByText(/may show entered credentials/i)).toBeInTheDocument();
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    expect(fetch).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: /reveal screenshot/i }));
-    const img = await screen.findByRole("img");
-    expect(img).toHaveAttribute("src", "https://s3.test/shot-1.png");
-    expect(String(fetch.mock.calls[0]![0])).toBe("/api/v1/test-runs/run_1/artifacts/art_2/url?reveal=true");
+    expect(await screen.findByRole("img")).toHaveAttribute("src", "https://s3.test/shot-1.png");
+    expect(String(fetch.mock.calls[0]![0])).toBe("/api/v1/test-runs/run_1/artifacts/art_2/url");
+    expect(screen.queryByRole("button", { name: /reveal/i })).not.toBeInTheDocument();
   });
 
   it("refetches the signed URL when the image fails to load (expired)", async () => {

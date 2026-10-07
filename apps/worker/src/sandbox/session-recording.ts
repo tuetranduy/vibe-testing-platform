@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { access, constants, mkdtemp, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { SessionRecording, StageContext } from "@platform/testing-engine";
+import { BROWSER_VIEWPORT, type SessionRecording, type StageContext } from "@platform/testing-engine";
 import type { CDPSession, Page } from "playwright-core";
 
 /**
@@ -27,7 +27,7 @@ export interface SessionRecordingOptions {
   baseDir?: string;
   /** ffmpeg's path; default: resolveFfmpegPath(). null: no video. */
   ffmpegPath?: string | null;
-  /** The video's frame size (the screencast is scaled to fit, then padded). Default 1280×720. */
+  /** The video's frame size (the screencast is scaled to fit, then padded). Default 1920×1080 (BROWSER_VIEWPORT). */
   size?: { width: number; height: number };
   logger?: { warn(obj: object, msg?: string): void };
 }
@@ -107,7 +107,7 @@ export class ScreencastVideo {
     ffmpeg.stdin?.on("error", () => {}); // ffmpeg gone: the video is simply shorter
   }
 
-  static async start(page: Page, ffmpegPath: string, outputFile: string, size = { width: 1280, height: 720 }): Promise<ScreencastVideo> {
+  static async start(page: Page, ffmpegPath: string, outputFile: string, size: { width: number; height: number } = BROWSER_VIEWPORT): Promise<ScreencastVideo> {
     const ffmpeg = spawn(ffmpegPath, ffmpegArgs(outputFile, size), { stdio: ["pipe", "ignore", "ignore"], env: { PATH: process.env.PATH ?? "" } });
     let cdp: CDPSession | undefined;
     try {

@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { RerunResultSchema, type GeneratedTest } from "@platform/contracts";
+import { createRunRedactor } from "@platform/security";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HELPERS_SOURCE } from "../compiler/helpers-template";
 import type { EvidenceStore, EvidenceUpload } from "../evidence/collector";
@@ -244,7 +245,7 @@ describe("buildPlaywrightConfig", () => {
         proxy: { server: PROXY },
         trace: "retain-on-failure",
         screenshot: { mode: "only-on-failure", fullPage: true },
-        video: "retain-on-failure",
+        video: { mode: "retain-on-failure" },
         actionTimeout: 10_000,
         navigationTimeout: 30_000,
       },
@@ -261,11 +262,24 @@ describe("buildPlaywrightConfig", () => {
     expect(JSON.stringify(config)).not.toContain("no-sandbox");
   });
 
+  it("the rerun is full HD: a 1920×1080 viewport, window and screen, and its video at that size", () => {
+    const config = load(buildPlaywrightConfig({ proxyUrl: PROXY, testTimeoutMs: 1000, actionTimeoutMs: 1000, record: { video: true, trace: false } }));
+    expect(config.use).toMatchObject({
+      viewport: { width: 1920, height: 1080 },
+      screen: { width: 1920, height: 1080 },
+      deviceScaleFactor: 1,
+      video: { mode: "on", size: { width: 1920, height: 1080 } },
+    });
+    expect(config.use.launchOptions.args).toContain("--window-size=1920,1080");
+    const failingOnly = load(buildPlaywrightConfig({ proxyUrl: PROXY, testTimeoutMs: 1000, actionTimeoutMs: 1000 }));
+    expect(failingOnly.use.video).toEqual({ mode: "retain-on-failure", size: { width: 1920, height: 1080 } });
+  });
+
   it("with record (V1.3), a passing test keeps its video and / or trace too", () => {
     const both = load(buildPlaywrightConfig({ proxyUrl: PROXY, testTimeoutMs: 1000, actionTimeoutMs: 1000, record: { video: true, trace: true } }));
-    expect(both.use).toMatchObject({ trace: "on", video: "on", screenshot: { mode: "only-on-failure", fullPage: true } });
+    expect(both.use).toMatchObject({ trace: "on", video: { mode: "on" }, screenshot: { mode: "only-on-failure", fullPage: true } });
     const videoOnly = load(buildPlaywrightConfig({ proxyUrl: PROXY, testTimeoutMs: 1000, actionTimeoutMs: 1000, record: { video: true, trace: false } }));
-    expect(videoOnly.use).toMatchObject({ trace: "retain-on-failure", video: "on" });
+    expect(videoOnly.use).toMatchObject({ trace: "retain-on-failure", video: { mode: "on" } });
   });
 
   it.each(["http://localhost:1234", "https://127.0.0.1:1234", "http://10.0.0.1:3128", "http://127.0.0.1", "http://127.0.0.1:1234/x", "socks5://127.0.0.1:1080"])(
@@ -462,15 +476,14 @@ describe("runGeneratedTest: infrastructure failures are logged", () => {
     expect((logged[0]!.obj.err as { message: string }).message).toMatch(/ENOTDIR|EEXIST|not a directory/i);
   });
 
-  it("the spawn fails → the cause is logged with the run's secret values redacted", async () => {
+  it("the spawn fails → the cause is logged as it is (run secrets are not redacted)", async () => {
     const { logged, logger } = captureLog();
     const spawn = fakeSpawn(async () => Promise.reject(new Error(`spawn node ENOENT (env ${SECRET})`)));
     const out = await runGeneratedTest(runInput(generated(["AC-1"]), { secrets: { password: SECRET } }), { spawn, workspace: { baseDir: base }, logger });
     expect(out.status).toBe("ERRORED");
     expect(logged).toHaveLength(1);
     expect(logged[0]!.msg).toMatch(/Playwright runner could not be started/i);
-    expect(JSON.stringify(logged)).not.toContain(SECRET);
-    expect((logged[0]!.obj.err as { message: string }).message).toContain("spawn node ENOENT");
+    expect((logged[0]!.obj.err as { message: string }).message).toBe(`spawn node ENOENT (env ${SECRET})`);
   });
 
   it("the browser cannot be launched (missing browser, no usable sandbox) → ERRORED (R41), never FAILED; the launch error is logged, the run gets a template message", async () => {
@@ -522,7 +535,7 @@ describe("createRunTestStage", () => {
       signal: opts.signal ?? new AbortController().signal,
       budgets: { explorationMs: 1_000, rerunMs: 60_000 },
       secrets: { names: ["password"], get: (n: string) => (n === "password" ? SECRET : undefined) },
-      redact: (v: unknown) => JSON.parse(JSON.stringify(v).replaceAll(SECRET, "[REDACTED]")),
+      redact: createRunRedactor(),
       publish: async (e: EventDraft) => void events.push(e),
       addCleanup: (fn: () => Promise<void> | void) => void cleanups.push(fn),
       deadlineAt: opts.deadlineAt ?? null,
@@ -556,13 +569,15 @@ describe("createRunTestStage", () => {
     expect(spawn.calls[0]!.env).toEqual({ SECRET_PASSWORD: SECRET });
     expect(spawn.snapshot[0]!["playwright.config.js"]).toContain(JSON.stringify(PROXY));
     expect(RerunResultSchema.parse(rerun)).toEqual(rerun);
-    expect(rerun).toMatchObject({ status: "FAILED", perCriterion: { "AC-1": "ASSERTION_FAILED" }, artifactIds: ["art_1"] });
-    expect(rerun.errorText["AC-1"]).toBe("Error: [AC-1] typed [REDACTED]");
-    expect(h.uploads.map((u) => [u.type, u.sensitivity, u.workspaceExisted])).toEqual([["SCREENSHOT", "SECRET_BEARING", true]]);
-    // The fake "trace-bytes" is not a zip: it cannot be scrubbed, so it is dropped, never uploaded.
+    expect(rerun).toMatchObject({ status: "FAILED", perCriterion: { "AC-1": "ASSERTION_FAILED" }, artifactIds: ["art_1", "art_2"] });
+    expect(rerun.errorText["AC-1"]).toBe(`Error: [AC-1] typed ${SECRET}`);
+    expect(h.uploads.map((u) => [u.type, u.sensitivity, u.workspaceExisted])).toEqual([
+      ["SCREENSHOT", "STANDARD", true],
+      ["TRACE", "STANDARD", true],
+    ]);
     expect(h.events.map((e) => [e.type, (e.payload as { type: string }).type])).toEqual([
       ["artifact.created", "SCREENSHOT"],
-      ["artifact.omitted", "TRACE"],
+      ["artifact.created", "TRACE"],
     ]);
     expect(existsSync(path.join(base, "run_1"))).toBe(false);
     expect(h.proxy.closed).toBeGreaterThanOrEqual(1);
@@ -619,13 +634,13 @@ describe("createRunTestStage", () => {
     expect(existsSync(path.join(base, "run_1"))).toBe(false);
   });
 
-  it("a proxy that cannot start → rerun ERRORED (R41), nothing spawned; the cause is logged, redacted", async () => {
+  it("a proxy that cannot start → rerun ERRORED (R41), nothing spawned; the cause is logged", async () => {
     const spawn = fakeSpawn(writesResults({}));
     const { logged, logger } = captureLog();
     const h = harness({ spawn, openProxy: async () => Promise.reject(new Error(`EADDRINUSE ${SECRET}`)), logger });
     const rerun = await h.stage(h.ctx, generated(["AC-1", "AC-2"]));
     expect(rerun).toMatchObject({ status: "ERRORED", perCriterion: { "AC-1": "NOT_REACHED", "AC-2": "NOT_REACHED" }, artifactIds: [] });
     expect(spawn.calls).toEqual([]);
-    expect(logged).toEqual([{ obj: { runId: "run_1", err: { name: "Error", message: "EADDRINUSE [REDACTED]" } }, msg: expect.stringMatching(/rerun's network guard could not be started/i) }]);
+    expect(logged).toEqual([{ obj: { runId: "run_1", err: { name: "Error", message: `EADDRINUSE ${SECRET}` } }, msg: expect.stringMatching(/rerun's network guard could not be started/i) }]);
   });
 });

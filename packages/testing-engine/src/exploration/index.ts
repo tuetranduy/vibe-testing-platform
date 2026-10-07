@@ -1,4 +1,5 @@
 export * from "./recorder";
+export * from "./input-generator";
 export * from "./fact-reader";
 export * from "./executor";
 export * from "./explore-stage";

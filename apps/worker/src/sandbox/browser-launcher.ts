@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { BROWSER_WINDOW_ARGS } from "@platform/testing-engine";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { applySessionHygiene } from "./session-hygiene";
 
@@ -146,6 +147,8 @@ export function buildChromiumArgs(opts: {
     "--disable-ipc-flooding-protection",
     "--disable-dev-shm-usage",
     "--mute-audio",
+    // Full HD: headless Chromium is 800×600 otherwise; the page itself is sized by applySessionHygiene.
+    ...BROWSER_WINDOW_ARGS,
   ];
   if (opts.extensions.length > 0) {
     const dirs = opts.extensions.map((e) => e.dir).join(",");

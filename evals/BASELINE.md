@@ -8,6 +8,12 @@ Token counts are the provider's own, so they don't compare across providers. The
 its 180 s budget is a quota artifact, not a wrong answer (each passed on re-run). Its daily limit
 (20 requests on `gemini-3.8-flash`) kept the default Gemini model from being scored (KI-018).
 
+Which offered models are scored (KI-026, 2026-10-07): `deepseek-flash` and `deepseek-v4-pro` on all three suites at
+the current prompts (V4 Pro at thinking high and off); `claude-sonnet-5` and `gemini-3.5-flash-lite` on the compiler
+and the planner at older prompts (2026-09-26/27), not on the survey; `claude-fable-5-1`, `claude-opus-5-5`,
+`claude-haiku-4-5`, `gemini-3.8-flash`, `gemini-3.5-flash` and `gemini-3.1-pro-preview` never: they need an
+`ANTHROPIC_API_KEY` with credit or a billing-enabled `GEMINI_API_KEY`.
+
 ## requirement-compiler
 
 **Status: baseline recorded 2026-09-26** (first run against the real provider).
@@ -42,6 +48,9 @@ commit of `packages/testing-engine/src/requirement/prompts.ts`, and any failing 
 | 2026-10-05 | deepseek-flash, text checks against a test data value (`testDataKey`), with case 31 (account-email) | this change | 30/31, 30/31 | ~108,700 / ~27,000 | $0.07 each | about-link, login-missing-secret (criteria counts, once each). account-email, login-dashboard and italian-login pass in both runs |
 | 2026-10-06 | deepseek-flash, cases 28–29 also forbid an `authenticated` precondition | 9ae38b1 | 31/31, 31/31, 30/31 | ~110,000 / ~29,000 | $0.03 each | selected-product-with-pages (ambiguous, once). No invented login in 6 compiles; a live run had one (2026-10-06) |
 | 2026-10-06 | deepseek-flash, "authenticated only when the requirement says the user logs in" | this change | 31/31, 30/31 | ~109,500 / ~31,000 | $0.03 each | selected-product-with-pages (ambiguous, once): no change |
+| 2026-10-07 | deepseek-flash (thinking high), KI-026 re-score | e448587 | 29/31 (93.5%) | 109,493 / 29,247 | $0.07 | login-missing-secret (3 criteria), spanish-newsletter (`visible`, not `text_matches`) — 144 s |
+| 2026-10-07 | deepseek-v4-pro (thinking high), KI-026 re-score | e448587 | 30/31 (96.8%) | 111,074 / 76,331 | $0.45 | spanish-newsletter (`visible`, not `text_matches`) — 637 s, 21 s a case |
+| 2026-10-07 | deepseek-v4-pro (`LLM_REASONING=minimal`), KI-026 re-score | e448587 | 30/31 (96.8%) | 121,337 / 11,848 | $0.21 | about-link (a fact keyed `url`, reserved, after the correction) — 91 s |
 
 The second row's prompt change fixes a `test_data` precondition invented for a value written in the
 requirement (seen in the Milestone B demo: "Search for iPhone 17 Pro…" got a `test_data` precondition
@@ -87,6 +96,9 @@ Record the `Total:` line with the commit of `packages/testing-engine/src/planner
 | 2026-10-06 | deepseek-flash, rule "each step is one action that always applies" | this change | 14/16, 15/16, 14/16 | ~30,000 / ~15,400 | $0.01 each | sort-by-price (9–10 steps > 8) in all, search-results (MISSING_TEST_DATA) twice. No conditional step; case 15 split into 2 in all 3 |
 | 2026-10-06 | deepseek-flash, with case 17 (login-then-product: a step opens the login page before the first fill) | 78c5ffa | 16/17, 15/17, 14/17 | ~33,000 / ~21,000 | $0.02 each | search-results (MISSING_TEST_DATA; once 2 scenarios), checkout-denied, sort-by-price, signed-out-and-signed-in (1 scenario, once). Case 17 passes in all 3: no prompt rule added; the executor now opens a form's page when a fill finds no field |
 | 2026-10-07 | deepseek-flash, "to log in again, start a new scenario" (prompt and correction) | this change | 15/17, 16/17 | ~31,800 / ~14,600 | $0.01 each | search-results (MISSING_TEST_DATA) in both, sort-by-price once. No eager split; case 15 split in both |
+| 2026-10-07 | deepseek-flash (thinking high), KI-026 re-score | e3873cf | 14/17 (82.4%) | 31,816 / 13,919 | $0.03 | search-results (MISSING_TEST_DATA, and split into 2), sort-by-price (9 steps > 8), signed-out-and-signed-in (1 scenario) — 63 s |
+| 2026-10-07 | deepseek-v4-pro (thinking high), KI-026 re-score | e3873cf | 15/17 (88.2%) | 32,683 / 67,123 | $0.31 | search-results (AC-3), checkout-allowed (AC-1, AC-2): blocked MISSING_TEST_DATA — 563 s. Case 15 split into 2; no eager split |
+| 2026-10-07 | deepseek-v4-pro (`LLM_REASONING=minimal`), KI-026 re-score | e3873cf | 16/17 (94.1%) | 31,340 / 7,589 | $0.07 | login-then-product (the first fill has no step opening its form; the executor opens it at run time) — 51 s. Case 15 split into 2 |
 | 2026-09-30 | deepseek-flash, `wait_for` must name an element (two runs) | this change | 12/15, 13/15 | 29,124 / 14,795; 28,538 / 13,750 | $0.01 each | search-results, sort-by-price in both; empty-cart once. Same score as before: Flash varies by a case or two between runs |
 | 2026-09-27 | gemini-3.5-flash-lite (free tier, default thinking) | 8a6800a | 12/14 (85.7%) | 15,516 / 6,306 | $0.02 | german-cart, invalid-email (the 180 s case budget: free-tier stalls; both pass on re-run) |
 
@@ -110,7 +122,7 @@ carrying a secret `inputRef`; every `expect.inputRefs` entry is carried by some 
 
 ## survey
 
-**Status: baseline recorded 2026-09-30** on DeepSeek (KI-026, KI-043).
+**Status: baseline recorded 2026-09-30** on DeepSeek (KI-026, KI-043); re-scored 2026-10-07.
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-... pnpm eval survey          # model: claude-sonnet-5 (default)
@@ -126,6 +138,9 @@ Record the `Total:` line with the commit of `packages/testing-engine/src/survey/
 | 2026-09-29 | — | 590484d | not run (no provider key) | | | — |
 | 2026-09-30 | deepseek-flash (thinking high) | 732f074 | 4/6 (66.7%) | 6,521 / 10,993 | $0.01 | saas-sign-in ("Sign up rejects a malformed work email" not flagged destructive), shop-checkout ("Cart page proceeds to checkout" not flagged destructive) |
 | 2026-09-30 | deepseek-v4-pro (thinking high) | 732f074 | 4/6 (66.7%) | 6,827 / 18,793 | $0.04 | demo-shop-home (no suggestion needs the `password` secret), saas-sign-in (two sign-up suggestions not flagged destructive) |
+| 2026-10-07 | deepseek-flash (thinking high), KI-026 re-score | 732f074 | 5/6 (83.3%) | 6,521 / 10,354 | $0.01 | saas-sign-in ("Sign up rejects an invalid work email" not flagged destructive) |
+| 2026-10-07 | deepseek-v4-pro (thinking high), KI-026 re-score | 732f074 | 4/6 (66.7%) | 6,827 / 25,608 | $0.11 | saas-sign-in (a sign-in and a "create account" suggestion that mention signing up, not flagged), shop-checkout ("Cart to checkout navigation" not flagged) — 202 s |
+| 2026-10-07 | deepseek-v4-pro (`LLM_REASONING=minimal`), KI-026 re-score | 732f074 | 5/6 (83.3%) | 6,353 / 3,860 | $0.02 | saas-sign-in (three suggestions that mention signing up or registering, not flagged) |
 
 Both DeepSeek models under-flag sign-up and checkout suggestions as destructive. The flag is advisory: a chosen
 suggestion is compiled and planned like any requirement, and the planner and the executor's action policy decide

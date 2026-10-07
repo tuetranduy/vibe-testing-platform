@@ -194,15 +194,13 @@ describe("runGeneratedTest against the demo shop (real child process, egress pro
     const raw = Object.values(unzipSync(readFileSync(trace.path))).map((b) => strFromU8(b, true)).join("\n");
     expect(raw).toContain(VALID_PASSWORD);
 
+    // Stored as recorded: run secrets are no longer scrubbed from traces (2026-10-07).
     const uploads: EvidenceUpload[] = [];
     await collectEvidence({ publish: async () => {} }, [trace], {
       store: { save: async (u) => (uploads.push(u), { artifactId: "art_1" }) },
-      secretValues: [VALID_PASSWORD],
     });
-    const scrubbed = Object.values(unzipSync(uploads[0]!.body)).map((b) => strFromU8(b, true)).join("\n");
-    expect(scrubbed).not.toContain(VALID_PASSWORD);
-    expect(scrubbed).not.toContain(Buffer.from(VALID_PASSWORD).toString("base64"));
-    expect(scrubbed).toContain("[REDACTED]");
+    const stored = Object.values(unzipSync(uploads[0]!.body)).map((b) => strFromU8(b, true)).join("\n");
+    expect(stored).toContain(VALID_PASSWORD);
   });
 
   it("browser traffic goes through the egress proxy, loopback included: a non-allowlisted address is blocked by the proxy, never connected to", async () => {

@@ -20,7 +20,7 @@ export interface Logger {
 export interface RunLogScope {
   tenantId: string;
   stage: string;
-  /** The run redactor (secret values in every encoded form), applied after key-based redaction. */
+  /** The run's redactor, applied after key-based redaction (key-based too since 2026-10-07: secret values are kept). */
   redact: (value: unknown) => unknown;
 }
 
@@ -109,8 +109,7 @@ function stringify(value: unknown): string {
 /**
  * JSON-lines logger for the API and worker processes. Every line: key-based redaction
  * (`redactByKey`), then — when the line names a registered run — `tenantId` / `stage` from the run
- * scope and the run's own redactor, so a secret value that reaches an error message is masked even
- * when the code that logged it never saw the secret.
+ * scope and the run's own redactor.
  */
 export function createLogger(opts: LoggerOptions, bindings: Record<string, unknown> = {}): Logger {
   const min = LOG_LEVELS.indexOf(opts.level ?? "info");

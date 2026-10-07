@@ -61,14 +61,11 @@ describe("GET artifact URL", () => {
     expect((await t.app.inject({ method: "GET", url: url(a.run.id, b.art.id), headers: auth })).statusCode).toBe(404);
   });
 
-  it("requires reveal=true for SECRET_BEARING artifacts and audit-logs the reveal", async () => {
+  it("serves a SECRET_BEARING artifact (recorded before 2026-10-07) without a reveal, and audits nothing", async () => {
     const { run, art } = await artifactFor(TEST_TENANT_ID, "SECRET_BEARING");
-    const denied = await t.app.inject({ method: "GET", url: url(run.id, art.id), headers: auth });
-    expect(denied.statusCode).toBe(403);
-    expect(denied.json().code).toBe("REVEAL_REQUIRED");
+    expect((await t.app.inject({ method: "GET", url: url(run.id, art.id), headers: auth })).statusCode).toBe(200);
+    // An older web app still sends reveal=true: accepted, ignored.
+    expect((await t.app.inject({ method: "GET", url: url(run.id, art.id, "?reveal=true"), headers: auth })).statusCode).toBe(200);
     expect(t.audit).toHaveLength(0);
-    const ok = await t.app.inject({ method: "GET", url: url(run.id, art.id, "?reveal=true"), headers: auth });
-    expect(ok.statusCode).toBe(200);
-    expect(t.audit).toEqual([expect.objectContaining({ action: "artifact.reveal", artifactId: art.id, runId: run.id })]);
   });
 });

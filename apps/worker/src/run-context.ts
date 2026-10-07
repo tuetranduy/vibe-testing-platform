@@ -60,12 +60,12 @@ export async function createRunContext(
   const controller = new AbortController();
   const cleanups: (() => Promise<void> | void)[] = [];
 
-  // Secrets: decrypted only here; the redactor masks their values everywhere downstream.
+  // Secrets: decrypted only here. The redactor is key-based: their values are no longer masked (2026-10-07).
   const secretValues = new Map<string, string>();
   for (const s of await new SecretRepository(deps.db).listActive(run.id)) {
     secretValues.set(s.name, decryptSecret(s, { runId: run.id, name: s.name }, deps.config.secretsKey));
   }
-  const redact = createRunRedactor([...secretValues.values()]);
+  const redact = createRunRedactor();
   const publisher = createRunEventPublisher({
     events: new EventRepository(deps.db),
     redis: deps.redis,
@@ -158,6 +158,7 @@ export async function createRunContext(
     async saveSiteAnalysis(analysis) {
       await new SiteAnalysisRepository(deps.db).save(run.id, analysis);
     },
+    getSiteAnalysis: () => new SiteAnalysisRepository(deps.db).get(run.id),
     async applyTestData(values) {
       const testData = await runs.mergeTestData(run.id, values);
       ctx.request = { ...ctx.request, testData };

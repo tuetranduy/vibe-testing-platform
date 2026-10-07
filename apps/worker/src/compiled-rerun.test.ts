@@ -280,7 +280,7 @@ async function rerun(test: GeneratedTest) {
     deadlineAt: null,
     budgets: { explorationMs: 60_000, rerunMs: 60_000 },
     secrets: { names: ["password"], get: (name: string) => (name === "password" ? VALID_PASSWORD : undefined) },
-    redact: createRunRedactor([VALID_PASSWORD]),
+    redact: createRunRedactor(),
     publish: async (e: EventDraft) => void events.push(e),
     addCleanup: (fn: () => Promise<void> | void) => void cleanups.push(fn),
   } as unknown as StageContext;
@@ -336,7 +336,7 @@ describe("compiled demo-shop flow, rerun by Playwright (real runner, egress prox
     });
   });
 
-  it("healthy shop → the compiled test PASSES every compiled criterion; its video and scrubbed trace are kept (V1.3), no screenshot", async () => {
+  it("healthy shop → the compiled test PASSES every compiled criterion; its video and trace are kept (V1.3), no screenshot", async () => {
     const test = compileRecorded(recording, `${shop.url}/login`);
     expect(test.compiledCriteria).toEqual(["AC-1", "AC-2", "AC-3"]);
     expect(test.notCompiled.map((n) => n.criterionId)).toEqual(["AC-4"]);
@@ -352,10 +352,11 @@ describe("compiled demo-shop flow, rerun by Playwright (real runner, egress prox
     expect([...result.artifactIds].sort()).toEqual(artifacts.map((a) => a.id).sort());
     const trace = artifacts.find((a) => a.type === "TRACE")!;
     const text = Object.values(unzipSync(readFileSync(resolveLocalObjectPath(objects, trace.objectKey)))).map((b) => strFromU8(b, true)).join("\n");
-    expect(text).not.toContain(VALID_PASSWORD);
+    // Stored as recorded: run secrets are no longer scrubbed from traces (2026-10-07).
+    expect(text).toContain(VALID_PASSWORD);
   }, 60_000);
 
-  it("?bug=empty_cart → the cart-contents criterion ASSERTION_FAILED, the others PASSED; the stored trace has no password", async () => {
+  it("?bug=empty_cart → the cart-contents criterion ASSERTION_FAILED, the others PASSED; the stored trace keeps the password it filled", async () => {
     const test = compileRecorded(recording, `${shop.url}/login?bug=empty_cart`);
     const { result, events, artifacts } = await rerun(test);
     expect(result.status).toBe("FAILED");
@@ -363,19 +364,16 @@ describe("compiled demo-shop flow, rerun by Playwright (real runner, egress prox
     expect(Object.keys(result.errorText)).toEqual(["AC-3"]);
     expect(result.errorText["AC-3"]).toContain("[AC-3] The cart lists iPhone 17 Pro");
 
-    // Evidence: trace, screenshot and video, all SECRET_BEARING (the run has a secret).
+    // Evidence: trace, screenshot and video, all STANDARD (secrets are no longer redacted).
     expect(artifacts.map((a) => a.type).sort()).toEqual(["SCREENSHOT", "TRACE", "VIDEO"]);
-    expect(new Set(artifacts.map((a) => a.sensitivity))).toEqual(new Set(["SECRET_BEARING"]));
+    expect(new Set(artifacts.map((a) => a.sensitivity))).toEqual(new Set(["STANDARD"]));
     expect([...result.artifactIds].sort()).toEqual(artifacts.map((a) => a.id).sort());
     expect(events.filter((e) => e.type === "artifact.created")).toHaveLength(3);
 
-    // The stored trace recorded the password fill, with the value scrubbed.
+    // The stored trace recorded the password fill, value included.
     const trace = artifacts.find((a) => a.type === "TRACE")!;
     const entries = unzipSync(readFileSync(resolveLocalObjectPath(objects, trace.objectKey)));
     const text = Object.values(entries).map((b) => strFromU8(b, true)).join("\n");
-    expect(text).toContain("[REDACTED]");
-    for (const form of [VALID_PASSWORD, encodeURIComponent(VALID_PASSWORD), Buffer.from(VALID_PASSWORD).toString("base64")]) {
-      expect(text).not.toContain(form);
-    }
+    expect(text).toContain(VALID_PASSWORD);
   }, 60_000);
 });

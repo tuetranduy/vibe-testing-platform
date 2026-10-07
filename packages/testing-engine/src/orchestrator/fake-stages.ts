@@ -393,6 +393,7 @@ export function createFakeStages(opts: FakeEngineOptions = {}): EngineStages & {
         },
         playwright: input.rerun && { status: input.rerun.status, durationMs: input.rerun.durationMs },
         diagnostics: [],
+        generatedInputs: [],
         usage: { llmCalls: 0, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
         startedAt: input.startedAt?.toISOString() ?? null,
         finishedAt: finishedAt.toISOString(),

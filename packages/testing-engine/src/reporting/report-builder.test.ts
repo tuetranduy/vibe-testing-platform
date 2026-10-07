@@ -278,6 +278,16 @@ describe("report stage: summary and verdict", () => {
     expect(report.usage).toEqual({ llmCalls: 3, inputTokens: 3210, outputTokens: 800, estimatedCostUsd: 0.0189 });
   });
 
+  it("lists the values nobody provided that exploration generated, once per key (2026-10-07)", async () => {
+    const filled = (i: number, key: string, generatedValue?: string) => ({ ...step(i, `PS-${i}`, []), kind: "fill" as const, inputRef: { source: "secret" as const, key }, ...(generatedValue ? { generatedValue } : {}) });
+    const steps = [...STEPS, filled(5, "password", "Gen-Pass-1!aB"), filled(6, "password", "Gen-Pass-1!aB")];
+    const report = await createReportStage({ store: fakeStore().store })(ctx, input({ exploration: { steps, facts: FACTS, stopReason: "COMPLETED" } }));
+    expect(report.generatedInputs).toEqual([{ source: "secret", key: "password", value: "Gen-Pass-1!aB", stepId: steps[5]!.id }]);
+    expect((await createReportStage({ store: fakeStore().store })(ctx, input())).generatedInputs).toEqual([]);
+    const built = await createReportBuilder(async () => ({ ...persisted({ results: report.criteria }), steps })).buildReport("run_1");
+    expect(built.generatedInputs).toEqual(report.generatedInputs);
+  });
+
   it("the generated test is summarised, without helpers or data", async () => {
     const generatedTest = { id: "gt_1", source: "src", helpersSource: "h", dataJson: "{}", compiledCriteria: ["AC-1"], notCompiled: [{ criterionId: "AC-3", reason: "r" }], notes: ["n"] };
     const report = await createReportStage({ store: fakeStore().store })(ctx, input({ generatedTest }));
@@ -514,6 +524,7 @@ describe("@platform/testing-engine/reporting entry point (Ruling R36)", () => {
       "reporting/report-builder.ts",
       "reporting/rerun-only.ts",
       "shared/fact-values.ts",
+      "shared/generated-inputs.ts",
       "verification/aggregate.ts",
       "verification/normalize.ts",
     ]);

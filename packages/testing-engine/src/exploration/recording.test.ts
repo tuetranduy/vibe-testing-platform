@@ -87,7 +87,7 @@ async function files(): Promise<{ trace: string; video: string }> {
 }
 
 describe("exploration recordings (V1.3)", () => {
-  it("are stopped before the sandbox closes, stored (the trace scrubbed of secrets) and returned as run-wide evidence", async () => {
+  it("are stopped before the sandbox closes, stored as recorded and returned as run-wide evidence", async () => {
     const f = await files();
     const discard = vi.fn(async () => {});
     const h = exploreStage(async () => ({
@@ -107,12 +107,11 @@ describe("exploration recordings (V1.3)", () => {
     expect(h.log.indexOf("recording.stop")).toBeLessThan(h.log.indexOf("sandbox.close"));
     expect(discard).toHaveBeenCalled();
     expect(h.uploads.map((u) => [u.type, u.sensitivity])).toEqual([
-      ["VIDEO", "SECRET_BEARING"],
-      ["TRACE", "SECRET_BEARING"],
+      ["VIDEO", "STANDARD"],
+      ["TRACE", "STANDARD"],
     ]);
-    const trace = strFromU8(unzipSync(h.uploads[1]!.body)["trace.trace"]!);
-    expect(trace).not.toContain(SECRET);
-    expect(trace).toContain("[REDACTED]");
+    // Stored as recorded: run secrets are no longer scrubbed from traces (2026-10-07).
+    expect(strFromU8(unzipSync(h.uploads[1]!.body)["trace.trace"]!)).toContain(SECRET);
     expect(events.filter((e) => e.type === "artifact.created").map((e) => e.message)).toEqual(["Exploration video stored", "Exploration trace stored"]);
   });
 

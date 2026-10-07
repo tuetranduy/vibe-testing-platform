@@ -14,6 +14,7 @@
  * not compiled. Diagnostics run only after the statuses, summary and verdict are decided, within their
  * own time-box (R43), and can add notes, never statuses (D3, Ruling R37).
  */
+import { generatedInputs } from "../shared/generated-inputs";
 import {
   CriterionResultSchema,
   ProvisionalResultSchema,
@@ -194,6 +195,8 @@ export interface AssembleReportInput {
   finishedAt: Date | null;
   /** A manual rerun's source run (V1.1 F5). */
   rerunOf?: string | null;
+  /** The exploration steps: the values nobody provided that they generated are listed (2026-10-07). */
+  steps?: readonly ExplorationStep[];
 }
 
 /** The TestReport, validated with the shared contract. `partial` for ERRORED / CANCELLED runs. */
@@ -221,6 +224,7 @@ export function assembleReport(input: AssembleReportInput): TestReport {
     },
     playwright: input.playwright,
     diagnostics: input.diagnostics,
+    generatedInputs: generatedInputs(input.steps ?? []),
     usage: usageOf(input.llmCalls),
     startedAt: startedAt?.toISOString() ?? null,
     finishedAt: finishedAt?.toISOString() ?? null,
@@ -295,6 +299,7 @@ export function createReportBuilder(load: ReportSourceLoader): { buildReport(run
         startedAt: s.run.startedAt,
         finishedAt: s.run.finishedAt,
         rerunOf: s.run.rerunOf ?? null,
+        steps: s.steps,
       });
     },
   };
@@ -470,6 +475,7 @@ export function createReportStage(deps: ReportStageDeps): EngineStages["report"]
       llmCalls,
       startedAt: input.startedAt,
       finishedAt: ctx.now(),
+      steps: input.exploration?.steps ?? [],
     });
   };
 }

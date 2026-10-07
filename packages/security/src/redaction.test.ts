@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REDACTED, createRunRedactor, createValueRedactor, isSensitiveKey, redactByKey } from "./redaction";
+import { REDACTED, createRunRedactor, isSensitiveKey, redactByKey } from "./redaction";
 
 describe("redactByKey", () => {
   it("redacts the plan example", () => {
@@ -158,105 +158,26 @@ describe("redactByKey", () => {
   });
 });
 
-describe("createValueRedactor", () => {
-  it("redacts a secret inside a string (plan example)", () => {
-    const redact = createValueRedactor(["hunter2-long"]);
-    expect(redact("typed hunter2-long into field")).toBe("typed [REDACTED] into field");
-  });
-
-  it("redacts every occurrence", () => {
-    const redact = createValueRedactor(["s3cr3t!"]);
-    expect(redact("s3cr3t! and s3cr3t!s3cr3t!")).toBe("[REDACTED] and [REDACTED][REDACTED]");
-  });
-
-  it("redacts the URL-encoded form (either hex case) and the form-encoded form", () => {
-    const secret = "p@ss w/rd&x=1";
-    const redact = createValueRedactor([secret]);
-    const enc = encodeURIComponent(secret);
-    expect(redact(`https://x.test/login?pw=${enc}&ok=1`)).toBe("https://x.test/login?pw=[REDACTED]&ok=1");
-    expect(redact(`pw=${enc.toLowerCase()}`)).toBe("pw=[REDACTED]");
-    const form = new URLSearchParams({ pw: secret }).toString(); // spaces as '+'
-    expect(redact(form)).toBe("pw=[REDACTED]");
-  });
-
-  it("redacts standard and url-safe base64 forms, padded or not", () => {
-    const secret = "hunter2-long??>"; // produces '+' / '/' in std base64
-    const redact = createValueRedactor([secret]);
-    const std = Buffer.from(secret).toString("base64");
-    const url = Buffer.from(secret).toString("base64url");
-    expect(std).not.toBe(url);
-    expect(redact(`data ${std} end`)).toBe("data [REDACTED] end");
-    expect(redact(`data ${url} end`)).toBe("data [REDACTED] end");
-    const padded = Buffer.from("abcd").toString("base64"); // "YWJjZA=="
-    const r2 = createValueRedactor(["abcd"]);
-    expect(r2(`x ${padded} y`)).toBe("x [REDACTED] y");
-    expect(r2(`x ${padded.replace(/=+$/, "")} y`)).toBe("x [REDACTED] y");
-  });
-
-  it("prefers the longest secret when secrets overlap", () => {
-    const redact = createValueRedactor(["abc", "abcdef"]);
-    expect(redact("xx abcdef yy abc")).toBe("xx [REDACTED] yy [REDACTED]");
-    const redact2 = createValueRedactor(["pass", "password123"]);
-    expect(redact2("password123")).toBe("[REDACTED]");
-  });
-
-  it("escapes regex metacharacters in secrets", () => {
-    const redact = createValueRedactor(["a.b*c(d)[e]$^|\\"]);
-    expect(redact("x a.b*c(d)[e]$^|\\ y")).toBe("x [REDACTED] y");
-    expect(redact("x aXbbbc y")).toBe("x aXbbbc y");
-  });
-
-  it("ignores empty secrets and is a no-op with none", () => {
-    const redact = createValueRedactor(["", ""]);
-    expect(redact("anything")).toBe("anything");
-    expect(createValueRedactor([])({ a: "b" })).toEqual({ a: "b" });
-  });
-
-  it("walks deep structures including arrays and does not mutate", () => {
-    const redact = createValueRedactor(["topsecret"]);
-    const input = { a: ["x topsecret", { b: "topsecret" }], n: 5, keep: "fine" };
-    const snapshot = structuredClone(input);
-    expect(redact(input)).toEqual({ a: ["x [REDACTED]", { b: "[REDACTED]" }], n: 5, keep: "fine" });
-    expect(input).toEqual(snapshot);
-  });
-
-  it("redacts secrets inside Error messages and stacks without mutating the error", () => {
-    const redact = createValueRedactor(["topsecret"]);
-    const err = new TypeError("failed with topsecret");
-    const out = redact({ err }) as { err: Error };
-    expect(out.err).toBeInstanceOf(TypeError);
-    expect(out.err.message).toBe("failed with [REDACTED]");
-    expect(out.err.stack).toContain("TypeError: failed with [REDACTED]");
-    expect(out.err.stack).not.toContain("topsecret");
-    expect(err.stack).toContain("topsecret");
-    expect(err.message).toBe("failed with topsecret");
-  });
-
-  it("does not key-redact", () => {
-    const redact = createValueRedactor(["zzz"]);
-    expect(redact({ password: "hello" })).toEqual({ password: "hello" });
-  });
-});
-
 describe("createRunRedactor", () => {
-  it("applies key and value redaction together", () => {
-    const redact = createRunRedactor(["hunter2-long"]);
+  it("redacts by key only: a run's secret values are kept as typed (2026-10-07)", () => {
+    const redact = createRunRedactor();
     expect(
       redact({
         headers: { Authorization: "Bearer abc" },
         log: ["typed hunter2-long into field"],
         url: `https://shop.test/?p=${encodeURIComponent("hunter2-long")}`,
-        email: "qa@example.com",
+        password: "hunter2-long",
       }),
     ).toEqual({
       headers: { Authorization: REDACTED },
-      log: ["typed [REDACTED] into field"],
-      url: "https://shop.test/?p=[REDACTED]",
-      email: "qa@example.com",
+      log: ["typed hunter2-long into field"],
+      url: "https://shop.test/?p=hunter2-long",
+      password: REDACTED,
     });
   });
 
-  it("works with no secrets (key-only)", () => {
-    expect(createRunRedactor([])({ token: "t", a: "b" })).toEqual({ token: REDACTED, a: "b" });
+  it("matches redactByKey", () => {
+    const value = { token: "t", a: "b", nested: [{ cookie: "c" }] };
+    expect(createRunRedactor()(value)).toEqual(redactByKey(value));
   });
 });

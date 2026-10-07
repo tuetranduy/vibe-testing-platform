@@ -99,7 +99,7 @@ describe("POST /v1/test-runs", () => {
     expect(values).toEqual({ password: "typed-password-1", password_2: "Adm1n#2026-long" });
   });
 
-  it("redacts secret values that also appear in the requirement text or test data", async () => {
+  it("keeps secret values that also appear in test data; key-based redaction and the requirement's own password still apply", async () => {
     const res = await post(
       validBody({
         requirement: "Log in with password hunter2-long-secret and check the account page.",
@@ -110,13 +110,10 @@ describe("POST /v1/test-runs", () => {
     expect(res.statusCode).toBe(202);
     const { runId } = res.json();
     const [row] = await t.tdb.db.select().from(schema.testRuns).where(eq(schema.testRuns.id, runId));
-    expect(JSON.stringify(row)).not.toContain("hunter2");
     const stored = row!.requestJson as { requirement: string; testData: Record<string, string> };
     // V1.3.1: a password written in the requirement that is one of the run's secrets is replaced by its name.
     expect(stored.requirement).toBe("Log in with password [secret: login_password] and check the account page.");
-    expect(stored.testData.email).toBe("qa@demo.test");
-    const summary = await t.app.inject({ method: "GET", url: `/v1/test-runs/${runId}`, headers: auth });
-    expect(summary.body).not.toContain("hunter2");
+    expect(stored.testData).toEqual({ email: "qa@demo.test", password: "[REDACTED]", note: "pw is hunter2-long-secret" });
   });
 
   it("returns 400 for malformed JSON", async () => {

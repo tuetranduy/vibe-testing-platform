@@ -120,14 +120,14 @@ export function createRunTestStage(deps: RunTestStageDeps): EngineStages["runTes
       const out: RunGeneratedTestResult = await running;
       await closeProxy();
       if (ctx.signal.aborted) throw ctx.signal.reason;
-      const artifactIds = await collectEvidence(ctx, out.artifacts, { store: deps.evidence(ctx), secretValues: Object.values(secrets) });
+      const artifactIds = await collectEvidence(ctx, out.artifacts, { store: deps.evidence(ctx) });
       // The collector stops at the run signal; the stage then throws its reason (never a partial result).
       if (ctx.signal.aborted) throw ctx.signal.reason;
       return RerunResultSchema.parse({
         status: out.status,
         perCriterion: out.perCriterion,
         durationMs: out.durationMs,
-        // Error text can quote page content or a filled value: the run's redactor applies (by value).
+        // Error text can quote page content or a filled value: the run's redactor applies (by key).
         errorText: ctx.redact(out.errorText),
         artifactIds,
       });

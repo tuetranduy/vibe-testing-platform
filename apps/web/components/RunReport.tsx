@@ -8,6 +8,7 @@ import { ArtifactList } from "./ArtifactList";
 import { CriteriaResults } from "./CriteriaResults";
 import { Disclosure } from "./Disclosure";
 import { FailureDiagnostics } from "./FailureDiagnostics";
+import { GeneratedInputs } from "./GeneratedInputs";
 import { GeneratedTestViewer } from "./GeneratedTestViewer";
 import { Icon } from "./Icon";
 import { AddToSuitePanel } from "./AddToSuitePanel";
@@ -118,6 +119,7 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
           <FailureDiagnostics findings={general} />
         </section>
       )}
+      <GeneratedInputs inputs={report.generatedInputs} />
       {report.generatedTest && <GeneratedTestViewer test={report.generatedTest} playwright={report.playwright} requirement={report.requirement} />}
       {secretNames && report.generatedTest && report.generatedTest.compiledCriteria.length > 0 && (
         <RerunPanel

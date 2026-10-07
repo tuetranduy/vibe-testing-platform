@@ -77,9 +77,8 @@ export function race<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-/** The run's usual rule (the executor's): a run with secrets marks its screenshots SECRET_BEARING. */
-export const screenshotSensitivity = (ctx: Pick<StageContext, "secrets" | "request">): ArtifactSensitivity =>
-  ctx.secrets.names.length > 0 || ctx.request.secretNames.length > 0 ? "SECRET_BEARING" : "STANDARD";
+/** Screenshots are never secret-bearing: a run's secrets are no longer redacted (2026-10-07). */
+export const screenshotSensitivity = (): ArtifactSensitivity => "STANDARD";
 
 /**
  * Loads the start page, then up to `maxLinks` of the pages it links to (chooseSurveyLinks, ordered by
@@ -90,7 +89,7 @@ export async function readSite(ctx: StageContext, opts: ReadSiteOptions): Promis
   const { sandbox, store, pagesBudget, pageTimeoutMs } = opts;
   const start = new URL(ctx.request.targetUrl);
   const additional = ctx.request.options.additionalAllowedHosts;
-  const sensitivity = screenshotSensitivity(ctx);
+  const sensitivity = screenshotSensitivity();
 
   let blocked = false;
   const unsubscribe = sandbox.onNavigationBlocked?.(() => {

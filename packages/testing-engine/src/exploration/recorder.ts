@@ -2,6 +2,7 @@
 import type { ElementRef, LocatorCandidate } from "@platform/contracts";
 import type { ElementHandle, Locator, Page } from "playwright-core";
 import { candidatesFromDescription, type ElementDescription } from "../shared/locator-policy";
+import type { FieldFacts } from "./input-generator";
 
 /**
  * Recorder (Task 14): turns the element the explorer acted on (Stagehand's `xpath=/…` selector,
@@ -73,6 +74,50 @@ function readDom(el: Element): DomFacts {
     text: text ? text.trim() : null,
     xpath,
     xpathResolves: resolved === el,
+  };
+}
+
+/**
+ * What a field asks for, read from the DOM (no model): what a generated value must suit (2026-10-07). The label is the
+ * field's own <label>, else its aria-label or aria-labelledby text; a select lists at most 50 options.
+ */
+export async function describeField(page: Page, target: ElementTarget, opts: RecorderOptions = {}): Promise<FieldFacts> {
+  const handle = await resolveHandle(page, target, opts);
+  return handle.evaluate(readField);
+}
+
+/** Runs in the page: no named inner functions (keepNames would wrap them in a helper the page lacks). */
+function readField(el: Element): FieldFacts {
+  const text: Record<string, string | null> = {};
+  for (const name of ["type", "name", "placeholder", "autocomplete", "min", "max", "pattern", "aria-label"]) {
+    const v = (el.getAttribute(name) ?? "").replace(/\s+/g, " ").trim();
+    text[name] = v ? v.slice(0, 200) : null;
+  }
+  const field = el as HTMLInputElement;
+  const own = (field.labels?.[0]?.textContent ?? "").replace(/\s+/g, " ").trim();
+  const ids = (el.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean);
+  const byIds = ids.map((id) => document.getElementById(id)?.textContent ?? "").join(" ").replace(/\s+/g, " ").trim();
+  const label = own || text["aria-label"] || byIds || null;
+  const tag = el.tagName.toLowerCase();
+  const maxLength = el.hasAttribute("maxlength") ? Number(el.getAttribute("maxlength")) : NaN;
+  const options =
+    tag === "select"
+      ? Array.from((el as HTMLSelectElement).options)
+          .slice(0, 50)
+          .map((o) => ({ value: o.value, label: (o.label || o.text).replace(/\s+/g, " ").trim() }))
+      : [];
+  return {
+    tag,
+    type: tag === "input" ? (text["type"] ?? "text") : null,
+    name: text["name"] ?? null,
+    label: label ? label.slice(0, 200) : null,
+    placeholder: text["placeholder"] ?? null,
+    autocomplete: text["autocomplete"] ?? null,
+    maxLength: Number.isInteger(maxLength) && maxLength >= 0 ? maxLength : null,
+    min: text["min"] ?? null,
+    max: text["max"] ?? null,
+    pattern: text["pattern"] ?? null,
+    options,
   };
 }
 
@@ -213,23 +258,21 @@ export async function resolveElement(page: Page, ref: ElementRef): Promise<{ loc
 
 /**
  * Deterministic fill by our own code (D7: secrets are filled by us, never by the model). The target
- * must match exactly one element. The value is never logged or returned.
+ * must match exactly one element. Its error keeps the first line of Playwright's (the value is no longer masked).
  */
 export async function fillElement(page: Page, target: ElementTarget, value: string, opts: RecorderOptions = {}): Promise<void> {
   const handle = await resolveHandle(page, target, opts);
   try {
     await handle.fill(value, { timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS });
   } catch (err) {
-    // Playwright error messages can echo call arguments; never let the value escape.
     const firstLine = (err instanceof Error ? err.message : String(err)).split("\n")[0] ?? "";
-    const safe = value ? firstLine.split(value).join("[REDACTED]") : firstLine;
-    throw new Error(`recorder: fill failed: ${safe.slice(0, 300)}`);
+    throw new Error(`recorder: fill failed: ${firstLine.slice(0, 300)}`);
   }
 }
 
 /**
  * Deterministic `<select>` choice by our own code (the value comes from test data, a secret or the
- * requirement, never from the model). Matches an option by value or label. Never logs the value.
+ * requirement, never from the model). Matches an option by value or label.
  */
 export async function selectElementOption(page: Page, target: ElementTarget, value: string, opts: RecorderOptions = {}): Promise<void> {
   const handle = await resolveHandle(page, target, opts);
@@ -237,7 +280,6 @@ export async function selectElementOption(page: Page, target: ElementTarget, val
     await handle.selectOption(value, { timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS });
   } catch (err) {
     const firstLine = (err instanceof Error ? err.message : String(err)).split("\n")[0] ?? "";
-    const safe = value ? firstLine.split(value).join("[REDACTED]") : firstLine;
-    throw new Error(`recorder: select failed: ${safe.slice(0, 300)}`);
+    throw new Error(`recorder: select failed: ${firstLine.slice(0, 300)}`);
   }
 }
