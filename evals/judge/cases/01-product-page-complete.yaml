@@ -1,0 +1,10 @@
+# KI-046: expected holds.
+id: "product-page-complete"
+tags: ["shop", "holds"]
+requirement: "Open the Trail Runner 3 product page and check that it looks complete"
+criterion: {"statement": "The product page is complete.", "description": "The product page shows everything a shopper needs to decide: name, price, description and a way to buy", "sourceText": "check that it looks complete", "ambiguity": null}
+stepDescription: "Open the Trail Runner 3 product page"
+url: "https://shop.example.com/products/trail-runner-3"
+inventory: {"title": "Trail Runner 3 — Example Shop", "description": "", "headings": [{"level": 1, "text": "Trail Runner 3"}, {"level": 2, "text": "Description"}, {"level": 2, "text": "Reviews (128)"}], "links": [{"text": "Size guide", "url": "https://shop.example.com/size-guide", "area": "main"}], "forms": [], "buttons": ["Add to cart", "Add to wishlist"]}
+text: "Trail Runner 3\n€129.00 incl. VAT\nIn stock — ships in 1–2 days\nSize: 40 41 42 43 44 45\nColour: Black / Lime\nAdd to cart\nDescription\nA lightweight trail shoe with a grippy outsole and a breathable mesh upper. Weight 280 g (size 42).\nReviews (128)\n★★★★☆ 4.4 out of 5"
+expect: {"relevant": true, "verdict": "HOLDS", "forbidden": []}

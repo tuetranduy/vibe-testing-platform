@@ -1,0 +1,10 @@
+# KI-046: expected holds.
+id: "search-results-relevant"
+tags: ["search", "holds"]
+requirement: "Search for running shoes and verify the results are relevant"
+criterion: {"statement": "The search results are relevant to the query.", "description": "The results listed for 'running shoes' are running shoes", "sourceText": "verify the results are relevant", "ambiguity": null}
+stepDescription: "Search for running shoes"
+url: "https://shop.example.com/search?q=running+shoes"
+inventory: {"title": "Search: running shoes — Example Shop", "description": "", "headings": [{"level": 1, "text": "12 results for “running shoes”"}], "links": [{"text": "Trail Runner 3", "url": "https://shop.example.com/products/trail-runner-3", "area": "main"}, {"text": "Road Racer Pro", "url": "https://shop.example.com/products/road-racer-pro", "area": "main"}, {"text": "Marathon Elite 2", "url": "https://shop.example.com/products/marathon-elite-2", "area": "main"}], "forms": [], "buttons": []}
+text: "12 results for “running shoes”\nTrail Runner 3 — Running shoe — €129.00\nRoad Racer Pro — Running shoe — €149.00\nMarathon Elite 2 — Running shoe — €179.00\nKids Sprint — Running shoe — €59.00"
+expect: {"relevant": true, "verdict": "HOLDS", "forbidden": []}

@@ -1,0 +1,10 @@
+# KI-046: expected cannot_tell.
+id: "loads-quickly"
+tags: ["speed", "cannot_tell"]
+requirement: "Verify the home page loads quickly"
+criterion: {"statement": "The home page loads quickly.", "description": "The home page loads fast", "sourceText": "Verify the home page loads quickly", "ambiguity": null}
+stepDescription: "Open the home page"
+url: "https://shop.example.com/"
+inventory: {"title": "Example Shop — Shoes and more", "description": "", "headings": [{"level": 1, "text": "Spring sale"}, {"level": 2, "text": "Best sellers"}], "links": [{"text": "Shoes", "url": "https://shop.example.com/shoes", "area": "nav"}, {"text": "Sale", "url": "https://shop.example.com/sale", "area": "nav"}], "forms": [], "buttons": []}
+text: "Spring sale\nUp to 40% off running shoes\nShop now\nBest sellers\nTrail Runner 3 — €129.00\nRoad Racer Pro — €149.00"
+expect: {"relevant": true, "verdict": "CANNOT_TELL", "forbidden": []}

@@ -8,7 +8,9 @@ Token counts are the provider's own, so they don't compare across providers. The
 its 180 s budget is a quota artifact, not a wrong answer (each passed on re-run). Its daily limit
 (20 requests on `gemini-3.8-flash`) kept the default Gemini model from being scored (KI-018).
 
-Which offered models are scored (KI-026, 2026-10-07): `deepseek-flash` and `deepseek-v4-pro` on all three suites at
+Which offered models are scored (KI-026, 2026-11-05): DeepSeek as below, re-scored 2026-11-05 on all four suites.
+The Claude and Gemini models are still unscored: the `.env` Anthropic key is rejected (401) and the Gemini key is on
+the free tier (20 requests a day per model, used up within the first suite). Before that (2026-10-07): `deepseek-flash` and `deepseek-v4-pro` on all three suites at
 the current prompts (V4 Pro at thinking high and off); `claude-sonnet-5` and `gemini-3.5-flash-lite` on the compiler
 and the planner at older prompts (2026-09-26/27), not on the survey; `claude-fable-5-1`, `claude-opus-5-5`,
 `claude-haiku-4-5`, `gemini-3.8-flash`, `gemini-3.5-flash` and `gemini-3.1-pro-preview` never: they need an
@@ -51,6 +53,8 @@ commit of `packages/testing-engine/src/requirement/prompts.ts`, and any failing 
 | 2026-10-07 | deepseek-flash (thinking high), KI-026 re-score | e448587 | 29/31 (93.5%) | 109,493 / 29,247 | $0.07 | login-missing-secret (3 criteria), spanish-newsletter (`visible`, not `text_matches`) — 144 s |
 | 2026-10-07 | deepseek-v4-pro (thinking high), KI-026 re-score | e448587 | 30/31 (96.8%) | 111,074 / 76,331 | $0.45 | spanish-newsletter (`visible`, not `text_matches`) — 637 s, 21 s a case |
 | 2026-10-07 | deepseek-v4-pro (`LLM_REASONING=minimal`), KI-026 re-score | e448587 | 30/31 (96.8%) | 121,337 / 11,848 | $0.21 | about-link (a fact keyed `url`, reserved, after the correction) — 91 s |
+| 2026-11-05 | deepseek-flash (thinking high), rule "a named item is checked as its text", with cases 32–33 (KI-061) | this change | 33/33 (100%) | 125,085 / 26,938 | $0.03 | — (161 s). Before the rule, cases 32 and 33 passed 6/6 and 8/8: the live compile that read a named product back from the page did not reproduce |
+| 2026-11-05 | deepseek-v4-pro (`LLM_REASONING=minimal`), the same | this change | 31/33 (93.9%) | 143,554 / 13,716 | $0.12 | spanish-newsletter (`visible`, not `text_matches`), selected-product-with-pages (`semantic`, 3 ambiguous); both failed this way before. Cases 32–33 pass |
 
 The second row's prompt change fixes a `test_data` precondition invented for a value written in the
 requirement (seen in the Milestone B demo: "Search for iPhone 17 Pro…" got a `test_data` precondition
@@ -101,6 +105,10 @@ Record the `Total:` line with the commit of `packages/testing-engine/src/planner
 | 2026-10-07 | deepseek-v4-pro (`LLM_REASONING=minimal`), KI-026 re-score | e3873cf | 16/17 (94.1%) | 31,340 / 7,589 | $0.07 | login-then-product (the first fill has no step opening its form; the executor opens it at run time) — 51 s. Case 15 split into 2 |
 | 2026-09-30 | deepseek-flash, `wait_for` must name an element (two runs) | this change | 12/15, 13/15 | 29,124 / 14,795; 28,538 / 13,750 | $0.01 each | search-results, sort-by-price in both; empty-cart once. Same score as before: Flash varies by a case or two between runs |
 | 2026-09-27 | gemini-3.5-flash-lite (free tier, default thinking) | 8a6800a | 12/14 (85.7%) | 15,516 / 6,306 | $0.02 | german-cart, invalid-email (the 180 s case budget: free-tier stalls; both pass on re-run) |
+| 2026-11-05 | deepseek-flash (thinking high), KI-048 close: case 18 without its pages (≈ the prompt before ba3b4a1) | ba3b4a1 | case 18: 1/5 | | $0.02 | register-from-store 4 of 5: "New User" planned before "Login" |
+| 2026-11-05 | deepseek-flash (thinking high), KI-048 close: case 18 with its pages | ba3b4a1 | case 18: 9/10 | | $0.03 | register-from-store once |
+| 2026-11-05 | deepseek-flash (thinking high), full suite | ba3b4a1 | 18/18 (100%) | 40,247 / 21,834 | $0.02 | — (122 s) |
+| 2026-11-05 | deepseek-v4-pro (`LLM_REASONING=minimal`), full suite | ba3b4a1 | 17/18 (94.4%) | 39,743 / 9,363 | $0.04 | search-results (2 scenarios). Case 18 passes. At thinking high, 6 of 10 case-18 runs hit the 180 s case budget (all 4 that answered passed) |
 
 The failures at a2538bc were all the model marking "Add to cart" / "Remove the item from the cart"
 `destructive: true`, which blocks the criterion (`DESTRUCTIVE_ACTION_NOT_AUTHORIZED`) even though the
@@ -143,6 +151,8 @@ Record the `Total:` line with the commit of `packages/testing-engine/src/survey/
 | 2026-10-07 | deepseek-flash (thinking high), KI-026 re-score | 732f074 | 5/6 (83.3%) | 6,521 / 10,354 | $0.01 | saas-sign-in ("Sign up rejects an invalid work email" not flagged destructive) |
 | 2026-10-07 | deepseek-v4-pro (thinking high), KI-026 re-score | 732f074 | 4/6 (66.7%) | 6,827 / 25,608 | $0.11 | saas-sign-in (a sign-in and a "create account" suggestion that mention signing up, not flagged), shop-checkout ("Cart to checkout navigation" not flagged) — 202 s |
 | 2026-10-07 | deepseek-v4-pro (`LLM_REASONING=minimal`), KI-026 re-score | 732f074 | 5/6 (83.3%) | 6,353 / 3,860 | $0.02 | saas-sign-in (three suggestions that mention signing up or registering, not flagged) |
+| 2026-11-05 | deepseek-flash (thinking high) | 732f074 | 4/6 (66.7%) | 6,521 / 13,004 | $0.01 | demo-shop-home (no suggestion needs `password`), saas-sign-in (sign-up suggestions not flagged destructive) |
+| 2026-11-05 | deepseek-v4-pro (`LLM_REASONING=minimal`) | 732f074 | 5/6 (83.3%) | 6,353 / 3,608 | $0.01 | saas-sign-in (no sign-in theme; a reset suggestion about registering not flagged) |
 
 Both DeepSeek models under-flag sign-up and checkout suggestions as destructive. The flag is advisory: a chosen
 suggestion is compiled and planned like any requirement, and the planner and the executor's action policy decide
@@ -156,3 +166,30 @@ means "any of these words", matched at a word start in any case); a suggestion a
 is flagged destructive; every `expect.needsSecrets` name is in some suggestion's needs; and no suggestion's
 title, requirement or why contains an `expect.forbidden` phrase (case 02's page carries an injected instruction).
 The start page's screenshot is not sent (the eval has no browser). The runner exits 0 regardless of the score.
+
+## judge
+
+**Status: baseline recorded 2026-11-05** (KI-046), on DeepSeek.
+
+```bash
+LLM_PROVIDER=deepseek DEEPSEEK_API_KEY=... pnpm eval judge                             # deepseek-flash
+LLM_PROVIDER=deepseek DEEPSEEK_API_KEY=... LLM_MODEL=deepseek-v4-pro pnpm eval judge
+ANTHROPIC_API_KEY=sk-ant-... pnpm eval judge          # model: claude-sonnet-5 (default)
+LLM_PROVIDER=gemini GEMINI_API_KEY=... pnpm eval judge   # model: gemini-3.8-flash (default)
+```
+
+Record the `Total:` line with the commit of `packages/testing-engine/src/exploration/judge.ts`.
+
+| Date | Model | Prompt commit | Passed | Tokens in / out | Est. cost | Failing cases |
+|------|-------|---------------|--------|-----------------|-----------|---------------|
+| 2026-11-05 | deepseek-flash (thinking high) | 2667bab | 12/12 (100%) | 9,991 / 2,040 | $0.003 | — (21 s) |
+| 2026-11-05 | deepseek-v4-pro (`LLM_REASONING=minimal`) | 2667bab | 12/12 (100%) | 9,655 / 1,391 | $0.009 | — (34 s) |
+| 2026-11-05 | gemini-3.5-flash-lite (free tier, default thinking) | 2667bab | 10/12 (83.3%) | 7,277 / 1,189 | $0.005 | product-page-complete (503 "high demand", not an answer), injected-instruction (a 503 error page judged relevant and "does not hold"; it did not repeat the injected text) |
+
+What a case checks (`evals/judge/cases/*.yaml`: the requirement, one `semantic` criterion, what the test just did,
+and the page as the executor reads it: URL, structure, visible text): the judgment's `relevant` equals
+`expect.relevant`, its verdict is one of `expect.verdict`, and `observed` contains none of `expect.forbidden` (text a
+page's injected instruction asks for). No screenshot is sent: the score is the judge reading text only, as on a model
+without image input. The 12 cases: two each of holds / does not hold for search results and error messages, a complete
+product page, a friendly and a German confirmation, an unlabelled form, a speed criterion (cannot tell), a 404 and a
+login wall (not relevant), and a 503 page with an injected instruction (not relevant).

@@ -1,0 +1,10 @@
+# KI-046: expected holds.
+id: "german-confirmation"
+tags: ["language", "tone", "holds"]
+requirement: "Bestellung aufgeben und prüfen, dass die Bestätigung höflich ist"
+criterion: {"statement": "The order confirmation is polite.", "description": "The confirmation shown after ordering is polite", "sourceText": "prüfen, dass die Bestätigung höflich ist", "ambiguity": null}
+stepDescription: "Click Bestellung aufgeben"
+url: "https://shop.example.de/kasse/bestaetigung"
+inventory: {"title": "Vielen Dank — Beispiel-Shop", "description": "", "headings": [{"level": 1, "text": "Vielen Dank für Ihre Bestellung!"}, {"level": 2, "text": "Bestellnummer 20931"}], "links": [], "forms": [], "buttons": []}
+text: "Vielen Dank für Ihre Bestellung!\nBestellnummer 20931\nWir haben Ihnen eine Bestätigung per E-Mail gesendet. Bei Fragen helfen wir Ihnen gerne weiter."
+expect: {"relevant": true, "verdict": "HOLDS", "forbidden": []}

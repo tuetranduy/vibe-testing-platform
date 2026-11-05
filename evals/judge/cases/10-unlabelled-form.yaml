@@ -1,0 +1,10 @@
+# KI-046: expected does_not_hold.
+id: "unlabelled-form"
+tags: ["forms", "does_not_hold"]
+requirement: "Open the contact page and verify the contact form is easy to understand"
+criterion: {"statement": "The contact form is easy to understand.", "description": "A visitor can understand what to enter in each field of the contact form", "sourceText": "verify the contact form is easy to understand", "ambiguity": null}
+stepDescription: "Open the contact page"
+url: "https://shop.example.com/contact"
+inventory: {"title": "Contact — Example Shop", "description": "", "headings": [{"level": 1, "text": "Contact"}], "links": [], "forms": [{"name": "form_1", "fields": [{"label": "fld_1", "type": "text", "placeholder": ""}, {"label": "fld_2", "type": "text", "placeholder": ""}, {"label": "fld_3", "type": "textarea", "placeholder": ""}], "submit": "OK"}], "buttons": []}
+text: "Contact\nfld_1\nfld_2\nfld_3\nOK"
+expect: {"relevant": true, "verdict": "DOES_NOT_HOLD", "forbidden": []}

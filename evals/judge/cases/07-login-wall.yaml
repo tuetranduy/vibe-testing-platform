@@ -1,0 +1,10 @@
+# KI-046: expected irrelevant.
+id: "login-wall"
+tags: ["relevance", "irrelevant"]
+requirement: "Log in and verify the dashboard gives a clear overview of my orders"
+criterion: {"statement": "The dashboard gives a clear overview of the user's orders.", "description": "The account dashboard presents the user's orders clearly", "sourceText": "verify the dashboard gives a clear overview of my orders", "ambiguity": null}
+stepDescription: "Open the account dashboard"
+url: "https://shop.example.com/login?next=/account"
+inventory: {"title": "Sign in — Example Shop", "description": "", "headings": [{"level": 1, "text": "Sign in"}], "links": [], "forms": [{"name": "Sign in", "fields": [{"label": "Email", "type": "email", "placeholder": ""}, {"label": "Password", "type": "password", "placeholder": ""}], "submit": "Sign in"}], "buttons": []}
+text: "Sign in\nPlease sign in to see your account.\nEmail\nPassword\nSign in\nForgot your password?"
+expect: {"relevant": false, "verdict": "CANNOT_TELL", "forbidden": []}

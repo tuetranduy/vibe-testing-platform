@@ -47,7 +47,7 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-023 | Medium | Deployment | Production starts with the example encryption key and API token | Resolved (2026-09-29) |
 | KI-024 | Medium | Crash recovery | Lost runs are detected only while some worker is alive | Resolved (2026-09-29) |
 | KI-025 | Medium | Process | No CI; the repository has no remote | CI added; remote open |
-| KI-026 | Medium | LLM quality | Most models offered in Settings have never been evaluated | Resolved for DeepSeek (2026-10-07); Claude and Gemini need paid keys |
+| KI-026 | Medium | LLM quality | Most models offered in Settings have never been evaluated | Resolved for DeepSeek (re-scored 2026-11-05, all four suites); Claude and Gemini blocked: invalid Anthropic key, free-tier Gemini key |
 | KI-027 | Low | Data model | D6: only 4 tables carry `tenant_id`; child rows rely on `run_id` | Resolved `3a61f16` |
 | KI-028 | Low | Audit | Revealing a secret-bearing artifact is only a log line | Resolved `6026592` (V1.1) |
 | KI-029 | Low | Isolation | The rerun runner is a worker child process; its image was never built | Resolved `1e2081d`, `ca9ef74` |
@@ -67,9 +67,9 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-043 | Medium | LLM | The DeepSeek provider has not been run against the live API | Resolved (2026-09-30): run live; see KI-001 |
 | KI-044 | High | Exploration | A field typed before the page settles is emptied by the page, and the fill is recorded as a success | Resolved (2026-10-07) |
 | KI-045 | Medium | Recordings | The exploration video shows a gray screen | Resolved (2026-10-07) |
-| KI-046 | Medium | LLM quality | The unclear-criterion judge's prompt has no eval suite | Open |
+| KI-046 | Medium | LLM quality | The unclear-criterion judge's prompt has no eval suite | Resolved (2026-11-05): `pnpm eval judge`, 12 cases; DeepSeek 12/12 |
 | KI-047 | Medium | Survey | The site survey misses a form's other buttons and reads a single-page app before it renders | Resolved (2026-10-07) |
-| KI-048 | High | Planning | The planner never sees the site; a step planned on the wrong page is not recovered | Fixed (2026-10-07); eval pending |
+| KI-048 | High | Planning | The planner never sees the site; a step planned on the wrong page is not recovered | Resolved (2026-10-07; eval 2026-11-05: case 18 1/5 → 9/10) |
 | KI-049 | High | Exploration | A click's background request is cancelled by the next step's navigation | Resolved for exploration (2026-10-07) and newly generated tests (2026-11-05) |
 | KI-050 | High | Exploration | The "way there" recovery clicks the step's own target, then looks for it again on the next page | Resolved (2026-10-07) |
 | KI-051 | High | Exploration | A transient explorer error counts as "nothing found" and starts a navigating recovery | Resolved (2026-10-07) |
@@ -82,7 +82,7 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-058 | High | Exploration | A click's route change (script first, then data) is not waited for; the next read sees the old page | Resolved in working tree (2026-11-05) |
 | KI-059 | High | Evidence | A popup the requirement names without quoting its text is never captured before it disappears | Resolved in working tree (2026-11-05) |
 | KI-060 | Medium | Verification | An empty counter (no badge shown) is "not observed", so "increased by 1" from an empty cart is inconclusive | Resolved in working tree (2026-11-05) |
-| KI-061 | Low | LLM quality | A compile may check the cart for a product name read back from a passing popup, though the requirement names it | Open: seen once live, 0 of 14 eval compiles |
+| KI-061 | Low | LLM quality | A compile may check the cart for a product name read back from a passing popup, though the requirement names it | Resolved in working tree (2026-11-05): prompt rule; compiler 33/33 |
 
 KI-056–KI-057: [Travel Luggage Set run investigation](reviews/run_0mw3gsjgke3a1923c465bb1e1.md), with the recorded
 timeline, reproduction, changes and rollout limits.
@@ -449,6 +449,12 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   The six models never scored (`claude-fable-5-1`, `claude-opus-5-5`, `claude-haiku-4-5`, `gemini-3.8-flash`,
   `gemini-3.5-flash`, `gemini-3.1-pro-preview`), and `claude-sonnet-5` and `gemini-3.5-flash-lite` at the current
   prompts, still need an `ANTHROPIC_API_KEY` with credit or a billing-enabled `GEMINI_API_KEY`; they stay in Settings.
+- **Re-scored 2026-11-05:** DeepSeek on all four suites at the current prompts (the judge suite is new, KI-046):
+  `deepseek-flash` compiler 33/33, planner 18/18, survey 4/6, judge 12/12; `deepseek-v4-pro` (thinking off) 31/33,
+  17/18, 5/6, 12/12. The Claude and Gemini models are still unscored. The `ANTHROPIC_API_KEY` in `.env` is rejected
+  (401 "invalid x-api-key") and Settings holds no Anthropic key; the `GEMINI_API_KEY` is on the free tier (20 requests a
+  day per model: `gemini-3.8-flash` ran out within the compiler suite). To close: a valid Anthropic key with credit and
+  a billing-enabled Gemini key, then `pnpm eval requirement-compiler | planner | survey | judge` per model.
 
 ## KI-027 — D6: only 4 tables carry `tenant_id`
 - **Severity:** Low (single tenant today).
@@ -711,6 +717,11 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   step: it counts toward `maxExplorationSteps`.
 - **To close:** an eval suite of pages with a known answer (relevant / holds / does not hold / irrelevant), run on
   each provider, scores recorded in `evals/BASELINE.md`.
+- **Resolved (2026-11-05, working tree):** `pnpm eval judge` (`evals/judge/`): 12 pages with a known answer
+  (holds / does not hold for search results, error messages, forms and confirmations; cannot tell for a speed; not
+  relevant for a 404, a login wall and a 503 page carrying an injected instruction). Text only, no screenshot.
+  `deepseek-flash` and `deepseek-v4-pro` (thinking off) 12/12; `gemini-3.5-flash-lite` (free tier) 10/12, judging the
+  503 page relevant. Scores in `evals/BASELINE.md`; the other providers with KI-026.
 
 ## KI-047 — The site survey misses a form's other buttons and reads a single-page app before it renders
 - **Severity:** Medium (the requirement analysis is told a page lacks what it shows, and its notes say so).
@@ -740,6 +751,9 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   The executor's recovery is unchanged.
 - **To close:** `pnpm eval planner` on DeepSeek with the new case 18 (`register-from-store`, this run's criteria and
   demoqa's pages), before and after the prompt change, recorded in `evals/BASELINE.md`.
+- **Eval (2026-11-05):** case 18 on `deepseek-flash`: without its pages (the planner as before the change) 1/5, with
+  them 9/10; the full planner suite 18/18. `deepseek-v4-pro` with thinking off: 17/18, case 18 passing; at thinking
+  high 6 of 10 case-18 runs hit the 180 s case budget and the 4 that answered passed. Recorded in `evals/BASELINE.md`.
 
 ## KI-049 — A click's background request is cancelled by the next step's navigation
 - **Severity:** High (a registration or login that works on the site is never sent; the run blocks on a "failed" login).
@@ -845,7 +859,10 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   ("Add ADELAIDE 2 to cart"). Right after adding, the name was only in the toast; its lookup ran after the toast had gone,
   so the fact stayed MODEL_EXTRACTED and the criterion INCONCLUSIVE / UNVERIFIED_EVIDENCE (the cart list itself was
   DOM_VERIFIED ["ADELAIDE 2"]). The first run's compile had no such criterion.
-- **Open:** not reproduced: eval cases 32 and 33 (`named-product-cart-checkout`, with and without that run's pages) passed
-  6/6 and 8/8 on deepseek-flash with the current prompt, with a new expectation `literalCollectionItems` (no fact as
-  item). A prompt rule ("a named item is checked as its text") is the likely fix once it reproduces. Meanwhile a
-  reviewer can remove that criterion before confirming (a fact item cannot be edited into text).
+- **Not reproduced in evals:** cases 32 and 33 (`named-product-cart-checkout`, with and without that run's pages)
+  passed 6/6 and 8/8 on deepseek-flash before any change, with a new expectation `literalCollectionItems` (no fact as
+  item).
+- **Resolved (2026-11-05, working tree):** the compiler prompt's "pick an item and refer back to it" rule now says a
+  named item is checked as its text ("ADELAIDE 2"), never read back from the page. Compiler suite after it:
+  `deepseek-flash` 33/33, `deepseek-v4-pro` (thinking off) 31/33 (two failures seen before the change); cases 32–33
+  pass on both.
