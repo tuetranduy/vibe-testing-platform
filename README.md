@@ -5,6 +5,10 @@ Plan: [`docs/ai-testing-platform-implementation-plan.md`](docs/ai-testing-platfo
 
 ## Status
 
+**2026-11-05 functional review:** [requirements coverage, fixed defects and prioritized improvements](docs/reviews/2026-11-05-functional-review.md).
+For current behavior, the later amendments and October 7 spec take precedence over the historical milestone
+descriptions below (including missing-input blocking and secret redaction/reveal).
+
 **Current status, the amendments since the plan, and the outstanding work (in priority order) are in the plan's
 [Revision 3](docs/ai-testing-platform-implementation-plan.md#revision-3--status-amendments-and-outstanding-work-2026-09-29).**
 **The V1 release gate passed on 2026-10-07** (KI-001): the live E2E suite, 27 cases with the real model and Stagehand,

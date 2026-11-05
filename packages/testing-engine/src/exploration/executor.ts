@@ -43,6 +43,7 @@ import { INVENTORY_SCRIPT, parseRawInventory, toPageInventory, type PageInventor
 import { createInputGenerator, type FieldFacts, type InputGenerator } from "./input-generator";
 import { JUDGE_TEXT_MAX_CHARS, createCriterionJudge, type CriterionJudge } from "./judge";
 import { describeElement, describeField, elementAction, fieldValue, fillElement, recordElement, selectElementOption } from "./recorder";
+import { captureEarlyNotificationFact } from "./early-facts";
 
 /**
  * Exploration executor (Task 14): runs the confirmed plan's scenarios (V1.1 F9: in order, each from a clean
@@ -143,6 +144,7 @@ export interface RecorderPort {
   fill(page: Page, selector: string, value: string): Promise<void>;
   select(page: Page, selector: string, value: string): Promise<void>;
   captureFact(page: Page, input: FactCaptureInput): Promise<ObservedFact>;
+  captureEarlyFact?(page: Page, request: FactRequest, criteria: readonly AcceptanceCriterion[], stepId: string): Promise<ObservedFact | null>;
   /** What a field asks for, for a value nobody provided (2026-10-07). Absent: the generator sees only the step. */
   describeField?(page: Page, selector: string): Promise<FieldFacts>;
   /** What a filled field holds now, null when it cannot be read (fieldValue). Absent: typed values are never re-checked. */
@@ -159,6 +161,7 @@ export const playwrightRecorder: RecorderPort = {
   fill: (page, selector, value) => fillElement(page, selector, value),
   select: (page, selector, value) => selectElementOption(page, selector, value),
   captureFact: (page, input) => captureFact(page, input),
+  captureEarlyFact: captureEarlyNotificationFact,
   describeField: (page, selector) => describeField(page, selector),
   value: (page, selector) => fieldValue(page, selector),
 };
@@ -414,6 +417,7 @@ class ExplorationRun {
   /** Values typed since the last click or navigation (2026-10-07). */
   private typed: Typed[] = [];
   private readonly judge: CriterionJudge | null;
+  private readonly earlyCheckpoints = new Map<string, { stepId: string; facts: Map<string, ObservedFact>; artifacts: string[] | null }>();
 
   constructor(
     private readonly ctx: StageContext,
@@ -486,6 +490,7 @@ class ExplorationRun {
    * others once its last step is done (2026-10-07).
    */
   private async exploreScenario(scenario: TestScenario): Promise<void> {
+    this.earlyCheckpoints.clear();
     const planned = scenario.steps;
     const targetUrl = this.ctx.request.targetUrl;
     const first = planned[0];
@@ -499,6 +504,15 @@ class ExplorationRun {
     for (const step of planned.slice(opensTarget ? 1 : 0)) {
       await this.ctx.boundary();
       await this.executePlanned(step);
+      // A model-backed wait may outlast a toast. Capture the next checkpoint's notifications as
+      // soon as its preceding action succeeds, provided no other action intervenes.
+      if (step.kind !== "wait_for" && step.kind !== "capture_checkpoint") {
+        const next = planned.slice(planned.indexOf(step) + 1).find((s) => s.kind !== "wait_for");
+        if (next?.kind === "capture_checkpoint") {
+          const early = await this.readEarlyCheckpoint(next, newStepId());
+          if (early.facts.size > 0) this.earlyCheckpoints.set(next.id, early);
+        }
+      }
       await this.judgeCriteria(step, judgeAfter.get(step.id) ?? []);
     }
     await this.judgeCriteria(null, judgeAfter.get(null) ?? []);
@@ -920,20 +934,47 @@ class ExplorationRun {
     return { element: { selector: PASSWORD_FIELD, description: "the page's only password field", method: "fill", arguments: [] }, ref, info };
   }
 
-  private async checkpoint(step: PlannedStep): Promise<Attempt> {
+  private async readEarlyCheckpoint(step: PlannedStep, stepId: string) {
+    await this.reserve();
     const checkpoint = step.checkpoint!;
     const requests = this.input.requirement.facts.filter((f) => f.checkpoint === checkpoint);
-    const stepId = newStepId();
+    const facts = new Map<string, ObservedFact>();
+    for (const request of requests) {
+      const fact = await this.recorder.captureEarlyFact?.(this.page, request, this.input.requirement.criteria, stepId).catch((err: unknown) => {
+        this.rethrowIfFatal(err);
+        return null;
+      });
+      if (fact) facts.set(request.key, fact);
+    }
+    // Keep evidence from the same moment as a transient reading, before any slow extraction/lookup.
+    const artifacts = facts.size > 0 ? await this.screenshot(`${checkpoint}.png`, `at checkpoint ${checkpoint}`) : null;
+    return { stepId, facts, artifacts };
+  }
+
+  private async checkpoint(step: PlannedStep): Promise<Attempt> {
+    await this.reserve();
+    const checkpoint = step.checkpoint!;
+    const requests = this.input.requirement.facts.filter((f) => f.checkpoint === checkpoint);
+    const prepared = this.earlyCheckpoints.get(step.id);
+    const capture = prepared ?? await this.readEarlyCheckpoint(step, newStepId());
+    if (capture.facts.size > 0) this.earlyCheckpoints.set(step.id, capture);
+    const { stepId, facts: early, artifacts: earlyArtifacts } = capture;
+    const remaining = requests.filter((r) => !early.has(r.key));
 
     let values: Record<string, FactValue> = {};
-    if (requests.length > 0) {
-      const extracted = await this.extract(step, requests);
+    if (remaining.length > 0) {
+      const extracted = await this.extract(step, remaining);
       if (!extracted) return "failed";
       values = extracted;
     }
 
     const captured: ObservedFact[] = [urlFact(this.page, { checkpoint, stepId })];
     for (const request of requests) {
+      const observed = early.get(request.key);
+      if (observed) {
+        captured.push(observed);
+        continue;
+      }
       const mode = this.modeFor(request);
       let element: ElementRef | null = null;
       if (mode) {
@@ -968,7 +1009,7 @@ class ExplorationRun {
     await this.reserve();
     const startedAt = this.ctx.now();
     const urlBefore = this.url();
-    const artifactIds = await this.screenshot(`${checkpoint}.png`, `at checkpoint ${checkpoint}`);
+    const artifactIds = earlyArtifacts ?? await this.screenshot(`${checkpoint}.png`, `at checkpoint ${checkpoint}`);
     await this.record({
       id: stepId,
       plannedStepId: step.id,
@@ -981,6 +1022,7 @@ class ExplorationRun {
       artifactIds,
     });
     for (const fact of captured) await this.saveFact(fact);
+    this.earlyCheckpoints.delete(step.id);
     return "ok";
   }
 

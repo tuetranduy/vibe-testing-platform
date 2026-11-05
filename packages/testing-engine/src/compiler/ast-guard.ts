@@ -48,7 +48,7 @@ export const ALLOWED_IDENTIFIERS: ReadonlySet<string> = new Set([
 ]);
 
 /** The compiler's numbered names: saved facts, and run-data keys. */
-const NUMBERED_IDENTIFIER = /^(?:fact|loc|item|input|url)[1-9]\d{0,3}$/;
+const NUMBERED_IDENTIFIER = /^(?:fact|loc|item|input|url|action)[1-9]\d{0,3}$/;
 const SECRET_ENV_NAME = /^SECRET_[A-Z][A-Z0-9_]{0,31}$/;
 const CRITERION_ID = /^AC-\d{1,3}$/;
 const CRITERION_PREFIX = /^\[AC-\d{1,3}\] $/;

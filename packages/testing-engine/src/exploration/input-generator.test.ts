@@ -80,6 +80,13 @@ describe("createInputGenerator", () => {
     expect((await createInputGenerator(llm).generate(request({ key: "city", field: field() }))).value).toBe("Springfield");
   });
 
+  it("fits a fallback password to the field's maxlength, with or without a model", async () => {
+    const req = request({ source: "secret", key: "password", field: field({ type: "password", maxLength: 12 }) });
+    expect((await createInputGenerator(null).generate(req)).value).toMatch(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12}$/);
+    const { llm } = setup({ json: { value: "" } });
+    expect((await createInputGenerator(llm).generate(req)).value).toHaveLength(12);
+  });
+
   it("a run that was cancelled throws instead of falling back", async () => {
     const ac = new AbortController();
     ac.abort(new Error("run cancelled"));

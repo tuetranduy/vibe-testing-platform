@@ -285,6 +285,16 @@ describe("compilePlaywrightTest: the discovered flow (snapshot)", () => {
     expect(out.source).toContain('.toBeCloseTo(data.criteria["AC-1"].right, 9)');
   });
 
+  it("waits for a click's background requests before replaying the next step (KI-049)", () => {
+    const out = compile();
+    const clicks = out.source.split("\n").filter((line) => line.endsWith(".click();"));
+    expect(clicks.length).toBeGreaterThan(0);
+    for (const [index, click] of clicks.entries()) {
+      expect(out.source).toContain(`const action${index + 1} = trackActionRequests(page);\n${click}\n  await action${index + 1}();`);
+    }
+    expect(checkGeneratedSource(out.source)).toEqual([]);
+  });
+
   it("replays nothing after the last checkpoint a compiled criterion needs", () => {
     const steps = [...shopFlow(), ...flow({ kind: "act", element: byRole("link", "Checkout") }).map((s) => ({ ...s, index: 8, id: "st_8" }))];
     const out = compile({ steps });

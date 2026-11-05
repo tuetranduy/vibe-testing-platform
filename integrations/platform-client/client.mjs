@@ -63,7 +63,7 @@ export function createClient({ url, token, fetch: f = globalThis.fetch }) {
   /**
    * @param {"GET" | "POST"} method
    * @param {string} path
-   * @param {{ body?: unknown; accept?: string; headers?: Record<string, string> }} [opts]
+   * @param {{ body?: unknown; accept?: string; headers?: Record<string, string>; signal?: AbortSignal }} [opts]
    */
   async function call(method, path, opts = {}) {
     /** @type {Record<string, string>} */
@@ -73,6 +73,7 @@ export function createClient({ url, token, fetch: f = globalThis.fetch }) {
       method,
       headers,
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      ...(opts.signal ? { signal: opts.signal } : {}),
     });
     const text = await res.text();
     if (!res.ok) {
@@ -117,8 +118,8 @@ export function createClient({ url, token, fetch: f = globalThis.fetch }) {
         ...(opts.idempotencyKey ? { headers: { "idempotency-key": opts.idempotencyKey } } : {}),
       });
     },
-    /** @param {string} suiteRunId @returns {Promise<SuiteRun>} */
-    getSuiteRun: (suiteRunId) => call("GET", `/v1/suite-runs/${encodeURIComponent(suiteRunId)}`),
+    /** @param {string} suiteRunId @param {{ signal?: AbortSignal }} [opts] @returns {Promise<SuiteRun>} */
+    getSuiteRun: (suiteRunId, opts = {}) => call("GET", `/v1/suite-runs/${encodeURIComponent(suiteRunId)}`, opts),
     /** @param {string} suiteRunId @returns {Promise<SuiteRun>} */
     cancelSuiteRun: (suiteRunId) => call("POST", `/v1/suite-runs/${encodeURIComponent(suiteRunId)}/cancel`),
     /** @param {string} suiteRunId @returns {Promise<string>} */
@@ -147,9 +148,23 @@ export async function waitForSuiteRun(client, suiteRunId, opts = {}) {
   let last = null;
   let failures = 0;
   for (;;) {
+    const remaining = deadline - now();
+    if (remaining <= 0) throw new WaitTimeoutError(last);
+    const controller = new AbortController();
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer;
+    /** @type {Promise<never>} */
+    const requestDeadline = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new WaitTimeoutError(last);
+        controller.abort(error);
+        reject(error);
+      }, remaining);
+    });
     let pause = intervalMs;
     try {
-      last = await client.getSuiteRun(suiteRunId);
+      // Abort real HTTP I/O, and bound custom transports even if they ignore the signal.
+      last = await Promise.race([client.getSuiteRun(suiteRunId, { signal: controller.signal }), requestDeadline]);
       failures = 0;
       onProgress?.(last);
       if (last.status === "COMPLETED") return last;
@@ -158,6 +173,8 @@ export async function waitForSuiteRun(client, suiteRunId, opts = {}) {
       if (!retryable || failures >= 8) throw err;
       failures += 1;
       pause = err instanceof PlatformError && err.retryAfterSeconds ? err.retryAfterSeconds * 1000 : Math.min(intervalMs * 2 ** failures, 120_000);
+    } finally {
+      clearTimeout(timer);
     }
     if (now() + pause > deadline) throw new WaitTimeoutError(last);
     await sleep(pause);

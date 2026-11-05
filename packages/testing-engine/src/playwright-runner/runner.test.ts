@@ -7,7 +7,7 @@ import path from "node:path";
 import { RerunResultSchema, type GeneratedTest } from "@platform/contracts";
 import { createRunRedactor } from "@platform/security";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { HELPERS_SOURCE } from "../compiler/helpers-template";
+import { HELPERS_SOURCE, PRE_ACTION_HELPERS_SOURCE } from "../compiler/helpers-template";
 import type { EvidenceStore, EvidenceUpload } from "../evidence/collector";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
 import { buildPlaywrightConfig } from "./config-template";
@@ -350,6 +350,14 @@ describe("runGeneratedTest", () => {
     const out = await runGeneratedTest(runInput(generated(["AC-1", "AC-2"])), { spawn, workspace: { baseDir: base } });
     expect(out).toMatchObject({ status: "PASSED", perCriterion: { "AC-1": "PASSED", "AC-2": "PASSED" }, errorText: {}, artifacts: [] });
     expect(out.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("reruns a saved test with the previous reviewed helper template using the current fixed helpers", async () => {
+    const spawn = fakeSpawn(writesResults({ steps: [{ title: title("AC-1") }] }, 0));
+    const test = { ...generated(["AC-1"]), helpersSource: PRE_ACTION_HELPERS_SOURCE };
+    const out = await runGeneratedTest(runInput(test), { spawn, workspace: { baseDir: base } });
+    expect(out).toMatchObject({ status: "PASSED", perCriterion: { "AC-1": "PASSED" } });
+    expect(spawn.snapshot[0]!["helpers.ts"]).toBe(HELPERS_SOURCE);
   });
 
   it("a soft assertion failed → FAILED; that criterion ASSERTION_FAILED with its error, the next one NOT_REACHED after a hard failure; evidence listed", async () => {

@@ -62,6 +62,21 @@ interface Fixture {
 /** Download fixture, reached as static.shop.test (an allowed subdomain of the target). */
 async function startFixtureServer(): Promise<Fixture> {
   const server = http.createServer((req, res) => {
+    if (req.url === "/offscreen") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!doctype html><html style="scroll-behavior:smooth"><body style="margin:0">
+        <h1>Store</h1><div style="height:900px"></div>
+        <a id="travel" href="/landed" style="display:block;padding:20px">Travel Luggage Set</a>
+        <div style="height:1200px"></div>
+        <div style="position:fixed;bottom:0;left:0;right:0;height:220px;background:white">Cookie notice</div>
+        </body></html>`);
+      return;
+    }
+    if (req.url === "/landed") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end("<!doctype html><h1>Travel Luggage Set</h1><button>Add to cart</button>");
+      return;
+    }
     if (req.url === "/download") {
       res.writeHead(200, { "content-type": "application/octet-stream", "content-disposition": 'attachment; filename="report.bin"' });
       res.end("SANDBOX-DOWNLOAD-PAYLOAD");
@@ -191,6 +206,19 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
     expect(llm!.inputTokens).toBeGreaterThan(0);
     expect(llm!.outputTokens).toBeGreaterThan(0);
   };
+
+  it("clicks the observed link itself when a fixed banner covers its first click point", async () => {
+    const { sandbox } = await openSandbox();
+    const { transport, llm } = llmClient();
+    const session = await startSession(sandbox, llm);
+    const origin = `http://static.shop.test:${fixture.port}`;
+    await session.navigate(`${origin}/offscreen`);
+    const result = await session.actOn({ selector: "#travel", description: "Travel Luggage Set", method: "click", arguments: [] });
+    expect(result.success).toBe(true);
+    await expect.poll(() => session.page.url(), { timeout: 3000 }).toBe(`${origin}/landed`);
+    expect(await session.page.getByRole("heading").textContent()).toBe("Travel Luggage Set");
+    expect(transport.requests).toHaveLength(0);
+  });
 
   it(
     "navigates, observes and acts on 'Add to cart', reads the cart badge as DOM_VERIFIED 1, and records model usage",

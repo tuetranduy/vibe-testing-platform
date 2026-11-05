@@ -66,6 +66,20 @@ export class SuiteRunService {
     const req = parseBody(RunSuiteRequestSchema, body);
     const { tenantId } = principal;
     const suite = await new SuiteService(this.deps).require(principal, suiteId);
+    // Replay accepted requests before checking mutable entries, saved tests or credentials. A retry
+    // returns the original run even if the suite was edited or its profile has since been removed.
+    const requestHash = idempotencyKey
+      ? createHmac("sha256", this.deps.config.secretsKey)
+          // HMAC, not a plain hash: the body contains secrets.
+          .update(canonical({ suite: suite.id, ...req }))
+          .digest("hex")
+      : null;
+    if (idempotencyKey) {
+      if (idempotencyKey.length > 200) throw new HttpError(400, "VALIDATION_FAILED", "Idempotency-Key too long");
+      const existing = await this.suiteRuns.findByIdempotencyKey(tenantId, idempotencyKey);
+      if (existing) return this.replay(existing, requestHash!, principal);
+    }
+
     const entries = await new SuiteRepository(this.deps.db).entries(suite.id);
     if (entries.length === 0) throw new HttpError(409, "SUITE_EMPTY", "Add a test to the suite before running it");
 
@@ -92,18 +106,6 @@ export class SuiteRunService {
     const missing = needed.filter((n) => !Object.hasOwn(given, n));
     if (missing.length > 0) throw secretsRequired(missing, "for this run: the suite's saved credentials don't provide it");
     const credentialProfile: StoredTestRunRequest["credentialProfile"] = used.at(-1);
-
-    const requestHash = idempotencyKey
-      ? createHmac("sha256", this.deps.config.secretsKey)
-          // HMAC, not a plain hash: the body contains secrets.
-          .update(canonical({ suite: suite.id, ...req }))
-          .digest("hex")
-      : null;
-    if (idempotencyKey) {
-      if (idempotencyKey.length > 200) throw new HttpError(400, "VALIDATION_FAILED", "Idempotency-Key too long");
-      const existing = await this.suiteRuns.findByIdempotencyKey(tenantId, idempotencyKey);
-      if (existing) return this.replay(existing, requestHash!, principal);
-    }
 
     for (const [i, t] of tests.entries()) await this.reruns.checkTarget(t.source.targetUrl, ["entries", i, "targetUrl"]);
 

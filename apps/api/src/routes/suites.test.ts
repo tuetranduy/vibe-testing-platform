@@ -228,6 +228,31 @@ describe("/v1/suites/:suiteId/runs", () => {
     expect((await call("GET", `/v1/suite-runs/${suiteRunId}`)).json()).toMatchObject({ status: "COMPLETED", verdict: "INCONCLUSIVE" });
   });
 
+  it("replays an accepted request after its credentials or suite entries change", async () => {
+    const profile = (await call("POST", "/v1/credential-profiles", {
+      name: `Replay login ${++n}`, secrets: { password: "original-password" },
+    })).json();
+    const suite = await createSuite();
+    const source = await finishedRunWithTest(t, { secrets: { password: "original-password" } });
+    await addEntry(suite.id, source);
+    const body = { credentialProfileId: profile.id };
+    const headers = { ...auth, "idempotency-key": `suite-replay-${++n}` };
+    const first = await call("POST", `/v1/suites/${suite.id}/runs`, body, headers);
+    expect(first.statusCode).toBe(202);
+    const queued = t.queue.rerun.length;
+
+    await call("DELETE", `/v1/credential-profiles/${profile.id}`);
+    const replay = await call("POST", `/v1/suites/${suite.id}/runs`, body, headers);
+    expect(replay.statusCode).toBe(202);
+    expect(replay.json()).toEqual(first.json());
+
+    await call("DELETE", `/v1/suites/${suite.id}/entries/${source}`);
+    const emptyReplay = await call("POST", `/v1/suites/${suite.id}/runs`, body, headers);
+    expect(emptyReplay.statusCode).toBe(202);
+    expect(emptyReplay.json()).toEqual(first.json());
+    expect(t.queue.rerun).toHaveLength(queued);
+  });
+
   it("cancels every active child", async () => {
     const suite = await createSuite();
     await addEntry(suite.id, await finishedRunWithTest(t));

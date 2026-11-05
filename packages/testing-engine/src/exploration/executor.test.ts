@@ -1070,6 +1070,32 @@ describe("runExploration (fake explorer)", () => {
     ]);
   });
 
+  it("captures transient notification evidence and its screenshot before slow model work", async () => {
+    const { ctx } = fakeCtx();
+    const order: string[] = [];
+    const session = new FakeSession({ extract: () => { order.push("extract"); return { cartCount: 1 }; } });
+    const mem = memoryStore();
+    const recorder: RecorderPort = {
+      ...fakeRecorder().recorder,
+      captureEarlyFact: async (_page, request, _criteria, stepId) => {
+        if (request.key !== "bannerShown") return null;
+        order.push("early");
+        return { key: request.key, checkpoint: request.checkpoint, stepId, value: true, provenance: "DOM_VERIFIED",
+          read: { mode: "visible", element: { candidates: [{ strategy: "text", text: "Item added to cart", exact: true }], chosenIndex: 0, framePath: [] } } };
+      },
+    };
+    const requirement = requirementWith([
+      { key: "bannerShown", checkpoint: "after_add", description: 'Popup reading "Item added to cart"', valueType: "boolean" }, cartFact,
+    ], { kind: "visible", fact: { key: "bannerShown", checkpoint: "after_add" }, expected: true });
+    const plan = planOf(step("navigate", "Open"), step("capture_checkpoint", "Read the result", { checkpoint: "after_add" }));
+    const outcome = await runExploration(ctx, { plan, requirement, session, budget: ctx.budgetSignal(1) }, {
+      recorder, store: { ...mem.store, saveScreenshot: async (input) => { order.push("screenshot"); return mem.store.saveScreenshot(input); } },
+    });
+    expect(order).toEqual(["early", "screenshot", "extract"]);
+    expect(outcome.facts.find((f) => f.key === "bannerShown")).toMatchObject({ value: true, provenance: "DOM_VERIFIED" });
+    expect(session.calls.filter((c) => c.op === "extract")[0]?.arg).not.toContain("bannerShown");
+  });
+
   it("a list fact's reads say that a message shown in place of the list (e.g. an empty cart) is what it lists (KI-001)", async () => {
     // In CI mode an empty cart reads as ["Your cart is empty"], the message in the list's place, so a check that the
     // cart contains an item FAILs; a model that answers null instead leaves it FACT_NOT_OBSERVED.

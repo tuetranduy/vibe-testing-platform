@@ -5,12 +5,13 @@ import type net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { VALID_PASSWORD, startDemoShop, type RunningDemoShop } from "@platform/demo-shop";
-import type { GeneratedTest } from "@platform/contracts";
+import type { ExplorationStep, GeneratedTest, NormalizedRequirement } from "@platform/contracts";
 import { defaultResolver } from "@platform/security";
 import {
   HELPERS_SOURCE,
   checkGeneratedSource,
   collectEvidence,
+  compilePlaywrightTest,
   runGeneratedTest,
   workspaceDir,
   type EvidenceUpload,
@@ -139,6 +140,48 @@ function processesMentioning(needle: string): string[] {
 // ---------------------------------------------------------------------------------------------
 
 describe("runGeneratedTest against the demo shop (real child process, egress proxy)", () => {
+  it("a compiled click finishes its background submission before a later navigation (KI-049)", async () => {
+    const targetUrl = `${shop.url}/newsletter`;
+    const requirement: NormalizedRequirement = {
+      runId: "run_fixture", revision: 1, originalText: "Subscribe then open Products; the cart remains empty",
+      confirmedAt: new Date().toISOString(), facts: [],
+      criteria: [{
+        id: "AC-1", sourceText: "the cart remains empty", statement: "The cart has zero items",
+        preconditions: [], critical: true, ambiguity: null,
+        expectedOutcome: { kind: "numeric_compare", left: { key: "cartCount", checkpoint: "products" }, operator: "eq", right: 0 },
+      }],
+    };
+    const drafts: (Pick<ExplorationStep, "kind" | "instruction"> & Partial<ExplorationStep>)[] = [
+      { kind: "navigate", instruction: `Navigate to ${targetUrl}` },
+      { kind: "act", instruction: "Click Subscribe", element: { candidates: [{ strategy: "role", role: "button", name: "Subscribe", exact: true }], chosenIndex: 0, framePath: [] } },
+      { kind: "navigate", instruction: `Navigate to ${shop.url}/products` },
+      { kind: "checkpoint", instruction: "Read the cart" },
+    ];
+    const steps: ExplorationStep[] = drafts.map((step, index) => ({
+      id: `step_${index}`, runId: "run_fixture", index, plannedStepId: null,
+      inputRef: null, element: null, onGoldenPath: true, outcome: "SUCCESS", blockReason: null, error: null,
+      urlBefore: targetUrl, urlAfter: targetUrl, startedAt: new Date().toISOString(), durationMs: 1,
+      artifactIds: [], llm: null, ...step,
+    }));
+    const test: GeneratedTest = {
+      id: "gt_newsletter",
+      ...compilePlaywrightTest({
+        targetUrl, requirement, steps, secretNames: [], testData: {},
+        plan: { runId: "run_fixture", requirementRevision: 1, scenarios: [{ id: "SC-1", title: "Subscribe", criterionIds: ["AC-1"], steps: [] }], blockedCriteria: [], stopConditions: [] },
+        facts: [{
+          key: "cartCount", checkpoint: "products", value: 0, provenance: "DOM_VERIFIED", stepId: "step_3",
+          read: { mode: "number", element: { candidates: [{ strategy: "testId", value: "cart-count" }], chosenIndex: 0, framePath: [] } },
+        }],
+        provisional: [{ criterionId: "AC-1", status: "PASS", reason: null, expected: "0", actual: "0", factRefs: [] }],
+      }),
+    };
+    expect(test.compiledCriteria).toEqual(["AC-1"]);
+    const before = shop.server.demoShop.subscriptions;
+    const out = await runGeneratedTest(input(test), deps());
+    expect(out).toMatchObject({ status: "PASSED", perCriterion: { "AC-1": "PASSED" } });
+    expect(shop.server.demoShop.subscriptions - before).toBe(1);
+  });
+
   it("a passing test → PASSED, every compiled criterion PASSED, no evidence (retain-on-failure)", async () => {
     const out = await runGeneratedTest(input(cartTest(`${shop.url}/products/1`)), deps());
     expect(out.errorText).toEqual({});

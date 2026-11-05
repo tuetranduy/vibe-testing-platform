@@ -333,6 +333,27 @@ class StagehandExplorerSession implements ExplorerSession {
   }
 
   actOn(element: ObservedElement): Promise<ActResult> {
+    if (element.method === "click" || element.method === null) {
+      return this.run("Observed click", async () => {
+        const navigations = this.watchNavigations();
+        let error: unknown;
+        try {
+          try {
+            // Stagehand's raw coordinate click reports success even when a fixed banner receives it.
+            // Playwright waits for a stable target, hit-tests it and retries scrolling without forcing clicks.
+            await this.page.locator(element.selector).click({ timeout: this.opts.operationTimeoutMs });
+          } catch (err) {
+            error = err;
+          }
+          await navigations.settle();
+        } finally {
+          navigations.dispose();
+        }
+        const navigationBlocks = this.takeBlocks();
+        if (error && navigationBlocks.length === 0) throw error;
+        return { success: !error, message: error ? "Navigation blocked" : "Observed element clicked", element, navigationBlocks, llm: null };
+      });
+    }
     return this.run("Stagehand act", () => this.doAct(toAction(element)));
   }
 

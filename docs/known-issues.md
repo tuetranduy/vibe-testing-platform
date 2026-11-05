@@ -70,9 +70,20 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-046 | Medium | LLM quality | The unclear-criterion judge's prompt has no eval suite | Open |
 | KI-047 | Medium | Survey | The site survey misses a form's other buttons and reads a single-page app before it renders | Resolved (2026-10-07) |
 | KI-048 | High | Planning | The planner never sees the site; a step planned on the wrong page is not recovered | Fixed (2026-10-07); eval pending |
-| KI-049 | High | Exploration | A click's background request is cancelled by the next step's navigation | Resolved for exploration (2026-10-07); generated test open |
+| KI-049 | High | Exploration | A click's background request is cancelled by the next step's navigation | Resolved for exploration (2026-10-07) and newly generated tests (2026-11-05) |
 | KI-050 | High | Exploration | The "way there" recovery clicks the step's own target, then looks for it again on the next page | Resolved (2026-10-07) |
 | KI-051 | High | Exploration | A transient explorer error counts as "nothing found" and starts a navigating recovery | Resolved (2026-10-07) |
+| KI-052 | Medium | Suites | Retrying an accepted suite run fails after credentials or entries change | Resolved in working tree (2026-11-05) |
+| KI-053 | Medium | Schedules | Redelivery in a later minute can execute the same firing twice | Resolved in working tree (2026-11-05) |
+| KI-054 | Medium | Generated inputs | A fallback password exceeds the field's maximum length | Resolved in working tree (2026-11-05) |
+| KI-055 | Medium | CI client | A hung HTTP poll ignores the suite wait timeout | Resolved in working tree (2026-11-05) |
+| KI-056 | High | Exploration | An observed coordinate click reports success while a fixed banner receives it | Resolved in working tree (2026-11-05) |
+| KI-057 | Medium | Evidence | A transient notification disappears during model lookup and loses DOM provenance | Fixed for named notification visibility/text checks in local worker; live validation blocked by target 403 (2026-11-05) |
+
+KI-056–KI-057: [Travel Luggage Set run investigation](reviews/run_0mw3gsjgke3a1923c465bb1e1.md), with the recorded
+timeline, reproduction, changes and rollout limits.
+The [AC-2 follow-up](reviews/run_0mw3htjel909be3105ae11b4f.md) covers unquoted source text, compiler
+paraphrases, waits before checkpoints and the deployed correction.
 
 ---
 
@@ -739,9 +750,15 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
   and other resources are not waited for. Covered by unit tests (order, the 5 s bound, what is ignored) and by
   `tests/integration/explore-stage.test.ts` against the demo shop's new `/newsletter` page, whose Subscribe button posts
   a fetch answered after 800 ms and counted only when answered (0 without the fix, 1 with it).
-- **Still open:** the generated Playwright test (`compiler/test-compiler.ts`) clicks and goes on to the next `goto` the
+- **Previously open:** the generated Playwright test (`compiler/test-compiler.ts`) clicks and goes on to the next `goto` the
   same way, so with "Rerun the generated test" on, the rerun can cancel what exploration let finish and disagree with it.
   The fix there: wait for the click's responses (e.g. `page.waitForLoadState("networkidle")`, bounded) after each click.
+- **Resolved for newly generated tests (2026-11-05, working tree):** the compiler installs a request tracker before
+  each click, waits for main-frame fetch/XHR completion (bounded at 5 s after load), then continues. A real compiled
+  rerun against `/newsletter` proved that a plain `networkidle` wait after the click can return too early; tracking
+  before the click completes the submission. Stuck-request and ignored-image tests cover the bound. Older saved
+  tests remain runnable through acceptance of their exact reviewed helper template; regenerate their source to
+  add tracking. See [the functional review](reviews/2026-11-05-functional-review.md) for KI-052–KI-055 and follow-ups.
 
 ## KI-050 — The "way there" recovery clicks the step's own target, then looks for it again on the next page
 - **Severity:** High (a step that has in fact been done fails, and exploration stops).

@@ -3,7 +3,7 @@ import path from "node:path";
 import type { GeneratedTest, RerunOutcome, RerunResult } from "@platform/contracts";
 import { redactByKey } from "@platform/security";
 import { checkGeneratedSource } from "../compiler/ast-guard";
-import { HELPERS_SOURCE } from "../compiler/helpers-template";
+import { HELPERS_SOURCE, PRE_ACTION_HELPERS_SOURCE } from "../compiler/helpers-template";
 import { secretEnvName } from "../compiler/test-compiler";
 import type { LocalArtifact } from "../evidence/collector";
 import { redactedCause, type FailureLogger } from "../shared/log-cause";
@@ -147,7 +147,9 @@ const isHttpUrl = (value: unknown): boolean => {
  */
 export function checkGeneratedTest(test: Pick<GeneratedTest, "source" | "helpersSource" | "dataJson">): string[] {
   const issues = [...checkGeneratedSource(test.source)];
-  if (test.helpersSource !== HELPERS_SOURCE) issues.push("helpers.ts is not the fixed helpers template");
+  if (test.helpersSource !== HELPERS_SOURCE && test.helpersSource !== PRE_ACTION_HELPERS_SOURCE) {
+    issues.push("helpers.ts is not the fixed helpers template");
+  }
   let data: unknown;
   try {
     data = JSON.parse(test.dataJson);

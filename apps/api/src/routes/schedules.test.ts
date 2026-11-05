@@ -140,6 +140,23 @@ describe("firing a schedule", () => {
     expect(await service().fire(schedule.id, new Date(NOW.getTime() - 14 * 60_000))).toMatchObject({ outcome: "started" });
   });
 
+  it("does not start a second run when the same scheduled firing is redelivered in a later minute", async () => {
+    const suiteId = await suiteWith();
+    const schedule = (await call("POST", `/v1/suites/${suiteId}/schedules`, { cron: "0 9 * * *" })).json();
+    const first = await service().fire(schedule.id, NOW);
+    expect(first.outcome).toBe("started");
+    const suiteRuns = new SuiteRunRepository(t.tdb.db);
+    for (const child of await suiteRuns.children(first.suiteRunId!)) {
+      await new RunRepository(t.tdb.db).transition(child.id, "QUEUED", "CANCELLED", { cancelReason: "USER_REQUESTED" });
+    }
+    await suiteRuns.settle(first.suiteRunId!);
+    const queued = t.queue.rerun.length;
+    const later = new ScheduleService({ ...t.deps, now: () => new Date(NOW.getTime() + 60_000) });
+    const again = await later.fire(schedule.id, NOW);
+    expect(again).toMatchObject({ outcome: "started", suiteRunId: first.suiteRunId });
+    expect(t.queue.rerun).toHaveLength(queued);
+  });
+
   it("fails without starting when the creator is disabled or the saved credentials no longer cover the suite", async () => {
     const ann = await signInMember(t);
     const suiteId = await suiteWith({ headers: ann.headers });

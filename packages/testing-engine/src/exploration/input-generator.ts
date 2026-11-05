@@ -110,18 +110,19 @@ const firstOption = (field: FieldFacts): string | undefined => field.options.fin
 function fallbackValue(req: InputRequest): string {
   const option = firstOption(req.field);
   if (option !== undefined) return option;
-  if (req.source === "secret" || req.field.type === "password") return randomPassword();
+  if (req.source === "secret" || req.field.type === "password") return fitToField(randomPassword(req.field.maxLength), req.field);
   const generated = generateTestDataValue(req.key, { hint: req.field.label ?? req.field.placeholder ?? undefined, seed: req.runId });
   return fitToField(String(generated ?? `test-${req.key}`), req.field);
 }
 
 const SETS = ["ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnopqrstuvwxyz", "23456789", "!#%+-=?@"];
 
-/** 16 characters with at least one of each set, shuffled. */
-function randomPassword(): string {
+/** Up to 16 characters, fitted before shuffling so a shorter field keeps each character class when it can. */
+function randomPassword(maxLength: number | null): string {
+  const length = Math.min(16, Math.max(0, maxLength ?? 16));
   const all = SETS.join("");
-  const chars = SETS.map((s) => s[randomInt(s.length)]!);
-  while (chars.length < 16) chars.push(all[randomInt(all.length)]!);
+  const chars = SETS.slice(0, length).map((s) => s[randomInt(s.length)]!);
+  while (chars.length < length) chars.push(all[randomInt(all.length)]!);
   for (let i = chars.length - 1; i > 0; i--) {
     const j = randomInt(i + 1);
     [chars[i], chars[j]] = [chars[j]!, chars[i]!];

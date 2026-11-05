@@ -193,6 +193,7 @@ class Compiler {
   private readonly helpers = new Set<string>();
   private readonly notes: string[] = [];
   private readonly factVars = new Map<string, string>();
+  private actionCount = 0;
 
   constructor(private readonly input: CompileTestInput) {
     for (const s of input.plan.scenarios) this.golden.set(s.id, []);
@@ -362,9 +363,15 @@ class Compiler {
             this.emitQuiet(w);
           }
           return;
-        case "act":
+        case "act": {
+          // Subscribe before the click: networkidle may still be satisfied by the idle state before it.
+          this.helpers.add("trackActionRequests");
+          const action = ident(`action${++this.actionCount}`);
+          w.line(`const ${action} = trackActionRequests(page);`);
           this.withLocator(w, step.element!, `Step ${step.index} (act)`, (l) => `await ${l}.click();`);
+          w.line(`await ${action}();`);
           return;
+        }
         case "fill": {
           const value = this.inputValue(step);
           const method = step.plannedStepId && this.plannedKind.get(step.plannedStepId) === "select" ? "selectOption" : "fill";

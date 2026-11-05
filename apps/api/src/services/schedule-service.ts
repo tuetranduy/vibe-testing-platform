@@ -236,8 +236,8 @@ export class ScheduleService {
       email: creator.email,
     };
     try {
-      // One suite run per firing, even if the job ran twice: the key names the schedule and the minute.
-      const key = `schedule:${row.id}:${Math.floor(now.getTime() / 60_000)}`;
+      // Use the scheduled minute, so redelivery in a later minute still returns the same suite run.
+      const key = `schedule:${row.id}:${Math.floor((dueAt ?? now).getTime() / 60_000)}`;
       const started = await new SuiteRunService(this.deps).start(principal, row.suiteId, {}, key, { trigger: "schedule", scheduleId: row.id });
       return record("started", { suiteRunId: started.body.suiteRunId });
     } catch (err) {

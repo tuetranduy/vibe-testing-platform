@@ -20,6 +20,7 @@ import { HELPERS_SOURCE } from "./helpers-template";
  */
 
 interface Helpers {
+  trackActionRequests(page: Page, timeoutMs?: number): () => Promise<void>;
   parseNumber(text: string): number | null;
   collapseText(s: string | null): string | null;
   foldText(s: string | null): string | null;
@@ -192,5 +193,30 @@ describe("helpers.ts DOM reads match the fact reader", () => {
     const expected: FactValue | undefined = (await readFact(page, ref, mode))?.value ?? null;
     const read = helpers[helper] as (l: Locator) => Promise<unknown>;
     expect(await read(locatorFor(page, ref.candidates[0]!))).toEqual(expected);
+  });
+
+  it.each(["fetch", "image"] as const)("bounds unfinished fetches and ignores images: %s", async (kind) => {
+    const actionPage = await browser.newPage();
+    try {
+      const action = kind === "fetch" ? 'fetch("/hang")' : 'document.getElementById("image").src = "/hang"';
+      await actionPage.route("http://action.test/", (route) => route.fulfill({
+        contentType: "text/html",
+        body: `<button onclick='${action}'>Start</button><img id="image">`,
+      }));
+      await actionPage.route("http://action.test/hang", () => {});
+      await actionPage.goto("http://action.test/");
+      const finish = helpers.trackActionRequests(actionPage, kind === "fetch" ? 100 : 2_000);
+      const startedRequest = actionPage.waitForRequest("http://action.test/hang");
+      await actionPage.getByRole("button", { name: "Start" }).click();
+      await startedRequest;
+      const started = Date.now();
+      await finish();
+      const elapsed = Date.now() - started;
+      if (kind === "fetch") expect(elapsed).toBeGreaterThanOrEqual(90);
+      // Images are ignored; an unfinished fetch is bounded instead of stalling every subsequent step.
+      expect(elapsed).toBeLessThan(1_000);
+    } finally {
+      await actionPage.close();
+    }
   });
 });

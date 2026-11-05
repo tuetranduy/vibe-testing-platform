@@ -24,7 +24,7 @@ const suiteRun = (patch: Partial<SuiteRun> = {}): SuiteRun => ({
   ...patch,
 });
 
-type Route = (init: RequestInit) => Response;
+type Route = (init: RequestInit) => Response | Promise<Response>;
 /** A fake platform: `"METHOD /path"` → answer (each call takes the next answer of a list). */
 function platform(routes: Record<string, Route | Route[]>) {
   const calls: { key: string; init: RequestInit }[] = [];
@@ -119,6 +119,24 @@ describe("summaryMarkdown", () => {
 });
 
 describe("runSuiteAndWait", () => {
+  it("enforces the wait deadline during a hung poll and preserves the last progress", async () => {
+    let signal: AbortSignal | null | undefined;
+    const p = happy({ "GET /v1/suite-runs/srn_1": [
+      () => json(200, suiteRun({ status: "RUNNING", verdict: null })),
+      (init) => {
+        signal = init.signal;
+        // Also test transports that do not cooperate with cancellation.
+        return new Promise<Response>(() => {});
+      },
+    ] });
+    const result = await Promise.race([
+      runSuiteAndWait({ client: createClient({ url: URL_, token: TOKEN, fetch: p.fetch }), suite: "checkout smoke", timeoutMs: 30, intervalMs: 1 }),
+      new Promise((resolve) => setTimeout(() => resolve("deadline was not enforced"), 200)),
+    ]);
+    expect(result).toMatchObject({ exitCode: 3, suiteRunId: "srn_1", run: { status: "RUNNING" } });
+    expect(signal?.aborted).toBe(true);
+  });
+
   it("starts, waits, writes the JUnit file and exits 0 on a pass; 1 when the verdict is in failOn", async () => {
     const files = new Map<string, string>();
     const writeFile = async (p: string, t: string) => void files.set(p, t);
