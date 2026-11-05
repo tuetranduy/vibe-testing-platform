@@ -443,6 +443,29 @@ describe("runExploration (fake explorer)", () => {
     expect([...session.listeners.values()].every((ls) => ls.size === 0)).toBe(true); // nothing left listening
   });
 
+  it("a click that changes route waits for its code chunk and the data fetched after it (a single-page app's link)", async () => {
+    const { ctx } = fakeCtx();
+    const log: string[] = [];
+    const session: FakeSession = new FakeSession({
+      actOn: () => {
+        // Nuxt / Next: the link loads the next page's script, then (after a short gap) fetches its data.
+        const chunk = session.startRequest({ resourceType: "script" });
+        setTimeout(() => (log.push("chunk loaded"), chunk()), 30);
+        setTimeout(() => {
+          const data = session.startRequest();
+          setTimeout(() => (log.push("data fetched"), data()), 40);
+        }, 130);
+        return {};
+      },
+      navigate: (url) => void log.push(`navigate ${url}`),
+    });
+    const plan = planOf(step("navigate", "Open the cart"), step("click", "Click Checkout"), step("navigate", "Open https://shop.test/after"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(log).toEqual([`navigate ${TARGET}`, "chunk loaded", "data fetched", "navigate https://shop.test/after"]);
+    expect([...session.listeners.values()].every((ls) => ls.size === 0)).toBe(true);
+  });
+
   it("a click's request that never finishes holds the next step only up to the limit", async () => {
     const { ctx } = fakeCtx();
     const session: FakeSession = new FakeSession({ actOn: () => (session.startRequest(), {}) });

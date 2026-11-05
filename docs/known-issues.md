@@ -79,11 +79,16 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-055 | Medium | CI client | A hung HTTP poll ignores the suite wait timeout | Resolved in working tree (2026-11-05) |
 | KI-056 | High | Exploration | An observed coordinate click reports success while a fixed banner receives it | Resolved in working tree (2026-11-05) |
 | KI-057 | Medium | Evidence | A transient notification disappears during model lookup and loses DOM provenance | Fixed for named notification visibility/text checks in local worker; live validation blocked by target 403 (2026-11-05) |
+| KI-058 | High | Exploration | A click's route change (script first, then data) is not waited for; the next read sees the old page | Resolved in working tree (2026-11-05) |
+| KI-059 | High | Evidence | A popup the requirement names without quoting its text is never captured before it disappears | Resolved in working tree (2026-11-05) |
+| KI-060 | Medium | Verification | An empty counter (no badge shown) is "not observed", so "increased by 1" from an empty cart is inconclusive | Resolved in working tree (2026-11-05) |
+| KI-061 | Low | LLM quality | A compile may check the cart for a product name read back from a passing popup, though the requirement names it | Open: seen once live, 0 of 14 eval compiles |
 
 KI-056–KI-057: [Travel Luggage Set run investigation](reviews/run_0mw3gsjgke3a1923c465bb1e1.md), with the recorded
 timeline, reproduction, changes and rollout limits.
 The [AC-2 follow-up](reviews/run_0mw3htjel909be3105ae11b4f.md) covers unquoted source text, compiler
 paraphrases, waits before checkpoints and the deployed correction.
+KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0mw3iqd89b1e9265a528ed663.md).
 
 ---
 
@@ -790,3 +795,57 @@ paraphrases, waits before checkpoints and the deployed correction.
   `BrowserProviderError`, so nothing else changes), and a lookup that fails with it is recorded and tried once more
   after the page settles, before any recovery. Covered by an adapter test (which errors are transient) and an executor
   test (the username lookup of the run, retried and filled on the same page, no recovery).
+
+## KI-058 — A click's route change is not waited for; the next read sees the old page
+- **Severity:** High (a checkpoint read right after a link click describes the page the click left).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`watchRequests`, after every click), and the generated
+  test's `trackActionRequests` (`compiler/helpers-template.ts`).
+- **What:** run `run_0mw3iqd89b1e9265a528ed663` (frontends-demo.vercel.app, a Nuxt app): the cart drawer's Checkout link
+  first loads the checkout route's scripts (~700 ms), then changes the URL and fetches its data. The click waited only
+  for fetch / XHR requests it started, so it returned after ~40 ms; the checkpoint's `extract` read the products page
+  and answered `checkoutPageVisible: false`, while the lookup that followed (on /checkout) found the heading. The fact
+  stayed MODEL_EXTRACTED (DOM true, model false) and AC-4 ended INCONCLUSIVE / UNVERIFIED_EVIDENCE.
+- **Resolved (2026-11-05, working tree):** a click also waits for the main frame's script and document requests, until
+  none has been pending for 300 ms (`ACTION_QUIET_MS`), still at most 5 s in all. The generated test's
+  `trackActionRequests` does the same (new helper template; the previous one stays accepted). Covered by an executor
+  test (script, gap, then fetch), a real-Chromium helper test and `exploration/cart-checkout-flow.test.ts`.
+
+## KI-059 — A popup named without its text is never captured before it disappears
+- **Severity:** High (a confirmation popup that works is reported "not visible").
+- **Where:** `packages/testing-engine/src/exploration/early-facts.ts` (`captureEarlyNotificationFact`).
+- **What:** same run. The requirement says "Verify ADELAIDE 2 has been added to cart. popup displayed": no quoted or
+  "popup <text> should be displayed" literal, so KI-057's early capture skipped it. The toast (`role="alert"`) shows for
+  ~5.5 s; the planned wait and the checkpoint's model calls took ~20 s, so the extract saw no popup, the lookup picked
+  the Add to cart button, and AC-1 (visible) and AC-2 (text contains "ADELAIDE 2") ended INCONCLUSIVE.
+- **Resolved (2026-11-05, working tree):** before an action whose next step is a checkpoint, the executor reads the
+  notifications the page shows (alert / status / dialog roles, live regions, open dialogs). When no literal is given, the
+  one notification that appeared since the action (waiting up to 1 s) is read from the DOM: visible, or its message
+  without its buttons' text. A notification already shown before, or two new ones, give nothing (the model path then
+  runs as before). A criterion qualifies when its source text, statement or fact description names a popup /
+  notification. Covered by `early-facts.test.ts` and `cart-checkout-flow.test.ts`.
+
+## KI-060 — An empty counter is "not observed"
+- **Severity:** Medium (a "count increased by 1" from an empty cart is inconclusive).
+- **Where:** `packages/testing-engine/src/verification/rules.ts` (`numeric_delta`), `verifier.ts`, and the compiler's
+  numeric_delta reads (`readNumberOrZero`).
+- **What:** same run. With the cart empty the site shows no badge, only the screen-reader text "items in cart, view
+  bag"; the DOM read and the model both gave null, and AC-3 (`after - before = +1`) ended INCONCLUSIVE /
+  FACT_NOT_OBSERVED although the count went from nothing to 1.
+- **Resolved (2026-11-05, working tree):** in a numeric_delta, a number read from the DOM on the one element located for
+  it that shows no number (DOM_VERIFIED null) counts as 0, reported as "(0, no number shown)". Not when the element was
+  not found or only the model said so. The generated test reads numeric_delta counters with `readNumberOrZero` (same
+  rule). Not handled: a model that answers 0 where the DOM shows no number (MODEL_EXTRACTED, still unverified).
+
+## KI-061 — A named product is read back from the page for a cart check
+- **Severity:** Low (one optional criterion inconclusive; the verdict follows it).
+- **Where:** the requirement compiler (`packages/testing-engine/src/requirement/prompts.ts`, the "pick an item and refer
+  back to it" rule).
+- **What:** run `run_0mw3k2qbn7425ae5696b0aa37`, the validation rerun of KI-058–KI-060: the compile added "the cart lists
+  `productName@after_add`" (collection_contains with a fact as item) although the requirement names the product
+  ("Add ADELAIDE 2 to cart"). Right after adding, the name was only in the toast; its lookup ran after the toast had gone,
+  so the fact stayed MODEL_EXTRACTED and the criterion INCONCLUSIVE / UNVERIFIED_EVIDENCE (the cart list itself was
+  DOM_VERIFIED ["ADELAIDE 2"]). The first run's compile had no such criterion.
+- **Open:** not reproduced: eval cases 32 and 33 (`named-product-cart-checkout`, with and without that run's pages) passed
+  6/6 and 8/8 on deepseek-flash with the current prompt, with a new expectation `literalCollectionItems` (no fact as
+  item). A prompt rule ("a named item is checked as its text") is the likely fix once it reproduces. Meanwhile a
+  reviewer can remove that criterion before confirming (a fact item cannot be edited into text).

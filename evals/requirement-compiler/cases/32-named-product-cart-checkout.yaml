@@ -1,0 +1,26 @@
+id: named-product-cart-checkout
+tags: [cart, references, notifications]
+# run_0mw3k2qbn7425ae5696b0aa37 (frontends-demo.vercel.app, KI-061): the requirement names the product. One compile
+# checked the cart for a fact "product name" read right after adding, where the page showed it only in a toast that was
+# gone before the read: the criterion was inconclusive. A named item should be checked as its text (0 of 6 compiles
+# read it back on 2026-11-05: a guard, the live failure was not reproduced).
+input: |-
+  Go to Products page
+  Add ADELAIDE 2 to cart
+  Verify ADELAIDE 2 has been added to cart. popup displayed
+  Verify cart quantity increased by 1
+  click on cart
+  click checkout
+  verify checkout page is displayed
+testDataKeys: []
+secretNames: []
+expect:
+  criteriaCount: { min: 3, max: 6 }
+  requiredOutcomeKinds:
+    - visible
+    - [numeric_delta, numeric_compare]
+  forbiddenOutcomeKinds: [semantic]
+  forbiddenPreconditions: [authenticated]
+  mustFlagAmbiguous: false
+  onlyProvidedInputRefs: true
+  literalCollectionItems: true

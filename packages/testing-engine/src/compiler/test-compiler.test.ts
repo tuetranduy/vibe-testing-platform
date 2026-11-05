@@ -462,11 +462,12 @@ describe("compilePlaywrightTest: assertions", () => {
     );
   });
 
-  it("numeric_delta → the polled difference is close to the expected delta", () => {
+  it("numeric_delta → the polled difference is close to the expected delta; counters read as the verifier reads them (KI-060)", () => {
     const out = compile({ requirement: requirementOf([criterion("AC-1", { kind: "numeric_delta", before, after, delta: 1 })]) });
     expect(stepBlock(out.source, "AC-1")).toMatch(
-      /await softExpect\.poll\(async \(\) => difference\(await readNumber\(page\.getByTestId\(data\.locators\.loc\d+\.value\), 0\), fact1\), \{ message \}\)\.toBeCloseTo\(data\.criteria\["AC-1"\]\.delta, 9\);/,
+      /await softExpect\.poll\(async \(\) => difference\(await readNumberOrZero\(page\.getByTestId\(data\.locators\.loc\d+\.value\), 0\), fact1\), \{ message \}\)\.toBeCloseTo\(data\.criteria\["AC-1"\]\.delta, 9\);/,
     );
+    expect(out.source).toMatch(/const fact1 = await readNumberOrZero\(page\.getByTestId\(data\.locators\.loc\d+\.value\)\);/);
     expect(dataOf(out.dataJson).criteria["AC-1"]!.delta).toBe(1);
   });
 

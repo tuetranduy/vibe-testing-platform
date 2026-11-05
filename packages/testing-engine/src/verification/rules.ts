@@ -113,7 +113,15 @@ function compare(left: number, operator: Operator, right: number): boolean {
  * FactRef the outcome uses (the verifier has already checked they were recorded). A value of the
  * wrong type is not observed (never FAIL); an invalid regex makes the criterion ambiguous.
  */
-export function evaluateRule(outcome: DeterministicOutcome, valueOf: (ref: FactRef) => FactValue): RuleResult {
+export function evaluateRule(
+  outcome: DeterministicOutcome,
+  valueOf: (ref: FactRef) => FactValue,
+  /**
+   * Whether the fact was read, from the DOM, on a counter that is on the page but shows no number (KI-060). In a
+   * numeric_delta it counts as 0: a cart badge or unread count is commonly hidden while it is zero.
+   */
+  showsNoNumber: (ref: FactRef) => boolean = () => false,
+): RuleResult {
   switch (outcome.kind) {
     case "numeric_compare": {
       const lv = valueOf(outcome.left);
@@ -137,15 +145,19 @@ export function evaluateRule(outcome: DeterministicOutcome, valueOf: (ref: FactR
     }
 
     case "numeric_delta": {
-      const bv = valueOf(outcome.before);
-      const b = numberOf(bv);
+      const counted = (ref: FactRef): { n: number | null; v: FactValue; empty: boolean } => {
+        const v = valueOf(ref);
+        const n = numberOf(v);
+        return n === null && v === null && showsNoNumber(ref) ? { n: 0, v, empty: true } : { n, v, empty: false };
+      };
+      const shown = (n: number, empty: boolean) => `${num(n)}${empty ? ", no number shown" : ""}`;
+      const { n: b, v: bv, empty: bEmpty } = counted(outcome.before);
       if (b === null) return notObserved(outcome.before, bv, "a number");
-      const av = valueOf(outcome.after);
-      const a = numberOf(av);
+      const { n: a, v: av, empty: aEmpty } = counted(outcome.after);
       if (a === null) return notObserved(outcome.after, av, "a number");
       const change = a - b;
       const pass = numbersEqual(change, outcome.delta);
-      const sentence = `${factLabel(outcome.after)} (${num(a)}) - ${otherLabel(outcome.before, outcome.after)} (${num(b)}) = ${signed(change)}`;
+      const sentence = `${factLabel(outcome.after)} (${shown(a, aEmpty)}) - ${otherLabel(outcome.before, outcome.after)} (${shown(b, bEmpty)}) = ${signed(change)}`;
       return decided(pass, pass ? sentence : `${sentence}, not ${signed(outcome.delta)}`);
     }
 

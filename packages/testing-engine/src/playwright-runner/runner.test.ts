@@ -7,7 +7,7 @@ import path from "node:path";
 import { RerunResultSchema, type GeneratedTest } from "@platform/contracts";
 import { createRunRedactor } from "@platform/security";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { HELPERS_SOURCE, PRE_ACTION_HELPERS_SOURCE } from "../compiler/helpers-template";
+import { ACTION_HELPERS_V1_SOURCE, HELPERS_SOURCE, PRE_ACTION_HELPERS_SOURCE } from "../compiler/helpers-template";
 import type { EvidenceStore, EvidenceUpload } from "../evidence/collector";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
 import { buildPlaywrightConfig } from "./config-template";
@@ -352,9 +352,9 @@ describe("runGeneratedTest", () => {
     expect(out.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it("reruns a saved test with the previous reviewed helper template using the current fixed helpers", async () => {
+  it.each([["before KI-049", PRE_ACTION_HELPERS_SOURCE], ["before KI-058", ACTION_HELPERS_V1_SOURCE]])("reruns a saved test with a previous reviewed helper template (%s) using the current fixed helpers", async (_when, helpersSource) => {
     const spawn = fakeSpawn(writesResults({ steps: [{ title: title("AC-1") }] }, 0));
-    const test = { ...generated(["AC-1"]), helpersSource: PRE_ACTION_HELPERS_SOURCE };
+    const test = { ...generated(["AC-1"]), helpersSource };
     const out = await runGeneratedTest(runInput(test), { spawn, workspace: { baseDir: base } });
     expect(out).toMatchObject({ status: "PASSED", perCriterion: { "AC-1": "PASSED" } });
     expect(spawn.snapshot[0]!["helpers.ts"]).toBe(HELPERS_SOURCE);

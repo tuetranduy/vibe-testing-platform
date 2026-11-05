@@ -43,7 +43,7 @@ import { INVENTORY_SCRIPT, parseRawInventory, toPageInventory, type PageInventor
 import { createInputGenerator, type FieldFacts, type InputGenerator } from "./input-generator";
 import { JUDGE_TEXT_MAX_CHARS, createCriterionJudge, type CriterionJudge } from "./judge";
 import { describeElement, describeField, elementAction, fieldValue, fillElement, recordElement, selectElementOption } from "./recorder";
-import { captureEarlyNotificationFact } from "./early-facts";
+import { captureEarlyNotificationFact, notificationTexts } from "./early-facts";
 
 /**
  * Exploration executor (Task 14): runs the confirmed plan's scenarios (V1.1 F9: in order, each from a clean
@@ -144,7 +144,10 @@ export interface RecorderPort {
   fill(page: Page, selector: string, value: string): Promise<void>;
   select(page: Page, selector: string, value: string): Promise<void>;
   captureFact(page: Page, input: FactCaptureInput): Promise<ObservedFact>;
-  captureEarlyFact?(page: Page, request: FactRequest, criteria: readonly AcceptanceCriterion[], stepId: string): Promise<ObservedFact | null>;
+  /** `before`: the notifications shown before the action (notificationTexts), when they were read (KI-059). */
+  captureEarlyFact?(page: Page, request: FactRequest, criteria: readonly AcceptanceCriterion[], stepId: string, before?: readonly string[] | null): Promise<ObservedFact | null>;
+  /** The texts of the notifications the page shows now, read before an action whose checkpoint may need them. */
+  notificationTexts?(page: Page): Promise<string[]>;
   /** What a field asks for, for a value nobody provided (2026-10-07). Absent: the generator sees only the step. */
   describeField?(page: Page, selector: string): Promise<FieldFacts>;
   /** What a filled field holds now, null when it cannot be read (fieldValue). Absent: typed values are never re-checked. */
@@ -162,6 +165,7 @@ export const playwrightRecorder: RecorderPort = {
   select: (page, selector, value) => selectElementOption(page, selector, value),
   captureFact: (page, input) => captureFact(page, input),
   captureEarlyFact: captureEarlyNotificationFact,
+  notificationTexts: (page) => notificationTexts(page),
   describeField: (page, selector) => describeField(page, selector),
   value: (page, selector) => fieldValue(page, selector),
 };
@@ -189,6 +193,8 @@ export interface ExplorationDeps {
   pollIntervalMs?: number;
   /** How long a click's own requests may hold the next step (KI-049); default ACTION_REQUESTS_TIMEOUT_MS. */
   actionRequestsTimeoutMs?: number;
+  /** How long a click's requests must stay settled before the next step (KI-058); default ACTION_QUIET_MS. */
+  actionQuietMs?: number;
   /** Cached element lookups from earlier runs (V1.1 F8); absent: every lookup asks the explorer. */
   cache?: ObserveCache;
   /**
@@ -246,6 +252,13 @@ const NETWORK_QUIET_TIMEOUT_MS = 3_000;
  */
 const ACTION_REQUESTS_TIMEOUT_MS = 5_000;
 const ACTION_REQUESTS_POLL_MS = 50;
+/**
+ * How long no request of the click's may be pending before the next step goes (KI-058): a single-page app's link
+ * first loads the next page's script, then changes the URL and fetches its data, with a short gap in between.
+ */
+const ACTION_QUIET_MS = 300;
+/** The click's requests that hold the next step: data (fetch / XHR), a route's code (script) and a page load. */
+const ACTION_REQUEST_TYPES = new Set(["fetch", "xhr", "script", "document"]);
 /** The page's visible text, for the judge (a string: see INVENTORY_SCRIPT on why not a function). */
 const VISIBLE_TEXT_SCRIPT = String.raw`(() => String((document.body && document.body.innerText) || "").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim().slice(0, ${JUDGE_TEXT_MAX_CHARS}))()`;
 /** `other` steps may keep these observed methods (none takes a value); everything else clicks. */
@@ -503,15 +516,17 @@ class ExplorationRun {
     if (opensTarget) await this.judgeCriteria(first, judgeAfter.get(first.id) ?? []);
     for (const step of planned.slice(opensTarget ? 1 : 0)) {
       await this.ctx.boundary();
-      await this.executePlanned(step);
       // A model-backed wait may outlast a toast. Capture the next checkpoint's notifications as
       // soon as its preceding action succeeds, provided no other action intervenes.
-      if (step.kind !== "wait_for" && step.kind !== "capture_checkpoint") {
-        const next = planned.slice(planned.indexOf(step) + 1).find((s) => s.kind !== "wait_for");
-        if (next?.kind === "capture_checkpoint") {
-          const early = await this.readEarlyCheckpoint(next, newStepId());
-          if (early.facts.size > 0) this.earlyCheckpoints.set(next.id, early);
-        }
+      const next = step.kind !== "wait_for" && step.kind !== "capture_checkpoint"
+        ? planned.slice(planned.indexOf(step) + 1).find((s) => s.kind !== "wait_for")
+        : undefined;
+      // What the page shows before the action, so a notification it brings up can be told apart (KI-059).
+      const before = next?.kind === "capture_checkpoint" ? await this.notificationBaseline() : null;
+      await this.executePlanned(step);
+      if (next?.kind === "capture_checkpoint") {
+        const early = await this.readEarlyCheckpoint(next, newStepId(), before);
+        if (early.facts.size > 0) this.earlyCheckpoints.set(next.id, early);
       }
       await this.judgeCriteria(step, judgeAfter.get(step.id) ?? []);
     }
@@ -934,13 +949,22 @@ class ExplorationRun {
     return { element: { selector: PASSWORD_FIELD, description: "the page's only password field", method: "fill", arguments: [] }, ref, info };
   }
 
-  private async readEarlyCheckpoint(step: PlannedStep, stepId: string) {
+  /** The notifications the page shows now (KI-059); null when they cannot be read (then only a named one is captured). */
+  private async notificationBaseline(): Promise<string[] | null> {
+    if (!this.recorder.notificationTexts) return null;
+    return this.recorder.notificationTexts(this.page).catch((err: unknown) => {
+      this.rethrowIfFatal(err);
+      return null;
+    });
+  }
+
+  private async readEarlyCheckpoint(step: PlannedStep, stepId: string, before: readonly string[] | null = null) {
     await this.reserve();
     const checkpoint = step.checkpoint!;
     const requests = this.input.requirement.facts.filter((f) => f.checkpoint === checkpoint);
     const facts = new Map<string, ObservedFact>();
     for (const request of requests) {
-      const fact = await this.recorder.captureEarlyFact?.(this.page, request, this.input.requirement.criteria, stepId).catch((err: unknown) => {
+      const fact = await this.recorder.captureEarlyFact?.(this.page, request, this.input.requirement.criteria, stepId, before).catch((err: unknown) => {
         this.rethrowIfFatal(err);
         return null;
       });
@@ -1292,16 +1316,17 @@ class ExplorationRun {
   }
 
   /**
-   * The fetch / XHR requests the page's own frame starts from now on (a click's, KI-049): `settle()` waits until they
-   * are answered or fail, at most `actionRequestsTimeoutMs`. An iframe's requests (ads) and other resources are not
-   * waited for. `dispose()` stops listening.
+   * The fetch / XHR / script / document requests the page's own frame starts from now on (a click's, KI-049, KI-058):
+   * `settle()` waits until none has been pending for `actionQuietMs` (a route change loads its script, then fetches its
+   * data), at most `actionRequestsTimeoutMs` in all. An iframe's requests (ads) and other resources (images, styles,
+   * fonts) are not waited for. `dispose()` stops listening.
    */
   private watchRequests(): { settle(): Promise<void>; dispose(): void } {
     const page = this.page;
     const pending = new Set<PwRequest>();
     const onRequest = (r: PwRequest) => {
       try {
-        if ((r.resourceType() === "fetch" || r.resourceType() === "xhr") && r.frame() === page.mainFrame()) pending.add(r);
+        if (ACTION_REQUEST_TYPES.has(r.resourceType()) && r.frame() === page.mainFrame()) pending.add(r);
       } catch {
         // A request without a frame (a service worker's) is not the click's.
       }
@@ -1313,11 +1338,17 @@ class ExplorationRun {
     return {
       settle: async () => {
         const deadline = Date.now() + (this.deps.actionRequestsTimeoutMs ?? ACTION_REQUESTS_TIMEOUT_MS);
-        while (pending.size > 0 && Date.now() < deadline) {
+        const quietMs = this.deps.actionQuietMs ?? ACTION_QUIET_MS;
+        let quietSince = Date.now();
+        for (;;) {
+          const now = Date.now();
+          if (pending.size > 0) quietSince = now;
+          if (now >= deadline || now - quietSince >= quietMs) break;
           try {
             await sleep(ACTION_REQUESTS_POLL_MS, this.input.budget);
           } catch (err) {
             this.rethrowIfFatal(err);
+            break; // the budget ran out: the next reserve() stops exploration
           }
         }
       },

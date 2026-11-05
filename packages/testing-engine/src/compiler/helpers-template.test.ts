@@ -20,7 +20,8 @@ import { HELPERS_SOURCE } from "./helpers-template";
  */
 
 interface Helpers {
-  trackActionRequests(page: Page, timeoutMs?: number): () => Promise<void>;
+  trackActionRequests(page: Page, timeoutMs?: number, quietMs?: number): () => Promise<void>;
+  readNumberOrZero(locator: Locator, waitMs?: number): Promise<number | null>;
   parseNumber(text: string): number | null;
   collapseText(s: string | null): string | null;
   foldText(s: string | null): string | null;
@@ -193,6 +194,43 @@ describe("helpers.ts DOM reads match the fact reader", () => {
     const expected: FactValue | undefined = (await readFact(page, ref, mode))?.value ?? null;
     const read = helpers[helper] as (l: Locator) => Promise<unknown>;
     expect(await read(locatorFor(page, ref.candidates[0]!))).toEqual(expected);
+  });
+
+  it("readNumberOrZero reads a counter as the verifier does in a numeric_delta: no number shown is 0 (KI-060)", async () => {
+    const at = (testId: string) => locatorFor(page, { strategy: "testId", value: testId });
+    expect(await helpers.readNumberOrZero(at("cart-count"))).toBe((await readFact(page, refOf("cart-count"), "number"))?.value);
+    // The fact reader reads null there; the verifier counts a DOM_VERIFIED null "number" reading as 0.
+    expect((await readFact(page, refOf("notice"), "number"))?.value).toBeNull();
+    expect(await helpers.readNumberOrZero(at("notice"))).toBe(0);
+    expect(await helpers.readNumberOrZero(at("dup"), 0)).toBeNull();
+    expect(await helpers.readNumberOrZero(at("missing"), 0)).toBeNull();
+  });
+
+  it("a click that loads a route's script and then fetches its data is awaited to the end (KI-058)", async () => {
+    const actionPage = await browser.newPage();
+    try {
+      await actionPage.route("http://route.test/", (route) => route.fulfill({
+        contentType: "text/html",
+        body: `<button onclick="const s = document.createElement('script'); s.src = '/chunk.js'; document.head.append(s)">Checkout</button>`,
+      }));
+      await actionPage.route("http://route.test/chunk.js", async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        await route.fulfill({ contentType: "text/javascript",
+          body: "setTimeout(() => fetch('/data').then(() => { history.pushState({}, '', '/checkout'); window.done = true; }), 120);" });
+      });
+      await actionPage.route("http://route.test/data", async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        await route.fulfill({ contentType: "application/json", body: "{}" });
+      });
+      await actionPage.goto("http://route.test/");
+      const finish = helpers.trackActionRequests(actionPage);
+      await actionPage.getByRole("button", { name: "Checkout" }).click();
+      await finish();
+      expect(await actionPage.evaluate(() => (window as unknown as { done?: boolean }).done)).toBe(true);
+      expect(new URL(actionPage.url()).pathname).toBe("/checkout");
+    } finally {
+      await actionPage.close();
+    }
   });
 
   it.each(["fetch", "image"] as const)("bounds unfinished fetches and ignores images: %s", async (kind) => {
