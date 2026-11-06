@@ -379,8 +379,13 @@ class Compiler {
           return;
         }
         case "fill": {
+          if (step.fillMethod === "check") {
+            this.withLocator(w, step.element!, `Step ${step.index} (check)`, (l) => `await ${l}.check();`);
+            return;
+          }
           const value = this.inputValue(step);
-          const method = step.plannedStepId && this.plannedKind.get(step.plannedStepId) === "select" ? "selectOption" : "fill";
+          const planned = step.plannedStepId && this.plannedKind.get(step.plannedStepId) === "select";
+          const method = (step.fillMethod ?? (planned ? "select" : "fill")) === "select" ? "selectOption" : "fill";
           this.withLocator(w, step.element!, `Step ${step.index} (fill)`, (l) => `await ${l}.${method}(${value});`);
           return;
         }

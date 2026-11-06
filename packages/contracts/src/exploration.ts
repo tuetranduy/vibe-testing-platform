@@ -75,6 +75,11 @@ export const ExplorationStepSchema = z.object({
    * 2026-10-07). Absent or null: the value was provided (or the step is not a fill).
    */
   generatedValue: z.string().max(1000).nullable().optional(),
+  /**
+   * How a fill the executor added itself is replayed (KI-062: a form's required field the plan left empty, filled before
+   * the form is submitted): typed, an option chosen, or checked. Absent: a planned fill, replayed by its planned step's kind.
+   */
+  fillMethod: z.enum(["fill", "select", "check"]).optional(),
   /** A `judge` step's judgment (2026-10-07); absent on every other step, and on a judge step that failed. */
   judgment: CriterionJudgmentSchema.optional(),
 });

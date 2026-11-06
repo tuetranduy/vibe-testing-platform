@@ -255,6 +255,18 @@ describe("compilePlaywrightTest: the discovered flow (snapshot)", () => {
     expect(dataOf(out.dataJson).inputs.input1).toBe("42");
   });
 
+  it.each([
+    ["select", { inputRef: { source: "testData", key: "country" }, generatedValue: "de" }, /\.selectOption\(data\.inputs\.input1\);/],
+    ["check", { inputRef: { source: "literal", key: "on" } }, /getByRole\("combobox", \{ name: data\.locators\.loc\d+\.name, exact: true \}\)\.check\(\);/],
+    ["fill", { inputRef: { source: "testData", key: "first_name" }, generatedValue: "Alex" }, /\.fill\(data\.inputs\.input1\);/],
+  ] as const)("a required field the executor filled itself (KI-062) replays by its fillMethod %s, whatever its planned step's kind", (fillMethod, over, expected) => {
+    const steps = shopFlow({ fill: { element: byRole("combobox", "Field"), fillMethod, ...over } });
+    const out = compile({ steps, testData: {} });
+    expect(out.compiledCriteria.length).toBeGreaterThan(0);
+    expect(out.source).toMatch(expected);
+    expect(checkGeneratedSource(out.source)).toEqual([]);
+  });
+
   it("every page.goto waits, like the executor's navigation, for a quiet network (bounded, best effort)", () => {
     const steps = flow(
       { kind: "navigate", plannedStepId: "PS-1", instruction: `Navigate to ${TARGET}` },

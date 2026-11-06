@@ -83,6 +83,10 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-059 | High | Evidence | A popup the requirement names without quoting its text is never captured before it disappears | Resolved in working tree (2026-11-05) |
 | KI-060 | Medium | Verification | An empty counter (no badge shown) is "not observed", so "increased by 1" from an empty cart is inconclusive | Resolved in working tree (2026-11-05) |
 | KI-061 | Low | LLM quality | A compile may check the cart for a product name read back from a passing popup, though the requirement names it | Resolved in working tree (2026-11-05): prompt rule; compiler 33/33 |
+| KI-062 | High | Exploration | A form submitted with only the fields the plan names ("Fill information") is rejected; its other required fields stay empty | Resolved in working tree (2026-11-05) |
+| KI-063 | Medium | Generated inputs | A made-up new-account email is the same every run, so the account exists after the first run | Resolved in working tree (2026-11-05) |
+| KI-064 | High | Exploration | A select the page resets after the first choice is recorded as chosen; a model-picked country can make a form refuse to submit | Resolved in working tree (2026-11-05) |
+| KI-065 | High | Verification | A login in a popup (the URL does not change) is reported LOGIN_FAILED although it succeeded | Open |
 
 KI-056–KI-057: [Travel Luggage Set run investigation](reviews/run_0mw3gsjgke3a1923c465bb1e1.md), with the recorded
 timeline, reproduction, changes and rollout limits.
@@ -866,3 +870,63 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   named item is checked as its text ("ADELAIDE 2"), never read back from the page. Compiler suite after it:
   `deepseek-flash` 33/33, `deepseek-v4-pro` (thinking off) 31/33 (two failures seen before the change); cases 32–33
   pass on both.
+
+## KI-062 — A form is submitted with only the fields the plan names
+- **Severity:** High (a sign-up that works is reported BLOCKED: the account is never created, so the login after it fails).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`completeRequiredFields`), `recorder.ts`
+  (`requiredEmptyFields`, `checkElement`), the compiler (`fillMethod`, `check` in the AST guard's allowlist).
+- **What:** run `run_0mw3mry56d3161609fb66537e` (frontends-demo.vercel.app, "Go to sign in page / Go to sign up page /
+  Fill information / Submit / Make sure user can login with newly created account"). The run did open /register, but
+  "Fill information" names no field, so the plan filled only the email and password (the criteria's preconditions).
+  First name, last name, street, ZIP, city and country stayed empty; the browser stopped the submit ("Please select an
+  item in the list" on Country), the page stayed on /register, and the second scenario's login with the never-created
+  account ended AC-5 BLOCKED / LOGIN_FAILED. AC-4 ("no error shown") was model-extracted as "no error": the native
+  validation bubble is not page text.
+- **Resolved (2026-11-05, working tree):** before the click on a step's own control, when the step submits (`submit`,
+  `login`) or the run typed into that control's form since the last click, the executor fills the form's required fields
+  that are still empty: visible, enabled, writable, required by `required`, `aria-required` or a label with "*". Values,
+  in order: what was typed into the field it confirms ("Repeat password"), the run's test data whose key names the field,
+  a provided secret for a password field, else a generated one (the input generator, as for any value nobody provided).
+  A select on its placeholder gets an option, a required checkbox (or radio group) is checked. Each is a golden `fill` of
+  the submit step with `fillMethod` (`fill` / `select` / `check`), so the generated test replays it. Checked on the real
+  page: the scan finds exactly those six fields and skips the optional salutation. Covered by executor tests, real-Chromium
+  recorder tests and compiler tests. Not handled: a form without a `<form>` element, and required fields marked only by
+  styling. Not yet validated by a live rerun of the run above.
+
+## KI-063 — A made-up new-account email is the same every run
+- **Severity:** Medium (a registration test passes once, then fails on "already registered" every later run).
+- **Where:** `packages/testing-engine/src/requirement/insights.ts` (suggested test data),
+  `packages/testing-engine/src/exploration/input-generator.ts`, `isEmailKey` in `packages/contracts/src/test-data-generator.ts`.
+- **What:** same run: the suggested `new_account_email` was the model's `new.user@example.com`, an address any earlier
+  run on that shared demo store may already have registered. The input generator also asked the model for emails, which
+  tends to answer the same address (`alex.tester@example.com`) every time.
+- **Resolved (2026-11-05, working tree):** an email the platform makes up is `qa.<token>@example.com`, the token from the
+  run id and the key: the same within a run (sign up, then log in), new in the next. In suggestions it replaces the
+  model's made-up address (one the site shows is kept); in exploration an email field (by type, autocomplete, key or
+  label) gets it without a model call. An email the user entered is still used as it is.
+
+## KI-064 — A reset select is recorded as chosen, and the model's country can block a submit
+- **Severity:** High (the form is submitted without the choice, or not submitted at all, while every step reports success).
+- **Where:** `packages/testing-engine/src/exploration/recorder.ts` (`selectElementOption`), `executor.ts`
+  (`requiredFieldInput`).
+- **What:** the re-runs of KI-062 on frontends-demo.vercel.app. `run_0mw3puf097100e87ac92d5859`: the register page's
+  first choice of a country is undone by its own re-render (a second choice holds); Playwright's `selectOption` returned,
+  the step was a SUCCESS, and the submit was stopped by the browser on an empty Country. `run_0mw3q5rom306cb1473717a7d8`:
+  the input generator's model picked the United States; with it the page sends no register request and shows no error
+  (Sweden, the first country listed, submits), so the account was never created and the login got 401.
+- **Resolved (2026-11-05, working tree):** a select is read back after 300 ms and chosen again, at most 3 times; a choice
+  the page never keeps is a failed step. A required select the plan left empty takes the site's first real option, not
+  the model's (no model call). Validated by `run_0mw3qf1kqdfef8ee989229c6e`: `POST /store-api/account/register` 200, then
+  `POST /store-api/account/login` 200 with the new account. Not handled: the generated test's `selectOption` has no such
+  read-back (a page that drops the first choice can fail the rerun).
+
+## KI-065 — A login in a popup is reported LOGIN_FAILED
+- **Severity:** High (a working login is reported BLOCKED).
+- **Where:** `packages/testing-engine/src/verification/verifier.ts` (rule 3, `failedLogin`, Ruling R15).
+- **What:** `run_0mw3qf1kqdfef8ee989229c6e`: frontends-demo.vercel.app signs in through a modal on the home page. The
+  login API answered 200, but the URL was `/` before and after the login step, so rule 3 ended AC-5 BLOCKED /
+  LOGIN_FAILED ("the page stayed at …").
+- **Open:** an unchanged URL is not enough evidence on a single-page app. Likely fix: the executor records, after a
+  `login` click, whether the fields it typed the credentials into are still shown; rule 3 then needs both (same page and
+  the login form still there).
+

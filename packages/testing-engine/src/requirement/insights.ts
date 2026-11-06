@@ -9,6 +9,7 @@ import {
   SuggestedTestDataValueSchema,
   generateTestDataValue,
   isCredentialKey,
+  isEmailKey,
   type SiteCheck,
   type TestDataSuggestion,
   type TestDataValue,
@@ -73,7 +74,10 @@ export function validateInsights(src: InsightsSource): RequirementInsights {
     if (testData.length >= MAX_TEST_DATA_SUGGESTIONS) break;
     if (isCredentialKey(key)) continue; // a credential is a secret: never suggested as test data
     const fromModel = src.output.testData.find((t) => t.key === key && usable(t.value, src.redact));
-    if (fromModel) {
+    // A made-up email (not one the site shows) is the platform's, unique to the run (KI-063): the model suggests the
+    // same address every time, and an account registered with it once is "already taken" for every later run.
+    const madeUpEmail = fromModel !== undefined && !(fromModel.fromSite && src.siteRead) && isEmailKey(key);
+    if (fromModel && !madeUpEmail) {
       const value = typeof fromModel.value === "string" ? fromModel.value.trim() : fromModel.value;
       testData.push({
         key,
@@ -84,7 +88,8 @@ export function validateInsights(src: InsightsSource): RequirementInsights {
       continue;
     }
     const generated = generateTestDataValue(key, { hint, seed: src.seed });
-    if (generated !== null) testData.push({ key, value: generated, description: clip(hint || `A value for ${key}`, 300), source: "GENERATED" });
+    const description = madeUpEmail ? String(src.redact(fromModel.description || hint)) : hint;
+    if (generated !== null) testData.push({ key, value: generated, description: clip(description || `A value for ${key}`, 300), source: "GENERATED" });
   }
   return { checks, testData };
 }

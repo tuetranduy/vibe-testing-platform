@@ -159,9 +159,10 @@ describe("analyze stage against the live site (V1.3)", () => {
       pages: [{ url: `${ORIGIN}/`, status: "READ" }, { url: `${ORIGIN}/register` }, { url: `${ORIGIN}/account` }, { url: `${ORIGIN}/about` }],
       checks: [{ criterionId: "AC-1", status: "FOUND", note: "The Register page has a sign-up form" }],
     });
-    // email from the model; firstName from the generator; never the password (a credential: a secret).
+    // The model's made-up email is replaced by one unique to the run (KI-063: a fixed address registers once, then is
+    // taken), its description kept; firstName from the generator; never the password (a credential: a secret).
     expect(result.siteAnalysis!.testData).toEqual([
-      { key: "email", value: "new.visitor@example.com", description: "A fresh address", source: "GENERATED" },
+      { key: "email", value: expect.stringMatching(/^qa\.[a-z0-9]+@example\.com$/), description: "A fresh address", source: "GENERATED" },
       { key: "firstName", value: "Alex", description: "First name for the account", source: "GENERATED" },
     ]);
     // Kept for the planner (KI-048): each page read and what it showed.

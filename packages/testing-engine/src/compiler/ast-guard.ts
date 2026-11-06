@@ -38,7 +38,7 @@ export const ALLOWED_IDENTIFIERS: ReadonlySet<string> = new Set([
   "targetUrl", "urls", "locators", "items", "inputs", "criteria", "statement", "name", "text", "value", "selector",
   "pattern", "item", "delta", "right",
   // page and locators
-  "goto", "click", "fill", "selectOption", "getByRole", "getByLabel", "getByPlaceholder", "getByText", "getByTestId",
+  "goto", "click", "fill", "selectOption", "check", "getByRole", "getByLabel", "getByPlaceholder", "getByText", "getByTestId",
   "locator", "url", "waitForLoadState", "timeout", "catch", "exact",
   // test and expect
   "step", "configure", "soft", "poll", "not", "ignoreCase", "useInnerText",
