@@ -54,6 +54,7 @@ commit of `packages/testing-engine/src/requirement/prompts.ts`, and any failing 
 | 2026-10-07 | deepseek-v4-pro (thinking high), KI-026 re-score | e448587 | 30/31 (96.8%) | 111,074 / 76,331 | $0.45 | spanish-newsletter (`visible`, not `text_matches`) — 637 s, 21 s a case |
 | 2026-10-07 | deepseek-v4-pro (`LLM_REASONING=minimal`), KI-026 re-score | e448587 | 30/31 (96.8%) | 121,337 / 11,848 | $0.21 | about-link (a fact keyed `url`, reserved, after the correction) — 91 s |
 | 2026-11-05 | deepseek-flash (thinking high), rule "a named item is checked as its text", with cases 32–33 (KI-061) | this change | 33/33 (100%) | 125,085 / 26,938 | $0.03 | — (161 s). Before the rule, cases 32 and 33 passed 6/6 and 8/8: the live compile that read a named product back from the page did not reproduce |
+| 2026-11-06 | deepseek-flash, rule "never invent wording" + deterministic rewrite of an unstated text to `visible` (KI-070), with cases 34–35 | a0b6cf8 + this change | 35/35 (100%) | 144,695 / 29,468 | $0.08 | — (177 s). Cases 34–35 score `noInventedText` (a rewrite counts as a failure): none rewritten |
 | 2026-11-05 | deepseek-v4-pro (`LLM_REASONING=minimal`), the same | this change | 31/33 (93.9%) | 143,554 / 13,716 | $0.12 | spanish-newsletter (`visible`, not `text_matches`), selected-product-with-pages (`semantic`, 3 ambiguous); both failed this way before. Cases 32–33 pass |
 
 The second row's prompt change fixes a `test_data` precondition invented for a value written in the
@@ -108,6 +109,7 @@ Record the `Total:` line with the commit of `packages/testing-engine/src/planner
 | 2026-11-05 | deepseek-flash (thinking high), KI-048 close: case 18 without its pages (≈ the prompt before ba3b4a1) | ba3b4a1 | case 18: 1/5 | | $0.02 | register-from-store 4 of 5: "New User" planned before "Login" |
 | 2026-11-05 | deepseek-flash (thinking high), KI-048 close: case 18 with its pages | ba3b4a1 | case 18: 9/10 | | $0.03 | register-from-store once |
 | 2026-11-05 | deepseek-flash (thinking high), full suite | ba3b4a1 | 18/18 (100%) | 40,247 / 21,834 | $0.02 | — (122 s) |
+| 2026-11-06 | deepseek-flash, R3 rule "open a page read with a navigate step to its URL; name only controls on the current page" (two runs) | a0b6cf8 + this change | 17/18, 17/18 | 44,441 / 30,155; 44,441 / 29,394 | $0.05 each | search-results in both (no pages in the case, so the new rule does not apply): split into 2 scenarios; once also fill + click instead of a `search` step. Both modes are recorded above for this case |
 | 2026-11-05 | deepseek-v4-pro (`LLM_REASONING=minimal`), full suite | ba3b4a1 | 17/18 (94.4%) | 39,743 / 9,363 | $0.04 | search-results (2 scenarios). Case 18 passes. At thinking high, 6 of 10 case-18 runs hit the 180 s case budget (all 4 that answered passed) |
 
 The failures at a2538bc were all the model marking "Add to cart" / "Remove the item from the cart"

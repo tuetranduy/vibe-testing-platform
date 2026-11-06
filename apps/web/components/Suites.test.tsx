@@ -78,6 +78,18 @@ describe("SuiteDetailView", () => {
     expect(navigate).toHaveBeenCalledWith("/suite-runs/srn_9");
   });
 
+  it("runs suites containing destructive tests with a single click", async () => {
+    const base = suiteFixture();
+    const suite = { ...base, entries: base.entries.map((entry) => ({ ...entry, destructive: true })) };
+    const fetch = api(routes(suite, { "POST /api/v1/suites/ste_1/runs": () => json(202, { suiteRunId: "srn_actions", runIds: ["run_x"] }) }));
+    const navigate = vi.fn();
+    render(<SuiteDetailView suiteId="ste_1" navigate={navigate} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Run suite" }));
+    expect(navigate).toHaveBeenCalledWith("/suite-runs/srn_actions");
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Confirm and run suite" })).not.toBeInTheDocument();
+  });
+
   it("explains older tests without offering retired credential inputs", async () => {
     api(routes(suiteFixture({ secretNames: ["password"], missingSecretNames: ["password"] })));
     render(<SuiteDetailView suiteId="ste_1" navigate={vi.fn()} />);
@@ -186,7 +198,7 @@ describe("AddToSuitePanel", () => {
     expect(await screen.findByRole("link", { name: "Checkout smoke" })).toHaveAttribute("href", "/suites/ste_1");
   });
 
-  it("creates a new suite for it, and a destructive run needs the confirmation", async () => {
+  it("creates a suite for a destructive test without asking for acknowledgment again", async () => {
     const fetch = api({
       "GET /api/v1/suites": () => json(200, { items: [] }),
       "POST /api/v1/suites": () => json(201, suiteFixture({ id: "ste_2", name: "Payments", entries: [] })),
@@ -197,9 +209,7 @@ describe("AddToSuitePanel", () => {
     await user.click(screen.getByRole("button", { name: "Add to suite" }));
     await user.type(await screen.findByLabelText("New suite's name"), "Payments");
     await user.click(screen.getByRole("button", { name: "Add" }));
-    expect(screen.getByText("Confirm that every run of the suite repeats destructive actions.")).toBeInTheDocument();
-    await user.click(screen.getByLabelText(/repeat the destructive actions on every run/));
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(fetch).toHaveBeenLastCalledWith(
       "/api/v1/suites/ste_2/entries",
       expect.objectContaining({ body: JSON.stringify({ sourceRunId: "run_1", confirmDestructiveActions: true }) }),

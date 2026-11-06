@@ -94,6 +94,10 @@ function modelUrl(raw: string): string | null {
   }
 }
 
+/** Links kept per page inventory, and at most this many of them from the header / navigation. */
+export const MAX_LINKS = 60;
+export const MAX_NAV_LINKS = 40;
+
 const bytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), "utf8");
 
 /**
@@ -105,13 +109,18 @@ export function toPageInventory(raw: RawPageInventory, redact: (value: unknown) 
   const r = redact(raw) as RawPageInventory;
   const seen = new Set<string>();
   const links: PageInventory["links"] = [];
+  let nav = 0;
   for (const l of r.links) {
     const url = modelUrl(l.url);
     const text = clip(l.text, 100);
     if (!url || seen.has(`${text}\n${url}`)) continue;
+    // A mega menu (45 links on frontends-demo) would take every place, and the page's own links (its products) none
+    // (KI-071): navigation gets at most MAX_NAV_LINKS, in page order.
+    if (l.area === "nav" && nav >= MAX_NAV_LINKS) continue;
     seen.add(`${text}\n${url}`);
     links.push({ text, url, area: l.area });
-    if (links.length >= 60) break;
+    if (l.area === "nav") nav++;
+    if (links.length >= MAX_LINKS) break;
   }
   return capInventory({
     title: clip(r.title, 200),
@@ -133,6 +142,24 @@ export function toPageInventory(raw: RawPageInventory, redact: (value: unknown) 
   });
 }
 
+/** Navigation links kept when an inventory must shrink: the page's own links (its products) go only after the rest. */
+const MIN_NAV_LINKS = 20;
+
+/**
+ * Drops one link to make room: the last navigation link while more than MIN_NAV_LINKS are left, else the last link.
+ * Popping from the end alone dropped every product card of frontends-demo's home page, which follow a 46-link menu
+ * (KI-071).
+ */
+function dropLink(links: PageInventory["links"]): void {
+  const nav = links.filter((l) => l.area === "nav").length;
+  if (nav > MIN_NAV_LINKS) {
+    const at = links.map((l) => l.area).lastIndexOf("nav");
+    links.splice(at, 1);
+    return;
+  }
+  links.pop();
+}
+
 /** Drops list items — from the end of whichever list is largest — until the inventory fits `maxBytes`. */
 export function capInventory(inventory: PageInventory, maxBytes = INVENTORY_MAX_BYTES): PageInventory {
   const out: PageInventory = {
@@ -151,7 +178,7 @@ export function capInventory(inventory: PageInventory, maxBytes = INVENTORY_MAX_
     ] as const;
     const largest = [...sizes].sort((a, b) => b.size - a.size)[0]!;
     if (largest.size === 0) break;
-    if (largest.list === "links") out.links.pop();
+    if (largest.list === "links") dropLink(out.links);
     else if (largest.list === "buttons") out.buttons.pop();
     else if (largest.list === "headings") out.headings.pop();
     else out.forms.pop();

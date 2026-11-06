@@ -5,7 +5,7 @@ Plan: [`docs/ai-testing-platform-implementation-plan.md`](docs/ai-testing-platfo
 
 ## Recent improvements
 
-The web app now starts from **Website URL + Test instructions**, or an explicit **Find test ideas** mode. Environment selection, manual test data, test secrets and their saved libraries have been retired from the UI and browser proxy. Existing run reports remain readable; older saved tests requiring manual credentials link to fresh setup. The service API and stored records remain compatible with historical runs. Every new UI run uses the stricter internal action policy, with host confirmation for actions that change site data.
+The web app now starts from **Website URL + Test instructions**, or an explicit **Find test ideas** mode. Environment selection, manual test data, test secrets and their saved libraries have been retired from the UI and browser proxy. Existing run reports remain readable; older saved tests requiring manual credentials link to fresh setup. The service API and stored records remain compatible with historical runs. Destructive actions are always enabled for new UI tests under the app’s existing acknowledgment; the client fills the legacy API permission/host fields automatically. Creating, rerunning or adding tests to suites does not ask for that acknowledgment again.
 
 The redesigned workspace defaults to light (saved theme preferences still apply), uses a four-step run guide, and keeps detailed activity, optional settings and saved test code behind disclosures. Desktop and mobile share the same flow.
 

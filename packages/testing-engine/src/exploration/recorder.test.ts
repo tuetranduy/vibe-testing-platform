@@ -3,7 +3,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LOCATOR_STRATEGY_ORDER } from "../shared/locator-policy";
 import { captureCheckpoint, captureFact, modeForValueType, readFact } from "./fact-reader";
-import { checkElement, describeElement, describeField, elementAction, fieldValue, fillElement, recordElement, requiredEmptyFields, selectElementOption } from "./recorder";
+import { checkElement, describeElement, describeField, elementAction, fieldValue, fillElement, hittableAlternative, isHittable, reachableNamedControl, recordElement, requiredEmptyFields, selectElementOption } from "./recorder";
 
 /**
  * Real Chromium (Playwright's build, launched headless without a proxy) on a static fixture
@@ -446,5 +446,54 @@ describe("selectElementOption (a page that drops the first choice, KI-064)", () 
     await page.setContent(`<select id="c"><option value="">-</option><option value="a">A</option></select>
       <script>document.getElementById("c").addEventListener("change", (e) => setTimeout(() => { e.target.selectedIndex = 0; }, 20));</script>`);
     await expect(selectElementOption(page, "#c", "a")).rejects.toThrow(/did not keep/);
+  });
+});
+
+describe("isHittable / hittableAlternative (R2: a carousel's off-screen clone)", () => {
+  // A transform carousel, like frontends-demo's product slider: the first slide is a clone moved off-screen inside an
+  // overflow-hidden track; the visible slide has the same button (same role, name and test id).
+  const CAROUSEL = `<div style="width:400px;overflow:hidden"><div style="display:flex;transform:translateX(-400px)">
+    <div style="flex:0 0 400px"><button data-testid="wish" aria-label="Add to wishlist">♡</button></div>
+    <div style="flex:0 0 400px"><button data-testid="wish" aria-label="Add to wishlist">♡</button></div>
+  </div></div>
+  <div style="position:fixed;top:0;left:500px;width:200px;height:200px;background:#000;z-index:10"></div>
+  <button id="under" style="position:absolute;top:50px;left:550px">Covered</button>`;
+  const CLONE = "xpath=/html[1]/body[1]/div[1]/div[1]/div[1]/button[1]";
+  const VISIBLE = "xpath=/html[1]/body[1]/div[1]/div[1]/div[2]/button[1]";
+
+  it("the clone and a covered element are not hittable; the visible slide's button is", async () => {
+    await page.setContent(CAROUSEL);
+    expect(await isHittable(page, CLONE)).toBe(false);
+    expect(await isHittable(page, VISIBLE)).toBe(true);
+    expect(await isHittable(page, "#under")).toBe(false);
+  });
+
+  it("the clone's role / test id candidates lead to the visible button's XPath", async () => {
+    await page.setContent(CAROUSEL);
+    const ref = await recordElement(page, CLONE);
+    expect(await hittableAlternative(page, ref)).toBe(VISIBLE);
+  });
+
+  it("no reachable twin: null", async () => {
+    await page.setContent(CAROUSEL);
+    const ref = await recordElement(page, "#under");
+    expect(await hittableAlternative(page, ref)).toBeNull();
+  });
+});
+
+describe("reachableNamedControl (KI-072: the named button, not the header link)", () => {
+  const PAGE = `<header><a href="/wishlist" aria-label="wishlist">♡</a></header>
+  <main><div style="width:300px;overflow:hidden"><div style="transform:translateX(-300px)"><button aria-label="Add to wishlist">♡</button></div></div>
+  <button aria-label="Add to wishlist">♡</button><a href="/p/1">Product 1</a></main>`;
+
+  it("the first reachable button whose name contains the step's name; never the link named 'wishlist'", async () => {
+    await page.setContent(PAGE);
+    expect(await reachableNamedControl(page, "Add to wishlist", ["button"])).toBe("xpath=/html[1]/body[1]/main[1]/button[1]");
+    expect(await reachableNamedControl(page, "add to WISHLIST", ["button", "link"])).toBe("xpath=/html[1]/body[1]/main[1]/button[1]");
+  });
+
+  it("no element of that role and name: null", async () => {
+    await page.setContent(PAGE);
+    expect(await reachableNamedControl(page, "Add to cart", ["button", "link"])).toBeNull();
   });
 });

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TestDataValueSchema } from "@platform/contracts";
 import type { LlmClient } from "@platform/llm";
-import { PageInventorySchema, compileRequirement } from "@platform/testing-engine";
+import { PageInventorySchema, TEXT_NOT_STATED, compileRequirement } from "@platform/testing-engine";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { describeError, report, type CaseResult, type UsageMeter } from "../usage";
@@ -57,6 +57,11 @@ export const EvalCaseSchema = z.object({
      * back from the page (where it may only be in a passing popup) adds nothing and can fail (KI-061).
      */
     literalCollectionItems: z.boolean().default(false),
+    /**
+     * No criterion checks wording the requirement does not write (KI-070). The compiler rewrites such a check to
+     * `visible` (TEXT_NOT_STATED), so this counts those rewrites: each is the model guessing a text.
+     */
+    noInventedText: z.boolean().default(false),
   }),
 });
 export type EvalCase = z.infer<typeof EvalCaseSchema>;
@@ -108,6 +113,13 @@ export function scoreCase(
   if (c.expect.literalCollectionItems) {
     const n = criteria.filter((x) => x.expectedOutcome.kind === "collection_contains" && typeof x.expectedOutcome.item !== "string").length;
     if (n > 0) failures.push(`${n} collection_contains criteria read the item named in the requirement back from the page`);
+  }
+  if (c.expect.noInventedText) {
+    const n = criteria.filter((x) => {
+      const reason = (x.ambiguity as { reason?: unknown } | null)?.reason;
+      return typeof reason === "string" && reason.startsWith(TEXT_NOT_STATED);
+    }).length;
+    if (n > 0) failures.push(`${n} criteria checked a text the requirement never wrote (rewritten to visible)`);
   }
   if (c.expect.onlyProvidedInputRefs) {
     const provided = { test_data: new Set(Object.keys(caseTestData(c))), secret: new Set(c.secretNames) };

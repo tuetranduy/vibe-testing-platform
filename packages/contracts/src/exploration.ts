@@ -80,6 +80,11 @@ export const ExplorationStepSchema = z.object({
    * the form is submitted): typed, an option chosen, or checked. Absent: a planned fill, replayed by its planned step's kind.
    */
   fillMethod: z.enum(["fill", "select", "check"]).optional(),
+  /**
+   * How an `act` step was performed: `press_enter` when a search without a submit button was submitted by pressing
+   * Enter in its field (2026-11-06, R1). Absent: a click.
+   */
+  actMethod: z.enum(["click", "press_enter"]).optional(),
   /** A `judge` step's judgment (2026-10-07); absent on every other step, and on a judge step that failed. */
   judgment: CriterionJudgmentSchema.optional(),
 });

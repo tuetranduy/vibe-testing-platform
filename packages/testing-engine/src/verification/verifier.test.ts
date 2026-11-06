@@ -15,7 +15,7 @@ import {
   type TestPlan,
 } from "@platform/contracts";
 import { describe, expect, it } from "vitest";
-import { verifyCriterion } from "./verifier";
+import { expectsRejectedLogin, verifyCriterion } from "./verifier";
 
 // ---------------------------------------------------------------------------------------------
 // Fixtures: a cart scenario and a login scenario, with steps and facts as the executor records them
@@ -164,6 +164,43 @@ describe("numeric_compare", () => {
   it("count after > count before (brief)", () => {
     expect(verify(rule, { before: 0, after: 1 })).toBe("PASS");
     expect(verify(rule, { before: 1, after: 1 })).toBe("FAIL");
+  });
+
+  it.each(["cartQuantity", "cartCount", "cart_quantity", "cartQty"])("an empty DOM-verified %s before adding an item is zero", (key) => {
+    const { steps, checkpointStep } = cartExploration();
+    const empty: ObservedFact = {
+      key, checkpoint: "before_add", value: null, modelValue: null, provenance: "DOM_VERIFIED",
+      read: { element, mode: "number" }, stepId: checkpointStep.before_add!.id,
+    };
+    const added: ObservedFact = { ...empty, checkpoint: "after_add", value: 1, modelValue: 1, stepId: checkpointStep.after_add!.id };
+    const comparison = { ...rule, left: { ...after, key }, right: { ...before, key } };
+    expect(run(comparison, { facts: [empty, added], steps })).toMatchObject({
+      status: "PASS", reason: null,
+      actual: expect.stringContaining("(1) > before add (0, no number shown)"),
+    });
+    // Empty before and after is still a failed increase, not a false pass.
+    expect(run(comparison, { facts: [empty, { ...added, value: null, modelValue: null }], steps }).status).toBe("FAIL");
+    // An empty counter can also be the left operand, or be compared with a literal.
+    expect(run({ ...comparison, left: comparison.right, right: comparison.left, operator: "lt" }, { facts: [empty, added], steps }).status).toBe("PASS");
+    expect(run({ ...comparison, left: comparison.right, right: 0, operator: "eq" }, { facts: [empty], steps }).status).toBe("PASS");
+
+    for (const unobserved of [
+      { ...empty, read: null },
+      { ...empty, provenance: "MODEL_EXTRACTED" as const },
+      { ...empty, read: { element, mode: "text" as const } },
+    ]) {
+      expect(statusOf(run(comparison, { facts: [unobserved, added], steps }))).toEqual(["INCONCLUSIVE", "FACT_NOT_OBSERVED"]);
+    }
+  });
+
+  it.each(["price", "discount", "subtotal"])("a missing %s is not an empty counter", (key) => {
+    const { steps, checkpointStep } = cartExploration();
+    const empty: ObservedFact = {
+      key, checkpoint: "before_add", value: null, modelValue: null, provenance: "DOM_VERIFIED",
+      read: { element, mode: "number" }, stepId: checkpointStep.before_add!.id,
+    };
+    expect(statusOf(run({ kind: "numeric_compare", left: { ...before, key }, operator: "eq", right: 0 }, { facts: [empty], steps })))
+      .toEqual(["INCONCLUSIVE", "FACT_NOT_OBSERVED"]);
   });
 
   it.each([
@@ -534,7 +571,7 @@ describe("login failed (R15)", () => {
   const beforeLogin = { kind: "text_matches", fact: loginTitle, match: { mode: "contains", value: "Sign in", caseSensitive: false } } as const;
 
   /** A login flow: `loginStep` overrides the golden act of PS-5; `accountUrl` is the url fact at `account`. */
-  function loginRun(rule: ExpectedOutcome, o: { loginStep?: Partial<ExplorationStep>; accountUrl?: string | null; failedLogin?: boolean }) {
+  function loginRun(rule: ExpectedOutcome, o: { loginStep?: Partial<ExplorationStep>; accountUrl?: string | null; failedLogin?: boolean; criterion?: RunOptions["criterion"] }) {
     const s = [
       step(0, "PS-1", "navigate", { urlBefore: "about:blank", urlAfter: LOGIN }),
       step(1, "PS-2", "checkpoint", { urlBefore: LOGIN, urlAfter: LOGIN }),
@@ -554,7 +591,7 @@ describe("login failed (R15)", () => {
         facts.push(fact({ key: "url", checkpoint: "account" }, o.accountUrl ?? ACCOUNT, cp.id), fact(greeting, "Welcome back, Ada", cp.id));
       }
     }
-    return run(rule, { facts, steps: s, plan: loginPlan, stopReason: "COMPLETED" });
+    return run(rule, { facts, steps: s, plan: loginPlan, stopReason: "COMPLETED", ...(o.criterion ? { criterion: o.criterion } : {}) });
   }
 
   it("login SUCCESS and the page moved on → evaluated", () => {
@@ -565,6 +602,21 @@ describe("login failed (R15)", () => {
     const r = loginRun(afterLogin, { accountUrl: `${LOGIN}?error=invalid` });
     expect(statusOf(r)).toEqual(["BLOCKED", "LOGIN_FAILED"]);
     expect(r.actual).toBe("Login step PS-5 succeeded but the page stayed at https://shop.example.com/login");
+  });
+
+  it("a criterion about a rejected login (wrong password → error): staying on the login page is no LOGIN_FAILED; its facts decide", () => {
+    const rejected = { statement: "After signing in with a wrong password, an error message is displayed.", sourceText: "Signing in with a wrong password should show an error" };
+    const r = loginRun(afterLogin, { accountUrl: `${LOGIN}?error=invalid`, criterion: rejected });
+    expect(r.status).toBe("PASS");
+  });
+
+  it("expectsRejectedLogin: a login word and a rejection word", () => {
+    const c = (statement: string) => ({ statement, sourceText: statement });
+    expect(expectsRejectedLogin(c("Signing in with a wrong password should show an error"))).toBe(true);
+    expect(expectsRejectedLogin(c("A user with invalid credentials cannot log in"))).toBe(true);
+    expect(expectsRejectedLogin(c("Logging in with an unknown email is rejected"))).toBe(true);
+    expect(expectsRejectedLogin(c("After logging in, the account page greets the user"))).toBe(false);
+    expect(expectsRejectedLogin(c("Adding a product shows an error when it is out of stock"))).toBe(false);
   });
 
   it("the next url fact wins over urlAfter (redirected back to the login form)", () => {

@@ -215,6 +215,81 @@ export function locatorFor(page: Page, c: LocatorCandidate): Locator {
   }
 }
 
+/**
+ * Whether a click on the element would land on it (2026-11-06, R2): scrolled into view, its centre inside the viewport
+ * and the topmost element there is it or inside it. A carousel's off-screen clone (clipped by `overflow: hidden`) or an
+ * element under a fixed banner is not. One function, no named inner helpers (tsx's keepNames would break it).
+ */
+const HITTABLE = (el: Element): boolean => {
+  el.scrollIntoView({ block: "center", inline: "nearest" });
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return false;
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) return false;
+  const top = document.elementFromPoint(x, y);
+  return top !== null && (top === el || el.contains(top));
+};
+
+/** The element's positional XPath, as the explorer's selectors are written (`xpath=/html[1]/…`). */
+const XPATH_OF = (el: Element): string => {
+  const parts: string[] = [];
+  for (let n: Element | null = el; n; n = n.parentElement) {
+    let i = 1;
+    for (let p = n.previousElementSibling; p; p = p.previousElementSibling) if (p.tagName === n.tagName) i++;
+    parts.unshift(`${n.tagName.toLowerCase()}[${i}]`);
+  }
+  return `xpath=/${parts.join("/")}`;
+};
+
+/** Whether a click on the selector's element would land on it (HITTABLE). True when it cannot be told. */
+export async function isHittable(page: Page, selector: string): Promise<boolean> {
+  const locator = page.locator(selector).first();
+  return locator.evaluate(HITTABLE, undefined, { timeout: 2_000 }).catch(() => true);
+}
+
+/** At most this many elements per candidate are hit-tested for an alternative. */
+const MAX_ALTERNATIVES = 20;
+
+/**
+ * Another element the recorded element's own non-positional candidates (role and name, test id, label, text) match
+ * that a click would land on (R2): e.g. the visible copy of a product card's "Add to wishlist" button when the explorer
+ * picked a carousel's off-screen clone. Its XPath selector, or null when there is none.
+ */
+export async function hittableAlternative(page: Page, ref: ElementRef): Promise<string | null> {
+  for (const candidate of ref.candidates) {
+    if (candidate.strategy === "xpath" || candidate.strategy === "css") continue;
+    const found = await firstHittable(locatorFor(page, candidate));
+    if (found) return found;
+  }
+  return null;
+}
+
+/** The XPath of the first of a locator's elements (at most MAX_ALTERNATIVES) a click would land on, or null. */
+async function firstHittable(locator: Locator): Promise<string | null> {
+  const n = Math.min(await countOf(locator), MAX_ALTERNATIVES);
+  for (let i = 0; i < n; i++) {
+    const el = locator.nth(i);
+    if (!(await el.evaluate(HITTABLE, undefined, { timeout: 2_000 }).catch(() => false))) continue;
+    const xpath = await el.evaluate(XPATH_OF, undefined, { timeout: 2_000 }).catch(() => null);
+    if (xpath) return xpath;
+  }
+  return null;
+}
+
+/**
+ * The first reachable element with one of these roles whose accessible name contains `name` (case-insensitive), e.g.
+ * a product card's "Add to wishlist" button when the explorer returned the header's "wishlist" link (KI-072). Its
+ * XPath selector, or null when the page has none.
+ */
+export async function reachableNamedControl(page: Page, name: string, roles: readonly string[]): Promise<string | null> {
+  for (const role of roles) {
+    const found = await firstHittable(page.getByRole(role as Parameters<Page["getByRole"]>[0], { name, exact: false }));
+    if (found) return found;
+  }
+  return null;
+}
+
 async function countOf(locator: Locator): Promise<number> {
   try {
     return await locator.count();

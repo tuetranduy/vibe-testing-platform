@@ -133,7 +133,7 @@ describe("@live Stagehand smoke against the demo shop", () => {
           title: "Add a product to the cart",
           criterionIds: ["AC-1"],
           steps: [
-            { id: "PS-1", kind: "navigate", description: "Open the product page", criterionIds: [], destructive: false },
+            { id: "PS-1", kind: "navigate", description: "Open the target URL", criterionIds: [], destructive: false },
             { id: "PS-2", kind: "capture_checkpoint", description: "Capture the cart badge before adding", checkpoint: "before_add", criterionIds: ["AC-1"], destructive: false },
             { id: "PS-3", kind: "click", description: "Click the Add to cart button", criterionIds: ["AC-1"], destructive: false },
             { id: "PS-4", kind: "capture_checkpoint", description: "Capture the cart badge after adding", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false },

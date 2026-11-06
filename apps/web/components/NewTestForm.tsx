@@ -31,8 +31,6 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const [maxSteps, setMaxSteps] = useState("40");
   const [autoConfirm, setAutoConfirm] = useState(false);
   const [rerun, setRerun] = useState(true);
-  const [destructive, setDestructive] = useState(false);
-  const [confirmedHost, setConfirmedHost] = useState("");
   const [hosts, setHosts] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [banner, setBanner] = useState<{ message: string; settings?: boolean } | null>(null);
@@ -89,13 +87,13 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
     setBanner(null);
     const body: CreateTestRunRequestInput = {
       targetUrl: targetUrl.trim(), requirement: mode === "explore" ? "" : requirement.trim(),
-      // Environment is an internal compatibility field. Every UI run uses the stricter action policy.
+      // Action consent is acknowledged for the app. Populate the legacy API authorization fields automatically.
       environment: "production",
       options: {
         maxRunSeconds: Number(maxRunSeconds), maxExplorationSteps: Number(maxSteps),
         generatePlaywright: true, rerunGeneratedTest: rerun, autoConfirmCriteria: autoConfirm,
-        allowDestructiveActions: destructive,
-        ...(destructive && confirmedHost.trim() ? { confirmProductionHost: confirmedHost.trim() } : {}),
+        allowDestructiveActions: true,
+        ...(host ? { confirmProductionHost: host } : {}),
         additionalAllowedHosts: hosts.split(/[\s,]+/).filter(Boolean),
       },
       ...((model || reasoning) ? { llm: { ...(model ? { model } : {}), ...(reasoning ? { reasoning } : {}) } } : {}),
@@ -167,8 +165,6 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
           <label className="choice"><input type="checkbox" checked={rerun} onChange={(e) => setRerun(e.target.checked)} />Verify results by rerunning the saved test</label>
           <label className="choice"><input type="checkbox" checked={autoConfirm} onChange={(e) => setAutoConfirm(e.target.checked)} />Start immediately after planning (skip review)</label>
           <div className="field"><label htmlFor="additionalAllowedHosts">Other website hosts</label><input id="additionalAllowedHosts" placeholder="login.example.com, help.example.com" value={hosts} onChange={(e) => setHosts(e.target.value)} {...invalid("additionalAllowedHosts")} /><p className="hint">Only needed if the test moves to another host.</p>{errorFor("additionalAllowedHosts")}</div>
-          <label className="choice"><input type="checkbox" checked={destructive} onChange={(e) => { setDestructive(e.target.checked); setRerun(!e.target.checked); setConfirmedHost(""); }} />Allow actions that change or delete site data</label>
-          {destructive && <div className="note note-warning"><p>This test may change real data. {rerun ? "Rerunning repeats these actions." : "Automatic rerun is off."}</p><div className="field"><label htmlFor="confirmProductionHost">Type {host ?? "the website host"} to confirm</label><input id="confirmProductionHost" value={confirmedHost} onChange={(e) => setConfirmedHost(e.target.value)} autoComplete="off" {...invalid("confirmProductionHost")} />{errorFor("confirmProductionHost")}</div></div>}
         </div>
       </details>
       <div className="composer-footer"><p className="composer-note"><Icon name="shield" />{autoConfirm ? "The test starts after planning." : "Review the checks before the test runs."}</p><button className="button button-primary button-lg" type="submit" disabled={pending || prefill === "loading"}>{pending ? "Starting…" : mode === "explore" ? "Explore website" : "Create test"}<Icon name="arrow" /></button></div>

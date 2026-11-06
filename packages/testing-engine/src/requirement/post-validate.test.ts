@@ -3,7 +3,7 @@ import type { CompilerOutput as FullCompilerOutput } from "./model-output";
 
 /** The criteria and facts: all postValidate reads (the advisory fields are validated apart, V1.3). */
 type CompilerOutput = Pick<FullCompilerOutput, "criteria" | "facts">;
-import { THRESHOLD_NOT_STATED, numbersInText, postValidate, statedNumbers } from "./post-validate";
+import { TEXT_NOT_STATED, THRESHOLD_NOT_STATED, normalizeText, numbersInText, postValidate, statedNumbers } from "./post-validate";
 
 describe("statedNumbers / numbersInText", () => {
   it("reads grouped digits both as thousands and as decimals", () => {
@@ -139,5 +139,85 @@ describe("postValidate: text checks against a test data value (KI-001)", () => {
     const r = postValidate(keyed("password"), { originalText: text, testData: {}, secretNames: ["password"] });
     expect(r.ok).toBe(false);
     expect(!r.ok && r.issues.join()).toMatch(/criteria\.0\.expectedOutcome\.match\.testDataKey: .*secret/);
+  });
+});
+
+describe("postValidate: wording the requirement never wrote (KI-070)", () => {
+  const textCheck = (text: string, value: string, o: { key?: string; mode?: "equals" | "contains" | "regex"; testData?: Record<string, string> } = {}) => {
+    const key = o.key ?? "emptyMessage";
+    const out: CompilerOutput = {
+      criteria: [
+        {
+          sourceText: text,
+          statement: "When no products have been added, the wishlist page shows its empty-state message.",
+          expectedOutcome: { kind: "text_matches", fact: { key, checkpoint: "wishlist_page" }, match: { mode: o.mode ?? "contains", value, caseSensitive: false } },
+          preconditions: [],
+          ambiguity: null,
+        },
+      ],
+      facts: [{ key, checkpoint: "wishlist_page", description: "The wishlist's empty-state message", valueType: "string" }],
+    };
+    return postValidate(out, { originalText: text, testData: o.testData ?? {} });
+  };
+
+  it("an exact text the model made up becomes a visible check on a boolean fact at the same checkpoint (the FD-05 run)", () => {
+    const r = textCheck("Make sure the wishlist works", "Wishlist is empty");
+    if (!r.ok) throw new Error(r.issues.join());
+    const c = r.draft.criteria[0]!;
+    expect(c.expectedOutcome).toEqual({ kind: "visible", fact: { key: "emptyMessageShown", checkpoint: "wishlist_page" }, expected: true });
+    expect(c.ambiguity?.reason).toBe(`${TEXT_NOT_STATED} (the model expected "Wishlist is empty")`);
+    expect(r.draft.facts).toEqual([
+      { key: "emptyMessageShown", checkpoint: "wishlist_page", description: "Whether this is shown: The wishlist's empty-state message", valueType: "boolean" },
+    ]);
+  });
+
+  it("text the requirement writes is kept, whatever its case, quotes and punctuation", () => {
+    const r = textCheck('When nothing matches, the page says "No results found".', "no results found.");
+    expect(r.ok && r.draft.criteria[0]!.expectedOutcome.kind).toBe("text_matches");
+    const shoe = textCheck("Every result title contains the word shoes", "shoe");
+    expect(shoe.ok && shoe.draft.criteria[0]!.expectedOutcome.kind).toBe("text_matches");
+  });
+
+  it("a test data value's text, a regex and the url fact are left alone", () => {
+    const data = textCheck("The greeting uses the customer's first name", "Ada", { testData: { firstName: "Ada" } });
+    expect(data.ok && data.draft.criteria[0]!.expectedOutcome.kind).toBe("text_matches");
+    const regex = textCheck("The order number is shown", "^SW\\d+$", { mode: "regex" });
+    expect(regex.ok && regex.draft.criteria[0]!.expectedOutcome.kind).toBe("text_matches");
+  });
+
+  it("the new key never collides with a fact the model declared", () => {
+    const text = "Make sure the wishlist works";
+    const r = postValidate(
+      {
+        criteria: [
+          {
+            sourceText: text,
+            statement: "The empty wishlist says so",
+            expectedOutcome: { kind: "text_matches", fact: { key: "msg", checkpoint: "wishlist_page" }, match: { mode: "contains", value: "Your wishlist is empty", caseSensitive: false } },
+            preconditions: [],
+            ambiguity: null,
+          },
+          {
+            sourceText: text,
+            statement: "A message is shown",
+            expectedOutcome: { kind: "visible", fact: { key: "msgShown", checkpoint: "wishlist_page" }, expected: true },
+            preconditions: [],
+            ambiguity: null,
+          },
+        ],
+        facts: [
+          { key: "msg", checkpoint: "wishlist_page", description: "The message", valueType: "string" },
+          { key: "msgShown", checkpoint: "wishlist_page", description: "Whether a message is shown", valueType: "boolean" },
+        ],
+      },
+      { originalText: text, testData: {} },
+    );
+    if (!r.ok) throw new Error(r.issues.join());
+    expect(r.draft.criteria[0]!.expectedOutcome).toMatchObject({ kind: "visible", fact: { key: "msgShown2" } });
+    expect(r.draft.facts.map((f) => f.key)).toEqual(["msgShown", "msgShown2"]);
+  });
+
+  it("normalizeText", () => {
+    expect(normalizeText("  “Wishlist   is EMPTY.” ")).toBe("wishlist is empty");
   });
 });

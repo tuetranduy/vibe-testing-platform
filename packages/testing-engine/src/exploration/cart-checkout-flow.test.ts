@@ -16,6 +16,7 @@ import { runExploration } from "./executor";
  *   the popup without quoting its text (KI-059);
  * - the drawer's Checkout link first loads the route's script, then fetches, then changes the URL (KI-058).
  * The model is slow (each call outlives the toast) and reads the page as it was when the call began.
+ * run_0mw4iqx0g3b597375de25c6e0 used numeric_compare for the same empty-cart increase, so both forms must pass.
  */
 
 const TARGET = "http://frontends.test/";
@@ -90,7 +91,11 @@ beforeAll(async () => { browser = await chromium.launch(); page = await browser.
 afterAll(async () => { await browser?.close(); });
 
 describe("frontends-demo cart → checkout (KI-058, KI-059, KI-060)", () => {
-  it("passes every criterion from DOM evidence and compiles them all", async () => {
+  it.each(["numeric_delta", "numeric_compare"] as const)("passes every criterion from DOM evidence and compiles them all (%s)", async (countRule) => {
+    const runCriteria = criteria.map((c) => c.id === "AC-3" && countRule === "numeric_compare"
+      ? { ...c, expectedOutcome: { kind: "numeric_compare" as const, left: outcome("cartQuantity", "after_add"), operator: "gt" as const, right: outcome("cartQuantity", "before_add") } }
+      : c);
+    const runRequirement = { ...requirement, criteria: runCriteria };
     await page.route(`${TARGET}**`, async (route) => {
       const url = new URL(route.request().url());
       if (url.pathname === "/add" || url.pathname === "/context") {
@@ -152,20 +157,22 @@ describe("frontends-demo cart → checkout (KI-058, KI-059, KI-060)", () => {
       publish: async () => {}, addCleanup: () => {}, boundary: async () => {}, budgetSignal: () => signal, now: () => new Date(), llm: null,
     };
     let artifacts = 0;
-    const out = await runExploration(ctx, { plan, requirement, session, budget: signal }, { pollIntervalMs: 50, store: {
+    const out = await runExploration(ctx, { plan, requirement: runRequirement, session, budget: signal }, { pollIntervalMs: 50, store: {
       saveFact: async () => {}, saveStep: async () => {}, saveScreenshot: async () => ({ artifactId: `art_${++artifacts}` }),
     } });
 
     expect(out.stopReason).toBe("COMPLETED");
-    const provisional = criteria.map((criterion) => verifyCriterion({ criterion, facts: out.facts, steps: out.steps, blocked: [], stopReason: out.stopReason, plan }));
+    const provisional = runCriteria.map((criterion) => verifyCriterion({ criterion, facts: out.facts, steps: out.steps, blocked: [], stopReason: out.stopReason, plan }));
     const results = provisional.map((p) => reconcile(p, "UNAVAILABLE", out.facts, { evidenceArtifactIds: [], relatedStepIds: [], aiNote: null }));
     expect(results.map((r) => [r.criterionId, r.status, r.verdictSource, r.actual])).toEqual([
       ["AC-1", "PASS", "EXPLORATION_ONLY", "Popup visible after add is visible"],
       ["AC-2", "PASS", "EXPLORATION_ONLY", 'Popup text after add is "ADELAIDE 2 has been added to cart."'],
-      ["AC-3", "PASS", "EXPLORATION_ONLY", "Cart quantity after add (1) - before add (0, no number shown) = +1"],
+      ["AC-3", "PASS", "EXPLORATION_ONLY", countRule === "numeric_delta"
+        ? "Cart quantity after add (1) - before add (0, no number shown) = +1"
+        : "Cart quantity after add (1) > before add (0, no number shown)"],
       ["AC-4", "PASS", "EXPLORATION_ONLY", "Checkout page visible checkout page is visible"],
     ]);
-    const compiled = compilePlaywrightTest({ requirement, plan, provisional, steps: out.steps, facts: out.facts, targetUrl: TARGET, secretNames: [], testData: {} });
+    const compiled = compilePlaywrightTest({ requirement: runRequirement, plan, provisional, steps: out.steps, facts: out.facts, targetUrl: TARGET, secretNames: [], testData: {} });
     expect(compiled.compiledCriteria).toEqual(ids);
   }, 60_000);
 });

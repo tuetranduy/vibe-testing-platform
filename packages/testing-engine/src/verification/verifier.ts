@@ -43,7 +43,8 @@ import { describeExpected, evaluateRule, factLabel } from "./rules";
  *                                                                   (TARGET_BLOCKED_BY_POLICY when it has none);
  *     - stopped early (STEP_LIMIT_REACHED / EXPLORATION_BUDGET_EXHAUSTED) → INCONCLUSIVE, that stop reason;
  *     - otherwise, incl. COMPLETED after a trailing FAILED step (R25) → INCONCLUSIVE / FACT_NOT_OBSERVED.
- *  6. Evaluate the rule                                           → PASS / FAIL. In a numeric_delta, a counter
+ *  6. Evaluate the rule                                           → PASS / FAIL. In a numeric_delta or a comparison
+ *                                                                   of explicitly named counters, a counter
  *                                                                   read from the page showing no number counts as 0
  *                                                                   (KI-060). An invalid regex →
  *                                                                   INCONCLUSIVE / AMBIGUOUS_CRITERION; a value of the
@@ -97,7 +98,8 @@ export function verifyCriterion(input: VerifyCriterionInput): ProvisionalResult 
 
   // 3. Login ran but did not get past the login page.
   const steps = [...input.steps].sort((a, b) => a.index - b.index);
-  const login = failedLogin(refs, plannedSteps, steps, input.facts);
+  // A criterion about a rejected login (a wrong password shows an error) expects the page to stay: not a failure here.
+  const login = expectsRejectedLogin(criterion) ? null : failedLogin(refs, plannedSteps, steps, input.facts);
   if (login) return result("BLOCKED", "LOGIN_FAILED", `Login step ${login.stepId} succeeded but the page stayed at ${login.page}`);
 
   // 4. Only a model could judge this one: from what the exploration saw.
@@ -172,6 +174,18 @@ function pageOf(url: string): string {
  * plan: its golden SUCCESS step, then the first `url` fact captured after it (else the step's own
  * urlAfter). Still on the login step's page (origin + path) → login failed.
  */
+const LOGIN_WORDS = /\b(log\s*-?\s*in|logs\s+in|sign\s*-?\s*in|signs\s+in|signing\s+in|logging\s+in|password|credentials?)\b/i;
+const REJECTED_WORDS = /\b(wrong|invalid|incorrect|bad|unknown|non-?existent|mismatch(?:ed)?|rejected|denied|refused|not\s+(?:be\s+)?(?:able|allowed|accepted)|cannot|can't|fails?|failed|error)\b/i;
+
+/**
+ * Whether the criterion checks that a login is rejected (e.g. "signing in with a wrong password shows an error"):
+ * there the page staying at the login form is the expected outcome, so rule 3 (LOGIN_FAILED) does not apply and
+ * the criterion's own facts decide it.
+ */
+export function expectsRejectedLogin(criterion: Pick<AcceptanceCriterion, "statement" | "sourceText">): boolean {
+  return [criterion.statement, criterion.sourceText].some((t) => LOGIN_WORDS.test(t) && REJECTED_WORDS.test(t));
+}
+
 function failedLogin(
   refs: readonly FactRef[],
   plannedSteps: readonly PlannedStep[],

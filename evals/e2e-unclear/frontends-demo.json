@@ -1,0 +1,18 @@
+{
+  "targetUrl": "https://frontends-demo.vercel.app/",
+  "note": "WS0 corpus (docs/superpowers/plans/2026-11-06-autonomous-unclear-requirements.md): requirements of decreasing clarity against the Shopware Frontends demo store. All are non-destructive except FD-12 (sign-up creates an account).",
+  "cases": [
+    { "id": "FD-01", "clarity": "specific", "requirement": "Open the Summer BBQ > Grills page, add \"Fred - 3 Burner Gas Grill\" to the cart, then open the cart and verify it lists Fred - 3 Burner Gas Grill." },
+    { "id": "FD-02", "clarity": "specific", "requirement": "Search for \"pepper\" and verify every product in the search results has pepper in its name." },
+    { "id": "FD-03", "clarity": "feature", "requirement": "Test the search" },
+    { "id": "FD-04", "clarity": "feature", "requirement": "Check that adding a product to the cart works" },
+    { "id": "FD-05", "clarity": "feature", "requirement": "Make sure the wishlist works" },
+    { "id": "FD-06", "clarity": "feature", "requirement": "Signing in with a wrong password should show an error" },
+    { "id": "FD-07", "clarity": "vague", "requirement": "The product page should look good and show the price" },
+    { "id": "FD-08", "clarity": "vague", "requirement": "Choosing a different variant on a product works properly" },
+    { "id": "FD-09", "clarity": "misnamed", "requirement": "find a grill and put it in the basket, basket should have it" },
+    { "id": "FD-10", "clarity": "misnamed", "requirement": "serch for salt and chek the results r relevant" },
+    { "id": "FD-11", "clarity": "site_wide", "requirement": "Test this website" },
+    { "id": "FD-12", "clarity": "feature", "requirement": "Make sure a new customer can sign up" }
+  ]
+}

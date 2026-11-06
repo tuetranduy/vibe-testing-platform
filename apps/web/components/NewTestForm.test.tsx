@@ -1,3 +1,4 @@
+import { CreateTestRunRequestSchema, destructiveActionsAllowed } from "@platform/contracts";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -38,10 +39,10 @@ describe("simple test setup", () => {
     await waitFor(() => expect(getLlmSettings).toHaveBeenCalled());
     expect(fetch).not.toHaveBeenCalled();
   });
-  it("creates a test using the stricter internal action policy and no manual input fields", async () => {
+  it("creates a test with destructive actions already authorized and no manual input fields", async () => {
     const fetch = api(); render(<NewTestForm />);
     const user = await fill(); await user.click(create());
-    expect(payload(fetch)).toMatchObject({ targetUrl: "https://shop.example.com", requirement: "Search for a product and verify the results.", environment: "production", options: { allowDestructiveActions: false, maxRunSeconds: 300, maxExplorationSteps: 40 } });
+    expect(payload(fetch)).toMatchObject({ targetUrl: "https://shop.example.com", requirement: "Search for a product and verify the results.", environment: "production", options: { allowDestructiveActions: true, confirmProductionHost: "shop.example.com", maxRunSeconds: 300, maxExplorationSteps: 40 } });
     for (const field of ["testData", "secrets", "testDataSetId", "credentialProfileId"]) expect(payload(fetch)).not.toHaveProperty(field);
     expect(push).toHaveBeenCalledWith("/runs/run_new");
   });
@@ -69,6 +70,7 @@ describe("simple test setup", () => {
     await user.click(screen.getByRole("button", { name: "Find test ideas" }));
     await user.click(screen.getByRole("button", { name: "Explore website" }));
     expect(payload(fetch).requirement).toBe("");
+    expect(destructiveActionsAllowed(CreateTestRunRequestSchema.parse(payload(fetch)))).toBe(true);
   });
   it("fills and focuses instructions from an example", async () => {
     api(); render(<NewTestForm />);
@@ -95,15 +97,18 @@ describe("simple test setup", () => {
     expect(screen.getByLabelText("Step limit")).toHaveFocus();
     expect(fetch).not.toHaveBeenCalled();
   });
-  it("validates host confirmation when actions change site data", async () => {
+  it("authorizes the current production host without permission or confirmation controls", async () => {
     const fetch = api(); render(<NewTestForm />);
     const user = await fill();
     await user.click(screen.getByText(/Run settings/));
-    await user.click(screen.getByLabelText("Allow actions that change or delete site data"));
-    await user.click(create()); expect(fetch).not.toHaveBeenCalled();
-    await user.type(screen.getByLabelText(/Type shop.example.com to confirm/), "shop.example.com");
+    expect(screen.queryByLabelText("Allow actions that change or delete site data")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Type .* to confirm/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Which website/), { target: { value: "https://STORE.example.com:8443/cart" } });
     await user.click(create());
-    expect(payload(fetch).options).toMatchObject({ allowDestructiveActions: true, confirmProductionHost: "shop.example.com", rerunGeneratedTest: false });
+    const request = CreateTestRunRequestSchema.parse(payload(fetch));
+    expect(request.options).toMatchObject({ allowDestructiveActions: true, confirmProductionHost: "store.example.com:8443", rerunGeneratedTest: true });
+    expect(destructiveActionsAllowed(request)).toBe(true);
+    expect(push).toHaveBeenCalledWith("/runs/run_new");
   });
   it("lets the user override a model and resets thinking when the model changes", async () => {
     const fetch = api(); render(<NewTestForm />); const user = await fill();

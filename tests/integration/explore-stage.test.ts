@@ -196,7 +196,7 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
     async () => {
       const { run, ctx, explore, events } = await setup({ targetPath: "/products/1", record: true });
       const plan = planOf(run.id, [
-        planned(1, "navigate", "Open the iPhone 17 Pro product page"),
+        planned(1, "navigate", "Open the target URL"),
         planned(2, "click", "Click the Add to cart button", { criterionIds: ["AC-1"] }),
         planned(3, "navigate", "Open /cart"),
       ]);
@@ -228,7 +228,7 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
       const { run, ctx, explore } = await setup({ targetPath: "/newsletter" });
       const before = shop.server.demoShop.subscriptions;
       const plan = planOf(run.id, [
-        planned(1, "navigate", "Open the newsletter page"),
+        planned(1, "navigate", "Open the target URL"),
         planned(2, "click", "Click the Subscribe button", { criterionIds: ["AC-1"] }),
         planned(3, "navigate", "Open /products"),
       ]);
@@ -246,7 +246,7 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
     async () => {
       const { run, ctx, events, transport, records, explore, target } = await setup({ targetPath: "/products/1" });
       const plan = planOf(run.id, [
-        planned(1, "navigate", "Open the iPhone 17 Pro product page"),
+        planned(1, "navigate", "Open the target URL"),
         planned(2, "capture_checkpoint", "Capture the cart badge before adding", { checkpoint: "before_add" }),
         planned(3, "click", "Click the Add to cart button", { criterionIds: ["AC-1"] }),
         planned(4, "capture_checkpoint", "Capture the cart badge after adding", { checkpoint: "after_add" }),
@@ -325,7 +325,7 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
         secrets: { password: VALID_PASSWORD },
       });
       const plan = planOf(run.id, [
-        planned(1, "navigate", "Open the login page"),
+        planned(1, "navigate", "Open the target URL"),
         planned(2, "fill", "Fill the email field", { inputRef: { source: "testData", key: "email" } }),
         planned(3, "fill", "Fill the password field", { inputRef: { source: "secret", key: "password" } }),
         planned(4, "login", "Click the Log in button"),

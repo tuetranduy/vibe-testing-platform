@@ -18,13 +18,11 @@ describe("simple reruns", () => {
     expect(screen.getByRole("link", { name: "Create a fresh test" })).toHaveAttribute("href", "/runs/new?from=run_1");
     expect(screen.queryByLabelText("password")).not.toBeInTheDocument(); expect(fetch).not.toHaveBeenCalled();
   });
-  it("requires confirmation for actions that change site data", async () => {
+  it("replays destructive tests in one click using the existing acknowledgment", async () => {
     const fetch = vi.fn(async () => response()); vi.stubGlobal("fetch", fetch);
     render(<RerunPanel runId="run_1" secretNames={[]} compiledCount={2} destructive navigate={vi.fn()} />);
     await userEvent.click(screen.getByRole("button", { name: "Rerun saved test" }));
-    await userEvent.click(screen.getByRole("button", { name: "Start rerun" })); expect(fetch).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("checkbox"));
-    await userEvent.click(screen.getByRole("button", { name: "Start rerun" }));
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ body: '{"confirmDestructiveActions":true}' }));
   });
 });

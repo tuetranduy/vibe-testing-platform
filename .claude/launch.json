@@ -18,6 +18,18 @@
       "runtimeExecutable": "sh",
       "runtimeArgs": ["-c", "set -a; . ./.env; set +a; cd apps/web && API_URL=http://localhost:3011 WEB_ALLOWED_HOSTS=localhost:3003,127.0.0.1:3003 PATH=$HOME/.config/nvm/versions/node/v24.15.0/bin:$PATH ./node_modules/.bin/next dev -p 3003"],
       "port": 3003
+    },
+    {
+      "name": "api-deepseek",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "set -a; . ./.env; set +a; export PATH=$HOME/.config/nvm/versions/node/v24.15.0/bin:$PATH; cd apps/api && LLM_PROVIDER=deepseek LLM_MODEL=deepseek-flash API_PORT=3011 BOOTSTRAP_ADMIN_EMAIL=admin@example.com BOOTSTRAP_ADMIN_PASSWORD=admin-password-change-me ../../node_modules/.bin/tsx src/main.ts"],
+      "port": 3011
+    },
+    {
+      "name": "worker-deepseek",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "set -a; . ./.env; set +a; export PATH=$HOME/.config/nvm/versions/node/v24.15.0/bin:$PATH; cd apps/worker && LLM_PROVIDER=deepseek LLM_MODEL=deepseek-flash WORKER_METRICS_PORT=9465 BOOTSTRAP_ADMIN_EMAIL=admin@example.com BOOTSTRAP_ADMIN_PASSWORD=admin-password-change-me ../../node_modules/.bin/tsx src/main.ts"],
+      "port": 9465
     }
   ]
 }

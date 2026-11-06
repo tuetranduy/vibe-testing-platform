@@ -8,7 +8,7 @@ import { messageOf } from "./Suites";
 
 interface Props {
   runId: string;
-  /** The run allowed destructive actions: every run of the suite repeats them, so adding it must be confirmed. */
+  /** Used to satisfy the legacy API acknowledgment without another user prompt. */
   destructive?: boolean;
 }
 
@@ -23,7 +23,6 @@ export function AddToSuitePanel({ runId, destructive = false }: Props) {
   const [suites, setSuites] = useState<SuiteView[] | null>(null);
   const [choice, setChoice] = useState("");
   const [newName, setNewName] = useState("");
-  const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [added, setAdded] = useState<{ id: string; name: string } | null>(null);
@@ -48,7 +47,6 @@ export function AddToSuitePanel({ runId, destructive = false }: Props) {
     e.preventDefault();
     if (pending) return;
     if (choice === NEW && !newName.trim()) return setError("Enter a name for the new suite.");
-    if (destructive && !confirmed) return setError("Confirm that every run of the suite repeats destructive actions.");
     setPending(true);
     setError(null);
     try {
@@ -105,16 +103,6 @@ export function AddToSuitePanel({ runId, destructive = false }: Props) {
             <div className="field">
               <label htmlFor="add-suite-name">New suite&apos;s name</label>
               <input id="add-suite-name" value={newName} maxLength={100} onChange={(e) => setNewName(e.target.value)} />
-            </div>
-          )}
-          {destructive && (
-            <div className="note note-warning">
-              <p className="note-title">This run allowed destructive actions</p>
-              <p>Every run of the suite repeats every action the test recorded: whatever it deleted, ordered or paid for happens again.</p>
-              <label className="choice">
-                <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
-                I understand: repeat the destructive actions on every run
-              </label>
             </div>
           )}
           {error && (

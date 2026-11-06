@@ -89,6 +89,7 @@ export async function compileRequirement(llm: RequirementLlm, input: CompileRequ
     testData: input.testData,
     secretNames: input.secretNames,
     siteRead: pages.length > 0,
+    pages,
     seed: input.runId,
     redact: input.redact,
   });

@@ -4,15 +4,19 @@
  */
 import {
   NormalizedRequirementSchema,
+  URL_FACT_KEY,
   factRefsOf,
   type AcceptanceCriterion,
   type ExpectedOutcome,
+  type FactRequest,
   type TestDataValue,
 } from "@platform/contracts";
 import type { RequirementDraft } from "../orchestrator/stages";
 import type { CompilerOutput } from "./model-output";
 
 export const THRESHOLD_NOT_STATED = "Threshold not stated in requirement";
+/** The ambiguity reason of a text check rewritten to `visible` (KI-070). */
+export const TEXT_NOT_STATED = "Exact text not stated in requirement: checked that it is shown";
 
 export type PostValidation = { ok: true; draft: RequirementDraft } | { ok: false; issues: string[] };
 
@@ -33,7 +37,9 @@ export function postValidate(
     criteria: output.criteria.map((c, i) => ({ ...c, id: `AC-${i + 1}`, critical: true })),
     facts: output.facts,
   };
-  const draft = withTestDataPreconditions(replaceUnstatedThresholds(assembled, statedNumbers(source.originalText, source.testData)));
+  const draft = withTestDataPreconditions(
+    replaceUnstatedTexts(replaceUnstatedThresholds(assembled, statedNumbers(source.originalText, source.testData)), source),
+  );
   const secretIssues = draft.criteria.flatMap((c, i) => {
     const key = c.expectedOutcome.kind === "text_matches" ? c.expectedOutcome.match.testDataKey : undefined;
     return key !== undefined && (source.secretNames ?? []).includes(key)
@@ -85,6 +91,64 @@ export function replaceUnstatedThresholds(draft: RequirementDraft, stated: Set<n
     const k = `${f.key}@${f.checkpoint}`;
     return !orphanCandidates.has(k) || stillUsed.has(k);
   });
+  return { ...draft, criteria, facts };
+}
+
+/** Lower case, punctuation and symbols as spaces, whitespace collapsed: "“Wishlist is empty.”" → "wishlist is empty". */
+export function normalizeText(text: string): string {
+  return text.normalize("NFKC").toLowerCase().replace(/[\p{P}\p{S}]+/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * KI-070: a text check (`text_matches` equals / contains) whose literal value the requirement does not write (nor a
+ * test data value) is wording the model made up, e.g. "Wishlist is empty" for "Make sure the wishlist works", where
+ * the site says "No products were added to the Wishlist." Like an invented threshold, it is rewritten, never retried:
+ * the outcome becomes `visible` on a boolean fact read at the same checkpoint (`<key>Shown`, "Whether … is shown"),
+ * so the check is that the element is there, not what it says, and the criterion is flagged with TEXT_NOT_STATED.
+ * A regex is left alone (a format, not wording), and so are a check against a test data key and one on the reserved
+ * `url` fact (the route, not the page's wording). Facts only the
+ * rewritten outcomes used are dropped.
+ */
+export function replaceUnstatedTexts(
+  draft: RequirementDraft,
+  source: { originalText: string; testData: Record<string, TestDataValue> },
+): RequirementDraft {
+  const stated = [source.originalText, ...Object.values(source.testData).filter((v): v is string => typeof v === "string")].map(normalizeText);
+  const byRef = new Map(draft.facts.map((f) => [`${f.key}@${f.checkpoint}`, f]));
+  const added: FactRequest[] = [];
+  const orphanCandidates = new Set<string>();
+  const criteria = draft.criteria.map((c): AcceptanceCriterion => {
+    const outcome = c.expectedOutcome;
+    if (outcome.kind !== "text_matches" || outcome.match.mode === "regex" || outcome.match.value === undefined) return c;
+    if (outcome.fact.key === URL_FACT_KEY) return c; // an address check is about the route, not the page's wording
+    const value = normalizeText(outcome.match.value);
+    if (value === "" || stated.some((t) => t.includes(value))) return c;
+    const { key, checkpoint } = outcome.fact;
+    // A key of its own at the checkpoint (never one the model declared); two rewrites of one fact share it.
+    const base = `${key.slice(0, 58)}Shown`;
+    let shown = base;
+    for (let n = 2; byRef.has(`${shown}@${checkpoint}`); n++) shown = `${base}${n}`;
+    if (!added.some((f) => f.key === shown && f.checkpoint === checkpoint)) {
+      const what = byRef.get(`${key}@${checkpoint}`)?.description ?? c.statement;
+      added.push({ key: shown, checkpoint, description: `Whether this is shown: ${what}`.slice(0, 500), valueType: "boolean" });
+    }
+    orphanCandidates.add(`${key}@${checkpoint}`);
+    const suggestions = [...new Set([c.statement.slice(0, 300), ...(c.ambiguity?.suggestions ?? [])])].slice(0, 3);
+    return {
+      ...c,
+      expectedOutcome: { kind: "visible", fact: { key: shown, checkpoint }, expected: true },
+      ambiguity: { reason: `${TEXT_NOT_STATED} (the model expected "${outcome.match.value.slice(0, 200)}")`.slice(0, 500), suggestions },
+    };
+  });
+  if (added.length === 0) return draft;
+  const stillUsed = new Set(criteria.flatMap((c) => factRefsOf(c.expectedOutcome).map(({ ref }) => `${ref.key}@${ref.checkpoint}`)));
+  const facts = [
+    ...draft.facts.filter((f) => {
+      const k = `${f.key}@${f.checkpoint}`;
+      return !orphanCandidates.has(k) || stillUsed.has(k);
+    }),
+    ...added,
+  ];
   return { ...draft, criteria, facts };
 }
 

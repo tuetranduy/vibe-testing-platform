@@ -39,6 +39,8 @@ import { z } from "zod";
 import type { StageContext } from "../orchestrator/stages";
 import { actionPolicyFor, isDestructiveStep } from "../shared/action-policy";
 import { captureFact, factFromReadings, modeForValueType, urlFact, type FactCaptureInput, type FactReadMode } from "./fact-reader";
+import { isAllowedPageHost } from "../survey/links";
+import { factValuesEqual } from "../shared/fact-values";
 import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
 import { INVENTORY_SCRIPT, parseRawInventory, toPageInventory, type PageInventory } from "../survey/inventory";
 import { createInputGenerator, type FieldFacts, type InputGenerator } from "./input-generator";
@@ -50,6 +52,9 @@ import {
   elementAction,
   fieldValue,
   fillElement,
+  hittableAlternative,
+  isHittable,
+  reachableNamedControl,
   recordElement,
   requiredEmptyFields,
   selectElementOption,
@@ -65,8 +70,9 @@ import { captureEarlyNotificationFact, notificationTexts } from "./early-facts";
  * Planned step kind → what runs (and what is recorded):
  *
  * - (start)      The first action navigates to `request.targetUrl` (`session.navigate`, kind
- *                `navigate`). If the first planned step is a `navigate` with no URL, or with the
- *                target URL, this navigation *is* that step; otherwise it is recorded with
+ *                `navigate`). If the first planned step explicitly opens the target URL or generically
+ *                opens the site, this navigation *is* that step; a named page must still be visited.
+ *                Otherwise the initial navigation is recorded with
  *                `plannedStepId: null` (still on the golden path: the compiler opens the target).
  * - navigate     A URL in the description (absolute `http(s)://…`, or a path `/…` resolved against the
  *                target) → `session.navigate(url)` (kind `navigate`, instruction `Navigate to <url>`).
@@ -103,8 +109,9 @@ import { captureEarlyNotificationFact, notificationTexts } from "./early-facts";
  *                a boolean is read as `visible` only when a `visible` outcome references that
  *                (key, checkpoint), else it has no DOM read (Ruling R24). The reserved `url` fact
  *                comes first. A located element with nothing to read (no number, empty text) gets one more
- *                lookup for the element that shows the value itself. A value the model read as null where its located element shows one is
- *                extracted once more, alone (the DOM reading must still equal the answer). Then a
+ *                lookup for the element that shows the value itself. A value the model read differently from its located
+ *                element, where that element shows one (null, or read before the page finished loading, KI-071), is
+ *                extracted once more, alone, once the network is quiet (the DOM reading must still equal the answer). Then a
  *                screenshot artifact. Recorded: `extract`, `observe`s, and the
  *                `checkpoint` step the facts point at (`stepId`, `artifactIds`).
  * - wait_for     Bounded poll: up to 3 `observe`s, `pollIntervalMs` apart, within the budget. An element that
@@ -135,6 +142,13 @@ import { captureEarlyNotificationFact, notificationTexts } from "./early-facts";
  * lookup is written only once the planned step that used it succeeded, so a failed, blocked or retried
  * attempt never populates the cache. A failing cache is a miss.
  */
+
+/** A number fact that counts listed items: "Number of products listed", "how many search results", "count of items". */
+const ITEM_COUNT = /\b(?:number|count|how many|total)\b[^.]{0,60}\b(?:products?|results?|items?|entries|rows|cards|articles|listings?)\b/i;
+
+/** Whether a DOM reading shows something: not absent, null, empty text or an empty list. */
+const shows = (value: FactValue | undefined): boolean =>
+  value !== undefined && value !== null && value !== "" && !(Array.isArray(value) && value.length === 0);
 
 /** The default share of exploration cache hits looked up again (KI-032). */
 const CACHE_RECHECK_RATE = 0.1;
@@ -171,6 +185,12 @@ export interface RecorderPort {
   requiredEmptyFields?(page: Page, submitSelector: string, typedSelectors: readonly string[]): Promise<{ touched: boolean; fields: RequiredField[] }>;
   /** Checks a checkbox or radio (checkElement, KI-062). */
   check?(page: Page, selector: string): Promise<void>;
+  /** Whether a click would land on the element (isHittable, R2). Absent: every element is taken as reachable. */
+  hittable?(page: Page, selector: string): Promise<boolean>;
+  /** A reachable element the ref's role / test id / label / text candidates match (hittableAlternative, R2). */
+  hittableAlternative?(page: Page, ref: ElementRef): Promise<string | null>;
+  /** The first reachable element of these roles whose accessible name contains the name (reachableNamedControl, KI-072). */
+  namedControl?(page: Page, name: string, roles: readonly string[]): Promise<string | null>;
 }
 
 export const playwrightRecorder: RecorderPort = {
@@ -189,6 +209,9 @@ export const playwrightRecorder: RecorderPort = {
   value: (page, selector) => fieldValue(page, selector),
   requiredEmptyFields: (page, submit, typed) => requiredEmptyFields(page, submit, typed),
   check: (page, selector) => checkElement(page, selector),
+  hittable: (page, selector) => isHittable(page, selector),
+  hittableAlternative: (page, ref) => hittableAlternative(page, ref),
+  namedControl: (page, name, roles) => reachableNamedControl(page, name, roles),
 };
 
 export interface ExplorationInput {
@@ -286,6 +309,8 @@ const VISIBLE_TEXT_SCRIPT = String.raw`(() => String((document.body && document.
 const SAFE_OTHER_METHODS = new Set(["click", "doubleClick", "hover", "scrollIntoView"]);
 /** Term matching regardless of what the run allows: what the step and the element are, not what may run. */
 const DENY_DESTRUCTIVE: ActionPolicy = { allowDestructive: false };
+/** Roles of a field a value is typed into: a click on one submits nothing, Enter in it may (R1). */
+const TEXT_FIELD_ROLES = new Set(["textbox", "searchbox", "combobox"]);
 
 const OUTCOME_LABEL: Record<ExplorationStep["outcome"], string> = {
   SUCCESS: "succeeded",
@@ -319,6 +344,7 @@ interface StepDraft {
   generatedValue?: string;
   /** How a fill the executor added itself is replayed (KI-062). */
   fillMethod?: ExplorationStep["fillMethod"];
+  actMethod?: ExplorationStep["actMethod"];
   /** A `judge` step's judgment (2026-10-07). */
   judgment?: CriterionJudgment;
 }
@@ -364,6 +390,18 @@ export function urlInDescription(description: string, targetUrl: string): string
   }
 }
 
+/** Opening the target cannot also satisfy a request to visit a different, named page. */
+function opensTargetPage(description: string, targetUrl: string): boolean {
+  const url = urlInDescription(description, targetUrl);
+  if (url !== null) return sameUrl(url, targetUrl);
+  const text = description.replace(/\s+/g, " ").trim();
+  if (/^(?:open|navigate(?: to)?|go to|visit|load)(?: (?:the )?(?:(?:target|initial|starting) )?(?:url|page|site|website|shop|store))?[.!]?$/i.test(text)) return true;
+  // A home-page instruction is only satisfied by opening a root URL, not an arbitrary deep link.
+  const target = new URL(targetUrl);
+  return target.pathname === "/" && target.search === "" && target.hash === ""
+    && /^(?:open|navigate to|go to|visit|load) (?:the )?(?:home ?page|landing page)[.!]?$/i.test(text);
+}
+
 /** A field that repeats another one ("Repeat password", "Confirm email"): it gets the value typed into that one (KI-062). */
 const CONFIRM_FIELD = /\b(confirm|confirmation|repeat|re-?enter|retype|verify|again)\b/i;
 
@@ -385,6 +423,57 @@ const sameUrl = (a: string, b: string): boolean => {
   }
 };
 
+/** Lower case, punctuation as spaces, whitespace collapsed: for comparing a control's name with a step's. */
+const normalizeName = (text: string): string => text.normalize("NFKC").toLowerCase().replace(/[\p{P}\p{S}]+/gu, " ").replace(/\s+/g, " ").trim();
+
+/** The roles a control word names; the words that name no one role (icon, menu, option, control) mean a button or a link. */
+const CONTROL_ROLES: Record<string, readonly string[]> = {
+  button: ["button"],
+  link: ["link"],
+  tab: ["tab"],
+  checkbox: ["checkbox"],
+  toggle: ["switch", "button", "checkbox"],
+};
+const ANY_CONTROL: readonly string[] = ["button", "link"];
+/** What a link or button is for, after its label: "the Galaxy S27 product link" names "Galaxy S27". */
+const GENERIC_NOUNS = new Set(["product", "item", "page", "card", "entry", "row", "tile", "category", "section", "list", "option"]);
+/** Words before a control word that are not its name ("Click the button", "Click this link", "the first button"). */
+const NOT_A_NAME = /^(?:the|a|an|this|that|its|their|first|second|third|last|next|previous|same|other|submit|primary|main)$/i;
+
+/**
+ * The control a click step names (KI-072), with the roles it can have: a quoted name, with the control word after it
+ * when there is one ("Click 'Add to cart'", "Click the 'Grills' link"), else an unquoted name before a control word
+ * ("Click the Add to wishlist button for the product"). Null when the step names no control: "Open the cart",
+ * "Submit the login form".
+ */
+export function namedControl(description: string): { name: string; roles: readonly string[] } | null {
+  const roleAfter = (rest: string) => {
+    const word = /^\s*(\p{L}+)/u.exec(rest)?.[1]?.toLowerCase();
+    return word && CONTROL_WORDS.has(word) ? (CONTROL_ROLES[word] ?? ANY_CONTROL) : ANY_CONTROL;
+  };
+  const quoted = /(?:^|[\s(])['"‘“]([^'"‘’“”]{2,80})['"’”]/u.exec(description);
+  if (quoted) return { name: quoted[1]!.trim(), roles: roleAfter(description.slice(quoted.index + quoted[0].length)) };
+  const plain = /\b(?:click|press|tap|hit|select|choose|use)\s+(?:on\s+)?(?:the\s+|a\s+|an\s+)?((?:[\p{L}\p{N}&+-]+\s+){0,5}?[\p{L}\p{N}&+-]+)\s+(button|link|tab|icon|checkbox|toggle)\b/iu.exec(description);
+  if (!plain) return null;
+  // Unquoted, only a label as the page writes it (capitalized, or a number): "the red button" names no control.
+  const words = plain[1]!.trim().split(/\s+/);
+  while (words.length > 1 && GENERIC_NOUNS.has(words.at(-1)!.toLowerCase())) words.pop();
+  const name = words.join(" ");
+  if (NOT_A_NAME.test(name) || !/^[\p{Lu}\p{N}]/u.test(name)) return null;
+  const word = plain[2]!.toLowerCase();
+  return { name, roles: CONTROL_ROLES[word] ?? ANY_CONTROL };
+}
+
+/** The names a step's description quotes: 'Grills', "New User", ‘Sign in’ (R3). */
+export function quotedNames(description: string): string[] {
+  const names: string[] = [];
+  for (const m of description.matchAll(/(?:^|[\s(])['"‘“]([^'"‘’“”]{1,80})['"’”]/g)) {
+    const name = m[1]!.trim();
+    if (name !== "") names.push(name);
+  }
+  return names;
+}
+
 /** Words that make the name before them the control a step clicks ("the New User button"). */
 const CONTROL_WORDS = new Set(["button", "link", "tab", "icon", "menu", "option", "checkbox", "toggle", "control"]);
 
@@ -398,6 +487,9 @@ function namesControl(description: string, name: string | null): boolean {
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
   const phrase = norm(name ?? "");
   if (phrase.length < 2) return false;
+  // The step names a longer control ("the Add to wishlist button"): a "wishlist" link inside that name is not it (KI-072).
+  const named = namedControl(description);
+  if (named && normalizeName(named.name) !== normalizeName(phrase)) return false;
   const quoted = [...description.matchAll(/["'‘“]([^"'’”]+)["'’”]/g)].map((m) => norm(m[1]!));
   if (quoted.includes(phrase)) return true;
   const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -543,8 +635,7 @@ class ExplorationRun {
     const planned = scenario.steps;
     const targetUrl = this.ctx.request.targetUrl;
     const first = planned[0];
-    const firstUrl = first?.kind === "navigate" ? urlInDescription(first.description, targetUrl) : null;
-    const opensTarget = first?.kind === "navigate" && (firstUrl === null || sameUrl(firstUrl, targetUrl));
+    const opensTarget = first?.kind === "navigate" && opensTargetPage(first.description, targetUrl);
     const judgeAfter = this.judgeSchedule(scenario);
 
     await this.ctx.boundary();
@@ -617,6 +708,13 @@ class ExplorationRun {
       case "search":
       case "select": {
         if (step.kind === "select" && !step.inputRef) return this.withRetry(() => this.act(step));
+        // A search planned as a fill, then a "search" step that only submits it (no value of its own, R1): it submits
+        // the field just typed into, as a search's own submit does.
+        const typed = this.typed.at(-1);
+        if (step.kind === "search" && !step.inputRef && typed) {
+          const submit = `Find the button that submits this search, not the text field the query was typed into: ${step.description}`;
+          return this.withRetry(() => this.act(step, submit, typed.located.element.selector));
+        }
         const value = await this.resolveInput(step);
         const how = step.kind === "select" ? "select" : "fill";
         if (step.kind !== "search") return this.withRetry(() => this.fill(step, value, how));
@@ -754,18 +852,29 @@ class ExplorationRun {
    */
   private async act(step: PlannedStep, observeInstruction = step.description, searchField?: string): Promise<Attempt> {
     let located = await this.locate(step, observeInstruction);
+    // Another control than the one the step names (the header's "wishlist" link for "the Add to wishlist button",
+    // KI-072): the named one, or none (then the recoveries below run as for nothing found).
+    if (located && searchField === undefined) located = await this.namedTarget(step, located);
+    // A search with no submit button (R1): the model finds the field itself, or nothing. Enter in the field submits it.
+    if (searchField !== undefined && (!located || located.element.selector === searchField)) {
+      const field = this.typed.findLast((t) => t.located.element.selector === searchField)?.located ?? located;
+      if (field) return this.click(step, observeInstruction, field, false, "press_enter");
+    }
+    // Not found, but the step names its control ("the Add to wishlist button", KI-072): that role and name on this page.
+    if (!located && searchField === undefined) located = await this.byName(step);
     // Nothing to click on this page (e.g. a product link after the login opened the account page, KI-001): ask once
     // for the way there, follow it (policy-checked) and look again. Not for a search's submit control.
     if (!located && searchField === undefined && observeInstruction === step.description) {
       const instruction = `Find the link or button that leads to where you can: ${step.description}`;
       const way = await this.locate(step, instruction);
-      if (!way) return "failed";
+      if (!way) return this.linkByName(step);
       const followed = await this.click(step, instruction, way);
       if (followed !== "ok") return followed;
       // The way there was the step's own control (the model missed it, then chose it as the way, KI-050): its click
       // did the step, and the page it opened does not have it.
       if (namesControl(step.description, way.info.name ?? way.info.text)) return "ok";
       located = await this.locate(step, observeInstruction);
+      if (located) located = await this.namedTarget(step, located);
     }
     if (!located) return "failed";
     // An element that cannot be clicked (e.g. the "Cart (1)" status badge for "Open the cart page", KI-001): ask once
@@ -776,6 +885,11 @@ class ExplorationRun {
       located = target;
     }
     const instruction = observeInstruction;
+    // A submit or click step that resolves to the text field the run just typed into ("Submit the search", "Press
+    // Enter in the search field", R1): clicking it again submits nothing; Enter in it does.
+    if (searchField === undefined && TEXT_FIELD_ROLES.has(located.info.role ?? "") && this.typed.some((t) => t.located.element.selector === located!.element.selector)) {
+      return this.click(step, instruction, located, false, "press_enter");
+    }
     if (searchField !== undefined && located.element.selector === searchField) {
       await this.reserve();
       await this.record({
@@ -797,7 +911,14 @@ class ExplorationRun {
    * Clicks a located element: the action policy first, then the explorer; recorded as an `act` step. `completeForm`:
    * the step's own control (not a way there, not a search's button), whose form gets its empty required fields first.
    */
-  private async click(step: PlannedStep, instruction: string, located: Located, completeForm = false): Promise<Attempt> {
+  private async click(
+    step: PlannedStep,
+    instruction: string,
+    target: Located,
+    completeForm = false,
+    how: "click" | "press_enter" = "click",
+  ): Promise<Attempt> {
+    const located = how === "click" ? await this.reachable(target) : target;
     await this.enforcePolicy(step, instruction, located, "act");
     if (completeForm) await this.completeRequiredFields(step, located);
     await this.retypeCleared();
@@ -807,12 +928,20 @@ class ExplorationRun {
     await this.reserve();
     const startedAt = this.ctx.now();
     const urlBefore = this.url();
-    const base = { plannedStepId: step.id, kind: "act" as const, instruction, element: located.ref, urlBefore, startedAt };
+    const base = {
+      plannedStepId: step.id,
+      kind: "act" as const,
+      instruction,
+      element: located.ref,
+      urlBefore,
+      startedAt,
+      ...(how === "press_enter" ? { actMethod: "press_enter" as const } : {}),
+    };
     let result;
     const requests = this.watchRequests();
     try {
       try {
-        result = await this.session.actOn(this.safeAction(located.element, step.kind));
+        result = await this.session.actOn(this.safeAction(located.element, step.kind, how));
       } catch (err) {
         this.rethrowIfFatal(err);
         await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
@@ -1179,11 +1308,30 @@ class ExplorationRun {
           fact = await capture(values[request.key] ?? null);
         }
       }
-      // The model said "not shown" where the element it located shows a value (KI-001): ask for that value once more,
-      // alone; the DOM reading must still equal the answer (D2).
-      if (fact.provenance === "MODEL_EXTRACTED" && fact.modelValue === null && fact.domValue !== undefined && fact.domValue !== null) {
+      // The model's answer and the element it located disagree, and the element shows a value: the model said "not
+      // shown" (KI-001), or it read the page before it finished loading — a cart drawer read as empty while its line
+      // item rendered, a results list read as missing (KI-071; the extract runs before the element is located and read).
+      // Once the network is quiet, ask for that value once more, alone; the DOM reading must still equal the answer (D2),
+      // so a value the two keep disagreeing on stays MODEL_EXTRACTED.
+      if (fact.provenance === "MODEL_EXTRACTED" && shows(fact.domValue)) {
+        await this.page.waitForLoadState("networkidle", { timeout: NETWORK_QUIET_TIMEOUT_MS }).catch(() => {});
         const again = await this.extract(step, [request]);
-        if (again && again[request.key] !== null && again[request.key] !== undefined) fact = await capture(again[request.key]!);
+        const value = again?.[request.key];
+        if (value !== null && value !== undefined && !factValuesEqual(value, fact.modelValue ?? null)) fact = await capture(value);
+      }
+      // A count of listed items ("Number of products listed in the search results") that no element shows as a number
+      // (KI-071): count the list container's items; the count must equal the model's answer (D2).
+      if (fact.provenance === "MODEL_EXTRACTED" && request.valueType === "number" && typeof fact.modelValue === "number" && ITEM_COUNT.test(request.description)) {
+        const list = await this.locate(step, `Find the list or container whose items are counted: ${request.description}`);
+        if (list) {
+          const counted = await this.recorder
+            .captureFact(this.page, { key: request.key, checkpoint, stepId, modelValue: fact.modelValue, element: list.ref, mode: "count" })
+            .catch((err: unknown) => {
+              this.rethrowIfFatal(err);
+              return null;
+            });
+          if (counted?.provenance === "DOM_VERIFIED") fact = counted;
+        }
       }
       captured.push(fact);
     }
@@ -1451,9 +1599,107 @@ class ExplorationRun {
   }
 
   /** What `actOn` replays: never the model's arguments, and only value-free methods. */
-  private safeAction(element: ObservedElement, kind: PlannedStep["kind"]): ObservedElement {
+  private safeAction(element: ObservedElement, kind: PlannedStep["kind"], how: "click" | "press_enter" = "click"): ObservedElement {
+    if (how === "press_enter") {
+      return this.ctx.redact({ selector: element.selector, description: element.description, method: "press", arguments: ["Enter"] }) as ObservedElement;
+    }
     const method = kind === "other" && element.method && SAFE_OTHER_METHODS.has(element.method) ? element.method : "click";
     return this.ctx.redact({ selector: element.selector, description: element.description, method, arguments: [] }) as ObservedElement;
+  }
+
+  /**
+   * The link a step names in quotes ("Click the 'Grills' link") when neither it nor a way to it can be found (R3): e.g.
+   * inside a closed side menu, which the explorer does not see. Its same-origin URL is read from the page's DOM (the
+   * link's aria-label, its text or its first text, e.g. a category name above its description) and opened with a
+   * navigate step, which the generated test replays as a `goto`. Only when the step clicks that link (namesControl),
+   * exactly one URL matches, the host is allowed and the link is not destructive; otherwise the step fails as before.
+   */
+  private async linkByName(step: PlannedStep): Promise<Attempt> {
+    const names = quotedNames(step.description).filter((n) => namesControl(step.description, n));
+    if (names.length === 0) return "failed";
+    const wanted = names.map((n) => n.toLowerCase().replace(/\s+/g, " ").trim());
+    const hrefs = await this.page
+      .evaluate((want: string[]) => {
+        const out: string[] = [];
+        for (const a of Array.from(document.querySelectorAll("a[href]"))) {
+          const walker = document.createTreeWalker(a, NodeFilter.SHOW_TEXT);
+          let first = "";
+          for (let n = walker.nextNode(); n && !first; n = walker.nextNode()) first = (n.textContent ?? "").replace(/\s+/g, " ").trim();
+          const texts = [a.getAttribute("aria-label") ?? "", a.textContent ?? "", first].map((t) => t.replace(/\s+/g, " ").trim().toLowerCase());
+          if (texts.some((t) => t !== "" && want.includes(t))) out.push((a as HTMLAnchorElement).href);
+        }
+        return out;
+      }, wanted)
+      .catch(() => [] as string[]);
+    const start = new URL(this.ctx.request.targetUrl);
+    const urls = [...new Set(hrefs)].filter((href) => {
+      try {
+        const url = new URL(href);
+        return /^https?:$/.test(url.protocol) && isAllowedPageHost(url, start, this.ctx.request.options.additionalAllowedHosts);
+      } catch {
+        return false;
+      }
+    });
+    if (urls.length !== 1) return "failed";
+    const allowed = assertActionAllowed({ instruction: step.description, elementRole: "link", elementName: names[0]! }, DENY_DESTRUCTIVE).allowed;
+    if (!allowed) return "failed";
+    return this.navigate(urls[0]!, step);
+  }
+
+  /** The reachable control of the role and name the step names (namedControl), or null (KI-072). */
+  private async byName(step: PlannedStep): Promise<Located | null> {
+    const recorder = this.recorder;
+    const named = namedControl(step.description);
+    if (!named || !recorder.namedControl) return null;
+    try {
+      const selector = await recorder.namedControl(this.page, named.name, named.roles);
+      if (!selector) return null;
+      const [ref, info] = await Promise.all([recorder.record(this.page, selector), recorder.describe(this.page, selector)]);
+      return { element: { selector, description: named.name, method: "click", arguments: [] }, ref, info };
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      return null;
+    }
+  }
+
+  /**
+   * The control the step names, when the located element is another one (KI-072): "Click the 'Add to wishlist' button"
+   * came back as the header's "wishlist" link, whose click opened the wishlist and added nothing. A step that names its
+   * control (in quotes, or followed by a control word: namedControl) is checked against the located element's
+   * accessible name and text. When neither contains that name, the first reachable element of the named role (a button
+   * or link for "icon", "menu" and the like) whose name contains it is used instead, re-recorded for the generated test.
+   * When the page has none, the located element is not the step's control: null (nothing found). An element with no
+   * name or text at all (an unlabelled icon button) cannot be told apart and is kept.
+   */
+  private async namedTarget(step: PlannedStep, located: Located): Promise<Located | null> {
+    const named = namedControl(step.description);
+    if (!named) return located;
+    const names = [located.info.name, located.info.text].map((t) => normalizeName(t ?? "")).filter((t) => t !== "");
+    if (names.length === 0) return located;
+    const want = normalizeName(named.name);
+    if (names.some((t) => t.includes(want))) return located;
+    return this.byName(step);
+  }
+
+  /**
+   * The element a click should go to (R2): the located one when a click lands on it; otherwise (a carousel's
+   * off-screen clone, an element under a banner) the first reachable element its role / test id / label / text
+   * candidates match, re-recorded so the generated test replays that one. Unchanged when the recorder cannot tell
+   * or there is no such element (the click then fails or succeeds as before).
+   */
+  private async reachable(located: Located): Promise<Located> {
+    const recorder = this.recorder;
+    if (!recorder.hittable || !recorder.hittableAlternative) return located;
+    try {
+      if (await recorder.hittable(this.page, located.element.selector)) return located;
+      const selector = await recorder.hittableAlternative(this.page, located.ref);
+      if (!selector || selector === located.element.selector) return located;
+      const [ref, info] = await Promise.all([recorder.record(this.page, selector), recorder.describe(this.page, selector)]);
+      return { element: { ...located.element, selector }, ref, info };
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      return located;
+    }
   }
 
   private modeFor(request: FactRequest): FactReadMode | null {
@@ -1633,6 +1879,7 @@ class ExplorationRun {
       ...(this.multiScenario ? { scenarioId: this.scenarioId } : {}),
       ...(draft.generatedValue !== undefined ? { generatedValue: draft.generatedValue } : {}),
       ...(draft.fillMethod !== undefined ? { fillMethod: draft.fillMethod } : {}),
+      ...(draft.actMethod !== undefined ? { actMethod: draft.actMethod } : {}),
       ...(draft.judgment !== undefined ? { judgment: draft.judgment } : {}),
     }) as ExplorationStep;
     return ExplorationStepSchema.parse({

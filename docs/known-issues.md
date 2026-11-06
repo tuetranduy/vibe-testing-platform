@@ -87,6 +87,15 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-063 | Medium | Generated inputs | A made-up new-account email is the same every run, so the account exists after the first run | Resolved in working tree (2026-11-05) |
 | KI-064 | High | Exploration | A select the page resets after the first choice is recorded as chosen; a model-picked country can make a form refuse to submit | Resolved in working tree (2026-11-05) |
 | KI-065 | High | Verification | A login in a popup (the URL does not change) is reported LOGIN_FAILED although it succeeded | Open |
+| KI-066 | High | Exploration | A search with no submit button is never submitted (Enter is never pressed) | Resolved in working tree (2026-11-06) |
+| KI-067 | High | Exploration | A click on a carousel's off-screen clone waits 60 s and fails, though a visible twin is on screen | Resolved in working tree (2026-11-06) |
+| KI-068 | High | Planning / exploration | A step names a link in a closed menu, or an item from another page, and the one-hop recovery cannot reach it | Resolved in working tree (2026-11-06) |
+| KI-069 | High | Verification | A criterion about a rejected login (wrong password → error) is reported BLOCKED / LOGIN_FAILED | Resolved in working tree (2026-11-06) |
+| KI-070 | High | LLM quality | An inferred criterion checks an exact text the requirement never wrote ("Wishlist is empty"), so a working page FAILS | Resolved in working tree (2026-11-06) |
+| KI-072 | High | Exploration | "Click the Add to wishlist button" resolves to the header's wishlist link; nothing is added and the check FAILS | Resolved in working tree (2026-11-06) |
+| KI-073 | Medium | Exploration | A click that opens a sign-in prompt (a guest's "Add to wishlist") is not recognised: the criterion ends INCONCLUSIVE, not "needs a login" | Open |
+| KI-071 | Medium | Verification | Facts read on a search results page stay MODEL_EXTRACTED or have the wrong type, so the criteria end UNVERIFIED_EVIDENCE | Resolved in working tree (2026-11-06) |
+| KI-074 | Medium | Target site | frontends-demo sometimes serves its own Error 500 in the sandbox ("[PATCH] …/store-api/context: <no response> Failed to fetch") | Open: not yet known whether site-side or egress-proxy-side |
 
 KI-056–KI-057: [Travel Luggage Set run investigation](reviews/run_0mw3gsjgke3a1923c465bb1e1.md), with the recorded
 timeline, reproduction, changes and rollout limits.
@@ -929,4 +938,135 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
 - **Open:** an unchanged URL is not enough evidence on a single-page app. Likely fix: the executor records, after a
   `login` click, whether the fields it typed the credentials into are still shown; rule 3 then needs both (same page and
   the login form still there).
+
+## KI-066 — A search with no submit button is never submitted
+- **Severity:** High (3 of 12 runs in the unclear-requirement corpus stopped at the search).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`act`, `executePlanned` for `search`),
+  `packages/stagehand-adapter/src/stagehand-explorer.ts` (`actOn`), `packages/testing-engine/src/compiler/*`.
+- **What:** frontends-demo.vercel.app's header search submits on Enter and has no button. The executor asked for "the
+  button that submits this search", got the field back, and failed the attempt; nothing pressed Enter
+  (`evals/e2e-unclear/RESULTS-2026-11-06-frontends-demo.md`, FD-02, FD-03, FD-10).
+- **Resolved (2026-11-06, working tree):** when a search's submit resolves to its field, or to nothing, the executor
+  presses Enter in the field. It does the same when a click or submit step resolves to a text field the run just typed
+  into, and when a `search` step with no value follows a fill. The step is recorded as `act` with
+  `actMethod: "press_enter"`. The adapter presses only Enter, deterministically, and the generated test replays
+  `.press("Enter")` (`press` and `"Enter"` were added to the AST guard's allowlist). Rerun: all three runs reach
+  `/search?search=…`.
+
+## KI-067 — A click on a carousel's off-screen clone waits 60 s and fails
+- **Severity:** High (2 of 12 corpus runs).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`click` → `reachable`), `exploration/recorder.ts`
+  (`isHittable`, `hittableAlternative`), `packages/stagehand-adapter/src/stagehand-explorer.ts`.
+- **What:** the explorer picked the XPath of a product slider's first slide, a clone translated to x = −3224 inside an
+  `overflow: hidden` track. Playwright could not scroll it into view, and each click waited the full 60 s operation
+  timeout.
+- **Resolved (2026-11-06, working tree):** before a click, the executor hit-tests the element (scrolled into view, its
+  centre in the viewport, topmost there). When it is unreachable, it clicks the first reachable element that the
+  ref's role / test id / label / text candidates match, re-recorded so the generated test replays that one. A
+  deterministic click or key press now times out after 15 s (`clickTimeoutMs`), not 60 s. Covered on real Chromium
+  (`recorder.test.ts`).
+
+## KI-068 — A step names a link in a closed menu, or an item from another page
+- **Severity:** High (2 of 12 corpus runs).
+- **Where:** `packages/testing-engine/src/planner/prompts.ts`, `exploration/executor.ts` (`act` → `linkByName`).
+- **What:** FD-09 planned "Click the 'Grills' link", which sits in a closed side menu, although the analysis had read
+  `/Summer-BBQ/Grills/`. FD-04 planned a product from the Product Slider page while still on the home page.
+- **Resolved (2026-11-06, working tree):** a planner rule says to open a page that was read with a `navigate` step to its
+  URL, and to name only controls on the page the browser is on. When a quoted link that the step clicks is neither
+  found nor reachable, the executor navigates to its single same-origin URL from the DOM (aria-label, text or first
+  text), after a destructive-term check. Planner eval: 17/18 twice (`search-results`, a known flaky case; see
+  `evals/BASELINE.md`). Rerun: FD-04 and FD-09 PASSED.
+
+## KI-069 — A criterion about a rejected login is reported BLOCKED / LOGIN_FAILED
+- **Severity:** High (a correct "wrong password shows an error" is never a PASS).
+- **Where:** `packages/testing-engine/src/verification/verifier.ts` (rule 3, `expectsRejectedLogin`).
+- **What:** FD-06 read `errorMessageVisible = true` from the DOM after a wrong-password sign-in. The URL stayed the same,
+  so rule 3 blocked the criterion.
+- **Resolved (2026-11-06, working tree):** rule 3 does not apply to a criterion whose statement or source text pairs a
+  login word with a rejection word (wrong, invalid, error, cannot, rejected, …). Its facts decide it. Rerun: FD-06
+  PASSED. KI-065 (a successful login in a popup) stays open.
+
+## KI-070 — An inferred criterion checks an exact text the requirement never wrote
+- **Severity:** High (a false FAIL on a working page).
+- **Where:** `packages/testing-engine/src/requirement/prompts.ts`.
+- **What:** "Make sure the wishlist works" (FD-05, `run_0mw4mecpjabb5d2b76db76940`) compiled a criterion "the empty
+  wishlist shows its empty-state message" as `text_matches` "Wishlist is empty". The site says "No products were added
+  to the Wishlist.", so the run FAILED.
+- **Resolved (2026-11-06, working tree):** a prompt rule ("never invent wording": a `text_matches` value is text the
+  requirement writes; otherwise check `visible`). Backed by a deterministic rewrite in `postValidate`
+  (`replaceUnstatedTexts`), like an invented threshold, never retried: an equals / contains value that neither the
+  requirement nor a test data value contains (case, quotes and punctuation ignored) becomes `visible` on a new boolean
+  fact `<key>Shown` at the same checkpoint. The criterion is flagged `TEXT_NOT_STATED` with the model's text, and
+  facts left unused are dropped. A regex, a test data key and the `url` fact are left alone. Eval cases 34
+  (`wishlist-works-with-pages`, this run's pages) and 35 (`wrong-password-error`) score `noInventedText`:
+  requirement-compiler 35/35 on DeepSeek Flash. Rerun: FD-05 has no text check any more, and FD-06 still PASSES.
+  FD-05 still FAILS, for another reason (KI-072).
+
+## KI-071 — Facts read on a search results page stay unverified
+- **Severity:** Medium (the flow works, but the criteria end INCONCLUSIVE).
+- **Where:** `packages/testing-engine/src/exploration/fact-reader.ts`, `executor.ts` (checkpoint).
+- **What:** after the KI-066 fix, FD-02 (a count, MODEL_EXTRACTED only), FD-03 (results list "not visible", while the DOM
+  shows "No products found" for the generated term "Lemonade") and FD-10 (a `visible` fact recorded as a list) end
+  UNVERIFIED_EVIDENCE or FACT_NOT_OBSERVED.
+- **Cause (the facts' `domValue`):** the page held the right answer every time. FD-09 cart: model `[]`, DOM
+  `["Fred - 3 Burner Gas Grill €429.00 Remove"]`. FD-08 cart: model "Your shopping cart is empty", DOM
+  `["ILARIO Product Variants"]`. FD-03 results: model `false`, DOM `true`. A checkpoint extracts first and locates and
+  reads the element after, so the model saw a drawer or results page still loading. In addition:
+  - the search term was a gallery heading ("Lemonade") or a call to action ("Browse summer trends");
+  - home-page product links never reached the inventory: a 46-link menu filled the 60 places, and the byte cap
+    dropped the page's own links first;
+  - a "number of products listed" fact had no element showing that number.
+- **Resolved (2026-11-06, working tree):**
+  - `checkpoint` (executor): any disagreement where the located element shows a value, not only a null answer, is
+    asked once more, alone, after the network is quiet. The DOM reading must still equal the new answer, so a value
+    the two keep disagreeing on stays MODEL_EXTRACTED. A number fact that counts listed items (`ITEM_COUNT`) and is
+    still unverified is read in `count` mode on the list container (the compiler already replays `count`).
+  - `validateInsights`: a suggested search term (`isSearchTermKey`) that is not the name of a product the pages link
+    to (`productNames`: main-area links whose last path segment is a short product id, not a hash) is replaced by the
+    first such product.
+  - `toPageInventory` / `capInventory`: navigation gets at most 40 of the 60 link places, and shrinking drops
+    navigation links first (down to 20).
+  Final corpus: 17 of 22 criteria PASS, 1 UNVERIFIED_EVIDENCE left (FD-08, a "no error message" check).
+
+## KI-072 — "Click the Add to wishlist button" resolves to the header's wishlist link
+- **Severity:** High (a false FAIL: nothing is added, so "the wishlist lists the product" fails).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`act` → `locate`).
+- **What:** `FD-05` after KI-070 (2026-11-06): on `/Products/Product-without-variants/` (a category listing), the
+  lookup for "Click the Add to wishlist button for the product" returned the header's wishlist link. The click opened
+  `/wishlist` (step 10), the wishlist stayed empty (`["Wishlist is empty"]`, DOM_VERIFIED), and AC-3 FAILED.
+- **Also:** a second rerun reached the same link through the "way there" recovery. KI-050's `namesControl` took the
+  "wishlist" link as the step's own control, because "wishlist button" appears in "the Add to wishlist button".
+- **Resolved (2026-11-06, working tree):** `namedControl` reads the control a click step names: a quoted name with its
+  control word, or an unquoted label before a control word ("the Add to wishlist button"). An unquoted name counts only
+  when it is capitalized or a number, so "the red button" names nothing, and trailing generic nouns are dropped
+  ("the Galaxy S27 product link" → "Galaxy S27"). In `act`:
+  - right after the lookup, a located element whose name and text both lack that name is replaced by the first
+    reachable element of the named role whose accessible name contains it (`reachableNamedControl`, real-Chromium
+    tested). When there is none, the lookup counts as having found nothing, so the recoveries run and the step fails
+    rather than clicking another control. An unlabelled element (an icon button) is kept;
+  - when the lookup finds nothing, the named control is looked up by role and name before the way-there recovery;
+  - `namesControl` (KI-050) only takes a followed element as the step's own control when its name is the whole named
+    control.
+  Corpus rerun: the add click hits a product card's "Add to wishlist" button, and FD-05 has no false FAIL. As a guest,
+  that button opens a sign-in dialog (KI-073).
+
+## KI-073 — A click that opens a sign-in prompt is not recognised
+- **Severity:** Medium (an honest INCONCLUSIVE, but not the actionable "needs a login").
+- **Where:** `packages/testing-engine/src/exploration/executor.ts`, `verification/verifier.ts`.
+- **What:** on frontends-demo.vercel.app, a guest's "Add to wishlist" opens a "Sign in to your account" dialog (checked
+  by hand, 2026-11-06). "Make sure the wishlist works" (FD-05) then finds an empty wishlist and ends INCONCLUSIVE.
+- **Open:** after a click, detect a sign-in prompt that appeared (a dialog with a password field and a sign-in button).
+  Report the criteria that depend on that step as BLOCKED / PRECONDITION_NOT_MET ("the site asks to sign in for this
+  action"), so the user knows to add credentials.
+
+## KI-074 — The target site sometimes serves its own Error 500 in the sandbox
+- **Severity:** Medium (a run on a working site ends INCONCLUSIVE, or is judged on an error page).
+- **Where:** the target, or `apps/worker/src/sandbox/egress-proxy.ts`. Not yet known which.
+- **What:** the FD-09 checkpoint screenshot of `run_0mw4u0iv4a6ceb7816c35e949` (2026-11-06) shows frontends-demo's
+  error page: "500 … [PATCH] "https://demo-frontends.shopware.store/store-api/context": <no response> Failed to fetch".
+  FD-07 hit an Error 500 / blank product area twice that day. The navigation guard only blocks main-frame documents,
+  and no block event was recorded. The same page loads normally in a regular browser.
+- **Open:** check whether the store API's PATCH fails through the egress proxy (CONNECT tunnel, timeouts) or on the
+  site. Either way, a checkpoint whose page is an error page (an HTTP 5xx document, or "500" / "something went wrong"
+  as the main heading) should be reported as such: retried once, or marked INCONCLUSIVE with a "site error" reason.
 

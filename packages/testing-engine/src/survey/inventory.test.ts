@@ -114,3 +114,28 @@ describe("INVENTORY_SCRIPT", () => {
     expect(() => new Function(`return ${INVENTORY_SCRIPT};`)).not.toThrow();
   });
 });
+
+describe("toPageInventory: links (KI-071)", () => {
+  it("a mega menu takes at most 40 places: the page's own links (its products) still fit", () => {
+    const navLinks = Array.from({ length: 50 }, (_, i) => ({ text: `Category ${i}`, url: `https://shop.example.com/c/${i}`, area: "nav" as const }));
+    const mainLinks = Array.from({ length: 30 }, (_, i) => ({ text: `Product ${i}`, url: `https://shop.example.com/p/${i}`, area: "main" as const }));
+    const out = toPageInventory(raw({ links: [...navLinks, ...mainLinks] }), identity);
+    expect(out.links.filter((l) => l.area === "nav")).toHaveLength(40);
+    expect(out.links.filter((l) => l.area === "main").map((l) => l.text).slice(0, 3)).toEqual(["Product 0", "Product 1", "Product 2"]);
+    expect(out.links.length).toBeLessThanOrEqual(60);
+  });
+});
+
+describe("capInventory: links (KI-071)", () => {
+  it("shrinking drops navigation links first (down to 20), so the page's own links stay", () => {
+    const links = [
+      ...Array.from({ length: 40 }, (_, i) => ({ text: `Category with a long descriptive menu text number ${i}`, url: `https://shop.example.com/c/${i}`, area: "nav" as const })),
+      ...Array.from({ length: 10 }, (_, i) => ({ text: `Product ${i}`, url: `https://shop.example.com/p/${i}`, area: "main" as const })),
+    ];
+    const full = toPageInventory(raw({ links }), identity);
+    const out = capInventory(full, bytes(full) - 1500);
+    expect(out.links.filter((l) => l.area === "main")).toHaveLength(10);
+    expect(out.links.filter((l) => l.area === "nav").length).toBeLessThan(40);
+  });
+});
+

@@ -84,6 +84,11 @@ export interface StagehandExplorerOptions {
   /** Per act/observe/extract call. */
   operationTimeoutMs?: number;
   navigationTimeoutMs?: number;
+  /**
+   * Per deterministic click or key press on an observed element (2026-11-06, R2): an element Playwright cannot reach
+   * (e.g. a carousel's off-screen clone) no longer holds the step for the whole operation timeout.
+   */
+  clickTimeoutMs?: number;
   /** How long to wait for Stagehand to connect and initialise. */
   connectTimeoutMs?: number;
   maxTokens?: number;
@@ -91,6 +96,7 @@ export interface StagehandExplorerOptions {
 
 const DEFAULT_OPERATION_TIMEOUT_MS = 60_000;
 const DEFAULT_NAVIGATION_TIMEOUT_MS = 30_000;
+const DEFAULT_CLICK_TIMEOUT_MS = 15_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 const CLOSE_TIMEOUT_MS = 5_000;
 /** After ERR_BLOCKED_BY_CLIENT, how long to wait for the guard's event (it may land just after). */
@@ -203,7 +209,7 @@ class StagehandExplorerSession implements ExplorerSession {
     private readonly shPage: StagehandPage,
     private readonly bridge: ClientLlmBridge,
     private readonly signal: AbortSignal,
-    private readonly opts: Required<Pick<StagehandExplorerOptions, "operationTimeoutMs" | "navigationTimeoutMs">>,
+    private readonly opts: Required<Pick<StagehandExplorerOptions, "operationTimeoutMs" | "navigationTimeoutMs" | "clickTimeoutMs">>,
     onNavigationBlocked: ((listener: (e: NavigationBlock) => void) => () => void) | undefined,
     private readonly restoreViewport?: () => Promise<void>,
   ) {
@@ -333,15 +339,22 @@ class StagehandExplorerSession implements ExplorerSession {
   }
 
   actOn(element: ObservedElement): Promise<ActResult> {
-    if (element.method === "click" || element.method === null) {
-      return this.run("Observed click", async () => {
+    // Enter in a field (a search without a submit button, R1): deterministic, like a click; no other key is replayed.
+    const press = element.method === "press";
+    if (press && (element.arguments.length !== 1 || element.arguments[0] !== "Enter")) {
+      return Promise.reject(new Error("Only the Enter key is pressed on an observed element"));
+    }
+    if (element.method === "click" || element.method === null || press) {
+      return this.run(press ? "Observed key press" : "Observed click", async () => {
         const navigations = this.watchNavigations();
         let error: unknown;
         try {
           try {
             // Stagehand's raw coordinate click reports success even when a fixed banner receives it.
             // Playwright waits for a stable target, hit-tests it and retries scrolling without forcing clicks.
-            await this.page.locator(element.selector).click({ timeout: this.opts.operationTimeoutMs });
+            const locator = this.page.locator(element.selector);
+            if (press) await locator.press("Enter", { timeout: this.opts.clickTimeoutMs });
+            else await locator.click({ timeout: this.opts.clickTimeoutMs });
           } catch (err) {
             error = err;
           }
@@ -351,7 +364,7 @@ class StagehandExplorerSession implements ExplorerSession {
         }
         const navigationBlocks = this.takeBlocks();
         if (error && navigationBlocks.length === 0) throw error;
-        return { success: !error, message: error ? "Navigation blocked" : "Observed element clicked", element, navigationBlocks, llm: null };
+        return { success: !error, message: error ? "Navigation blocked" : press ? "Enter pressed in the observed element" : "Observed element clicked", element, navigationBlocks, llm: null };
       });
     }
     return this.run("Stagehand act", () => this.doAct(toAction(element)));
@@ -517,6 +530,7 @@ export class StagehandExplorer implements BrowserExplorer {
         {
           operationTimeoutMs: this.opts.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS,
           navigationTimeoutMs: this.opts.navigationTimeoutMs ?? DEFAULT_NAVIGATION_TIMEOUT_MS,
+          clickTimeoutMs: this.opts.clickTimeoutMs ?? DEFAULT_CLICK_TIMEOUT_MS,
         },
         handle.onNavigationBlocked?.bind(handle),
         handle.restoreViewport?.bind(handle),

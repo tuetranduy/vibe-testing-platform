@@ -7,7 +7,7 @@ import type { EventDraft, StageContext } from "../orchestrator/stages";
 import type { SurveyLink } from "../survey/links";
 import type { SurveySandbox } from "../survey/site-reader";
 import { createAnalyzeStage, linkRelevance, requirementWords } from "./compiler";
-import { validateInsights } from "./insights";
+import { isSearchTermKey, productNames, validateInsights } from "./insights";
 
 /** A redactor that masks the given values: the run's redactor is key-based, but the plumbing applies whatever it is given. */
 const maskValues =
@@ -286,3 +286,47 @@ describe("validateInsights", () => {
     expect(out.testData[0]).toMatchObject({ key: "email", source: "GENERATED" });
   });
 });
+
+describe("search terms come from the products the pages link to (KI-071)", () => {
+  const page = (links: { text: string; url: string; area: "nav" | "main" }[]) =>
+    ({ url: `${ORIGIN}/`, inventory: { title: "Home", description: "", headings: [{ level: 2, text: "Lemonade" }], links, forms: [], buttons: [] } }) as never;
+  const PAGES = [
+    page([
+      { text: "Grills", url: `${ORIGIN}/Summer-BBQ/Grills/`, area: "nav" },
+      { text: "Product listing 1", url: `${ORIGIN}/Products/Product-listing-1/`, area: "main" },
+      { text: "Browse summer trends", url: `${ORIGIN}/navigation/1ccd9d102a684e38b56eb32abece80eb`, area: "main" },
+      { text: "Fred - 3 Burner Gas Grill", url: `${ORIGIN}/Fred-3-Burner-Gas-Grill/941044`, area: "main" },
+      { text: "Hawaii sea-salt Black Lava", url: `${ORIGIN}/Hawaii-sea-salt-Black-Lava/SW10092.1`, area: "main" },
+    ]),
+  ];
+  const draft = {
+    originalText: "Test the search",
+    criteria: [{ ...answer.criteria[0], id: "AC-1", critical: true, preconditions: [{ kind: "test_data", ref: "searchTerm", description: "A search term" }] }],
+    facts: answer.facts,
+  } as never;
+  const insights = (value: string, pages = PAGES) =>
+    validateInsights({
+      draft, testData: {}, secretNames: [], seed: "run_1", redact: (v: unknown) => v, siteRead: true, pages,
+      output: { siteChecks: [], testData: [{ key: "searchTerm", value, description: "Product name to search for", fromSite: true }] },
+    }).testData[0];
+
+  it("a heading or a call to action the model took for a product is replaced by the first product link's name", () => {
+    expect(insights("Lemonade")).toMatchObject({ key: "searchTerm", value: "Fred - 3 Burner Gas Grill", source: "SITE" });
+    expect(insights("Browse summer trends")?.value).toBe("Fred - 3 Burner Gas Grill");
+  });
+
+  it("a product the pages link to is kept; with no product link, the model's term is kept", () => {
+    expect(insights("hawaii sea-salt black lava")?.value).toBe("hawaii sea-salt black lava");
+    expect(insights("Lemonade", [page([{ text: "Grills", url: `${ORIGIN}/Summer-BBQ/Grills/`, area: "nav" }])])?.value).toBe("Lemonade");
+  });
+
+  it("productNames: main-area links whose last path segment has an id; categories and navigation are not products", () => {
+    expect(productNames(PAGES)).toEqual(["Fred - 3 Burner Gas Grill", "Hawaii sea-salt Black Lava"]);
+  });
+
+  it("isSearchTermKey", () => {
+    for (const key of ["searchTerm", "search_query", "query", "q", "productSearchKeyword"]) expect(isSearchTermKey(key)).toBe(true);
+    for (const key of ["researchTopic", "email", "termsAccepted", "quantity"]) expect(isSearchTermKey(key)).toBe(false);
+  });
+});
+

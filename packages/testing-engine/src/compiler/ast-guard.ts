@@ -16,7 +16,7 @@ import { HELPER_EXPORTS } from "./helpers-template";
  *   compiler's numbered names `factN` / `locN` / `itemN` / `inputN` / `urlN`): no `require`, `arguments`,
  *   `Object`, `fetch`, `globalThis`, `constructor`, `evaluate`, `__dirname`, `Buffer`, …;
  * - any string literal outside the fixed set (import paths, the test title, `"[AC-n] "` prefixes,
- *   criterion ids, allow-listed ARIA roles, regex flags, match modes, the load state); no template
+ *   criterion ids, allow-listed ARIA roles, regex flags, match modes, the load state, the "Enter" key); no template
  *   literals or regex literals;
  * - element access other than `data.criteria["AC-n"]`;
  * - `process` anywhere except `secret(process.env.SECRET_<NAME>)` as the whole argument of a `fill`.
@@ -38,7 +38,7 @@ export const ALLOWED_IDENTIFIERS: ReadonlySet<string> = new Set([
   "targetUrl", "urls", "locators", "items", "inputs", "criteria", "statement", "name", "text", "value", "selector",
   "pattern", "item", "delta", "right",
   // page and locators
-  "goto", "click", "fill", "selectOption", "check", "getByRole", "getByLabel", "getByPlaceholder", "getByText", "getByTestId",
+  "goto", "click", "press", "fill", "selectOption", "check", "getByRole", "getByLabel", "getByPlaceholder", "getByText", "getByTestId",
   "locator", "url", "waitForLoadState", "timeout", "catch", "exact",
   // test and expect
   "step", "configure", "soft", "poll", "not", "ignoreCase", "useInnerText",
@@ -60,6 +60,8 @@ const ALLOWED_STRINGS: ReadonlySet<string> = new Set([
   "discovered flow",
   "load",
   "networkidle",
+  // the one key a step presses (a search submitted with Enter, R1)
+  "Enter",
   "",
   "i",
   "contains",

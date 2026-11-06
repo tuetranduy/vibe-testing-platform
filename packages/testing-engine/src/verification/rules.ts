@@ -1,4 +1,5 @@
 import { URL_FACT_KEY, type ExpectedOutcome, type FactRef, type FactValue } from "@platform/contracts";
+import { usesEmptyCounterZero } from "../shared/empty-counter";
 import {
   booleanOf,
   collapseText,
@@ -118,14 +119,22 @@ export function evaluateRule(
   valueOf: (ref: FactRef) => FactValue,
   /**
    * Whether the fact was read, from the DOM, on a counter that is on the page but shows no number (KI-060). In a
-   * numeric_delta it counts as 0: a cart badge or unread count is commonly hidden while it is zero.
+   * numeric_delta or a comparison of an explicitly named counter it counts as 0: a cart badge or
+   * unread count is commonly hidden while it is zero.
    */
   showsNoNumber: (ref: FactRef) => boolean = () => false,
 ): RuleResult {
+  const counted = (ref: FactRef): { n: number | null; v: FactValue; empty: boolean } => {
+    const v = valueOf(ref);
+    const n = numberOf(v);
+    return n === null && v === null && usesEmptyCounterZero(outcome, ref) && showsNoNumber(ref)
+      ? { n: 0, v, empty: true }
+      : { n, v, empty: false };
+  };
+  const shown = (n: number, empty: boolean) => `${num(n)}${empty ? ", no number shown" : ""}`;
   switch (outcome.kind) {
     case "numeric_compare": {
-      const lv = valueOf(outcome.left);
-      const left = numberOf(lv);
+      const { n: left, v: lv, empty: leftEmpty } = counted(outcome.left);
       if (left === null) return notObserved(outcome.left, lv, "a number");
       let right: number;
       let rightText: string;
@@ -133,24 +142,17 @@ export function evaluateRule(
         right = outcome.right;
         rightText = num(right);
       } else {
-        const rv = valueOf(outcome.right);
-        const n = numberOf(rv);
+        const { n, v: rv, empty } = counted(outcome.right);
         if (n === null) return notObserved(outcome.right, rv, "a number");
         right = n;
-        rightText = `${otherLabel(outcome.right, outcome.left)} (${num(n)})`;
+        rightText = `${otherLabel(outcome.right, outcome.left)} (${shown(n, empty)})`;
       }
       const pass = compare(left, outcome.operator, right);
       const op = OPERATOR[outcome.operator];
-      return decided(pass, `${factLabel(outcome.left)} (${num(left)}) ${pass ? op : `is not ${op}`} ${rightText}`);
+      return decided(pass, `${factLabel(outcome.left)} (${shown(left, leftEmpty)}) ${pass ? op : `is not ${op}`} ${rightText}`);
     }
 
     case "numeric_delta": {
-      const counted = (ref: FactRef): { n: number | null; v: FactValue; empty: boolean } => {
-        const v = valueOf(ref);
-        const n = numberOf(v);
-        return n === null && v === null && showsNoNumber(ref) ? { n: 0, v, empty: true } : { n, v, empty: false };
-      };
-      const shown = (n: number, empty: boolean) => `${num(n)}${empty ? ", no number shown" : ""}`;
       const { n: b, v: bv, empty: bEmpty } = counted(outcome.before);
       if (b === null) return notObserved(outcome.before, bv, "a number");
       const { n: a, v: av, empty: aEmpty } = counted(outcome.after);

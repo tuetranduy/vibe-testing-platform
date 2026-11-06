@@ -307,6 +307,15 @@ describe("compilePlaywrightTest: the discovered flow (snapshot)", () => {
     expect(checkGeneratedSource(out.source)).toEqual([]);
   });
 
+  it("a search submitted with Enter in its field replays as press(\"Enter\"), accepted by the guard (R1)", () => {
+    const steps = shopFlow().map((s) =>
+      s.plannedStepId === "PS-4" && s.kind === "act" ? { ...s, element: byRole("searchbox", "Search"), actMethod: "press_enter" as const } : s,
+    );
+    const out = compile({ steps });
+    expect(out.source).toMatch(/getByRole\("searchbox", \{ name: [^}]+\}\)\.press\("Enter"\);/);
+    expect(checkGeneratedSource(out.source)).toEqual([]);
+  });
+
   it("replays nothing after the last checkpoint a compiled criterion needs", () => {
     const steps = [...shopFlow(), ...flow({ kind: "act", element: byRole("link", "Checkout") }).map((s) => ({ ...s, index: 8, id: "st_8" }))];
     const out = compile({ steps });
@@ -402,7 +411,7 @@ describe("compilePlaywrightTest: assertions", () => {
   it("each criterion's step sits at the latest checkpoint it references; earlier facts are read into variables at their own checkpoint", () => {
     const out = compile();
     const src = out.source;
-    const readBefore = src.indexOf("const fact1 = await readNumber(page.getByTestId(data.locators.");
+    const readBefore = src.indexOf("const fact1 = await readNumberOrZero(page.getByTestId(data.locators.");
     const addToCart = src.search(/getByRole\("button", \{ name: data\.locators\.loc\d+\.name, exact: true \}\)\.click\(\)/);
     const ac1 = src.indexOf(stepBlock(src, "AC-1"));
     expect(readBefore).toBeGreaterThan(0);
@@ -411,7 +420,7 @@ describe("compilePlaywrightTest: assertions", () => {
     // The "after" value is polled (the badge may update after the click), compared with the saved "before".
     expect(stepBlock(src, "AC-1")).toContain("expect.soft(fact1, message).not.toBeNull();");
     expect(stepBlock(src, "AC-1")).toMatch(
-      /await softExpect\.poll\(\(\) => readNumber\(page\.getByTestId\(data\.locators\.loc\d+\.value\), 0\), \{ message \}\)\.toBeGreaterThan\(fact1 \?\? Number\.NaN\);/,
+      /await softExpect\.poll\(\(\) => readNumberOrZero\(page\.getByTestId\(data\.locators\.loc\d+\.value\), 0\), \{ message \}\)\.toBeGreaterThan\(fact1 \?\? Number\.NaN\);/,
     );
   });
 
@@ -429,7 +438,7 @@ describe("compilePlaywrightTest: assertions", () => {
     expect(out.source).not.toContain("const fact");
     expect(out.source).not.toContain("not.toBeNull");
     expect(stepBlock(out.source, "AC-1")).toMatch(
-      /await softExpect\.poll\(async \(\) => difference\(await readNumber\(page\.getByTestId\(data\.locators\.loc\d+\.value\), 0\), await readNumber\(page\.getByTestId\(data\.locators\.loc\d+\.value\), 0\)\), \{ message \}\)\.toBeGreaterThanOrEqual\(0\);/,
+      /await softExpect\.poll\(async \(\) => difference\(await readNumber\(page\.getByTestId\(data\.locators\.loc\d+\.value\), 0\), await readNumberOrZero\(page\.getByTestId\(data\.locators\.loc\d+\.value\), 0\)\), \{ message \}\)\.toBeGreaterThanOrEqual\(0\);/,
     );
     expect(stepBlock(out.source, "AC-2")).toMatch(
       /await softExpect\.poll\(async \(\) => listContains\(await readTextList\(page\.getByTestId\(data\.locators\.loc\d+\.value\), 0\), await readText\(page\.getByRole\("status", \{ name: data\.locators\.loc\d+\.name, exact: true \}\), 0\), "equals"\), \{ message \}\)\.toBe\(true\);/,
@@ -485,7 +494,20 @@ describe("compilePlaywrightTest: assertions", () => {
 
   it("numeric_compare against a later fact flips the operator so the later (polled) value is on the left", () => {
     const out = compile({ requirement: requirementOf([criterion("AC-1", { kind: "numeric_compare", left: before, operator: "lt", right: after })]) });
-    expect(stepBlock(out.source, "AC-1")).toMatch(/\.poll\(\(\) => readNumber\(.*\), \{ message \}\)\.toBeGreaterThan\(fact1 \?\? Number\.NaN\);/);
+    expect(stepBlock(out.source, "AC-1")).toMatch(/\.poll\(\(\) => readNumberOrZero\(.*\), \{ message \}\)\.toBeGreaterThan\(fact1 \?\? Number\.NaN\);/);
+  });
+
+  it("numeric_compare replays empty cart quantities as zero, but keeps non-counter numbers nullable", () => {
+    for (const key of ["cartQuantity", "price"]) {
+      const facts = shopFacts().map((f) => f.key === "cartCount" ? { ...f, key, value: f.checkpoint === "before_add" ? null : f.value } : f);
+      const out = compile({ facts, requirement: requirementOf([
+        criterion("AC-1", { kind: "numeric_compare", left: { ...after, key }, operator: "gt", right: { ...before, key } }),
+      ]) });
+      expect(out.compiledCriteria).toContain("AC-1");
+      const reader = key === "cartQuantity" ? "readNumberOrZero" : "readNumber";
+      expect(out.source).toContain(`const fact1 = await ${reader}(page.getByTestId(`);
+      expect(stepBlock(out.source, "AC-1")).toContain(`.poll(() => ${reader}(page.getByTestId(`);
+    }
   });
 
   it("collection_contains → the list is read like the fact reader (children's text) and searched with the verifier's matching", () => {

@@ -17,6 +17,7 @@ import {
   type TestDataValue,
   type TestPlan,
 } from "@platform/contracts";
+import { usesEmptyCounterZero } from "../shared/empty-counter";
 import { NAMEABLE_ROLES } from "../shared/locator-policy";
 import { assertSafeSource } from "./ast-guard";
 import { HELPERS_SOURCE } from "./helpers-template";
@@ -325,7 +326,7 @@ class Compiler {
         itemSelector = fact.read.itemSelector ?? null;
       }
       if (!allowed(path[0]!).includes(kind)) return `${label} was read as ${kind}, which this assertion cannot replay`;
-      if (outcome.kind === "numeric_delta" && kind === "number") kind = "number_or_zero";
+      if (usesEmptyCounterZero(outcome, ref) && kind === "number") kind = "number_or_zero";
       reads.push({ ref, kind, candidate, itemSelector, position, scenario });
     }
 
@@ -374,7 +375,11 @@ class Compiler {
           this.helpers.add("trackActionRequests");
           const action = ident(`action${++this.actionCount}`);
           w.line(`const ${action} = trackActionRequests(page);`);
-          this.withLocator(w, step.element!, `Step ${step.index} (act)`, (l) => `await ${l}.click();`);
+          // A search without a submit button was submitted with Enter in its field (R1).
+          const press = step.actMethod === "press_enter";
+          this.withLocator(w, step.element!, `Step ${step.index} (${press ? "press Enter" : "act"})`, (l) =>
+            press ? `await ${l}.press(${lit("Enter")});` : `await ${l}.click();`,
+          );
           w.line(`await ${action}();`);
           return;
         }

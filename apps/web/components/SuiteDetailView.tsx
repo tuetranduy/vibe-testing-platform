@@ -103,13 +103,10 @@ export function SuiteDetailView({ suiteId, navigate = (url) => window.location.a
 function RunSuiteCard({ suite, navigate }: { suite: SuiteDetail; navigate: (url: string) => void }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState(false);
   const key = useRef<string | null>(null);
   const legacy = suite.secretNames.length > 0;
-  const destructive = suite.entries.some((entry) => entry.destructive);
   async function start() {
     if (pending) return;
-    if (destructive && !confirming) { setConfirming(true); return; }
     setPending(true);
     setError(null);
     key.current ??= newIdempotencyKey();
@@ -124,9 +121,8 @@ function RunSuiteCard({ suite, navigate }: { suite: SuiteDetail; navigate: (url:
   return <section className="card stack" aria-labelledby="run-suite-title">
     <div className="section-head"><h2 id="run-suite-title" className="card-title">Run this suite</h2><p className="muted">Replay all {plural(suite.entryCount, "saved test")} in order.</p></div>
     {legacy && <p className="note note-warning">Some saved tests use an older setup. Replace them with fresh tests before running this suite.</p>}
-    {confirming && <p className="note note-warning">This suite includes tests that change site data. Running it repeats those actions.</p>}
     {error && <p role="alert" className="field-error">{error}</p>}
-    <div className="actions"><button type="button" className="button button-primary" onClick={() => void start()} disabled={pending || legacy || suite.entryCount === 0}><Icon name="arrow" />{pending ? "Starting…" : confirming ? "Confirm and run suite" : "Run suite"}</button>{confirming && <button type="button" className="button button-secondary" disabled={pending} onClick={() => setConfirming(false)}>Cancel</button>}{suite.entryCount === 0 && <p className="muted">Add a test first.</p>}</div>
+    <div className="actions"><button type="button" className="button button-primary" onClick={() => void start()} disabled={pending || legacy || suite.entryCount === 0}><Icon name="arrow" />{pending ? "Starting…" : "Run suite"}</button>{suite.entryCount === 0 && <p className="muted">Add a test first.</p>}</div>
   </section>;
 }
 

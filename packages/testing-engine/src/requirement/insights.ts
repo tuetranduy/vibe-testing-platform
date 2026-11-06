@@ -11,6 +11,7 @@ import {
   isCredentialKey,
   isEmailKey,
   type SiteCheck,
+  type SitePage,
   type TestDataSuggestion,
   type TestDataValue,
 } from "@platform/contracts";
@@ -30,6 +31,8 @@ export interface InsightsSource {
   secretNames: string[];
   /** Pages of the live site were read (the model's site checks and "from the site" values mean something). */
   siteRead: boolean;
+  /** The pages read (their link inventories pick a product name for a search term, KI-071). Absent: none. */
+  pages?: readonly SitePage[];
   /** Seeds the generator (the run id: reproducible per run). */
   seed: string;
   /** The run redactor: a value that carries a secret value is dropped, never masked into a suggestion. */
@@ -78,7 +81,13 @@ export function validateInsights(src: InsightsSource): RequirementInsights {
     // same address every time, and an account registered with it once is "already taken" for every later run.
     const madeUpEmail = fromModel !== undefined && !(fromModel.fromSite && src.siteRead) && isEmailKey(key);
     if (fromModel && !madeUpEmail) {
-      const value = typeof fromModel.value === "string" ? fromModel.value.trim() : fromModel.value;
+      let value = typeof fromModel.value === "string" ? fromModel.value.trim() : fromModel.value;
+      // A search term must name a product, or the search finds nothing (KI-071: "Lemonade", a gallery heading on a
+      // CMS page): a term that is no product link's text is replaced by the first product the pages link to.
+      if (src.siteRead && isSearchTermKey(key, hint) && typeof value === "string") {
+        const products = productNames(src.pages ?? []);
+        if (products.length > 0 && !products.some((p) => p.toLowerCase() === String(value).toLowerCase())) value = products[0]!;
+      }
       testData.push({
         key,
         value,
@@ -92,6 +101,45 @@ export function validateInsights(src: InsightsSource): RequirementInsights {
     if (generated !== null) testData.push({ key, value: generated, description: clip(description || `A value for ${key}`, 300), source: "GENERATED" });
   }
   return { checks, testData };
+}
+
+/**
+ * A product id as a URL's last path segment: digits, optionally after a short prefix and with a variant suffix
+ * (941044, SW10095.1, SW10100, 42), or a slug ending in one (iphone-17-pro-1234). Not a hash
+ * (/navigation/1ccd9d102a684e38b56eb32abece80eb) nor a single digit (Product-listing-1).
+ */
+const PRODUCT_ID = /^(?:[A-Za-z]{0,4}\d{2,12}(?:[._-]\d{1,4})?|[\p{L}\p{N}-]+-\d{2,12})$/u;
+
+const SEARCH_WORDS = new Set(["search", "query", "keyword", "keywords", "term", "q"]);
+
+/** A test data key for what is typed into a search: searchTerm, query, keyword, q, … (or its hint says so). */
+export function isSearchTermKey(key: string, hint = ""): boolean {
+  const words = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(/[\s_-]+/);
+  return words.some((w) => SEARCH_WORDS.has(w)) || /\bsearch (?:term|query|word)\b/i.test(hint);
+}
+
+/**
+ * The names of the products the pages link to, in page order: a main-area link whose URL's last path segment is a
+ * product id (PRODUCT_ID: /Fred-3-Burner-Gas-Grill/941044, /Hawaii-sea-salt-Black-Lava/SW10092.1, /products/42) and
+ * whose text is a short name. Categories ("/Products/Product-listing-1/"), CMS and navigation pages do not qualify.
+ */
+export function productNames(pages: readonly SitePage[]): string[] {
+  const out: string[] = [];
+  for (const page of pages) {
+    for (const link of page.inventory.links) {
+      if (link.area !== "main") continue;
+      const text = link.text.replace(/\s+/g, " ").trim();
+      if (text.length < 3 || text.length > 60) continue;
+      let last = "";
+      try {
+        last = new URL(link.url, page.url).pathname.split("/").filter(Boolean).at(-1) ?? "";
+      } catch {
+        continue;
+      }
+      if (PRODUCT_ID.test(last) && !out.includes(text)) out.push(text);
+    }
+  }
+  return out;
 }
 
 /** A suggested value the platform can use: valid, finite, and not carrying one of the run's secret values. */
