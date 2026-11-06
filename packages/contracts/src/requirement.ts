@@ -118,6 +118,7 @@ export const NormalizedRequirementSchema = z
     runId: z.string(),
     revision: z.number().int().min(1),
     originalText: z.string(),
+    title: z.string().trim().min(3).max(120).nullable().optional(),
     criteria: z.array(AcceptanceCriterionSchema).min(1).max(20),
     facts: z.array(FactRequestSchema).max(60),
     confirmedAt: IsoDateTime.nullable(),

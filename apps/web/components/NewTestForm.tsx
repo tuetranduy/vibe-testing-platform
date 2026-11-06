@@ -1,1084 +1,177 @@
 "use client";
 
-import {
-  CreateTestRunRequestSchema,
-  DataKeySchema,
-  extractInlineInputs,
-  generateTestDataValue,
-  HttpUrlSchema,
-  SecretNameSchema,
-  type CreateTestRunRequestInput,
-  type LlmOverride,
-  type LlmSettingsView,
-  type ReasoningLevel,
-  type CredentialProfile,
-  type TestDataSet,
-} from "@platform/contracts";
+import { CreateTestRunRequestSchema, HttpUrlSchema, type CreateTestRunRequestInput, type LlmSettingsView, type ReasoningLevel } from "@platform/contracts";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import {
-  ApiRequestError,
-  createRun,
-  getCriteria,
-  getLlmSettings,
-  getRun,
-  getSuggestions,
-  listCredentialProfiles,
-  listTestDataSets,
-} from "../lib/api";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { ApiRequestError, createRun, getCriteria, getLlmSettings, getRun, getSuggestions } from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
-import { ComposerMenu, type MenuOption } from "./ComposerMenu";
-import { Icon, type IconName } from "./Icon";
-import { LEVEL_LABEL, modelDefaultLabel, modelGroups } from "./llm-format";
-import { plural } from "./report-format";
+import { Icon } from "./Icon";
+import { LEVEL_LABEL, modelGroups } from "./llm-format";
 
-interface DataRow {
-  id: number;
-  key: string;
-  value: string;
-}
-interface SecretRow {
-  id: number;
-  name: string;
-  value: string;
-}
-interface Options {
-  maxExplorationSteps: string;
-  maxRunSeconds: string;
-  generatePlaywright: boolean;
-  rerunGeneratedTest: boolean;
-  autoConfirmCriteria: boolean;
-  allowDestructiveActions: boolean;
-  confirmProductionHost: string;
-  additionalAllowedHosts: string;
-  useExplorationCache: boolean;
-  recordVideo: boolean;
-  recordTrace: boolean;
-  analyzeLiveSite: boolean;
-}
 type Errors = Record<string, string>;
-interface Banner {
-  title: string;
-  message: string;
-  link?: { href: string; label: string };
-}
-/** The model catalog and defaults (GET /v1/settings/llm), for the Model and Reasoning selects. */
-type Catalog = { status: "loading" } | { status: "ready"; view: LlmSettingsView } | { status: "failed" };
-
-const DEFAULT_OPTIONS: Options = {
-  maxExplorationSteps: "40",
-  maxRunSeconds: "300",
-  generatePlaywright: true,
-  rerunGeneratedTest: true,
-  autoConfirmCriteria: false,
-  allowDestructiveActions: false,
-  confirmProductionHost: "",
-  additionalAllowedHosts: "",
-  useExplorationCache: true,
-  recordVideo: true,
-  recordTrace: true,
-  analyzeLiveSite: true,
-};
-
-const MSG = {
-  url: "Enter an http:// or https:// URL, without a username or password.",
-  requirement: "Describe the requirement in at least 10 characters, or leave it empty for suggestions.",
-  dataKey: "Start with a letter; use letters, digits or _ (up to 64).",
-  secretName: "Start with a lowercase letter; use a–z, 0–9 or _ (up to 32).",
-  secretValue: "Enter at least 4 characters.",
-  secretMissing: "Enter the secret value.",
-  duplicate: "This name is already used.",
-  credentialKey: "This looks like a credential: enter it under Secrets, where it is encrypted — no value is generated.",
-  generateNeedsKey: "Enter a key first: the value is generated from it.",
-  confirmHost: (host: string) => `Type ${host} exactly to confirm.`,
-};
-
-// Field ids double as error keys, so a server issue path maps straight onto a field.
-const fid = {
-  url: "targetUrl",
-  requirement: "requirement",
-  dataKey: (id: number) => `testData-${id}-key`,
-  secretName: (id: number) => `secret-${id}-name`,
-  secretValue: (id: number) => `secret-${id}-value`,
-  option: (name: string) => `options-${name}`,
-  llm: (name: "model" | "reasoning") => `llm-${name}`,
-  testDataSet: "testDataSetId",
-  credentialProfile: "credentialProfileId",
-};
-
-/** The actions mode, chosen in the requirement box like Claude Code's permission mode. */
-const ACTION_MODES: MenuOption<"safe" | "destructive">[] = [
-  { value: "safe", label: "Safe actions", hint: "Deleting, ordering, paying and other lasting changes are blocked" },
-  { value: "destructive", label: "Destructive allowed", hint: "The test may create, change or delete data, place orders and pay" },
+const EXAMPLES = [
+  { label: "Search", icon: "search" as const, text: "Search for a product and check that the results match the search term." },
+  { label: "Shopping cart", icon: "layers" as const, text: "Add a product to the cart and check that the total includes its price." },
+  { label: "Navigation", icon: "globe" as const, text: "Open the main navigation links and check that each page has the expected heading." },
 ];
 
-/** What each reasoning level trades, as the Reasoning menu says it. */
-const LEVEL_HINT: Record<Exclude<ReasoningLevel, "default">, string> = {
-  minimal: "Fastest: little or no thinking",
-  low: "Faster and cheaper",
-  medium: "Balanced",
-  high: "Most thorough: slower and costlier",
-};
-
-/** The URL's host as the API compares it (lowercase, with a non-default port), or null while the URL is invalid. */
-function hostOf(url: string): string | null {
-  return HttpUrlSchema.safeParse(url).success ? new URL(url).host : null;
-}
-
-/** The body's `llm`: only what the user changed from the defaults ("" = the default). */
-function llmOverride(model: string, reasoning: ReasoningLevel | ""): LlmOverride | undefined {
-  if (!model && !reasoning) return undefined;
-  return { ...(model ? { model } : {}), ...(reasoning ? { reasoning } : {}) };
-}
-
-function build(
-  targetUrl: string,
-  requirement: string,
-  environment: "staging" | "production",
-  data: DataRow[],
-  secrets: SecretRow[],
-  options: Options,
-): { errors: Errors; body: CreateTestRunRequestInput } {
-  const errors: Errors = {};
-  const url = targetUrl.trim();
-  if (!HttpUrlSchema.safeParse(url).success) errors[fid.url] = MSG.url;
-  // Empty is allowed: the run explores the website and suggests tests (spec 2026-09-28-suggest-tests).
-  const text = requirement.trim();
-  if (text.length > 0 && text.length < 10) errors[fid.requirement] = MSG.requirement;
-
-  const testData: Record<string, string> = {};
-  for (const row of data) {
-    const key = row.key.trim();
-    if (!key && !row.value) continue; // empty rows are omitted
-    if (!DataKeySchema.safeParse(key).success) errors[fid.dataKey(row.id)] = MSG.dataKey;
-    else if (key in testData) errors[fid.dataKey(row.id)] = MSG.duplicate;
-    else testData[key] = row.value;
-  }
-
-  const secretValues: Record<string, string> = {};
-  for (const row of secrets) {
-    const name = row.name.trim();
-    if (!name && !row.value) continue;
-    if (!SecretNameSchema.safeParse(name).success) errors[fid.secretName(row.id)] = MSG.secretName;
-    else if (name in secretValues) errors[fid.secretName(row.id)] = MSG.duplicate;
-    if (!row.value) errors[fid.secretValue(row.id)] = MSG.secretMissing;
-    else if (row.value.length < 4) errors[fid.secretValue(row.id)] = MSG.secretValue;
-    if (!errors[fid.secretName(row.id)] && !errors[fid.secretValue(row.id)]) secretValues[name] = row.value;
-  }
-
-  // Production needs the target host typed as confirmation; the API enforces the same rule.
-  const confirming = environment === "production" && options.allowDestructiveActions;
-  const host = hostOf(url);
-  if (confirming && host !== null && options.confirmProductionHost.trim().toLowerCase() !== host) {
-    errors[fid.option("confirmProductionHost")] = MSG.confirmHost(host);
-  }
-
-  const int = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN);
-  const body: CreateTestRunRequestInput = {
-    targetUrl: url,
-    requirement: requirement.trim(),
-    environment,
-    testData,
-    secrets: secretValues,
-    options: {
-      maxExplorationSteps: int(options.maxExplorationSteps),
-      maxRunSeconds: int(options.maxRunSeconds),
-      generatePlaywright: options.generatePlaywright,
-      rerunGeneratedTest: options.generatePlaywright && options.rerunGeneratedTest,
-      autoConfirmCriteria: options.autoConfirmCriteria,
-      // Sent only when turned off: absent means on (V1.1).
-      ...(options.useExplorationCache ? {} : { useExplorationCache: false }),
-      // Sent only when turned off: absent means on (V1.3).
-      ...(options.recordVideo ? {} : { recordVideo: false }),
-      ...(options.recordTrace ? {} : { recordTrace: false }),
-      ...(options.analyzeLiveSite ? {} : { analyzeLiveSite: false }),
-      allowDestructiveActions: options.allowDestructiveActions,
-      // Only sent when there is a non-empty value to confirm: a valid URL with an empty value is
-      // already refused above, and an empty string here would otherwise surface the contract's raw
-      // min(1) message once the confirmation field renders (it doesn't exist yet while the URL is invalid).
-      ...(confirming && options.confirmProductionHost.trim() !== "" ? { confirmProductionHost: options.confirmProductionHost.trim() } : {}),
-      additionalAllowedHosts: options.additionalAllowedHosts
-        .split(/[\s,]+/)
-        .map((h) => h.trim())
-        .filter(Boolean),
-    },
-  };
-
-  // The contract schema is the final word (option bounds, host names, cross-field rules).
-  const parsed = CreateTestRunRequestSchema.safeParse(body);
-  if (!parsed.success) {
-    for (const issue of parsed.error.issues) {
-      const [head, name] = issue.path;
-      const field = head === "options" && typeof name === "string" ? fid.option(name) : null;
-      if (field && !errors[field]) errors[field] = OPTION_MSG[name as string] ?? issue.message;
-    }
-  }
-  return { errors, body };
-}
-
-const OPTION_MSG: Record<string, string> = {
-  maxExplorationSteps: "Enter a whole number from 1 to 100.",
-  maxRunSeconds: "Enter a whole number from 60 to 1800.",
-  additionalAllowedHosts: "Enter up to 10 host names, such as login.example.com.",
-};
-
-/** Starting points for an empty requirement; each fills in a full sentence to edit. */
-/** What a pre-filled form says it copied (test data and secrets never are). */
-const PREFILL_NOTICE = {
-  criteria: "Copied the website and requirement from your earlier run. Test data and secrets must be entered again — they are never copied.",
-  suggestion: "Copied the website and the suggested test from your earlier run. Test data and secrets must be entered again — they are never copied.",
-  url: "Copied the website from your earlier run. Test data and secrets must be entered again — they are never copied.",
-} as const;
-type Copied = keyof typeof PREFILL_NOTICE;
-
-const EXAMPLES = [
-  { label: "Adding to cart updates the total", text: "A user can add a product to the cart, and the cart total updates to include its price." },
-  { label: "Sign-in opens the account page", text: "A user can sign in with valid credentials and lands on their account page." },
-  { label: "Search lists matching products", text: "Searching for a product name lists only products whose names contain it." },
-] as const;
-
-/** Maps server validation issues (400) onto the fields they name. */
-function issuesToErrors(err: ApiRequestError): Errors {
-  const errors: Errors = {};
-  for (const issue of err.issues ?? []) {
-    const [head, name] = issue.path;
-    if (head === "targetUrl" || head === "requirement" || head === "testDataSetId" || head === "credentialProfileId") errors[head] = issue.message;
-    else if (head === "options" && typeof name === "string") errors[fid.option(name)] = issue.message;
-  }
-  return errors;
-}
-
-let nextRowId = 1;
-
-/**
- * `from`: an earlier run to start over from (its website and requirement are copied in); with
- * `suggestion`, one of that run's suggested tests is copied instead of its requirement.
- */
+/** A test starts with two inputs. Execution settings are optional; legacy data/credential inputs are never copied. */
 export function NewTestForm({ from = null, suggestion = null }: { from?: string | null; suggestion?: string | null } = {}) {
   const router = useRouter();
-  const formRef = useRef<HTMLFormElement>(null);
-  const requirementRef = useRef<HTMLTextAreaElement>(null);
+  const form = useRef<HTMLFormElement>(null);
+  const prompt = useRef<HTMLTextAreaElement>(null);
   const [targetUrl, setTargetUrl] = useState("");
   const [requirement, setRequirement] = useState("");
-  /**
-   * Pre-fill from an earlier run: its URL, plus the requirement it tested (its criteria's text) or,
-   * with `suggestion`, that suggested test's text. A run that never got criteria (it ended while
-   * exploring for test ideas or at "Choose what to test") gives its URL only.
-   */
-  const [prefill, setPrefill] = useState<"loading" | Copied | "failed" | null>(from ? "loading" : null);
+  const [mode, setMode] = useState<"describe" | "explore">("describe");
+  const [catalog, setCatalog] = useState<LlmSettingsView | null>(null);
+  const [catalogFailed, setCatalogFailed] = useState(false);
+  const [model, setModel] = useState("");
+  const [reasoning, setReasoning] = useState<ReasoningLevel | "">("");
+  const [maxRunSeconds, setMaxRunSeconds] = useState("300");
+  const [maxSteps, setMaxSteps] = useState("40");
+  const [autoConfirm, setAutoConfirm] = useState(false);
+  const [rerun, setRerun] = useState(true);
+  const [destructive, setDestructive] = useState(false);
+  const [confirmedHost, setConfirmedHost] = useState("");
+  const [hosts, setHosts] = useState("");
+  const [errors, setErrors] = useState<Errors>({});
+  const [banner, setBanner] = useState<{ message: string; settings?: boolean } | null>(null);
+  const [pending, setPending] = useState(false);
+  const [prefill, setPrefill] = useState<"loading" | "ready" | "error" | null>(from ? "loading" : null);
+  const key = useRef<{ fingerprint: string; value: string } | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    getLlmSettings().then((v) => live && setCatalog(v), () => live && setCatalogFailed(true));
+    return () => { live = false; };
+  }, []);
+
   useEffect(() => {
     if (!from) return;
     let live = true;
-    const text: Promise<{ copied: Copied; requirement: string }> = suggestion
+    const copied = suggestion
       ? getSuggestions(from).then((set) => {
           const chosen = set.suggestions.find((s) => s.id === suggestion);
-          if (!chosen) throw new Error(`Suggestion ${suggestion} not found`);
-          return { copied: "suggestion" as const, requirement: chosen.requirement };
+          if (!chosen) throw new Error("Test idea no longer available");
+          return chosen.requirement;
         })
-      : getCriteria(from).then(
-          (req) => ({ copied: "criteria" as const, requirement: req.originalText }),
-          (err: unknown) => {
-            // 409: the run has no criteria — it never got past choosing what to test.
-            if (err instanceof ApiRequestError && err.status === 409) return { copied: "url" as const, requirement: "" };
-            throw err;
-          },
-        );
-    Promise.all([getRun(from), text]).then(
-      ([run, copied]) => {
-        if (!live) return;
-        setTargetUrl((v) => v || run.targetUrl);
-        if (copied.requirement) setRequirement((v) => v || copied.requirement);
-        setPrefill(copied.copied);
-      },
-      () => live && setPrefill("failed"),
-    );
-    return () => {
-      live = false;
-    };
+      : getCriteria(from).then((req) => req.originalText, (err: unknown) => {
+          if (err instanceof ApiRequestError && err.status === 409) return "";
+          throw err;
+        });
+    Promise.all([getRun(from), copied]).then(([run, text]) => {
+      if (!live) return;
+      setTargetUrl((v) => v || run.targetUrl);
+      setRequirement((v) => v || text);
+      if (!text) setMode("explore");
+      setPrefill("ready");
+    }, () => live && setPrefill("error"));
+    return () => { live = false; };
   }, [from, suggestion]);
-  const [environment, setEnvironment] = useState<"staging" | "production">("staging");
-  const [data, setData] = useState<DataRow[]>([]);
-  const [secrets, setSecrets] = useState<SecretRow[]>([]);
-  /** Credentials written in the requirement (V1.3.1): what the server will take from it, previewed as you type. */
-  const inlineFound = extractInlineInputs(requirement, {
-    testData: Object.fromEntries(data.filter((r) => r.key.trim() !== "").map((r) => [r.key.trim(), r.value])),
-    secrets: Object.fromEntries(secrets.filter((r) => r.name.trim() !== "").map((r) => [r.name.trim(), r.value])),
-  }).found;
-  const [options, setOptions] = useState<Options>(DEFAULT_OPTIONS);
-  /** This run's model and level ("" = the default: Settings, else the server's environment). */
-  const [llmModel, setLlmModel] = useState("");
-  const [llmReasoning, setLlmReasoning] = useState<ReasoningLevel | "">("");
-  const [catalog, setCatalog] = useState<Catalog>({ status: "loading" });
-  /** Saved test data sets (V1.1): offered only once loaded; a failed load just hides the choice. */
-  const [dataSets, setDataSets] = useState<TestDataSet[]>([]);
-  const [dataSetId, setDataSetId] = useState("");
-  /** Saved credentials (V1.1): names only; likewise hidden when they can't be loaded. */
-  const [profiles, setProfiles] = useState<CredentialProfile[]>([]);
-  const [profileId, setProfileId] = useState("");
-  useEffect(() => {
-    let live = true;
-    listTestDataSets().then(
-      (sets) => live && setDataSets(sets),
-      () => {},
-    );
-    listCredentialProfiles().then(
-      (ps) => live && setProfiles(ps),
-      () => {},
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
-  useEffect(() => {
-    let live = true;
-    getLlmSettings().then(
-      (view) => live && setCatalog({ status: "ready", view }),
-      () => live && setCatalog({ status: "failed" }),
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
-  const [errors, setErrors] = useState<Errors>({});
 
-  /**
-   * Fills a test data row with a fictional value generated from its key (V1.3). A new seed each time, so
-   * "Generate" again gives a new value; a credential-like key gets none (it belongs under Secrets).
-   */
-  function generateValue(row: DataRow) {
-    const key = row.key.trim();
-    const field = fid.dataKey(row.id);
-    const value = key === "" ? null : generateTestDataValue(key, { seed: `${Date.now()}-${Math.random()}` });
-    if (value === null) {
-      setErrors((prev) => ({ ...prev, [field]: key === "" ? MSG.generateNeedsKey : MSG.credentialKey }));
-      return;
-    }
-    setErrors((prev) => {
-      const { [field]: _cleared, ...rest } = prev;
-      return rest;
-    });
-    setData((rows) => rows.map((r) => (r.id === row.id ? { ...r, value: String(value) } : r)));
-  }
-  const [banner, setBanner] = useState<Banner | null>(null);
-  const [pending, setPending] = useState(false);
-  /** Secret values were wiped after a failed submit and must be typed again. */
-  const [secretsCleared, setSecretsCleared] = useState(false);
-  /**
-   * One Idempotency-Key per request: a retry after a lost response must replay the run it may have
-   * created, not start a second one. A new key only once the request changes. The fingerprint
-   * holds secret names, never their values (those are re-entered for every attempt).
-   */
-  const idempotency = useRef<{ key: string; fingerprint: string } | null>(null);
-  const keyFor = (body: CreateTestRunRequestInput) => {
-    const fingerprint = JSON.stringify({ ...body, secrets: Object.keys(body.secrets ?? {}).sort() });
-    if (idempotency.current?.fingerprint !== fingerprint) idempotency.current = { key: newIdempotencyKey(), fingerprint };
-    return idempotency.current.key;
-  };
+  const effectiveModel = catalog?.models.find((m) => m.id === (model || catalog.defaults.model));
+  const levels = effectiveModel?.reasoningLevels.filter((l) => l !== "default") ?? [];
+  const host = HttpUrlSchema.safeParse(targetUrl.trim()).success ? new URL(targetUrl.trim()).host : null;
+  const errorFor = (id: string) => errors[id] ? <p id={`${id}-error`} className="field-error"><Icon name="error" /> {errors[id]}</p> : null;
+  const invalid = (id: string) => ({ "aria-invalid": errors[id] ? true as const : undefined, "aria-describedby": errors[id] ? `${id}-error` : undefined });
 
-  /** Focuses the first invalid field in document order (opening Advanced options if it's in there). */
-  const focusFirstError = (errs: Errors) => {
-    const fields = Array.from(formRef.current?.elements ?? []) as HTMLElement[];
-    const first = fields.find((el) => el.id && el.id in errs);
+  function showErrors(next: Errors) {
+    setErrors(next);
+    const first = Array.from(form.current?.elements ?? []).find((el) => (el as HTMLElement).id in next) as HTMLElement | undefined;
     const details = first?.closest("details");
     if (details) details.open = true;
     first?.focus();
-  };
+  }
 
-  const setOption = <K extends keyof Options>(name: K, value: Options[K]) => setOptions((o) => ({ ...o, [name]: value }));
-
-  /** The rerun setting from before destructive actions were allowed, restored when they are unticked. */
-  const rerunBeforeDestructive = useRef<boolean | null>(null);
-  const toggleDestructive = (allow: boolean) => {
-    if (allow) {
-      rerunBeforeDestructive.current = options.rerunGeneratedTest;
-      setOptions((o) => ({ ...o, allowDestructiveActions: true, rerunGeneratedTest: false }));
-    } else {
-      const rerun = rerunBeforeDestructive.current ?? options.rerunGeneratedTest;
-      rerunBeforeDestructive.current = null;
-      setOptions((o) => ({ ...o, allowDestructiveActions: false, rerunGeneratedTest: rerun }));
-    }
-  };
-  const host = hostOf(targetUrl.trim());
-  const rerunOn = options.generatePlaywright && options.rerunGeneratedTest;
-
-  /** The model the Reasoning select describes: the one chosen, else the default one (when it is in the catalog). */
-  const effectiveModel = catalog.status === "ready" ? catalog.view.models.find((m) => m.id === (llmModel || catalog.view.defaults.model)) : undefined;
-  const levels = (effectiveModel?.reasoningLevels ?? []).filter((l): l is Exclude<ReasoningLevel, "default"> => l !== "default");
-  const defaults = catalog.status === "ready" ? catalog.view.defaults : null;
-  const modelOptions: MenuOption<string>[] = [
-    { value: "", label: defaults ? `Default (${defaults.label})` : "Default", hint: "The default model in Settings" },
-    ...(catalog.status === "ready"
-      ? modelGroups(catalog.view.models).flatMap((g) =>
-          g.models.map((m) => ({ value: m.id, label: m.label, group: g.label, disabled: !m.available, ...(m.available ? {} : { hint: "Add a key in Settings" }) })),
-        )
-      : []),
-  ];
-  const modelDisplay = (llmModel && catalog.status === "ready" ? catalog.view.models.find((m) => m.id === llmModel)?.label : null) ?? defaults?.label ?? "Default model";
-  const reasoningOptions: MenuOption<ReasoningLevel | "">[] = [
-    { value: "", label: "Default", hint: modelDefaultLabel(effectiveModel) },
-    ...levels.map((l) => ({ value: l, label: LEVEL_LABEL[l], hint: LEVEL_HINT[l] })),
-  ];
-  const chooseModel = (id: string) => {
-    setLlmModel(id);
-    const next = catalog.status === "ready" ? catalog.view.models.find((m) => m.id === (id || catalog.view.defaults.model)) : undefined;
-    // A level the newly chosen model does not take goes back to Default.
-    if (llmReasoning && !next?.reasoningLevels.includes(llmReasoning)) setLlmReasoning("");
-  };
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function submit(event: FormEvent) {
+    event.preventDefault();
     if (pending) return;
-    const { errors: errs, body } = build(targetUrl, requirement, environment, data, secrets, options);
-    const llm = llmOverride(llmModel, llmReasoning);
-    if (llm) body.llm = llm;
-    if (dataSetId) body.testDataSetId = dataSetId;
-    if (profileId) body.credentialProfileId = profileId;
-    setErrors(errs);
     setBanner(null);
-    if (Object.keys(errs).length > 0) {
-      focusFirstError(errs);
-      return;
+    const body: CreateTestRunRequestInput = {
+      targetUrl: targetUrl.trim(), requirement: mode === "explore" ? "" : requirement.trim(),
+      // Environment is an internal compatibility field. Every UI run uses the stricter action policy.
+      environment: "production",
+      options: {
+        maxRunSeconds: Number(maxRunSeconds), maxExplorationSteps: Number(maxSteps),
+        generatePlaywright: true, rerunGeneratedTest: rerun, autoConfirmCriteria: autoConfirm,
+        allowDestructiveActions: destructive,
+        ...(destructive && confirmedHost.trim() ? { confirmProductionHost: confirmedHost.trim() } : {}),
+        additionalAllowedHosts: hosts.split(/[\s,]+/).filter(Boolean),
+      },
+      ...((model || reasoning) ? { llm: { ...(model ? { model } : {}), ...(reasoning ? { reasoning } : {}) } } : {}),
+    };
+    const next: Errors = {};
+    if (mode === "describe" && requirement.trim().length < 10) next.requirement = "Describe what to check in at least 10 characters, or choose Find test ideas.";
+    const parsed = CreateTestRunRequestSchema.safeParse(body);
+    if (!parsed.success) for (const issue of parsed.error.issues) {
+      const id = issue.path[0] === "options" || issue.path[0] === "llm" ? String(issue.path[1]) : String(issue.path[0]);
+      next[id] ??= issue.message;
     }
-
+    if (!HttpUrlSchema.safeParse(body.targetUrl).success) next.targetUrl = "Enter a full website URL, such as https://example.com.";
+    if (Object.keys(next).length) { showErrors(next); return; }
+    showErrors({});
+    const fingerprint = JSON.stringify(body);
+    if (key.current?.fingerprint !== fingerprint) key.current = { fingerprint, value: newIdempotencyKey() };
     setPending(true);
-    // Secret values leave component state as soon as the request is built (success or failure);
-    // names stay so they can be re-entered after an error.
-    setSecrets((rows) => rows.map((r) => ({ ...r, value: "" })));
     try {
-      const created = await createRun(body, keyFor(body));
+      const created = await createRun(body, key.current.value);
       router.push(`/runs/${encodeURIComponent(created.runId)}`);
-      idempotency.current = null;
     } catch (err) {
       setPending(false);
-      setSecretsCleared(secrets.some((r) => r.value));
-      if (!(err instanceof ApiRequestError)) {
-        // A bug in the page, not a server answer: keep it visible to whoever debugs it. The error
-        // comes from our own code, never from the request body, so it carries no secret values.
-        console.error("New test: unexpected client-side error", err);
-        setBanner({
-          title: "The test couldn't be started",
-          message: "Something went wrong in the browser (details are in the console). Please try again.",
-        });
-        return;
-      }
-      if (err.code === "TARGET_NOT_ALLOWED") {
-        const next = { [fid.url]: err.message };
-        setErrors(next);
-        focusFirstError(next);
-      } else if (err.code === "IDEMPOTENCY_CONFLICT") {
-        // An earlier attempt with these details reached the server with different secret values.
-        idempotency.current = null;
-        setBanner({
-          title: "This test may already have started",
-          message: "An earlier attempt reached the server. Check Test runs before starting it again; submitting again starts a new run.",
-        });
-      } else if (err.code === "MODEL_NOT_AVAILABLE") {
-        const field = err.issues?.[0]?.path[1];
-        if (field === "model" || field === "reasoning") {
-          const next = { [fid.llm(field)]: err.message };
-          setErrors(next);
-          focusFirstError(next);
-        } else {
-          // The defaults are at fault (e.g. their provider's key was removed): only Settings can fix that.
-          setBanner({ title: "The default model can't be used", message: err.message, link: { href: "/settings", label: "Open Settings" } });
-        }
-      } else if (err.code === "TOO_MANY_ACTIVE_RUNS") {
-        setBanner({ title: "Can't start another run yet", message: `${err.message}. You can cancel a run or try again later.` });
-      } else if (
-        ["VALIDATION_FAILED", "TEST_DATA_SET_NOT_FOUND", "CREDENTIAL_PROFILE_NOT_FOUND", "CREDENTIAL_PROFILE_UNREADABLE"].includes(err.code) &&
-        Object.keys(issuesToErrors(err)).length > 0
-      ) {
-        const next = issuesToErrors(err);
-        setErrors(next);
-        focusFirstError(next);
-      } else {
-        setBanner({ title: "The test couldn't be started", message: err.message });
-      }
+      if (err instanceof ApiRequestError) {
+        if (err.code === "TARGET_NOT_ALLOWED") { showErrors({ targetUrl: err.message }); return; }
+        if (err.code === "IDEMPOTENCY_CONFLICT") key.current = null;
+        const fields = Object.fromEntries((err.issues ?? []).map((i) => [String(i.path.at(-1)), i.message]));
+        if (Object.keys(fields).length) showErrors(fields);
+        setBanner({ message: err.message, settings: err.code === "MODEL_NOT_AVAILABLE" });
+      } else setBanner({ message: "The test couldn’t be started. Please try again." });
     }
   }
 
-  const describedBy = (id: string, hint?: string) =>
-    [hint, errors[id] ? `${id}-error` : null].filter(Boolean).join(" ") || undefined;
-  const fieldError = (id: string) =>
-    errors[id] ? (
-      <p id={`${id}-error`} className="field-error">
-        <Icon name="error" /> {errors[id]}
-      </p>
-    ) : null;
-
-  const dataCount = data.filter((r) => r.key.trim() || r.value).length;
-  const dataSet = dataSets.find((s) => s.id === dataSetId);
-  const profile = profiles.find((p) => p.id === profileId);
-  const secretCount = secrets.filter((r) => r.name.trim()).length;
-
-  /** Fills the requirement from an example; focus moves to it, since the example buttons go away. */
-  const applyExample = (text: string) => {
-    setRequirement(text);
-    requirementRef.current?.focus();
-  };
-
   return (
-    <form ref={formRef} className="composer" noValidate onSubmit={onSubmit} aria-busy={pending}>
+    <form ref={form} className="composer simple-composer" onSubmit={submit} noValidate aria-busy={pending}>
       <div className="composer-body">
-        {(prefill === "criteria" || prefill === "suggestion" || prefill === "url") && (
-          <div role="status" className="banner banner-info">
-            <Icon name="info" />
-            <div>
-              <p>{PREFILL_NOTICE[prefill]}</p>
-            </div>
-          </div>
-        )}
-        {prefill === "failed" && (
-          <div role="status" className="banner banner-warning">
-            <Icon name="warning" />
-            <div>
-              <p>Couldn&apos;t load the earlier run; fill in the form below.</p>
-            </div>
-          </div>
-        )}
-        {banner && (
-          <div role="alert" className="banner banner-error">
-            <Icon name="warning" />
-            <div>
-              <p className="banner-title">{banner.title}</p>
-              <p>{banner.message}</p>
-              {banner.link && (
-                <p>
-                  <a href={banner.link.href}>{banner.link.label}</a>
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-
-        <div className="field">
-          <label htmlFor={fid.url}>Website URL</label>
-          <div className="input-with-icon">
-            <Icon name="globe" />
-            <input
-              id={fid.url}
-              name="targetUrl"
-              type="url"
-              inputMode="url"
-              autoComplete="url"
-              spellCheck={false}
-              placeholder="https://shop.example.com"
-              value={targetUrl}
-              onChange={(e) => setTargetUrl(e.target.value)}
-              aria-invalid={errors[fid.url] ? true : undefined}
-              aria-describedby={describedBy(fid.url, "targetUrl-hint")}
-            />
-          </div>
-          <p id="targetUrl-hint" className="hint">
-            The page the test starts from.
-          </p>
-          {fieldError(fid.url)}
+        {prefill === "ready" && <p role="status" className="note note-info">Website and instructions copied from your earlier run.</p>}
+        {prefill === "error" && <p role="status" className="note note-warning">Couldn’t load the earlier run. You can start a new test below.</p>}
+        {banner && <div role="alert" className="banner banner-error"><Icon name="warning" /><div><p>{banner.message}</p>{banner.settings && <a href="/settings">Choose an available model in Settings</a>}</div></div>}
+        <div className="field setup-field">
+          <label htmlFor="targetUrl"><span className="field-number">1</span> Which website?</label>
+          <div className="input-with-icon"><Icon name="globe" /><input id="targetUrl" type="url" inputMode="url" autoComplete="url" placeholder="https://your-website.com" value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} {...invalid("targetUrl")} /></div>
+          {errorFor("targetUrl")}
         </div>
-
-        <div className="field">
-          <label htmlFor={fid.requirement}>Requirement (optional)</label>
-          <div className="prompt-box">
-            <textarea
-              ref={requirementRef}
-              id={fid.requirement}
-              name="requirement"
-              rows={4}
-              placeholder="Verify that a user can search for an iPhone, add it to the cart, and see it in the cart."
-              value={requirement}
-              onChange={(e) => setRequirement(e.target.value)}
-              aria-invalid={errors[fid.requirement] ? true : undefined}
-              aria-describedby={describedBy(fid.requirement, "requirement-hint")}
-            />
-            {requirement === "" && (
-              <div className="prompt-examples" role="group" aria-label="Examples to start from">
-                <span className="examples-label" aria-hidden="true">
-                  Try
-                </span>
-                {EXAMPLES.map((ex) => (
-                  <button key={ex.label} type="button" className="example-chip" onClick={() => applyExample(ex.text)}>
-                    {ex.label}
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="prompt-toolbar" role="group" aria-label="Model and actions">
-              {catalog.status === "failed" ? (
-                <span className="prompt-toolbar-note">
-                  <Icon name="info" /> Model choices couldn&apos;t be loaded; the default model will be used.
-                </span>
-              ) : (
-                <>
-                  <ComposerMenu
-                    id={fid.llm("model")}
-                    label="Model"
-                    icon="sparkle"
-                    value={llmModel}
-                    display={modelDisplay}
-                    options={modelOptions}
-                    onChange={chooseModel}
-                    disabled={catalog.status !== "ready"}
-                    invalid={Boolean(errors[fid.llm("model")])}
-                    describedBy={describedBy(fid.llm("model"))}
-                  />
-                  {levels.length > 0 && (
-                    <ComposerMenu<ReasoningLevel | "">
-                      id={fid.llm("reasoning")}
-                      label="Reasoning"
-                      icon="gauge"
-                      value={llmReasoning}
-                      display={llmReasoning && llmReasoning !== "default" ? LEVEL_LABEL[llmReasoning] : "Default"}
-                      options={reasoningOptions}
-                      onChange={setLlmReasoning}
-                      invalid={Boolean(errors[fid.llm("reasoning")])}
-                      describedBy={describedBy(fid.llm("reasoning"))}
-                    />
-                  )}
-                </>
-              )}
-              <span className="prompt-toolbar-spacer" />
-              <ComposerMenu
-                id={fid.option("allowDestructiveActions")}
-                label="Actions"
-                icon={options.allowDestructiveActions ? "warning" : "shield"}
-                value={options.allowDestructiveActions ? "destructive" : "safe"}
-                display={options.allowDestructiveActions ? "Destructive allowed" : "Safe actions"}
-                options={ACTION_MODES}
-                onChange={(mode) => toggleDestructive(mode === "destructive")}
-                tone={options.allowDestructiveActions ? "warning" : undefined}
-                align="end"
-              />
-            </div>
+        <div className="setup-field">
+          <p className="field-label"><span className="field-number">2</span> What would you like to test?</p>
+          <div className="test-mode" role="group" aria-label="How to start">
+            <button type="button" aria-pressed={mode === "describe"} onClick={() => setMode("describe")}><Icon name="file" /><span>Describe a test</span></button>
+            <button type="button" aria-pressed={mode === "explore"} onClick={() => setMode("explore")}><Icon name="sparkle" /><span>Find test ideas</span></button>
           </div>
-          <p id="requirement-hint" className="hint">
-            One behaviour per test works best: name the page, the action, and what you expect to see. Leave it empty and the agent
-            explores the website and suggests what to test.
-          </p>
-          {inlineFound.length > 0 && (
-            <p className="hint" role="status">
-              <Icon name="key" /> Taken from your requirement and used in the test:{" "}
-              {inlineFound
-                .map((f) => (f.kind === "secret" ? `${f.name} (kept as a secret; removed from the text before it is stored)` : `${f.name} (test data)`))
-                .join(", ")}
-              .
-            </p>
-          )}
-          {fieldError(fid.requirement)}
-          {fieldError(fid.llm("model"))}
-          {fieldError(fid.llm("reasoning"))}
+          {mode === "describe" ? <div className="field">
+            <label className="visually-hidden" htmlFor="requirement">Test instructions</label>
+            <textarea ref={prompt} id="requirement" rows={5} placeholder="For example: Search for a product, add it to the cart, and check that the total updates." value={requirement} onChange={(e) => setRequirement(e.target.value)} {...invalid("requirement")} />
+            {errorFor("requirement")}
+            <div className="example-row" role="group" aria-label="Example tests"><span className="hint">Try an example</span>{EXAMPLES.map((ex) => <button key={ex.label} type="button" className="example-chip" onClick={() => { setRequirement(ex.text); prompt.current?.focus(); }}><Icon name={ex.icon} />{ex.label}</button>)}</div>
+          </div> : <div className="explore-intro"><Icon name="sparkle" /><div><strong>Let the agent find a starting point.</strong><p>It explores your website and suggests useful tests. Choose an idea, review the checks, and start when you’re ready.</p></div></div>}
         </div>
-
-        <fieldset className="field">
-          <legend>Environment</legend>
-          <div className="env-row">
-            <div className="segmented">
-              {(["staging", "production"] as const).map((env) => (
-                <label key={env} className="segment">
-                  <input
-                    type="radio"
-                    className="segment-input"
-                    name="environment"
-                    value={env}
-                    checked={environment === env}
-                    onChange={() => setEnvironment(env)}
-                  />
-                  {env === "staging" ? "Staging" : "Production"}
-                </label>
-              ))}
-            </div>
-            <p className="hint">
-              {options.allowDestructiveActions
-                ? "Destructive actions are allowed for this run (Actions in the requirement box)."
-                : "Destructive actions are blocked unless you allow them with Actions in the requirement box."}
-            </p>
-          </div>
-        </fieldset>
-        {options.allowDestructiveActions &&
-          options.generatePlaywright &&
-          (rerunOn ? (
-            <p className="hint hint-warning">
-              <Icon name="warning" /> Destructive actions will run twice: once while exploring and again in the rerun.
-            </p>
-          ) : (
-            <p className="hint">
-              <Icon name="info" /> Rerun is off: it repeats the whole test, so destructive actions would run a second time. You can turn it
-              back on.
-            </p>
-          ))}
-        {environment === "production" && options.allowDestructiveActions && (
-          <div className="danger-panel">
-            {host === null ? (
-              <p>Enter the website URL first.</p>
-            ) : (
-              <>
-                <p>
-                  This run can create, change or delete real data and place real orders or payments on <strong>{host}</strong>.
-                </p>
-                <div className="field">
-                  <label htmlFor={fid.option("confirmProductionHost")}>
-                    Type <strong>{host}</strong> to confirm
-                  </label>
-                  <input
-                    id={fid.option("confirmProductionHost")}
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={options.confirmProductionHost}
-                    onChange={(e) => setOption("confirmProductionHost", e.target.value)}
-                    aria-invalid={errors[fid.option("confirmProductionHost")] ? true : undefined}
-                    aria-describedby={describedBy(fid.option("confirmProductionHost"))}
-                  />
-                  {fieldError(fid.option("confirmProductionHost"))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
       </div>
-
-      <div className="form-sections">
-        <FormSection
-          icon="data"
-          title="Test data"
-          description="Values the test may type, such as a search term. Empty rows are ignored."
-          summary={[dataSet?.name, dataCount === 0 ? (dataSet ? null : "None") : plural(dataCount, "value")].filter(Boolean).join(" + ")}
-        >
-          {dataSets.length > 0 && (
-            <div className="field saved-picker">
-              <label htmlFor={fid.testDataSet}>Saved test data set</label>
-              <select
-                id={fid.testDataSet}
-                value={dataSetId}
-                onChange={(e) => setDataSetId(e.target.value)}
-                aria-invalid={errors[fid.testDataSet] ? true : undefined}
-                aria-describedby={`${fid.testDataSet}-hint${errors[fid.testDataSet] ? ` ${fid.testDataSet}-error` : ""}`}
-              >
-                <option value="">None</option>
-                {dataSets.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-              <p id={`${fid.testDataSet}-hint`} className="hint">
-                {dataSet
-                  ? `Adds ${Object.keys(dataSet.values).join(", ") || "no values"}. A value you enter below with the same key wins.`
-                  : "Start from values saved under Settings → Test data."}
-              </p>
-              {fieldError(fid.testDataSet)}
-            </div>
-          )}
-          {data.map((row, i) => (
-            <div key={row.id} className="row">
-              <div className="row-cell">
-                <label className="visually-hidden" htmlFor={fid.dataKey(row.id)}>
-                  Test data {i + 1} key
-                </label>
-                <input
-                  id={fid.dataKey(row.id)}
-                  placeholder="Key, e.g. searchTerm"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={row.key}
-                  onChange={(e) => setData((rows) => rows.map((r) => (r.id === row.id ? { ...r, key: e.target.value } : r)))}
-                  aria-invalid={errors[fid.dataKey(row.id)] ? true : undefined}
-                  aria-describedby={describedBy(fid.dataKey(row.id))}
-                />
-                {fieldError(fid.dataKey(row.id))}
-              </div>
-              <div className="row-cell">
-                <label className="visually-hidden" htmlFor={`testData-${row.id}-value`}>
-                  Test data {i + 1} value
-                </label>
-                <input
-                  id={`testData-${row.id}-value`}
-                  placeholder="Value"
-                  autoComplete="off"
-                  value={row.value}
-                  onChange={(e) => setData((rows) => rows.map((r) => (r.id === row.id ? { ...r, value: e.target.value } : r)))}
-                />
-              </div>
-              <button type="button" className="button button-quiet" onClick={() => generateValue(row)}>
-                Generate<span className="visually-hidden"> a value for test data {i + 1}</span>
-              </button>
-              <button
-                type="button"
-                className="button button-quiet"
-                onClick={() => setData((rows) => rows.filter((r) => r.id !== row.id))}
-              >
-                Remove<span className="visually-hidden"> test data {i + 1}</span>
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => setData((rows) => [...rows, { id: nextRowId++, key: "", value: "" }])}
-          >
-            <Icon name="plus" />
-            Add test data
-          </button>
-        </FormSection>
-
-        <FormSection
-          icon="lock"
-          title="Secrets"
-          description="Credentials such as a password: encrypted at rest and deleted when the run ends. They are shown as typed in the run's evidence and report."
-          summary={[profile?.name, secretCount === 0 ? (profile ? null : "None") : plural(secretCount, "secret")].filter(Boolean).join(" + ")}
-        >
-          {profiles.length > 0 && (
-            <div className="field saved-picker">
-              <label htmlFor={fid.credentialProfile}>Saved credentials</label>
-              <select
-                id={fid.credentialProfile}
-                value={profileId}
-                onChange={(e) => setProfileId(e.target.value)}
-                aria-invalid={errors[fid.credentialProfile] ? true : undefined}
-                aria-describedby={`${fid.credentialProfile}-hint${errors[fid.credentialProfile] ? ` ${fid.credentialProfile}-error` : ""}`}
-              >
-                <option value="">None</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <p id={`${fid.credentialProfile}-hint`} className="hint">
-                {profile
-                  ? `Provides ${profile.secretNames.join(", ")}. A secret you enter below with the same name wins.`
-                  : "Use a test account saved under Settings → Credentials."}
-              </p>
-              {fieldError(fid.credentialProfile)}
-            </div>
-          )}
-          <p className="hint">
-            <Icon name="lock" /> Secrets are filled in by the platform, never by the AI.
-          </p>
-          {secretsCleared && secrets.length > 0 && (
-            <p className="hint">
-              <Icon name="info" /> Secret values are cleared after every submit, so enter them again before retrying.
-            </p>
-          )}
-          {secrets.map((row, i) => (
-            <div key={row.id} className="row">
-              <div className="row-cell">
-                <label className="visually-hidden" htmlFor={fid.secretName(row.id)}>
-                  Secret {i + 1} name
-                </label>
-                <input
-                  id={fid.secretName(row.id)}
-                  placeholder="Name, e.g. password"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={row.name}
-                  onChange={(e) => setSecrets((rows) => rows.map((r) => (r.id === row.id ? { ...r, name: e.target.value } : r)))}
-                  aria-invalid={errors[fid.secretName(row.id)] ? true : undefined}
-                  aria-describedby={describedBy(fid.secretName(row.id))}
-                />
-                {fieldError(fid.secretName(row.id))}
-              </div>
-              <div className="row-cell">
-                <label className="visually-hidden" htmlFor={fid.secretValue(row.id)}>
-                  Secret {i + 1} value
-                </label>
-                <input
-                  id={fid.secretValue(row.id)}
-                  type="password"
-                  placeholder="Value"
-                  autoComplete="new-password"
-                  spellCheck={false}
-                  value={row.value}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setSecrets((rows) => rows.map((r) => (r.id === row.id ? { ...r, value } : r)));
-                  }}
-                  aria-invalid={errors[fid.secretValue(row.id)] ? true : undefined}
-                  aria-describedby={describedBy(fid.secretValue(row.id))}
-                />
-                {fieldError(fid.secretValue(row.id))}
-              </div>
-              <button
-                type="button"
-                className="button button-quiet"
-                onClick={() => setSecrets((rows) => rows.filter((r) => r.id !== row.id))}
-              >
-                Remove<span className="visually-hidden"> secret {i + 1}</span>
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => setSecrets((rows) => [...rows, { id: nextRowId++, name: "", value: "" }])}
-          >
-            <Icon name="plus" />
-            Add secret
-          </button>
-        </FormSection>
-
-        <FormSection
-          icon="sliders"
-          title="Advanced options"
-          description="Step and time limits, the Playwright test, recordings, confirmation and extra hosts."
-          summary={optionsSummary(options)}
-        >
+      <details className="simple-options">
+        <summary><span><Icon name="sliders" /> Run settings <span className="muted">· optional</span></span><Icon name="chevron" /></summary>
+        <div className="stack">
           <div className="field-pair">
-            <div className="field">
-              <label htmlFor={fid.option("maxExplorationSteps")}>Max exploration steps</label>
-              <input
-                id={fid.option("maxExplorationSteps")}
-                inputMode="numeric"
-                value={options.maxExplorationSteps}
-                onChange={(e) => setOption("maxExplorationSteps", e.target.value)}
-                aria-invalid={errors[fid.option("maxExplorationSteps")] ? true : undefined}
-                aria-describedby={describedBy(fid.option("maxExplorationSteps"))}
-              />
-              {fieldError(fid.option("maxExplorationSteps"))}
-            </div>
-            <div className="field">
-              <label htmlFor={fid.option("maxRunSeconds")}>Max run time (seconds)</label>
-              <input
-                id={fid.option("maxRunSeconds")}
-                inputMode="numeric"
-                value={options.maxRunSeconds}
-                onChange={(e) => setOption("maxRunSeconds", e.target.value)}
-                aria-invalid={errors[fid.option("maxRunSeconds")] ? true : undefined}
-                aria-describedby={describedBy(fid.option("maxRunSeconds"))}
-              />
-              {fieldError(fid.option("maxRunSeconds"))}
-            </div>
+            <div className="field"><label htmlFor="model">AI model</label><select id="model" value={model} disabled={!catalog} onChange={(e) => { setModel(e.target.value); setReasoning(""); }} {...invalid("model")}><option value="">{catalog ? `Default · ${catalog.defaults.label}` : "Default model"}</option>{catalog && modelGroups(catalog.models).map((group) => <optgroup key={group.label} label={group.label}>{group.models.map((m) => <option key={m.id} value={m.id} disabled={!m.available}>{m.label}{m.available ? "" : " · add a key in Settings"}</option>)}</optgroup>)}</select>{errorFor("model")}{catalogFailed && <p className="hint">Model choices couldn’t be loaded. The default model will be used.</p>}</div>
+            <div className="field"><label htmlFor="reasoning">Thinking level</label><select id="reasoning" value={reasoning} onChange={(e) => setReasoning(e.target.value as ReasoningLevel | "")} {...invalid("reasoning")}><option value="">Model default</option>{levels.map((level) => <option key={level} value={level}>{LEVEL_LABEL[level]}</option>)}</select>{errorFor("reasoning")}</div>
           </div>
-
-          <label className="choice">
-            <input
-              type="checkbox"
-              checked={options.generatePlaywright}
-              onChange={(e) => setOption("generatePlaywright", e.target.checked)}
-            />
-            Generate a Playwright test
-          </label>
-          <label className="choice">
-            <input
-              type="checkbox"
-              checked={options.generatePlaywright && options.rerunGeneratedTest}
-              disabled={!options.generatePlaywright}
-              onChange={(e) => setOption("rerunGeneratedTest", e.target.checked)}
-            />
-            Rerun the generated test to confirm results
-          </label>
-          <label className="choice">
-            <input
-              type="checkbox"
-              checked={options.useExplorationCache}
-              onChange={(e) => setOption("useExplorationCache", e.target.checked)}
-            />
-            Reuse element lookups from earlier runs (faster and cheaper; each is checked against the page first)
-          </label>
-          <label className="choice">
-            <input type="checkbox" checked={options.analyzeLiveSite} onChange={(e) => setOption("analyzeLiveSite", e.target.checked)} />
-            Read the live website before writing the criteria (a few pages; nothing is clicked, typed or submitted)
-          </label>
-          <label className="choice">
-            <input type="checkbox" checked={options.recordVideo} onChange={(e) => setOption("recordVideo", e.target.checked)} />
-            Record a video of the exploration and of the rerun
-          </label>
-          <label className="choice">
-            <input type="checkbox" checked={options.recordTrace} onChange={(e) => setOption("recordTrace", e.target.checked)} />
-            Record a Playwright trace of the exploration and of the rerun (secrets are removed from it)
-          </label>
-          <label className="choice">
-            <input
-              type="checkbox"
-              checked={options.autoConfirmCriteria}
-              onChange={(e) => setOption("autoConfirmCriteria", e.target.checked)}
-            />
-            Confirm criteria automatically (skip the review step)
-          </label>
-          <div className="field">
-            <label htmlFor={fid.option("additionalAllowedHosts")}>Additional allowed hosts</label>
-            <p id="hosts-hint" className="hint">
-              Other host names the test may visit, separated by commas or spaces (e.g. a login provider).
-            </p>
-            <input
-              id={fid.option("additionalAllowedHosts")}
-              spellCheck={false}
-              autoComplete="off"
-              value={options.additionalAllowedHosts}
-              onChange={(e) => setOption("additionalAllowedHosts", e.target.value)}
-              aria-invalid={errors[fid.option("additionalAllowedHosts")] ? true : undefined}
-              aria-describedby={describedBy(fid.option("additionalAllowedHosts"), "hosts-hint")}
-            />
-            {fieldError(fid.option("additionalAllowedHosts"))}
+          <div className="field-pair">
+            <div className="field"><label htmlFor="maxRunSeconds">Time limit (seconds)</label><input id="maxRunSeconds" type="number" min={60} max={1800} value={maxRunSeconds} onChange={(e) => setMaxRunSeconds(e.target.value)} {...invalid("maxRunSeconds")} />{errorFor("maxRunSeconds")}</div>
+            <div className="field"><label htmlFor="maxExplorationSteps">Step limit</label><input id="maxExplorationSteps" type="number" min={1} max={100} value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} {...invalid("maxExplorationSteps")} />{errorFor("maxExplorationSteps")}</div>
           </div>
-        </FormSection>
-      </div>
-
-      <div className="composer-footer">
-        <p className="composer-note">
-          <Icon name="shield" /> Runs in a sandboxed browser.{" "}
-          {options.autoConfirmCriteria ? "Its criteria are confirmed automatically." : "You confirm the criteria before it starts."}
-        </p>
-        <button type="submit" className="button button-primary button-lg" disabled={pending}>
-          {pending ? "Starting…" : requirement.trim() === "" ? "Explore and suggest tests" : "Start test"}
-          <Icon name="arrow" />
-        </button>
-      </div>
+          <label className="choice"><input type="checkbox" checked={rerun} onChange={(e) => setRerun(e.target.checked)} />Verify results by rerunning the saved test</label>
+          <label className="choice"><input type="checkbox" checked={autoConfirm} onChange={(e) => setAutoConfirm(e.target.checked)} />Start immediately after planning (skip review)</label>
+          <div className="field"><label htmlFor="additionalAllowedHosts">Other website hosts</label><input id="additionalAllowedHosts" placeholder="login.example.com, help.example.com" value={hosts} onChange={(e) => setHosts(e.target.value)} {...invalid("additionalAllowedHosts")} /><p className="hint">Only needed if the test moves to another host.</p>{errorFor("additionalAllowedHosts")}</div>
+          <label className="choice"><input type="checkbox" checked={destructive} onChange={(e) => { setDestructive(e.target.checked); setRerun(!e.target.checked); setConfirmedHost(""); }} />Allow actions that change or delete site data</label>
+          {destructive && <div className="note note-warning"><p>This test may change real data. {rerun ? "Rerunning repeats these actions." : "Automatic rerun is off."}</p><div className="field"><label htmlFor="confirmProductionHost">Type {host ?? "the website host"} to confirm</label><input id="confirmProductionHost" value={confirmedHost} onChange={(e) => setConfirmedHost(e.target.value)} autoComplete="off" {...invalid("confirmProductionHost")} />{errorFor("confirmProductionHost")}</div></div>}
+        </div>
+      </details>
+      <div className="composer-footer"><p className="composer-note"><Icon name="shield" />{autoConfirm ? "The test starts after planning." : "Review the checks before the test runs."}</p><button className="button button-primary button-lg" type="submit" disabled={pending || prefill === "loading"}>{pending ? "Starting…" : mode === "explore" ? "Explore website" : "Create test"}<Icon name="arrow" /></button></div>
     </form>
   );
-}
-
-/**
- * An optional part of the form, collapsed to one line that says what is set. Kept in the DOM while
- * collapsed, so values survive and `focusFirstError` can open it to show an invalid field.
- */
-function FormSection({
-  icon,
-  title,
-  description,
-  summary,
-  children,
-}: {
-  icon: IconName;
-  title: string;
-  description: string;
-  summary: string;
-  children: ReactNode;
-}) {
-  const titleId = useId();
-  return (
-    <details className="form-section">
-      <summary>
-        <span className="form-section-icon" aria-hidden="true">
-          <Icon name={icon} />
-        </span>
-        <span className="form-section-text">
-          <span id={titleId} className="form-section-title">
-            {title}
-          </span>
-          <span className="form-section-desc">{description}</span>
-        </span>
-        <span className="form-section-summary">{summary}</span>
-        <Icon name="chevron" className="form-section-chevron" />
-      </summary>
-      <div className="form-section-body" role="group" aria-labelledby={titleId}>
-        {children}
-      </div>
-    </details>
-  );
-}
-
-/** "40 steps · 5 min · rerun on": the advanced options at a glance (only the values that parse). */
-function optionsSummary(o: Options): string {
-  const whole = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : null);
-  const steps = whole(o.maxExplorationSteps);
-  const seconds = whole(o.maxRunSeconds);
-  const parts = [
-    steps !== null ? plural(steps, "step") : null,
-    seconds !== null ? (seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds}s`) : null,
-    !o.generatePlaywright ? "no Playwright test" : o.rerunGeneratedTest ? "rerun on" : "no rerun",
-    o.autoConfirmCriteria ? "auto-confirm" : null,
-    o.useExplorationCache ? null : "no cache",
-    o.recordVideo ? null : "no video",
-    o.recordTrace ? null : "no trace",
-    o.analyzeLiveSite ? null : "no live-site check",
-  ];
-  return parts.filter(Boolean).join(" · ");
 }

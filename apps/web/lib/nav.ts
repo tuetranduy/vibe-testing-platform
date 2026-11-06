@@ -11,8 +11,6 @@ export const MAIN_NAV: readonly { href: string; label: string; icon: IconName }[
 /** Settings' sections. Users and API tokens are shown to administrators only. */
 export const SETTINGS_NAV = [
   { href: "/settings", label: "AI models", admin: false },
-  { href: "/settings/credentials", label: "Credentials", admin: false },
-  { href: "/settings/test-data", label: "Test data", admin: false },
   { href: "/settings/users", label: "Users", admin: true },
   { href: "/settings/tokens", label: "API tokens", admin: true },
 ] as const;

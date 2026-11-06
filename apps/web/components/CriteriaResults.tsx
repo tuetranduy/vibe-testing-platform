@@ -2,6 +2,7 @@
 
 import type { AcceptanceCriterion, CriterionResult, NormalizedRequirement, TestReport } from "@platform/contracts";
 import { useState } from "react";
+import { reviewResult } from "../lib/api";
 import type { ArtifactInfo, StepInfo } from "../lib/progress-reducer";
 import { CriterionDetail } from "./CriterionDetail";
 import { Icon } from "./Icon";
@@ -17,10 +18,11 @@ interface Props {
   steps: ReadonlyMap<string, StepInfo>;
   /** A partial report: say the run stopped when there are no results. */
   partial?: boolean;
+  onReview?: (report: TestReport) => void;
 }
 
 /** The criterion-centric results: one row per criterion, each expandable into its evidence. */
-export function CriteriaResults({ runId, criteria, requirement, diagnostics, artifacts, steps, partial = false }: Props) {
+export function CriteriaResults({ runId, criteria, requirement, diagnostics, artifacts, steps, partial = false, onReview }: Props) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const byId = new Map((requirement?.criteria ?? []).map((c) => [c.id, c]));
   const toggle = (id: string) =>
@@ -48,6 +50,7 @@ export function CriteriaResults({ runId, criteria, requirement, diagnostics, art
               key={r.criterionId}
               runId={runId}
               result={r}
+              onReview={onReview}
               criterion={byId.get(r.criterionId) ?? null}
               expanded={open.has(r.criterionId)}
               onToggle={() => toggle(r.criterionId)}
@@ -68,12 +71,26 @@ interface RowProps {
   criterion: AcceptanceCriterion | null;
   expanded: boolean;
   onToggle(): void;
+  onReview?: (report: TestReport) => void;
   diagnostics: TestReport["diagnostics"];
   artifacts: ReadonlyMap<string, ArtifactInfo>;
   steps: ReadonlyMap<string, StepInfo>;
 }
 
-function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnostics, artifacts, steps }: RowProps) {
+function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnostics, artifacts, steps, onReview }: RowProps) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const decide = async (status: "PASS" | "FAIL") => {
+    setPending(true);
+    setError(null);
+    try {
+      onReview?.(await reviewResult(runId, r.criterionId, status));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The review could not be saved.");
+    } finally {
+      setPending(false);
+    }
+  };
   const toggleId = `criterion-${r.criterionId}-toggle`;
   const detailId = `criterion-${r.criterionId}-detail`;
   const decided = r.status === "PASS" || r.status === "FAIL";
@@ -124,6 +141,15 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
         </div>
       </div>
 
+      {r.review && <p className="hint">Automated result: Inconclusive — {reasonText(r.review.originalReason)}. Reviewed {new Date(r.review.reviewedAt).toLocaleString()}.</p>}
+      {r.status === "INCONCLUSIVE" && onReview && (
+        <div className="actions" aria-label={`Review ${r.criterionId}`}>
+          <button type="button" className="button button-secondary" disabled={pending} onClick={() => decide("PASS")}>Mark as pass</button>
+          <button type="button" className="button button-danger-quiet" disabled={pending} onClick={() => decide("FAIL")}>Mark as fail</button>
+          {pending && <span role="status">Saving review…</span>}
+          {error && <p role="alert">{error}</p>}
+        </div>
+      )}
       {r.aiNote && (
         <div role="note" aria-label={r.verdictSource === "AI_JUDGMENT" ? "AI reasoning" : "AI note"} className="ai-note">
           <p className="ai-note-title">

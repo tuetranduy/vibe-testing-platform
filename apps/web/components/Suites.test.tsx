@@ -68,25 +68,22 @@ describe("SuiteDetailView", () => {
     ...extra,
   });
 
-  it("runs the suite, asking only for the secrets nothing saved provides, and opens the suite run", async () => {
-    const fetch = api(
-      routes(suiteFixture({ secretNames: ["password", "username"], missingSecretNames: ["password"] }), {
-        "POST /api/v1/suites/ste_1/runs": () => json(202, { suiteRunId: "srn_9", runIds: ["run_x"] }),
-      }),
-    );
+  it("runs a suite directly without manual setup", async () => {
+    const fetch = api(routes(suiteFixture(), { "POST /api/v1/suites/ste_1/runs": () => json(202, { suiteRunId: "srn_9", runIds: ["run_x"] }) }));
     const navigate = vi.fn();
-    const user = userEvent.setup();
     render(<SuiteDetailView suiteId="ste_1" navigate={navigate} />);
-    await user.click(await screen.findByRole("button", { name: "Run suite" }));
-    expect(screen.queryByLabelText("username")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Run 1 test" }));
-    expect(screen.getByText("Enter password, or choose saved credentials that have it.")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("password"), "typed-secret");
-    await user.click(screen.getByRole("button", { name: "Run 1 test" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Run suite" }));
     const call = fetch.mock.calls.find((c) => String(c[0]) === "/api/v1/suites/ste_1/runs")!;
-    expect(call[1]!.body).toBe(JSON.stringify({ secrets: { password: "typed-secret" } }));
-    expect((call[1]!.headers as Record<string, string>)["idempotency-key"]).toMatch(/.+/);
+    expect(call[1]?.body).toBe("{}");
     expect(navigate).toHaveBeenCalledWith("/suite-runs/srn_9");
+  });
+
+  it("explains older tests without offering retired credential inputs", async () => {
+    api(routes(suiteFixture({ secretNames: ["password"], missingSecretNames: ["password"] })));
+    render(<SuiteDetailView suiteId="ste_1" navigate={vi.fn()} />);
+    expect(await screen.findByRole("button", { name: "Run suite" })).toBeDisabled();
+    expect(screen.queryByLabelText("password")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Saved credentials")).not.toBeInTheDocument();
   });
 
   it("moves and removes tests", async () => {

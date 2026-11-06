@@ -1,931 +1,137 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getLlmSettings, listCredentialProfiles, listTestDataSets } from "../lib/api";
-import { json, llmSettingsFixture, requirementFixture, suggestionsFixture, summaryFixture } from "../test/fixtures";
+import { getLlmSettings } from "../lib/api";
+import { json, llmSettingsFixture, requirementFixture, summaryFixture } from "../test/fixtures";
 import { NewTestForm } from "./NewTestForm";
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
-// The model catalog loads on mount; stubbing it here keeps `fetch` (and its call order) for the run requests.
-vi.mock("../lib/api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../lib/api")>()),
-  getLlmSettings: vi.fn(),
-  // Saved test data sets (V1.1) load on mount too; none unless a test says otherwise.
-  listTestDataSets: vi.fn(async () => []),
-  listCredentialProfiles: vi.fn(async () => []),
-}));
-
-
-function mockFetch(...responses: Response[]) {
-  const fetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => responses.shift() ?? json(500, {}));
+vi.mock("../lib/api", async (original) => ({ ...(await original<typeof import("../lib/api")>()), getLlmSettings: vi.fn() }));
+beforeEach(() => { push.mockReset(); vi.mocked(getLlmSettings).mockResolvedValue(llmSettingsFixture()); });
+const created = () => json(202, { runId: "run_new", lifecycle: "QUEUED", eventsUrl: "/events" });
+function api(...answers: (Response | Error)[]) {
+  const fetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => {
+    const answer = answers.shift() ?? created();
+    if (answer instanceof Error) throw answer;
+    return answer;
+  });
   vi.stubGlobal("fetch", fetch);
   return fetch;
 }
-
-async function fillValid(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText(/website url/i), "https://shop.example.com");
-  await user.type(screen.getByLabelText(/requirement/i), "A user can add a product to the cart.");
+const payload = (fetch: ReturnType<typeof api>, index = 0) => JSON.parse(String(fetch.mock.calls[index]?.[1]?.body));
+async function fill() {
+  const user = userEvent.setup();
+  await user.type(screen.getByLabelText(/Which website/), "https://shop.example.com");
+  await user.type(screen.getByLabelText("Test instructions"), "Search for a product and verify the results.");
+  return user;
 }
+const create = () => screen.getByRole("button", { name: "Create test" });
 
-const bodyOf = (fetch: ReturnType<typeof mockFetch>, call = 0) => JSON.parse(String(fetch.mock.calls[call]![1]!.body));
-
-beforeEach(() => {
-  push.mockReset();
-  vi.mocked(getLlmSettings).mockResolvedValue(llmSettingsFixture());
-  vi.mocked(listTestDataSets).mockResolvedValue([]);
-  vi.mocked(listCredentialProfiles).mockResolvedValue([]);
-});
-
-describe("NewTestForm", () => {
-  it("requires an http(s) URL", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch();
+describe("simple test setup", () => {
+  it("shows two inputs and no environment, secret or data setup", async () => {
+    const fetch = api();
     render(<NewTestForm />);
-    await user.type(screen.getByLabelText(/website url/i), "ftp://shop.example.com");
-    await user.type(screen.getByLabelText(/requirement/i), "A user can add a product to the cart.");
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    const url = screen.getByLabelText(/website url/i);
-    expect(url).toHaveAttribute("aria-invalid", "true");
-    expect(url).toHaveAccessibleDescription(/http/i);
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Secrets$|^Test data$|^Environment$|Saved credentials/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Run settings/).closest("details")).not.toHaveAttribute("open");
+    await waitFor(() => expect(getLlmSettings).toHaveBeenCalled());
     expect(fetch).not.toHaveBeenCalled();
   });
-
-  it("requires a requirement of at least 10 characters", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch();
-    render(<NewTestForm />);
-    await user.type(screen.getByLabelText(/website url/i), "https://shop.example.com");
-    await user.type(screen.getByLabelText(/requirement/i), "too short");
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    expect(screen.getByLabelText(/requirement/i)).toHaveAccessibleDescription(/at least 10 characters/i);
+  it("creates a test using the stricter internal action policy and no manual input fields", async () => {
+    const fetch = api(); render(<NewTestForm />);
+    const user = await fill(); await user.click(create());
+    expect(payload(fetch)).toMatchObject({ targetUrl: "https://shop.example.com", requirement: "Search for a product and verify the results.", environment: "production", options: { allowDestructiveActions: false, maxRunSeconds: 300, maxExplorationSteps: 40 } });
+    for (const field of ["testData", "secrets", "testDataSetId", "credentialProfileId"]) expect(payload(fetch)).not.toHaveProperty(field);
+    expect(push).toHaveBeenCalledWith("/runs/run_new");
+  });
+  it("validates the URL and moves focus to the first error", async () => {
+    const fetch = api(); render(<NewTestForm />);
+    await userEvent.click(create());
+    expect(screen.getByLabelText(/Which website/)).toHaveFocus();
+    expect(screen.getByLabelText(/Which website/)).toHaveAttribute("aria-invalid", "true");
     expect(fetch).not.toHaveBeenCalled();
   });
-
-  it("submits the request with an idempotency key and opens the run", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch(json(202, { runId: "run_42", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_42/events" }));
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: /add test data/i }));
-    await user.type(screen.getByLabelText(/test data 1 key/i), "searchTerm");
-    await user.type(screen.getByLabelText(/test data 1 value/i), "iPhone");
-    await user.click(screen.getByRole("button", { name: /add test data/i })); // an empty row is omitted
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_42"));
-    const [url, init] = fetch.mock.calls[0]!;
-    expect(url).toBe("/api/v1/test-runs");
-    expect(init!.method).toBe("POST");
-    expect(new Headers(init!.headers).get("idempotency-key")).toMatch(/^[0-9a-f-]{36}$/);
-    expect(bodyOf(fetch)).toMatchObject({
-      targetUrl: "https://shop.example.com",
-      requirement: "A user can add a product to the cart.",
-      environment: "staging",
-      testData: { searchTerm: "iPhone" },
-      secrets: {},
-      options: { autoConfirmCriteria: false, allowDestructiveActions: false },
-    });
-  });
-
-  it("generates a fictional value from a test data key; never for a credential or a blank key (V1.3)", async () => {
-    const user = userEvent.setup();
-    const generate = () => screen.getByRole("button", { name: /^generate\s*a value for test data 1$/i });
-    const fetch = mockFetch(json(202, { runId: "run_42", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_42/events" }));
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByText("Test data")); // open the collapsed section
-    await user.click(screen.getByRole("button", { name: /add test data/i }));
-    await user.click(generate());
-    expect(screen.getByLabelText(/test data 1 key/i)).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByText(/enter a key first/i)).toBeInTheDocument();
-
-    await user.type(screen.getByLabelText(/test data 1 key/i), "password");
-    await user.click(generate());
-    expect(screen.getByText(/looks like a credential/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/test data 1 value/i)).toHaveValue("");
-
-    await user.clear(screen.getByLabelText(/test data 1 key/i));
-    await user.type(screen.getByLabelText(/test data 1 key/i), "email");
-    await user.click(generate());
-    expect((screen.getByLabelText(/test data 1 value/i) as HTMLInputElement).value).toMatch(/^qa\.[a-z0-9]{6}@example\.com$/);
-    expect(screen.getByLabelText(/test data 1 key/i)).not.toHaveAttribute("aria-invalid");
-
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_42"));
-    expect(bodyOf(fetch).testData.email).toMatch(/@example\.com$/);
-  });
-
-  it("sends the V1.3 recording and live-site options only when turned off", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch(
-      json(202, { runId: "run_1", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_1/events" }),
-      json(202, { runId: "run_2", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_2/events" }),
-    );
-    const first = render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(push).toHaveBeenCalled());
-    const defaults = bodyOf(fetch).options;
-    expect(defaults).not.toHaveProperty("recordVideo");
-    expect(defaults).not.toHaveProperty("recordTrace");
-    expect(defaults).not.toHaveProperty("analyzeLiveSite");
-    first.unmount();
-
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByText("Advanced options"));
-    await user.click(screen.getByLabelText(/record a video/i));
-    await user.click(screen.getByLabelText(/record a playwright trace/i));
-    await user.click(screen.getByLabelText(/read the live website/i));
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    expect(bodyOf(fetch, 1).options).toMatchObject({ recordVideo: false, recordTrace: false, analyzeLiveSite: false });
-  });
-
-  it("says which credentials it takes from the requirement (V1.3.1)", async () => {
-    const user = userEvent.setup();
-    mockFetch();
-    render(<NewTestForm />);
-    await user.type(screen.getByLabelText(/requirement/i), "Log in as admin@shop.test with password Adm1n#2026 and see the dashboard.");
-    expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
-      "Taken from your requirement and used in the test: password (kept as a secret; removed from the text before it is stored), email (test data).",
-    );
-  });
-
-  it("validates test data keys with the contract's key rule", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch();
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: /add test data/i }));
-    await user.type(screen.getByLabelText(/test data 1 key/i), "1 bad key");
-    await user.type(screen.getByLabelText(/test data 1 value/i), "x");
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    expect(screen.getByLabelText(/test data 1 key/i)).toHaveAttribute("aria-invalid", "true");
+  it("requires instructions when describing a test", async () => {
+    const fetch = api(); render(<NewTestForm />);
+    await userEvent.type(screen.getByLabelText(/Which website/), "https://shop.example.com");
+    await userEvent.click(create());
+    expect(screen.getByLabelText("Test instructions")).toHaveAccessibleDescription(/at least 10 characters/);
     expect(fetch).not.toHaveBeenCalled();
   });
-
-  it("renders secret values as password inputs and clears them after submit", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch(json(503, { code: "QUEUE_UNAVAILABLE", message: "The run could not be queued; please retry" }));
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: /add secret/i }));
-    const value = screen.getByLabelText(/secret 1 value/i);
-    expect(value).toHaveAttribute("type", "password");
-    expect(value).toHaveAttribute("autocomplete", "new-password"); // never offer or save a stored password
-    await user.type(screen.getByLabelText(/secret 1 name/i), "password");
-    await user.type(value, "hunter2!");
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-
-    await screen.findByRole("alert");
-    expect(bodyOf(fetch).secrets).toEqual({ password: "hunter2!" });
-    expect(screen.getByLabelText(/secret 1 value/i)).toHaveValue("");
-    expect(screen.getByLabelText(/secret 1 name/i)).toHaveValue("password"); // name kept so it can be re-entered
-    expect(screen.getByText(/enter them again/i)).toBeInTheDocument();
-    expect(document.body.innerHTML).not.toContain("hunter2!");
+  it("explicitly explores with an empty requirement and preserves a draft when switching back", async () => {
+    const fetch = api(); render(<NewTestForm />);
+    const user = await fill();
+    await user.click(screen.getByRole("button", { name: "Find test ideas" }));
+    expect(screen.queryByLabelText("Test instructions")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Describe a test" }));
+    expect(screen.getByLabelText("Test instructions")).toHaveValue("Search for a product and verify the results.");
+    await user.click(screen.getByRole("button", { name: "Find test ideas" }));
+    await user.click(screen.getByRole("button", { name: "Explore website" }));
+    expect(payload(fetch).requirement).toBe("");
   });
-
-  it("shows 422 TARGET_NOT_ALLOWED inline on the URL field", async () => {
-    const user = userEvent.setup();
-    mockFetch(
-      json(422, {
-        code: "TARGET_NOT_ALLOWED",
-        message: "Target URL is not allowed: resolves to a private address",
-        issues: [{ path: ["targetUrl"], message: "resolves to a private address" }],
-      }),
-    );
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-
-    const url = screen.getByLabelText(/website url/i);
-    await waitFor(() => expect(url).toHaveAttribute("aria-invalid", "true"));
-    expect(url).toHaveAccessibleDescription(/not allowed.*private address/i);
-    expect(screen.queryByRole("alert", { name: /too many/i })).not.toBeInTheDocument();
-    expect(push).not.toHaveBeenCalled();
+  it("fills and focuses instructions from an example", async () => {
+    api(); render(<NewTestForm />);
+    await userEvent.click(screen.getByRole("button", { name: "Shopping cart" }));
+    expect(screen.getByLabelText("Test instructions")).toHaveFocus();
+    expect((screen.getByLabelText("Test instructions") as HTMLTextAreaElement).value).toContain("cart");
   });
-
-  it("shows 429 TOO_MANY_ACTIVE_RUNS as a banner", async () => {
-    const user = userEvent.setup();
-    mockFetch(json(429, { code: "TOO_MANY_ACTIVE_RUNS", message: "Too many active runs; wait for one to finish" }));
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-
-    const banner = await screen.findByRole("alert");
-    expect(within(banner).getByText(/too many active runs/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/website url/i)).not.toHaveAttribute("aria-invalid", "true");
-    expect(push).not.toHaveBeenCalled();
+  it("reuses the idempotency key after a lost response, and changes it after editing", async () => {
+    const fetch = api(new Error("lost"), new Error("lost"), new Error("lost")); render(<NewTestForm />);
+    const user = await fill();
+    await user.click(create()); await screen.findByRole("alert");
+    await user.click(create()); await screen.findByRole("alert");
+    await user.type(screen.getByLabelText("Test instructions"), " Check the heading too.");
+    await user.click(create());
+    const keys = fetch.mock.calls.map(([, init]) => (init?.headers as Record<string, string>)["idempotency-key"]);
+    expect(keys[0]).toBe(keys[1]); expect(keys[2]).not.toBe(keys[1]);
   });
-
-  it("keeps advanced options collapsed until opened", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch(json(202, { runId: "run_1", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_1/events" }));
-    render(<NewTestForm />);
-    expect(screen.getByLabelText(/confirm criteria automatically/i)).not.toBeVisible();
-    await user.click(screen.getByText("Advanced options"));
-    await user.click(screen.getByLabelText(/confirm criteria automatically/i));
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(push).toHaveBeenCalled());
-    expect(bodyOf(fetch).options.autoConfirmCriteria).toBe(true);
-  });
-
-  it("keeps test data and secrets collapsed, and says what is set in each", async () => {
-    const user = userEvent.setup();
-    render(<NewTestForm />);
-    const dataSection = screen.getByText("Test data").closest("details")!;
-    const secretSection = screen.getByText("Secrets").closest("details")!;
-    expect(dataSection).not.toHaveAttribute("open");
-    expect(secretSection).not.toHaveAttribute("open");
-    expect(within(dataSection).getByRole("button", { name: /add test data/i })).not.toBeVisible();
-    expect(within(dataSection.querySelector("summary")!).getByText("None")).toBeInTheDocument();
-
-    await user.click(screen.getByText("Test data"));
-    expect(dataSection).toHaveAttribute("open");
-    await user.click(within(dataSection).getByRole("button", { name: /add test data/i }));
-    await user.type(screen.getByLabelText(/test data 1 key/i), "searchTerm");
-    expect(within(dataSection.querySelector("summary")!).getByText("1 value")).toBeInTheDocument();
-
-    await user.click(screen.getByText("Secrets"));
-    await user.click(within(secretSection).getByRole("button", { name: /add secret/i }));
-    await user.type(screen.getByLabelText(/secret 1 name/i), "password");
-    expect(within(secretSection.querySelector("summary")!).getByText("1 secret")).toBeInTheDocument();
-  });
-
-  it("summarizes the advanced options while they are collapsed", async () => {
-    const user = userEvent.setup();
-    render(<NewTestForm />);
-    const summary = screen.getByText("Advanced options").closest("summary")!;
-    expect(summary).toHaveTextContent("40 steps · 5 min · rerun on");
-    await user.click(summary);
-    await user.clear(screen.getByLabelText(/max run time/i));
-    await user.type(screen.getByLabelText(/max run time/i), "90");
-    await user.click(screen.getByLabelText(/rerun the generated test/i));
-    expect(summary).toHaveTextContent("40 steps · 90s · no rerun");
-  });
-
-  it("opens a collapsed section to show an invalid field in it", async () => {
-    const user = userEvent.setup();
-    mockFetch();
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByText("Test data"));
-    await user.click(screen.getByRole("button", { name: /add test data/i }));
-    await user.type(screen.getByLabelText(/test data 1 key/i), "1 bad key");
-    await user.click(screen.getByText("Test data")); // collapse it again
-    expect(screen.getByText("Test data").closest("details")).not.toHaveAttribute("open");
-
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    expect(screen.getByText("Test data").closest("details")).toHaveAttribute("open");
-    expect(screen.getByLabelText(/test data 1 key/i)).toHaveFocus();
-  });
-
-  it("offers example requirements while the requirement is empty", async () => {
-    const user = userEvent.setup();
-    render(<NewTestForm />);
-    const examples = screen.getByRole("group", { name: /examples/i });
-    await user.click(within(examples).getByRole("button", { name: "Search lists matching products" }));
-    const requirement = screen.getByLabelText(/requirement/i);
-    expect(requirement).toHaveValue("Searching for a product name lists only products whose names contain it.");
-    expect(requirement).toHaveFocus(); // the example buttons are gone, so focus moves on
-    expect(screen.queryByRole("group", { name: /examples/i })).not.toBeInTheDocument();
-
-    await user.clear(requirement);
-    expect(screen.getByRole("group", { name: /examples/i })).toBeInTheDocument();
-  });
-
-  it("creates a run on an insecure origin, where crypto.randomUUID is unavailable", async () => {
-    const real = globalThis.crypto;
-    vi.stubGlobal("crypto", { getRandomValues: real.getRandomValues.bind(real) });
-    const user = userEvent.setup();
-    const fetch = mockFetch(json(202, { runId: "run_7", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_7/events" }));
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_7"));
-    expect(new Headers(fetch.mock.calls[0]![1]!.headers).get("idempotency-key")).toMatch(/^[0-9a-f-]{36}$/);
-  });
-
-  it("logs an unexpected client-side error and says it happened in the browser", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    push.mockImplementationOnce(() => {
-      throw new Error("router exploded");
-    });
-    const user = userEvent.setup();
-    mockFetch(json(202, { runId: "run_8", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_8/events" }));
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/in the browser/i);
-    expect(error).toHaveBeenCalledWith(expect.stringMatching(/new test/i), expect.objectContaining({ message: "router exploded" }));
-  });
-
-  describe("Idempotency-Key across retries", () => {
-    const keyOf = (fetch: ReturnType<typeof mockFetch>, call: number) => new Headers(fetch.mock.calls[call]![1]!.headers).get("idempotency-key");
-    const created = () => json(202, { runId: "run_5", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_5/events" });
-
-    it("reuses the key when the same request is retried after a lost response", async () => {
-      const user = userEvent.setup();
-      let calls = 0;
-      const fetch = vi.fn(async () => {
-        if (calls++ === 0) throw new TypeError("Failed to fetch"); // the run may have been created
-        return created();
-      });
-      vi.stubGlobal("fetch", fetch);
-      render(<NewTestForm />);
-      await fillValid(user);
-      await user.click(screen.getByRole("button", { name: /start test/i }));
-      expect(await screen.findByRole("alert")).toHaveTextContent(/could not reach the server/i);
-      await user.click(screen.getByRole("button", { name: /start test/i }));
-      await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_5"));
-      expect(keyOf(fetch as never, 1)).toBe(keyOf(fetch as never, 0));
-    });
-
-    it("reuses the key when only the (re-entered) secret values are sent again", async () => {
-      const user = userEvent.setup();
-      const fetch = mockFetch(json(503, { code: "QUEUE_UNAVAILABLE", message: "The run could not be queued; please retry" }), created());
-      render(<NewTestForm />);
-      await fillValid(user);
-      await user.click(screen.getByRole("button", { name: /add secret/i }));
-      await user.type(screen.getByLabelText(/secret 1 name/i), "password");
-      await user.type(screen.getByLabelText(/secret 1 value/i), "hunter2!");
-      await user.click(screen.getByRole("button", { name: /start test/i }));
-      await screen.findByRole("alert");
-      await user.type(screen.getByLabelText(/secret 1 value/i), "hunter2!");
-      await user.click(screen.getByRole("button", { name: /start test/i }));
-      await waitFor(() => expect(push).toHaveBeenCalled());
-      expect(keyOf(fetch, 1)).toBe(keyOf(fetch, 0));
-    });
-
-    it("uses a new key once the request changes", async () => {
-      const user = userEvent.setup();
-      const fetch = mockFetch(json(503, { code: "QUEUE_UNAVAILABLE", message: "The run could not be queued; please retry" }), created());
-      render(<NewTestForm />);
-      await fillValid(user);
-      await user.click(screen.getByRole("button", { name: /start test/i }));
-      await screen.findByRole("alert");
-      await user.type(screen.getByLabelText(/requirement/i), " And see it listed.");
-      await user.click(screen.getByRole("button", { name: /start test/i }));
-      await waitFor(() => expect(push).toHaveBeenCalled());
-      expect(keyOf(fetch, 1)).not.toBe(keyOf(fetch, 0));
-    });
-
-    it("on IDEMPOTENCY_CONFLICT says a run may already exist, and the next attempt uses a new key", async () => {
-      const user = userEvent.setup();
-      const fetch = mockFetch(
-        json(503, { code: "QUEUE_UNAVAILABLE", message: "The run could not be queued; please retry" }),
-        json(409, { code: "IDEMPOTENCY_CONFLICT", message: "Idempotency-Key was already used with a different request body" }),
-        created(),
-      );
-      render(<NewTestForm />);
-      await fillValid(user);
-      await user.click(screen.getByRole("button", { name: /start test/i }));
-      await screen.findByRole("alert");
-      await user.click(screen.getByRole("button", { name: /start test/i }));
-      expect(await screen.findByRole("alert")).toHaveTextContent(/may already have started/i);
-      await user.click(screen.getByRole("button", { name: /start test/i }));
-      await waitFor(() => expect(push).toHaveBeenCalled());
-      expect(keyOf(fetch, 1)).toBe(keyOf(fetch, 0));
-      expect(keyOf(fetch, 2)).not.toBe(keyOf(fetch, 1));
-    });
-  });
-
-  it("disables the submit button while the request is pending", async () => {
-    const user = userEvent.setup();
-    let resolve!: (r: Response) => void;
-    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((r) => (resolve = r))));
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    expect(screen.getByRole("button", { name: /starting/i })).toBeDisabled();
-    resolve(json(202, { runId: "run_9", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_9/events" }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_9"));
-  });
-});
-
-describe("NewTestForm starting over from a run", () => {
-  it("pre-fills the URL and the full requirement, and asks for test data and secrets again", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: RequestInfo | URL) =>
-        String(url).endsWith("/criteria") ? json(200, requirementFixture()) : json(200, summaryFixture({ lifecycle: "CANCELLED" })),
-      ),
-    );
-    render(<NewTestForm from="run_1" />);
-    expect(await screen.findByDisplayValue("https://shop.example.com/")).toBeInTheDocument();
-    expect(screen.getByLabelText(/requirement/i)).toHaveValue(requirementFixture().originalText);
-    expect(screen.getByText(/test data and secrets must be entered again/i)).toBeInTheDocument();
-  });
-
-  it("stays empty with a notice when the earlier run can't be loaded", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => json(404, { code: "NOT_FOUND", message: "Not found" })));
-    render(<NewTestForm from="run_missing" />);
-    expect(await screen.findByText(/couldn't load the earlier run/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/website url/i)).toHaveValue("");
-  });
-
-  it("without `from` it loads nothing", () => {
-    const fetch = mockFetch();
-    render(<NewTestForm />);
+  it("opens settings with an invalid limit and blocks submission", async () => {
+    const fetch = api(); render(<NewTestForm />);
+    const user = await fill();
+    fireEvent.change(screen.getByLabelText("Step limit"), { target: { value: "101" } });
+    await user.click(create());
+    expect(screen.getByText(/Run settings/).closest("details")).toHaveAttribute("open");
+    expect(screen.getByLabelText("Step limit")).toHaveFocus();
     expect(fetch).not.toHaveBeenCalled();
   });
-});
-
-/** Opens a toolbar chip in the requirement box ("Model: …") and picks one of its options. */
-async function choose(user: ReturnType<typeof userEvent.setup>, chip: RegExp, option: string | RegExp) {
-  await user.click(screen.getByRole("button", { name: chip }));
-  await user.click(screen.getByRole("option", { name: option }));
-}
-
-describe("NewTestForm — destructive actions (the Actions chip)", () => {
-  const openAdvanced = (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByText("Advanced options"));
-  const actions = () => screen.getByRole("button", { name: /^Actions:/ });
-  const allow = (user: ReturnType<typeof userEvent.setup>) => choose(user, /^Actions:/, "Destructive allowed");
-  const block = (user: ReturnType<typeof userEvent.setup>) => choose(user, /^Actions:/, "Safe actions");
-  const rerun = () => screen.getByLabelText(/rerun the generated test/i);
-  const created = () => json(202, { runId: "run_9", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_9/events" });
-  const fill = async (user: ReturnType<typeof userEvent.setup>, url: string) => {
-    await user.type(screen.getByLabelText(/website url/i), url);
-    await user.type(screen.getByLabelText(/requirement/i), "A user can delete a saved address.");
-  };
-
-  it("sits in the requirement box: Safe actions by default; allowing them, in staging or production, colours the chip", async () => {
-    const user = userEvent.setup();
-    render(<NewTestForm />);
-    expect(screen.getByText("Destructive actions are blocked unless you allow them with Actions in the requirement box.")).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "Model and actions" })).getByRole("button", { name: "Actions: Safe actions" })).toBeInTheDocument();
-    await user.click(actions());
-    expect(screen.getByRole("option", { name: "Destructive allowed" })).toHaveAccessibleDescription(/may create, change or delete data/);
-    await user.click(screen.getByRole("option", { name: "Destructive allowed" }));
-    expect(actions()).toHaveAccessibleName("Actions: Destructive allowed");
-    expect(actions()).toHaveClass("composer-chip-warning");
-    expect(screen.getByText("Destructive actions are allowed for this run (Actions in the requirement box).")).toBeInTheDocument();
-    await user.click(screen.getByLabelText("Production"));
-    expect(actions()).toHaveAccessibleName("Actions: Destructive allowed");
-    expect(screen.getByText("Advanced options").closest("summary")).not.toHaveTextContent("destructive");
+  it("validates host confirmation when actions change site data", async () => {
+    const fetch = api(); render(<NewTestForm />);
+    const user = await fill();
+    await user.click(screen.getByText(/Run settings/));
+    await user.click(screen.getByLabelText("Allow actions that change or delete site data"));
+    await user.click(create()); expect(fetch).not.toHaveBeenCalled();
+    await user.type(screen.getByLabelText(/Type shop.example.com to confirm/), "shop.example.com");
+    await user.click(create());
+    expect(payload(fetch).options).toMatchObject({ allowDestructiveActions: true, confirmProductionHost: "shop.example.com", rerunGeneratedTest: false });
   });
-
-  it("turns the rerun off when allowed, says why, warns when it is turned back on, and restores it when blocked again", async () => {
-    const user = userEvent.setup();
-    render(<NewTestForm />);
-    await openAdvanced(user);
-    expect(rerun()).toBeChecked();
-    await allow(user);
-    expect(rerun()).not.toBeChecked();
-    expect(
-      screen.getByText("Rerun is off: it repeats the whole test, so destructive actions would run a second time. You can turn it back on."),
-    ).toBeInTheDocument();
-    await user.click(rerun());
-    expect(screen.getByText("Destructive actions will run twice: once while exploring and again in the rerun.")).toBeInTheDocument();
-    await user.click(rerun());
-    await block(user);
-    expect(rerun()).toBeChecked(); // what it was before destructive actions were allowed
+  it("lets the user override a model and resets thinking when the model changes", async () => {
+    const fetch = api(); render(<NewTestForm />); const user = await fill();
+    await waitFor(() => expect(screen.getByLabelText("AI model")).toBeEnabled());
+    await user.click(screen.getByText(/Run settings/));
+    await user.selectOptions(screen.getByLabelText("Thinking level"), "high");
+    await user.selectOptions(screen.getByLabelText("AI model"), "claude-haiku-4-5");
+    expect(screen.getByLabelText("Thinking level")).toHaveValue("");
+    await user.click(create()); expect(payload(fetch).llm).toEqual({ model: "claude-haiku-4-5" });
   });
-
-  it("keeps the rerun off after blocking again when it was off before", async () => {
-    const user = userEvent.setup();
-    render(<NewTestForm />);
-    await openAdvanced(user);
-    await user.click(rerun());
-    await allow(user);
-    await block(user);
-    expect(rerun()).not.toBeChecked();
+  it("shows target policy refusals on the website field", async () => {
+    api(json(422, { code: "TARGET_NOT_ALLOWED", message: "Target blocked" })); render(<NewTestForm />);
+    const user = await fill(); await user.click(create());
+    expect(await screen.findByText("Target blocked")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Which website/)).toHaveFocus();
   });
-
-  it("shows no rerun note when there is no Playwright test to rerun", async () => {
-    const user = userEvent.setup();
-    render(<NewTestForm />);
-    await openAdvanced(user);
-    await user.click(screen.getByLabelText(/generate a playwright test/i));
-    await allow(user);
-    expect(screen.queryByText(/rerun is off/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/destructive actions will run twice/i)).not.toBeInTheDocument();
+  it("links unavailable model errors to settings", async () => {
+    api(json(422, { code: "MODEL_NOT_AVAILABLE", message: "Choose an available model" })); render(<NewTestForm />);
+    const user = await fill(); await user.click(create());
+    expect(await screen.findByRole("link", { name: /Choose an available model in Settings/ })).toHaveAttribute("href", "/settings");
   });
-
-  it("in production asks for the website's host (lowercase, with its port) and sends it", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch(created());
-    render(<NewTestForm />);
-    await fill(user, "https://Shop.Example.com:8443/");
-    await user.click(screen.getByLabelText("Production"));
-    await allow(user);
-    expect(screen.getByText(/this run can create, change or delete real data/i)).toHaveTextContent(
-      "This run can create, change or delete real data and place real orders or payments on shop.example.com:8443.",
-    );
-    await user.type(screen.getByLabelText("Type shop.example.com:8443 to confirm"), "SHOP.example.com:8443");
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_9"));
-    expect(bodyOf(fetch)).toMatchObject({
-      environment: "production",
-      options: { allowDestructiveActions: true, rerunGeneratedTest: false, confirmProductionHost: "SHOP.example.com:8443" },
-    });
-  });
-
-  it.each([
-    ["", "left empty"],
-    ["shop.example.com", "without the port"],
-  ])("in production refuses to start with the confirmation %j (%s), on the field", async (typed) => {
-    const user = userEvent.setup();
-    const fetch = mockFetch();
-    render(<NewTestForm />);
-    await fill(user, "https://shop.example.com:8443");
-    await user.click(screen.getByLabelText("Production"));
-    await allow(user);
-    if (typed) await user.type(screen.getByLabelText(/to confirm$/i), typed);
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    const field = screen.getByLabelText(/to confirm$/i);
-    expect(field).toHaveAttribute("aria-invalid", "true");
-    expect(field).toHaveAccessibleDescription(/Type shop\.example\.com:8443 exactly to confirm\./);
-    expect(field).toHaveFocus();
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it("refuses when the URL changed after the host was typed", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch();
-    render(<NewTestForm />);
-    await fill(user, "https://shop.example.com");
-    await user.click(screen.getByLabelText("Production"));
-    await allow(user);
-    await user.type(screen.getByLabelText(/to confirm$/i), "shop.example.com");
-    await user.clear(screen.getByLabelText(/website url/i));
-    await user.type(screen.getByLabelText(/website url/i), "https://other.example.com");
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    expect(screen.getByLabelText("Type other.example.com to confirm")).toHaveAccessibleDescription(/Type other\.example\.com exactly to confirm\./);
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it("asks for the URL first while it isn't valid", async () => {
-    const user = userEvent.setup();
-    render(<NewTestForm />);
-    await user.click(screen.getByLabelText("Production"));
-    await allow(user);
-    expect(screen.getByText("Enter the website URL first.")).toBeInTheDocument();
-    expect(screen.queryByLabelText(/to confirm$/i)).not.toBeInTheDocument();
-  });
-
-  it("with an invalid URL, submitting shows only the URL error, not a raw contract message on the (not yet rendered) confirmation field", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch(created());
-    const { container } = render(<NewTestForm />);
-    await user.type(screen.getByLabelText(/requirement/i), "A user can delete a saved address.");
-    await user.click(screen.getByLabelText("Production"));
-    await allow(user);
-    await user.type(screen.getByLabelText(/website url/i), "not-a-url");
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-
-    expect(screen.getByLabelText(/website url/i)).toHaveAttribute("aria-invalid", "true");
-    expect(container.querySelectorAll(".field-error")).toHaveLength(1); // only the URL error
-    expect(fetch).not.toHaveBeenCalled();
-
-    // Fixing the URL renders the confirmation field; it must not carry a stale/raw error.
-    await user.clear(screen.getByLabelText(/website url/i));
-    await user.type(screen.getByLabelText(/website url/i), "https://shop.example.com");
-    const confirmField = screen.getByLabelText(/to confirm$/i);
-    expect(confirmField).not.toHaveAttribute("aria-invalid", "true");
-  });
-
-  it("never sends the confirmation outside production (typed, then switched back to Staging)", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch(created());
-    render(<NewTestForm />);
-    await fill(user, "https://shop.example.com");
-    await user.click(screen.getByLabelText("Production"));
-    await allow(user);
-    await user.type(screen.getByLabelText(/to confirm$/i), "shop.example.com");
-    await user.click(screen.getByLabelText("Staging"));
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_9"));
-    expect(bodyOf(fetch)).toMatchObject({ environment: "staging", options: { allowDestructiveActions: true } });
-    expect(bodyOf(fetch).options).not.toHaveProperty("confirmProductionHost");
-  });
-});
-
-describe("NewTestForm: model and reasoning (chips in the requirement box)", () => {
-  const created = () => json(202, { runId: "run_3", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_3/events" });
-  const modelChip = () => screen.getByRole("button", { name: /^Model:/ });
-  const reasoningChip = () => screen.queryByRole("button", { name: /^Reasoning:/ });
-  const ready = () => waitFor(() => expect(modelChip()).toBeEnabled());
-
-  it("shows the default model; its menu offers Default first, then the catalog by provider; a model with no key is disabled", async () => {
-    const user = userEvent.setup();
-    mockFetch();
-    render(<NewTestForm />);
-    await ready();
-    expect(modelChip()).toHaveAccessibleName("Model: Claude Sonnet 5");
-    await user.click(modelChip());
-    const list = screen.getByRole("listbox", { name: "Model" });
-    expect(within(list).getAllByRole("option")[0]).toHaveAccessibleName("Default (Claude Sonnet 5)");
-    expect(within(list).getAllByRole("group").map((g) => g.getAttribute("aria-label"))).toEqual(["Anthropic", "Google Gemini", "Development"]);
-    const gemini = within(list).getByRole("option", { name: "Gemini 3.8 Flash" });
-    expect(gemini).toHaveAttribute("aria-disabled", "true");
-    expect(gemini).toHaveAccessibleDescription("Add a key in Settings");
-  });
-
-  it.each([
-    ["nothing changed: no llm at all", {}, undefined],
-    ["a model", { model: "Claude Opus 5.5" }, { model: "claude-opus-5-5" }],
-    ["a level for the default model", { reasoning: "High" }, { reasoning: "high" }],
-    ["both", { model: "Claude Opus 5.5", reasoning: "Low" }, { model: "claude-opus-5-5", reasoning: "low" }],
-  ] as const)("the body carries llm only for what was changed: %s", async (_what, pick, expected) => {
-    const user = userEvent.setup();
-    const fetch = mockFetch(created());
-    render(<NewTestForm />);
-    await fillValid(user);
-    await ready();
-    if ("model" in pick) await choose(user, /^Model:/, pick.model);
-    if ("reasoning" in pick) await choose(user, /^Reasoning:/, pick.reasoning);
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(push).toHaveBeenCalled());
-    expect(bodyOf(fetch).llm).toEqual(expected);
-  });
-
-  it("the reasoning levels are the chosen model's; a model that does not reason hides the chip and goes back to Default", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch(created());
-    render(<NewTestForm />);
-    await fillValid(user);
-    await ready();
-    expect(reasoningChip()).toHaveAccessibleName("Reasoning: Default");
-    await user.click(reasoningChip()!);
-    expect(screen.getAllByRole("option").map((o) => o.querySelector(".composer-option-label")!.textContent)).toEqual(["Default", "Low", "Medium", "High"]);
-    expect(screen.getByRole("option", { name: "Default" })).toHaveAccessibleDescription("Model default (high)");
-    await user.click(screen.getByRole("option", { name: "High" }));
-    expect(reasoningChip()).toHaveAccessibleName("Reasoning: High");
-    await choose(user, /^Model:/, "Claude Haiku 4.5");
-    expect(reasoningChip()).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(push).toHaveBeenCalled());
-    expect(bodyOf(fetch).llm).toEqual({ model: "claude-haiku-4-5" });
-  });
-
-  it("when the catalog can't be loaded, the chips give way to a notice and the default model is used", async () => {
-    const user = userEvent.setup();
-    vi.mocked(getLlmSettings).mockRejectedValue(new Error("down"));
-    const fetch = mockFetch(created());
-    render(<NewTestForm />);
-    expect(await screen.findByText("Model choices couldn't be loaded; the default model will be used.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Model:/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Actions:/ })).toBeInTheDocument();
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(push).toHaveBeenCalled());
-    expect(bodyOf(fetch)).not.toHaveProperty("llm");
-  });
-
-  it("a 422 MODEL_NOT_AVAILABLE on the model lands on the Model chip, with the message under the box", async () => {
-    const user = userEvent.setup();
-    mockFetch(
-      json(422, {
-        code: "MODEL_NOT_AVAILABLE",
-        message: "Add a Google Gemini API key in Settings",
-        issues: [{ path: ["llm", "model"], message: "Add a Google Gemini API key in Settings" }],
-      }),
-    );
-    render(<NewTestForm />);
-    await fillValid(user);
-    await ready();
-    await choose(user, /^Model:/, "Claude Opus 5.5");
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-
-    await waitFor(() => expect(modelChip()).toHaveAttribute("aria-invalid", "true"));
-    expect(modelChip()).toHaveAccessibleDescription(/Add a Google Gemini API key in Settings/);
-    expect(modelChip()).toHaveFocus();
-    expect(push).not.toHaveBeenCalled();
-  });
-
-  it("a 422 MODEL_NOT_AVAILABLE at the defaults is a banner that links to Settings", async () => {
-    const user = userEvent.setup();
-    mockFetch(
-      json(422, {
-        code: "MODEL_NOT_AVAILABLE",
-        message: "Add an Anthropic API key in Settings: the default model (Claude Sonnet 5) needs it",
-        issues: [{ path: ["llm"], message: "Add an Anthropic API key in Settings: the default model (Claude Sonnet 5) needs it" }],
-      }),
-    );
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent(/The default model can't be used.*Add an Anthropic API key in Settings/);
-    expect(within(banner).getByRole("link", { name: "Open Settings" })).toHaveAttribute("href", "/settings");
-  });
-
-  it("the chips show the chosen model and level; Advanced options no longer mention them", async () => {
-    const user = userEvent.setup();
-    mockFetch();
-    render(<NewTestForm />);
-    const summary = screen.getByText("Advanced options").closest("summary")!;
-    await ready();
-    await choose(user, /^Model:/, "Claude Opus 5.5");
-    await choose(user, /^Reasoning:/, "High");
-    expect(modelChip()).toHaveAccessibleName("Model: Claude Opus 5.5");
-    expect(reasoningChip()).toHaveAccessibleName("Reasoning: High");
-    expect(summary).toHaveTextContent("40 steps · 5 min · rerun on");
-    expect(summary).not.toHaveTextContent("Opus");
-  });
-});
-
-describe("NewTestForm: the requirement is optional", () => {
-  it("labels the requirement optional and says what leaving it empty does", () => {
-    render(<NewTestForm />);
-    expect(screen.getByLabelText("Requirement (optional)")).toHaveAccessibleDescription(
-      /Leave it empty and the agent explores the website and suggests what to test\./,
-    );
-  });
-
-  it("with an empty requirement the button reads 'Explore and suggest tests' and the run is created with requirement ''", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch(json(202, { runId: "run_s", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_s/events" }));
-    render(<NewTestForm />);
-    await user.type(screen.getByLabelText(/website url/i), "https://shop.example.com");
-    expect(screen.queryByRole("button", { name: /start test/i })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Explore and suggest tests" }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/run_s"));
-    expect(bodyOf(fetch).requirement).toBe("");
-  });
-
-  it("reads 'Start test' once there is a requirement; whitespace alone is still empty", async () => {
-    const user = userEvent.setup();
-    render(<NewTestForm />);
-    const field = screen.getByLabelText(/requirement/i);
-    await user.type(field, "   ");
-    expect(screen.getByRole("button", { name: "Explore and suggest tests" })).toBeInTheDocument();
-    await user.type(field, "A user can add a product to the cart.");
-    expect(screen.getByRole("button", { name: /start test/i })).toBeInTheDocument();
-  });
-
-  it("1–9 characters: asks for 10, or none, and sends nothing", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch();
-    render(<NewTestForm />);
-    await user.type(screen.getByLabelText(/website url/i), "https://shop.example.com");
-    await user.type(screen.getByLabelText(/requirement/i), "too short");
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    expect(screen.getByLabelText(/requirement/i)).toHaveAccessibleDescription(
-      /Describe the requirement in at least 10 characters, or leave it empty for suggestions\./,
-    );
-    expect(fetch).not.toHaveBeenCalled();
-  });
-});
-
-describe("NewTestForm pre-filled from a suggested test", () => {
-  it("copies the website and that suggestion's text, and asks for test data and secrets again", async () => {
-    const fetch = vi.fn(async (url: RequestInfo | URL) =>
-      String(url).endsWith("/suggestions")
-        ? json(200, suggestionsFixture())
-        : json(200, summaryFixture({ lifecycle: "AWAITING_SELECTION", requirementPreview: "" })),
-    );
+  it("copies only the website and instructions from an older test", async () => {
+    const fetch = vi.fn(async (url: RequestInfo | URL) => String(url).endsWith("/criteria") ? json(200, requirementFixture()) : json(200, summaryFixture()));
     vi.stubGlobal("fetch", fetch);
-    render(<NewTestForm from="run_1" suggestion="S-2" />);
-    expect(await screen.findByDisplayValue("https://shop.example.com/")).toBeInTheDocument();
-    expect(screen.getByLabelText(/requirement/i)).toHaveValue(suggestionsFixture().suggestions[1]!.requirement);
-    expect(
-      screen.getByText(
-        "Copied the website and the suggested test from your earlier run. Test data and secrets must be entered again — they are never copied.",
-      ),
-    ).toBeInTheDocument();
-    expect(fetch.mock.calls.map(([u]) => String(u))).not.toContain("/api/v1/test-runs/run_1/criteria");
-  });
-
-  it("a suggestion the run doesn't have leaves the form empty, with a notice", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: RequestInfo | URL) => (String(url).endsWith("/suggestions") ? json(200, suggestionsFixture()) : json(200, summaryFixture()))),
-    );
-    render(<NewTestForm from="run_1" suggestion="S-8" />);
-    expect(await screen.findByText(/couldn't load the earlier run/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/requirement/i)).toHaveValue("");
-  });
-});
-
-describe("NewTestForm 'Run again' from a run that never got criteria", () => {
-  it("copies the website only, leaving the requirement empty to explore again", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: RequestInfo | URL) =>
-        String(url).endsWith("/criteria")
-          ? json(409, { code: "CRITERIA_NOT_READY", message: "Criteria have not been compiled for this run yet" })
-          : json(200, summaryFixture({ lifecycle: "CANCELLED", cancelReason: "USER_REQUESTED", requirementPreview: "" })),
-      ),
-    );
     render(<NewTestForm from="run_1" />);
-    expect(await screen.findByDisplayValue("https://shop.example.com/")).toBeInTheDocument();
-    expect(screen.getByLabelText(/requirement/i)).toHaveValue("");
-    expect(
-      screen.getByText("Copied the website from your earlier run. Test data and secrets must be entered again — they are never copied."),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Explore and suggest tests" })).toBeInTheDocument();
-  });
-});
-
-describe("NewTestForm saved test data (V1.1)", () => {
-  const set = {
-    id: "tds_1",
-    name: "Returning shopper",
-    values: { email: "qa@demo.test", searchTerm: "iPhone" },
-    createdBy: null,
-    createdAt: "2026-09-29T10:00:00.000Z",
-    updatedAt: "2026-09-29T10:00:00.000Z",
-  };
-
-  it("offers no choice when there are no saved sets", async () => {
-    render(<NewTestForm />);
-    await waitFor(() => expect(listTestDataSets).toHaveBeenCalled());
-    expect(screen.queryByLabelText("Saved test data set")).not.toBeInTheDocument();
-  });
-
-  it("sends the chosen set's id and says which keys it adds", async () => {
-    vi.mocked(listTestDataSets).mockResolvedValue([set]);
-    const user = userEvent.setup();
-    const fetch = mockFetch(json(202, { runId: "run_7", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_7/events" }));
-    render(<NewTestForm />);
-    await fillValid(user);
-    const select = await screen.findByLabelText("Saved test data set");
-    await user.selectOptions(select, "tds_1");
-    expect(select).toHaveAccessibleDescription("Adds email, searchTerm. A value you enter below with the same key wins.");
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(fetch).toHaveBeenCalled());
-    expect(bodyOf(fetch)).toMatchObject({ testDataSetId: "tds_1", testData: {} });
-  });
-
-  it("puts a deleted set's 422 on the picker", async () => {
-    vi.mocked(listTestDataSets).mockResolvedValue([set]);
-    const user = userEvent.setup();
-    mockFetch(
-      json(422, {
-        code: "TEST_DATA_SET_NOT_FOUND",
-        message: "gone",
-        issues: [{ path: ["testDataSetId"], message: "This test data set no longer exists" }],
-      }),
-    );
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.selectOptions(await screen.findByLabelText("Saved test data set"), "tds_1");
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    expect(await screen.findByText("This test data set no longer exists")).toBeInTheDocument();
-  });
-});
-
-describe("NewTestForm saved credentials (V1.1)", () => {
-  const profile = {
-    id: "cp_1",
-    name: "Staging admin",
-    description: "",
-    secretNames: ["password", "username"],
-    createdBy: null,
-    createdAt: "2026-09-29T10:00:00.000Z",
-    updatedAt: "2026-09-29T10:00:00.000Z",
-  };
-
-  it("sends the chosen profile's id, names what it provides, and keeps the choice after a failed submit", async () => {
-    vi.mocked(listCredentialProfiles).mockResolvedValue([profile]);
-    const user = userEvent.setup();
-    const fetch = mockFetch(
-      json(422, {
-        code: "CREDENTIAL_PROFILE_UNREADABLE",
-        message: "x",
-        issues: [{ path: ["credentialProfileId"], message: "These saved credentials can't be read; save their values again in Settings → Credentials" }],
-      }),
-    );
-    render(<NewTestForm />);
-    await fillValid(user);
-    const select = await screen.findByLabelText("Saved credentials");
-    await user.selectOptions(select, "cp_1");
-    expect(select).toHaveAccessibleDescription("Provides password, username. A secret you enter below with the same name wins.");
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(fetch).toHaveBeenCalled());
-    expect(bodyOf(fetch)).toMatchObject({ credentialProfileId: "cp_1", secrets: {} });
-    expect(await screen.findByText(/These saved credentials can't be read/)).toBeInTheDocument();
-    expect(screen.getByLabelText("Saved credentials")).toHaveValue("cp_1");
-  });
-});
-
-describe("NewTestForm exploration cache (V1.1)", () => {
-  const created = () => json(202, { runId: "run_8", lifecycle: "QUEUED", eventsUrl: "/v1/test-runs/run_8/events" });
-
-  it("leaves the cache on by default (the option is not sent)", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch(created());
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
-    expect(bodyOf(fetch).options).not.toHaveProperty("useExplorationCache");
-  });
-
-  it("sends useExplorationCache: false when unticked", async () => {
-    const user = userEvent.setup();
-    const fetch = mockFetch(created());
-    render(<NewTestForm />);
-    await fillValid(user);
-    await user.click(screen.getByText("Advanced options"));
-    await user.click(screen.getByRole("checkbox", { name: /reuse element lookups/i }));
-    await user.click(screen.getByRole("button", { name: /start test/i }));
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
-    expect(bodyOf(fetch).options.useExplorationCache).toBe(false);
+    expect(await screen.findByText(/Website and instructions copied/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Test instructions")).toHaveValue(requirementFixture().originalText);
+    expect(fetch.mock.calls).toHaveLength(2);
+    expect(screen.queryByText(/Secrets|Test data/)).not.toBeInTheDocument();
   });
 });

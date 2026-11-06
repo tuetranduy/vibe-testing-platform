@@ -101,7 +101,7 @@ export class CriteriaService {
       throw new HttpError(400, edit.code, message, edit.issues);
     }
 
-    const updated = await this.requirements.createRevision(runId, { originalText: req.originalText, criteria: edit.criteria, facts: edit.facts });
+    const updated = await this.requirements.createRevision(runId, { originalText: req.originalText, title: latest.title, criteria: edit.criteria, facts: edit.facts });
 
     await this.publisher().publish({
       runId,

@@ -1,4 +1,5 @@
-import { isTerminalLifecycle, type TestReport } from "@platform/contracts";
+import { eq } from "drizzle-orm";
+import { CriterionResultSchema, suiteVerdict, isTerminalLifecycle, type TestReport } from "@platform/contracts";
 import {
   DiagnosticFindingRepository,
   EventRepository,
@@ -10,11 +11,12 @@ import {
   RequirementRepository,
   ResultRepository,
   RunRepository,
+  schema,
   type Database,
   type RunScope,
 } from "@platform/db";
 // The pure assembler only (Ruling R36): this entry point never loads Stagehand, a browser or an LLM client.
-import { createReportBuilder, type PersistedRunSources } from "@platform/testing-engine/reporting";
+import { aggregateVerdict, createReportBuilder, type PersistedRunSources } from "@platform/testing-engine/reporting";
 import type { ApiDeps } from "../deps";
 import { HttpError } from "../errors";
 
@@ -69,6 +71,41 @@ export class ReportService {
 
   constructor(private readonly deps: Pick<ApiDeps, "db" | "config">) {
     this.builder = createReportBuilder((runId) => loadReportSources(deps.db, runId));
+  }
+
+  async review(scope: RunScope, runId: string, criterionId: string, status: "PASS" | "FAIL", actorId: string | null): Promise<TestReport> {
+    await new RunRepository(this.deps.db).getRequired(scope, runId);
+    await this.deps.db.transaction(async (tx) => {
+      // Serialize decisions on different criteria too: the aggregate verdict must include every review.
+      const existing = await new RunRepository(tx).getRequired(scope, runId);
+      // Suite reviews also serialize on the parent so its verdict stays consistent across child reviews.
+      if (existing.suiteRunId) await tx.select().from(schema.suiteRuns).where(eq(schema.suiteRuns.id, existing.suiteRunId)).for("update");
+      const [run] = await tx.select().from(schema.testRuns).where(eq(schema.testRuns.id, runId)).for("update");
+      if (run?.lifecycle !== "COMPLETED") {
+        throw new HttpError(409, "REVIEW_NOT_ALLOWED", "Only completed runs can be reviewed");
+      }
+      const results = new ResultRepository(tx);
+      const all = (await results.listByRun(runId)).map((r) => CriterionResultSchema.parse(r));
+      const current = all.find((r) => r.criterionId === criterionId);
+      if (!current) throw new HttpError(404, "CRITERION_NOT_FOUND", "This criterion has no result");
+      if (current.status !== "INCONCLUSIVE") {
+        throw new HttpError(409, "REVIEW_NOT_ALLOWED", "Only inconclusive results can be marked as pass or fail");
+      }
+      const reviewed = CriterionResultSchema.parse({
+        ...current, status, reason: null, verdictSource: "USER_REVIEW",
+        review: { originalStatus: current.status, originalReason: current.reason, actorId, reviewedAt: new Date().toISOString() },
+      });
+      await results.upsert(runId, reviewed);
+      const verdict = aggregateVerdict(all.map((r) => r.criterionId === criterionId ? reviewed : r));
+      await tx.update(schema.testRuns).set({ verdict, updatedAt: new Date() }).where(eq(schema.testRuns.id, runId));
+      if (run.suiteRunId) {
+        const children = await tx.select({ lifecycle: schema.testRuns.lifecycle, verdict: schema.testRuns.verdict })
+          .from(schema.testRuns).where(eq(schema.testRuns.suiteRunId, run.suiteRunId));
+        const suiteResult = suiteVerdict(children);
+        if (suiteResult) await tx.update(schema.suiteRuns).set({ verdict: suiteResult }).where(eq(schema.suiteRuns.id, run.suiteRunId));
+      }
+    });
+    return this.get(scope, runId);
   }
 
   async get(scope: RunScope, runId: string): Promise<TestReport> {

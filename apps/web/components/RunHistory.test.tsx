@@ -259,9 +259,9 @@ describe("RunHistory", () => {
         }),
     });
     render(<RunHistory />);
-    const tagged = await screen.findByText("Production · destructive");
+    const tagged = await screen.findByText("Changes site data");
     expect(tagged.closest("tr")).toHaveTextContent("Requirement number 1");
-    expect(screen.getAllByText("Production · destructive")).toHaveLength(1);
+    expect(screen.getAllByText("Changes site data")).toHaveLength(1);
   });
 });
 

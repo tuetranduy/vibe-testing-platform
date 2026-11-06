@@ -4,7 +4,7 @@ import { ExplorationStepSchema, ObservedFactSchema } from "./exploration";
 import { BlockReasonSchema, CriterionStatusSchema, InconclusiveReasonSchema } from "./run";
 
 /** AI_JUDGMENT (2026-10-07): an unclear (`semantic`) criterion judged by a model from what the exploration saw. */
-export const VerdictSourceSchema = z.enum(["PLAYWRIGHT_RERUN", "EXPLORATION_ONLY", "AI_JUDGMENT"]);
+export const VerdictSourceSchema = z.enum(["PLAYWRIGHT_RERUN", "EXPLORATION_ONLY", "AI_JUDGMENT", "USER_REVIEW"]);
 export type VerdictSource = z.infer<typeof VerdictSourceSchema>;
 
 export const StatusReasonSchema = z.union([BlockReasonSchema, InconclusiveReasonSchema]);
@@ -34,9 +34,19 @@ export const CriterionResultSchema = ProvisionalResultSchema.extend({
   aiNote: z.string().max(1000).nullable(), // semantic criteria: the model's reasoning or comment; the status comes from the judgment step
   /** From the criterion (V1.1): a non-critical result never changes the run's verdict. Rows before V1.1: true. */
   critical: z.boolean().default(true),
+  /** Human resolution preserves the automated result and its reason. */
+  review: z.object({
+    originalStatus: z.literal("INCONCLUSIVE"),
+    originalReason: StatusReasonSchema.nullable(),
+    actorId: z.string().nullable(),
+    reviewedAt: z.iso.datetime(),
+  }).optional(),
 }).refine((r) => (r.status === "PASS" || r.status === "FAIL") === (r.verdictSource !== null), {
   message: "verdictSource must be set exactly for PASS/FAIL",
   path: ["verdictSource"],
+}).refine((r) => (r.verdictSource === "USER_REVIEW") === (r.review !== undefined), {
+  message: "A user review must include the original automated result and audit metadata",
+  path: ["review"],
 });
 export type CriterionResult = z.infer<typeof CriterionResultSchema>;
 

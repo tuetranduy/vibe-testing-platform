@@ -63,12 +63,6 @@ describe("API proxy allow-list", () => {
     ["GET", "/api/v1/users", GET],
     ["POST", "/api/v1/users", POST],
     ["PATCH", "/api/v1/users/usr_1", PATCH],
-    ["GET", "/api/v1/test-data-sets", GET],
-    ["POST", "/api/v1/test-data-sets", POST],
-    ["GET", "/api/v1/test-data-sets/tds_1", GET],
-    ["PUT", "/api/v1/test-data-sets/tds_1", PUT],
-    ["DELETE", "/api/v1/test-data-sets/tds_1", DELETE],
-    ["GET", "/api/v1/credential-profiles", GET],
     ["POST", "/api/v1/test-runs/run_1/rerun", POST],
     ["GET", "/api/v1/test-runs/run_1/report.md", GET],
     ["GET", "/api/v1/test-runs/run_1/comparison?baseline=run_0", GET],
@@ -95,9 +89,6 @@ describe("API proxy allow-list", () => {
     ["GET", "/api/v1/suite-runs/srn_1/junit.xml", GET],
     ["GET", "/api/v1/exploration-cache", GET],
     ["DELETE", "/api/v1/exploration-cache", DELETE],
-    ["POST", "/api/v1/credential-profiles", POST],
-    ["PUT", "/api/v1/credential-profiles/cp_1", PUT],
-    ["DELETE", "/api/v1/credential-profiles/cp_1", DELETE],
   ] as const)("forwards %s %s", async (method, path, handler) => {
     const calls = stubUpstream();
     const res = await handler(req(method, path, method === "GET" ? {} : { headers: sameOrigin, body: "{}" }));
@@ -128,14 +119,15 @@ describe("API proxy allow-list", () => {
     ["PATCH", "/api/v1/users", PATCH],
     ["DELETE", "/api/v1/users/usr_1", DELETE],
     ["GET", "/api/v1/users/usr_1/sessions", GET],
-    ["DELETE", "/api/v1/test-data-sets", DELETE],
-    ["PATCH", "/api/v1/test-data-sets/tds_1", PATCH],
-    ["GET", "/api/v1/credential-profiles/cp_1", GET],
     ["GET", "/api/v1/test-runs/run_1/rerun", GET],
     ["PATCH", "/api/v1/suites/ste_1", PATCH],
     ["GET", "/api/v1/suites/ste_1/entries", GET],
     ["DELETE", "/api/v1/suite-runs/srn_1", DELETE],
     ["GET", "/api/v1/test-runs/run_1/reportXmd", GET],
+    ["GET", "/api/v1/test-data-sets", GET],
+    ["POST", "/api/v1/test-data-sets", POST],
+    ["GET", "/api/v1/credential-profiles", GET],
+    ["POST", "/api/v1/credential-profiles", POST],
   ] as const)("rejects %s %s with 404 and never forwards it", async (method, path, handler) => {
     const calls = stubUpstream();
     const res = await handler(req(method, path, method === "GET" ? {} : { headers: sameOrigin, body: "{}" }));

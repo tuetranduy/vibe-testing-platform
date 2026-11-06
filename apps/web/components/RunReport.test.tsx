@@ -58,6 +58,8 @@ describe("RunReport", () => {
 
     expect(screen.getByRole("heading", { name: /^results by criterion$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^AC-1\b/ })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /generated playwright test/i })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Saved test code" }));
     expect(screen.getByRole("heading", { name: /generated playwright test/i })).toBeInTheDocument();
     // Report-level diagnostics (not tied to a criterion).
     expect(screen.getByText("The site loaded slowly on the first visit.")).toBeInTheDocument();
@@ -86,13 +88,14 @@ describe("RunReport", () => {
   it("offers a rerun of the saved test only when told the run's secrets and the test checks something (V1.1)", async () => {
     reportFetch(() => json(200, reportFixture()));
     const { unmount } = render(<RunReport runId="run_1" artifacts={[]} steps={[]} secretNames={["password"]} />);
-    expect(await screen.findByRole("heading", { name: "Rerun the saved test" })).toBeInTheDocument();
-    expect(screen.getByText(/It checks 3 criteria/)).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Reuse this test" }));
+    expect(screen.getByRole("heading", { name: "Run this test again" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Create a fresh test" })).toBeInTheDocument();
     unmount();
     reportFetch(() => json(200, reportFixture()));
     renderReport();
     await screen.findByRole("heading", { name: /verdict/i });
-    expect(screen.queryByRole("heading", { name: "Rerun the saved test" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Run this test again" })).not.toBeInTheDocument();
   });
 
   it("shows a partial report for an errored run: lifecycle, error category and message, and what exists", async () => {

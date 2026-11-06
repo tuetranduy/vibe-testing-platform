@@ -20,9 +20,9 @@ export interface SurveyStageDeps {
 }
 
 /**
- * The real `survey` stage (spec section 5): read-only by construction. Platform code loads the start
+ * The real `survey` stage: bounded live-site discovery. Platform code loads the start
  * page and up to 5 same-site links by URL (`page.goto`) and reads each with a fixed in-page script —
- * nothing is clicked, typed or submitted, and the model never drives the browser. Page loading stops
+ * a model-guided pass clicks browsing controls and fills inputs, keeping screenshots, resulting inventories and network metadata. Page loading stops
  * once 60 % of the survey's time is used; then one model call proposes the tests. The browser is
  * closed before that call, and is always released (finally + the stage cleanup).
  */

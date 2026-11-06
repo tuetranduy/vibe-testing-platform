@@ -351,3 +351,24 @@ describe("analyze stage (real compiler behind runAnalysis)", () => {
     expect(sent).not.toContain("SKU-4471");
   });
 });
+
+
+describe("summarized test titles", () => {
+  it("obtains a title in the criteria call and preserves the full requirement", async () => {
+    const { llm, transport } = setup({ json: { ...cartOutput(), title: "Verify cart count after adding a product" } });
+    const draft = await compileRequirement(llm, input(CART_TEXT));
+    expect(draft.title).toBe("Verify cart count after adding a product");
+    expect(draft.originalText).toBe(CART_TEXT);
+    expect(persist(draft).title).toBe(draft.title);
+    expect(transport.requests).toHaveLength(1);
+  });
+
+  it("redacts title content and supports old model responses without a title", async () => {
+    const secret = "private-value";
+    const { llm } = setup({ json: { ...cartOutput(), title: `Cart ${secret}` } });
+    const draft = await compileRequirement(llm, { ...input(CART_TEXT), redact: maskValues(secret) });
+    expect(draft.title).toBe("Cart [REDACTED]");
+    const old = setup({ json: cartOutput() });
+    expect((await compileRequirement(old.llm, input(CART_TEXT))).title).toBeUndefined();
+  });
+});

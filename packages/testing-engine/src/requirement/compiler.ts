@@ -3,13 +3,13 @@ import {
   ContractError,
   liveSiteAnalysisOn,
   type SiteAnalysisDraft,
+  type SitePage,
   type StoredTestRunRequest,
   type SurveyedPage,
   type TestDataValue,
 } from "@platform/contracts";
 import type { LlmClient, LlmContentPart } from "@platform/llm";
 import { requireLlm, type AnalyzedRequirement, type RequirementDraft, type StageContext } from "../orchestrator/stages";
-import type { PageInventory } from "../survey/inventory";
 import type { SurveyLink } from "../survey/links";
 import { readSite, type SiteRead, type SurveySandbox, type SurveyStore } from "../survey/site-reader";
 import { validateInsights, type RequirementInsights } from "./insights";
@@ -33,7 +33,7 @@ export interface CompileRequirementInput {
   /** Credentials taken from the requirement text (V1.3.1): names only. */
   inlineInputs?: StoredTestRunRequest["inlineInputs"];
   /** Pages of the live site read for this analysis (V1.3), and the start page's screenshot. */
-  site?: { pages: { url: string; inventory: PageInventory }[]; screenshot: Buffer | null };
+  site?: { pages: SitePage[]; screenshot: Buffer | null };
 }
 
 /** A compiled draft plus the advisory insights (V1.3): site checks and suggested test data. */
@@ -92,7 +92,7 @@ export async function compileRequirement(llm: RequirementLlm, input: CompileRequ
     seed: input.runId,
     redact: input.redact,
   });
-  return { ...result.draft, insights };
+  return { ...result.draft, ...(data.title ? { title: String(input.redact(data.title)).slice(0, 120) } : {}), insights };
 }
 
 /** The live-site read of the analysis (V1.3): the survey's sandbox (no Stagehand) and screenshot store. */
@@ -152,8 +152,8 @@ interface LiveSite {
 const isAbort = (ctx: StageContext, err: unknown) => ctx.signal.aborted || err instanceof CancelledError;
 
 /**
- * Reads the live site for the analysis, best effort: read-only (the survey's reader), within its own
- * budget. A failure never fails the analysis — it is recorded UNAVAILABLE with a short reason, and the
+ * Reads the live site for the analysis, best effort (the survey's reader), within its own
+ * budget, including a bounded interactive pass. A failure never fails the analysis — it is recorded UNAVAILABLE with a short reason, and the
  * criteria are compiled from the requirement alone. Cancel and the hard deadline still end the run.
  */
 async function readLiveSite(ctx: StageContext, deps: AnalyzeSiteDeps | undefined): Promise<LiveSite> {

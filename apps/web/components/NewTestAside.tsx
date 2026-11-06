@@ -7,17 +7,17 @@ import { LIFECYCLE_LABEL, VERDICT_LABEL } from "./format";
 import { hostOf, runTitle } from "./report-format";
 
 const STEPS = [
-  { title: "Describe", text: "Your requirement becomes acceptance criteria: what the run will check." },
-  { title: "Confirm", text: "Adjust a check's values or remove it. Nothing runs until you confirm." },
-  { title: "Watch it explore", text: "A sandboxed browser works through the site while you follow along." },
-  { title: "Get the evidence", text: "A result for each criterion, confirmed by rerunning a generated Playwright test." },
+  { title: "Describe", text: "Tell us where to start and what you expect." },
+  { title: "Confirm", text: "Make sure the proposed checks match your intent." },
+  { title: "Watch it explore", text: "Follow the browser as it checks your flow." },
+  { title: "Get the evidence", text: "See what passed, what needs attention, and the evidence." },
 ] as const;
 
 export function HowItWorks() {
   const titleId = useId();
   return (
-    <section className="ink how-card" aria-labelledby={titleId}>
-      <h2 id={titleId}>How a run works</h2>
+    <section className="card how-card" aria-labelledby={titleId}>
+      <h2 id={titleId}>From idea to evidence</h2>
       <ol className="how-steps">
         {STEPS.map((s, i) => (
           <li key={s.title} className="how-step">

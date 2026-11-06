@@ -10,11 +10,7 @@ import {
   SessionListResponseSchema,
   RevokeSessionsResponseSchema,
   type SessionInfo,
-  CredentialProfileListSchema,
-  CredentialProfileSchema,
-  TestDataSetListSchema,
   UsageReportSchema,
-  TestDataSetSchema,
   UserListResponseSchema,
   UserViewSchema,
   TestReportSchema,
@@ -51,12 +47,7 @@ import {
   type RerunRequestInput,
   type CreateUserRequestInput,
   type SessionView,
-  type CreateCredentialProfileRequestInput,
-  type CredentialProfile,
-  type UpdateCredentialProfileRequest,
-  type TestDataSet,
   type UsageReport,
-  type TestDataSetInput,
   type UpdateUserRequest,
   type UserView,
   type LlmDefaultsInput,
@@ -170,6 +161,9 @@ export const getComparison = (runId: string, baseline?: string): Promise<RunComp
 /** The final report (COMPLETED) or a partial one (ERRORED / CANCELLED); 409 while the run is still going. */
 export const getReport = (runId: string): Promise<TestReport> => request(TestReportSchema, `${runPath(runId)}/report`);
 
+export const reviewResult = (runId: string, criterionId: string, status: "PASS" | "FAIL"): Promise<TestReport> =>
+  request(TestReportSchema, `${runPath(runId)}/results/${seg(criterionId)}/review`, { method: "POST", body: { status } });
+
 export const getRun = (runId: string): Promise<TestRunSummary> => request(TestRunSummarySchema, runPath(runId));
 
 /** A manual rerun of a finished run's saved Playwright test (V1.1): a new run, no model call. */
@@ -239,36 +233,6 @@ export const createUser = (body: CreateUserRequestInput): Promise<UserView> => r
 
 export const updateUser = (userId: string, body: UpdateUserRequest): Promise<UserView> =>
   request(UserViewSchema, `${USERS}/${seg(userId)}`, { method: "PATCH", body });
-
-const SETS = "/api/v1/test-data-sets";
-
-/** Saved test data sets (V1.1 F3), by name. */
-export const listTestDataSets = async (): Promise<TestDataSet[]> => (await request(TestDataSetListSchema, SETS)).items;
-
-export const createTestDataSet = (body: TestDataSetInput): Promise<TestDataSet> => request(TestDataSetSchema, SETS, { method: "POST", body });
-
-export const updateTestDataSet = (id: string, body: TestDataSetInput): Promise<TestDataSet> =>
-  request(TestDataSetSchema, `${SETS}/${seg(id)}`, { method: "PUT", body });
-
-export const deleteTestDataSet = async (id: string): Promise<void> => {
-  await request(NoContentSchema, `${SETS}/${seg(id)}`, { method: "DELETE" });
-};
-
-const PROFILES = "/api/v1/credential-profiles";
-
-/** Saved credentials (V1.1 F4): names only, never a value. */
-export const listCredentialProfiles = async (): Promise<CredentialProfile[]> => (await request(CredentialProfileListSchema, PROFILES)).items;
-
-export const createCredentialProfile = (body: CreateCredentialProfileRequestInput): Promise<CredentialProfile> =>
-  request(CredentialProfileSchema, PROFILES, { method: "POST", body });
-
-/** A value replaces the secret, null removes it, an omitted name is kept. */
-export const updateCredentialProfile = (id: string, body: UpdateCredentialProfileRequest): Promise<CredentialProfile> =>
-  request(CredentialProfileSchema, `${PROFILES}/${seg(id)}`, { method: "PUT", body });
-
-export const deleteCredentialProfile = async (id: string): Promise<void> => {
-  await request(NoContentSchema, `${PROFILES}/${seg(id)}`, { method: "DELETE" });
-};
 
 /** Model spend over whole UTC days (V1.1): the last 30 by default; `owner` as for the run list. */
 export const getUsage = (range: { from?: string; to?: string; owner?: "me" | "all" } = {}): Promise<UsageReport> => {

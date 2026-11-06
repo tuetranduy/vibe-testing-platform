@@ -10,7 +10,7 @@ export const THEME_EVENT = "themechange";
  * Runs in <head> before first paint (app/layout.tsx), so a light-theme user never sees a dark flash.
  * Mirrors `readThemePref` and `applyTheme`; storage may be unavailable, and then the default stands.
  */
-export const THEME_SCRIPT = `(function(){try{var d=document.documentElement,s=localStorage,p=s.getItem("${THEME_KEY}");if(p!=="light"&&p!=="system")p="dark";var l=p==="light"||(p==="system"&&matchMedia("(prefers-color-scheme: light)").matches);d.setAttribute("data-theme",l?"light":"dark");d.setAttribute("data-theme-pref",p);if(s.getItem("${SIDEBAR_KEY}")==="collapsed")d.setAttribute("data-sidebar","collapsed")}catch(e){}})();`;
+export const THEME_SCRIPT = `(function(){try{var d=document.documentElement,s=localStorage,p=s.getItem("${THEME_KEY}");if(p!=="dark"&&p!=="system"&&p!=="light")p="light";var l=p==="light"||(p==="system"&&matchMedia("(prefers-color-scheme: light)").matches);d.setAttribute("data-theme",l?"light":"dark");d.setAttribute("data-theme-pref",p);if(s.getItem("${SIDEBAR_KEY}")==="collapsed")d.setAttribute("data-sidebar","collapsed")}catch(e){}})();`;
 
 function prefersLight(): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: light)").matches;
@@ -18,7 +18,7 @@ function prefersLight(): boolean {
 
 export function readThemePref(): ThemePref {
   const p = document.documentElement.getAttribute("data-theme-pref");
-  return p === "light" || p === "system" ? p : "dark";
+  return p === "dark" || p === "system" ? p : "light";
 }
 
 /** Applies `pref` to <html>, remembers it, and tells the other theme controls. */

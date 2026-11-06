@@ -163,3 +163,31 @@ describe("CriteriaResults", () => {
     expect(screen.getByText(/no criterion results/i)).toBeInTheDocument();
   });
 });
+
+describe("manual reviews", () => {
+  it("submits a pass decision and returns the updated report to its parent", async () => {
+    const report = reportFixture();
+    report.criteria = [resultFixture({ criterionId: "AC-1", status: "INCONCLUSIVE", reason: "UNVERIFIED_EVIDENCE", verdictSource: null })];
+    const reviewed = { ...report, verdict: "PASSED", criteria: [{ ...report.criteria[0], status: "PASS", reason: null, verdictSource: "USER_REVIEW",
+      review: { originalStatus: "INCONCLUSIVE", originalReason: "UNVERIFIED_EVIDENCE", actorId: "u_1", reviewedAt: "2026-11-06T00:00:00.000Z" } }] };
+    const fetch = vi.fn(async () => json(200, reviewed));
+    vi.stubGlobal("fetch", fetch);
+    const onReview = vi.fn();
+    render(<CriteriaResults runId="run_1" criteria={report.criteria} requirement={report.requirement} diagnostics={[]} artifacts={artifacts} steps={steps} onReview={onReview} />);
+    await userEvent.click(screen.getByRole("button", { name: "Mark as pass" }));
+    expect(fetch).toHaveBeenCalledWith("/api/v1/test-runs/run_1/results/AC-1/review", expect.objectContaining({ method: "POST", body: JSON.stringify({ status: "PASS" }) }));
+    expect(onReview).toHaveBeenCalledWith(expect.objectContaining({ verdict: "PASSED" }));
+  });
+
+  it("shows a save failure and leaves the decision available for retry", async () => {
+    const report = reportFixture();
+    report.criteria = [resultFixture({ criterionId: "AC-1", status: "INCONCLUSIVE", reason: "UNVERIFIED_EVIDENCE", verdictSource: null })];
+    vi.stubGlobal("fetch", vi.fn(async () => json(409, { code: "REVIEW_NOT_ALLOWED", message: "Already reviewed" })));
+    const onReview = vi.fn();
+    render(<CriteriaResults runId="run_1" criteria={report.criteria} requirement={report.requirement} diagnostics={[]} artifacts={artifacts} steps={steps} onReview={onReview} />);
+    await userEvent.click(screen.getByRole("button", { name: "Mark as fail" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Already reviewed");
+    expect(onReview).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Mark as fail" })).toBeEnabled();
+  });
+});

@@ -52,10 +52,7 @@ const browserTimeZone = () => {
   }
 };
 
-/**
- * A suite's schedules (V1.2 F3): when it runs by itself, as whoever created the schedule, with the suite's saved
- * credentials only (so a schedule can't be added while they miss a secret).
- */
+/** Scheduled replay is available for tests using the current setup flow. */
 export function SuiteSchedules({ suite }: { suite: SuiteDetail }) {
   const [schedules, setSchedules] = useState<ScheduleView[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -73,7 +70,7 @@ export function SuiteSchedules({ suite }: { suite: SuiteDetail }) {
   }, [suite.id]);
 
   const replace = (s: ScheduleView) => setSchedules((all) => (all ?? []).map((x) => (x.id === s.id ? s : x)));
-  const blocked = suite.missingSecretNames.length > 0;
+  const blocked = suite.secretNames.length > 0;
 
   return (
     <section className="card stack" aria-labelledby="schedules-title">
@@ -85,8 +82,7 @@ export function SuiteSchedules({ suite }: { suite: SuiteDetail }) {
       </div>
       {blocked && (
         <p className="hint">
-          <Icon name="lock" /> A scheduled run can only use the suite&apos;s saved credentials, which don&apos;t provide{" "}
-          {suite.missingSecretNames.join(", ")}. Choose saved credentials that do in the suite settings.
+          Some tests use an older setup. Replace them with fresh tests before adding a schedule.
         </p>
       )}
       {loadError && (

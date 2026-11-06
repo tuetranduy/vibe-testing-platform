@@ -6,3 +6,5 @@ export * from "./post-validate";
 export * from "./suggest";
 export * from "./survey-stage";
 export * from "./site-reader";
+
+export { SITE_EXPLORATION_SYSTEM_PROMPT } from "./interactive";

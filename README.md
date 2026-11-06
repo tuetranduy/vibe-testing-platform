@@ -3,6 +3,16 @@
 Submit a website URL and a plain-language requirement, confirm the acceptance criteria, watch the run live, and get an evidence-backed report.
 Plan: [`docs/ai-testing-platform-implementation-plan.md`](docs/ai-testing-platform-implementation-plan.md).
 
+## Recent improvements
+
+The web app now starts from **Website URL + Test instructions**, or an explicit **Find test ideas** mode. Environment selection, manual test data, test secrets and their saved libraries have been retired from the UI and browser proxy. Existing run reports remain readable; older saved tests requiring manual credentials link to fresh setup. The service API and stored records remain compatible with historical runs. Every new UI run uses the stricter internal action policy, with host confirmation for actions that change site data.
+
+The redesigned workspace defaults to light (saved theme preferences still apply), uses a four-step run guide, and keeps detailed activity, optional settings and saved test code behind disclosures. Desktop and mobile share the same flow.
+
+- Completed runs offer **Mark as pass** and **Mark as fail** for inconclusive criterion results. Reviews preserve the automated reason, evidence, reviewer and timestamp, are labeled **Reviewed by user**, and update report totals and run/suite verdicts. `POST /v1/test-runs/:runId/results/:criterionId/review` accepts `{ "status": "PASS" | "FAIL" }` with the run's usual ownership checks.
+- Requirement analysis asks the run's LLM for a short test title in the existing criteria call. Run history, run pages and suites use it; older runs retain their requirement preview. **Input requirements** on the run page shows the full submitted requirement.
+- Site discovery during surveys and live requirement analysis now performs up to six browsing/search/sign-in interactions (up to three per page) within the existing time budget. Values come from supplied test data/secrets or synthetic inputs; the model selects controls and input keys. Each resulting state retains an inventory and screenshot. Bounded document/fetch/XHR request metadata (method, endpoint, status/failure; no query strings, bodies or headers) accompanies the page context used for suggestions, criteria and planning. Discovery filters controls identified as persistent-data submissions, destructive actions or sign-out. Cancellation, the egress proxy and navigation policy still apply. The older read-only survey descriptions below describe the original implementation.
+
 ## Status
 
 **2026-11-05 functional review:** [requirements coverage, fixed defects and prioritized improvements](docs/reviews/2026-11-05-functional-review.md).

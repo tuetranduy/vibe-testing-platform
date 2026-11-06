@@ -15,10 +15,9 @@ export default async function NewTestPage({
       <div className="new-test-main">
         <div className="title-block">
           <p className="eyebrow">New test</p>
-          <h1 className="page-title">What should work?</h1>
+          <h1 className="page-title">Create a test</h1>
           <p className="page-lede">
-            Give a website and describe the behaviour in plain language. You&apos;ll confirm the acceptance criteria before anything
-            runs, then get a report with the evidence for each one.
+            Describe a flow, review the checks, and get results backed by a real browser.
           </p>
         </div>
         <NewTestForm from={typeof from === "string" ? from : null} suggestion={typeof suggestion === "string" ? suggestion : null} />

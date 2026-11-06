@@ -8,7 +8,6 @@ import { ArtifactList } from "./ArtifactList";
 import { CriteriaResults } from "./CriteriaResults";
 import { Disclosure } from "./Disclosure";
 import { FailureDiagnostics } from "./FailureDiagnostics";
-import { GeneratedInputs } from "./GeneratedInputs";
 import { GeneratedTestViewer } from "./GeneratedTestViewer";
 import { Icon } from "./Icon";
 import { AddToSuitePanel } from "./AddToSuitePanel";
@@ -101,7 +100,7 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
           Print or save as PDF
         </a>
       </div>
-      {report.lifecycle === "COMPLETED" && <ComparisonPanel runId={runId} />}
+      {report.lifecycle === "COMPLETED" && <ComparisonPanel key={report.criteria.map((r) => r.status).join()} runId={runId} />}
       <CriteriaResults
         runId={runId}
         criteria={report.criteria}
@@ -110,7 +109,11 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
         artifacts={artifactMap}
         steps={stepMap}
         partial={report.partial}
+        onReview={report.lifecycle === "COMPLETED" ? (report) => setState({ status: "ready", report }) : undefined}
       />
+      <Disclosure title={`All evidence (${artifacts.length})`} hint="Every screenshot, trace and video the run stored.">
+        <ArtifactList runId={runId} artifactIds={artifacts.map((a) => a.artifactId)} artifacts={artifactMap} />
+      </Disclosure>
       {general.length > 0 && (
         <section className="card" aria-labelledby="diagnostics-title">
           <h2 id="diagnostics-title" className="card-title">
@@ -119,22 +122,21 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
           <FailureDiagnostics findings={general} />
         </section>
       )}
-      <GeneratedInputs inputs={report.generatedInputs} />
-      {report.generatedTest && <GeneratedTestViewer test={report.generatedTest} playwright={report.playwright} requirement={report.requirement} />}
+      {report.generatedTest && <Disclosure title="Saved test code" hint="View the reusable Playwright test and verification details."><GeneratedTestViewer test={report.generatedTest} playwright={report.playwright} requirement={report.requirement} /></Disclosure>}
       {secretNames && report.generatedTest && report.generatedTest.compiledCriteria.length > 0 && (
-        <RerunPanel
-          runId={runId}
-          secretNames={secretNames}
-          compiledCount={report.generatedTest.compiledCriteria.length}
-          destructive={destructive}
-        />
+        <Disclosure title="Reuse this test" hint="Replay the saved test or add it to a suite.">
+          <div className="stack">
+            <RerunPanel
+              runId={runId}
+              secretNames={secretNames}
+              compiledCount={report.generatedTest.compiledCriteria.length}
+              destructive={destructive}
+            />
+            {secretNames.length === 0 && <AddToSuitePanel runId={runId} destructive={destructive} />}
+          </div>
+        </Disclosure>
       )}
-      {secretNames && report.generatedTest && report.generatedTest.compiledCriteria.length > 0 && (
-        <AddToSuitePanel runId={runId} destructive={destructive} />
-      )}
-      <Disclosure title={`All evidence (${artifacts.length})`} hint="Every screenshot, trace and video the run stored.">
-        <ArtifactList runId={runId} artifactIds={artifacts.map((a) => a.artifactId)} artifacts={artifactMap} />
-      </Disclosure>
+
     </>
   );
 }

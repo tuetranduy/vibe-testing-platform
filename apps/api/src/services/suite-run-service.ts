@@ -214,7 +214,7 @@ export class SuiteRunService {
         baselineRunId: changes.get(c.id)?.baselineRunId ?? null,
         runId: c.id,
         sourceRunId: c.request.rerunOf ?? c.id,
-        title: c.request.requirement.slice(0, 200),
+        title: c.request.title ?? c.request.requirement.slice(0, 200),
         targetUrl: c.targetUrl,
         lifecycle: c.lifecycle,
         verdict: c.verdict,
@@ -245,7 +245,7 @@ export class SuiteRunService {
       const statements = new Map((requirement?.criteria ?? []).map((x) => [x.id, x.statement]));
       children.push({
         runId: c.id,
-        title: c.request.requirement.slice(0, 200),
+        title: c.request.title ?? c.request.requirement.slice(0, 200),
         lifecycle: c.lifecycle,
         durationMs: c.startedAt && c.finishedAt ? c.finishedAt.getTime() - c.startedAt.getTime() : null,
         error: c.errorCategory ? { category: c.errorCategory, message: c.errorMessage } : null,

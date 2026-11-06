@@ -1,5 +1,5 @@
 import type { LlmTransport, LlmTransportRequest, LlmTransportResponse } from "@platform/llm";
-import { DIAGNOSTICS_SYSTEM_PROMPT, INPUT_SYSTEM_PROMPT, PLANNER_SYSTEM_PROMPT, REQUIREMENT_SYSTEM_PROMPT, SURVEY_SYSTEM_PROMPT } from "@platform/testing-engine";
+import { DIAGNOSTICS_SYSTEM_PROMPT, INPUT_SYSTEM_PROMPT, PLANNER_SYSTEM_PROMPT, REQUIREMENT_SYSTEM_PROMPT, SURVEY_SYSTEM_PROMPT, SITE_EXPLORATION_SYSTEM_PROMPT } from "@platform/testing-engine";
 import { DEMO_SHOP_SUGGESTIONS, type Scenario } from "./scenarios";
 
 const textOf = (req: LlmTransportRequest) =>
@@ -24,6 +24,9 @@ export class ScenarioTransport implements LlmTransport {
     let json: unknown;
     if (req.system === DIAGNOSTICS_SYSTEM_PROMPT) {
       json = { findings: [], notes: [] };
+    } else if (req.system === SITE_EXPLORATION_SYSTEM_PROMPT) {
+      // Interactive discovery is covered by its real-browser unit tests; preserve each scenario's initial state.
+      json = { candidate: -1, source: "generated", key: "" };
     } else if (req.system === INPUT_SYSTEM_PROMPT) {
       json = { value: SCRIPTED_INPUT };
     } else if (req.system === SURVEY_SYSTEM_PROMPT) {

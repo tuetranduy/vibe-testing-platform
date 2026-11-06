@@ -181,7 +181,7 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
             textField(draft.mode === "regex" ? "Pattern" : "Text")
           ) : (
             <p className="hint">
-              Compared with the test data value <strong>{outcome.match.testDataKey}</strong>
+              Uses the value entered for <strong>{outcome.match.testDataKey}</strong>
             </p>
           )}
           <label className="choice">

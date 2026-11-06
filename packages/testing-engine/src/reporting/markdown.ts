@@ -50,6 +50,7 @@ function duration(ms: number | null): string {
 }
 
 function confirmation(c: CriterionResult): string {
+  if (c.verdictSource === "USER_REVIEW") return `Reviewed by user on ${c.review?.reviewedAt ?? "an unknown date"}; automated result: INCONCLUSIVE (${c.review?.originalReason ?? "no reason recorded"})`;
   if (c.verdictSource === "PLAYWRIGHT_RERUN") return "Confirmed by the Playwright rerun";
   if (c.verdictSource === "EXPLORATION_ONLY") return "Not confirmed by a rerun: read from the page while exploring";
   if (c.verdictSource === "AI_JUDGMENT") return "Judged by AI from what the page showed while exploring: the criterion is unclear, so the actual result was judged against it";

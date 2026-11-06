@@ -4,8 +4,8 @@ import { SurveyedPageSchema } from "./suggestions";
 
 /**
  * Requirement analysis against the live website (V1.3). While the requirement is analyzed, the worker reads
- * the start page and a few pages it links to (read-only, like the survey: nothing is clicked, typed or
- * submitted), and the compile call sees what they show. The result is advisory — it never changes a status:
+ * the start page and a few pages it links to, including bounded clicks and fills for discovery.
+ * The compile call sees their inventories, resulting states, screenshots and network metadata. The result is advisory — it never changes a status:
  *
  * - `checks`: per criterion, whether what it checks was seen on the pages read;
  * - `testData`: values for the test data keys the criteria need but the run was not given — taken from the
@@ -58,8 +58,22 @@ export const PageInventorySchema = z.object({
 });
 export type PageInventory = z.infer<typeof PageInventorySchema>;
 
-/** A page read for the analysis: where it landed (origin + path) and what it showed. */
-export const SitePageSchema = z.object({ url: z.string().max(2048), inventory: PageInventorySchema });
+export const SiteNetworkEntrySchema = z.object({
+  method: z.string().max(20), url: z.string().max(2048), resourceType: z.string().max(30),
+  status: z.number().int().nullable(), failed: z.boolean(),
+});
+export type SiteNetworkEntry = z.infer<typeof SiteNetworkEntrySchema>;
+export const SiteInteractionSchema = z.object({
+  kind: z.enum(["click", "fill"]), label: z.string().max(160), inputKey: z.string().max(100).nullable(),
+  url: z.string().max(2048), inventory: PageInventorySchema, screenshotArtifactId: z.string().nullable(),
+});
+export type SiteInteraction = z.infer<typeof SiteInteractionSchema>;
+
+/** A page and the states discovered by interacting with it; network contains no bodies, headers or query strings. */
+export const SitePageSchema = z.object({ url: z.string().max(2048), inventory: PageInventorySchema,
+  interactions: z.array(SiteInteractionSchema).max(3).optional(),
+  network: z.array(SiteNetworkEntrySchema).max(50).optional(),
+});
 export type SitePage = z.infer<typeof SitePageSchema>;
 
 export const SiteAnalysisSchema = z.object({

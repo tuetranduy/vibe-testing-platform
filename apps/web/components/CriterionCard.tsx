@@ -46,11 +46,6 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-const PRECONDITION: Record<AcceptanceCriterion["preconditions"][number]["kind"], string> = {
-  authenticated: "Needs a signed-in user",
-  test_data: "Needs test data",
-  secret: "Needs a secret",
-};
 
 export function CriterionCard({
   criterion: c,
@@ -191,11 +186,11 @@ export function CriterionCard({
           </div>
         )}
 
-        {c.preconditions.length > 0 && (
+        {c.preconditions.some((p) => p.kind === "authenticated") && (
           <ul className="criterion-needs">
-            {c.preconditions.map((p, i) => (
+            {c.preconditions.filter((p) => p.kind === "authenticated").map((p, i) => (
               <li key={i}>
-                {PRECONDITION[p.kind]}
+                Needs a signed-in user
                 {p.ref ? `: ${p.ref}` : ""}
               </li>
             ))}

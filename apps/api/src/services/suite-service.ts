@@ -139,7 +139,7 @@ export class SuiteService {
       views.push({
         sourceRunId: e.sourceRunId,
         position: e.position,
-        title: source.request.requirement.slice(0, 200),
+        title: source.request.title ?? source.request.requirement.slice(0, 200),
         targetUrl: source.targetUrl,
         environment: source.request.environment,
         secretNames: source.request.secretNames,

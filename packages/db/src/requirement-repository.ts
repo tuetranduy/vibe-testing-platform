@@ -1,5 +1,5 @@
 import { NormalizedRequirementSchema, type NormalizedRequirement } from "@platform/contracts";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Executor } from "./client";
 import { NotFoundError, RequirementFrozenError, RequirementStateError } from "./errors";
 import { newId } from "./ids";
@@ -58,6 +58,11 @@ export class RequirementRepository {
         .insert(requirementRevisions)
         .values({ id: newId("req"), runId, revision, json: parsed })
         .returning();
+      if (parsed.title) {
+        await tx.update(testRuns).set({
+          requestJson: sql`jsonb_set(${testRuns.requestJson}, '{title}', to_jsonb(${parsed.title}::text))`,
+        }).where(eq(testRuns.id, runId));
+      }
       return toRequirement(row!);
     });
   }

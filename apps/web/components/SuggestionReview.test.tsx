@@ -39,14 +39,11 @@ describe("SuggestionReview", () => {
     expect(within(card).getByRole("link", { name: /start as a separate test/i })).toHaveAttribute("href", "/runs/new?from=run_1&suggestion=S-2");
   });
 
-  it("marks a need the run lacks, and not one it has", async () => {
+  it("does not ask users to configure data or credentials on test ideas", async () => {
     renderReview({ [`GET ${SUGGESTIONS}`]: () => json(200, suggestionsFixture()) });
-    const needs = within(await cardOf("Sign in to the account")).getByRole("list", { name: /needs/i });
-    const [password, email] = within(needs).getAllByRole("listitem");
-    expect(password).toHaveTextContent("password — not provided: the run will make one up (start it as a separate test to give your own)");
-    expect(email).toHaveTextContent("email");
-    expect(email).not.toHaveTextContent(/not provided/);
-    expect(within(await cardOf("Search for a product")).queryByRole("list", { name: /needs/i })).not.toBeInTheDocument();
+    const card = await cardOf("Sign in to the account");
+    expect(within(card).queryByRole("list", { name: /needs/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/not provided/)).not.toBeInTheDocument();
   });
 
   it("badges a destructive suggestion, and says it will be blocked when the run doesn't allow destructive actions", async () => {

@@ -111,6 +111,8 @@ export function toRunSummary(
     environment: run.request.environment,
     allowDestructiveActions: destructiveActionsAllowed(run.request),
     requirementPreview: run.request.requirement.slice(0, 200),
+    requirementText: run.request.requirement,
+    title: run.request.title ?? null,
     createdAt: run.createdAt.toISOString(),
     startedAt: run.startedAt?.toISOString() ?? null,
     finishedAt: run.finishedAt?.toISOString() ?? null,

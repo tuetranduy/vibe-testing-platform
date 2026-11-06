@@ -100,7 +100,7 @@ describe("CriteriaReview", () => {
     await user.click(within(cards[0]!).getByRole("button", { name: "Edit check AC-1" }));
     await user.selectOptions(within(cards[0]!).getByLabelText(/comparison/i), "gte");
     await user.click(within(cards[0]!).getByRole("button", { name: /save check/i }));
-    await screen.findByText(/revision 2/i);
+    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([, init]) => init?.method === "PUT")).toBe(true));
 
     const after = screen.getAllByRole("article");
     expect(within(after[0]!).getByRole("group", { name: /what will be checked/i })).toHaveTextContent("is at least");
@@ -123,7 +123,7 @@ describe("CriteriaReview", () => {
     await user.type(delta, "2");
     expect(screen.getByRole("button", { name: /confirm and start/i })).toBeDisabled();
     await user.click(within(cards[1]!).getByRole("button", { name: /save check/i }));
-    await screen.findByText(/revision 2/i);
+    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([, init]) => init?.method === "PUT")).toBe(true));
     expect(screen.getByRole("button", { name: /confirm and start/i })).toBeEnabled();
   });
 
@@ -144,7 +144,7 @@ describe("CriteriaReview", () => {
     await user.clear(delta);
     await user.type(delta, "2");
     const wording = "Cart badge count (at “after add”) is exactly 2 more than Cart badge count (at “before add”).";
-    expect(within(cards[1]!).getByText(wording)).toBeInTheDocument(); // live preview
+    expect(within(cards[1]!).getAllByText(wording).length).toBeGreaterThan(0); // live preview
     await user.click(within(cards[1]!).getByRole("button", { name: /save check/i }));
 
     await waitFor(() => expect(sent).not.toBeNull());
@@ -153,7 +153,7 @@ describe("CriteriaReview", () => {
     if (ac2.expectedOutcome.kind !== "numeric_delta") throw new Error("fixture changed: AC-2 should be a numeric_delta check");
     expected.criteria[1] = { ...ac2, expectedOutcome: { ...ac2.expectedOutcome, delta: 2 }, statement: wording, ambiguity: null };
     expect(sent).toEqual(expected);
-    expect(await screen.findByText(/revision 2/i)).toBeInTheDocument();
+    expect(within(screen.getAllByRole("article")[1]!).getAllByText(wording).length).toBeGreaterThan(0);
   });
 
   it("saving a check that wasn't changed sends nothing and just closes the editor", async () => {
@@ -348,7 +348,7 @@ describe("CriteriaReview", () => {
     render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
     await screen.findAllByRole("article");
     await user.click(screen.getByRole("button", { name: /start over with a revised requirement/i }));
-    expect(screen.getByText(/test data and secrets must be entered again/i)).toBeInTheDocument();
+    expect(screen.queryByText(/test data and secrets must be entered again/i)).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledTimes(2); // nothing cancelled yet (the criteria and the site analysis, V1.3)
     await user.click(screen.getByRole("button", { name: /yes, start over/i }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/new?from=run_1"));
@@ -408,7 +408,7 @@ describe("CriteriaReview: the live-site analysis and suggested test data (V1.3)"
     routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()), [`GET ${SITE}`]: () => json(200, analysis) });
     render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
     expect(await screen.findByText("Checked against the live site")).toBeInTheDocument();
-    expect(screen.getByText(/1 page read before the criteria were written/)).toBeInTheDocument();
+    expect(screen.getByText(/1 page explored before the checks were written/)).toBeInTheDocument();
     expect(screen.getByText(/1 criterion checks something the pages read don/)).toBeInTheDocument();
     const cards = screen.getAllByRole("article");
     expect(within(cards[0]!).getByText(/seen on the site/i)).toBeInTheDocument();
@@ -417,27 +417,16 @@ describe("CriteriaReview: the live-site analysis and suggested test data (V1.3)"
     expect(within(cards[2]!).queryByText(/on the site|pages read/i)).not.toBeInTheDocument();
   });
 
-  it("confirm sends the suggested test data that was kept, as edited", async () => {
-    const user = userEvent.setup();
+  it("confirms without asking for manual data, even when an older analysis suggests it", async () => {
     const onConfirmed = vi.fn();
-    const fetch = routeFetch({
-      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
-      [`GET ${SITE}`]: () => json(200, analysis),
-      [`POST ${CONFIRM}`]: () => json(202, { revision: 1, warnings: [] }),
-    });
+    const fetch = routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()), [`GET ${SITE}`]: () => json(200, analysis), [`POST ${CONFIRM}`]: () => json(202, { revision: 1, warnings: [] }) });
     render(<CriteriaReview runId="run_1" onConfirmed={onConfirmed} />);
-    const email = await screen.findByLabelText("Value for email");
-    expect(email).toHaveValue("qa.abc123@example.com");
-    expect(screen.getByText("From the site")).toBeInTheDocument();
-    await user.clear(email);
-    await user.type(email, "me@example.com");
-    await user.click(screen.getByRole("checkbox", { name: /productName/ }));
-    expect(screen.getByLabelText("Value for productName")).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: /confirm and start/i }));
-
+    await screen.findByText("Checked against the live site");
+    expect(screen.queryByLabelText("Value for email")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /confirm and start/i }));
     await waitFor(() => expect(onConfirmed).toHaveBeenCalled());
     const [, init] = fetch.mock.calls.find(([url, i]) => String(url) === CONFIRM && i?.method === "POST")!;
-    expect(JSON.parse(String(init!.body))).toEqual({ testData: { email: "me@example.com", quantity: 2 } });
+    expect(init?.body).toBeUndefined();
   });
 
   it("a run without an analysis confirms as before, with no body", async () => {

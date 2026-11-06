@@ -1,14 +1,15 @@
-import type { ArtifactSensitivity, SurveyedPage } from "@platform/contracts";
-import type { Page } from "playwright-core";
+import type { ArtifactSensitivity, SiteNetworkEntry, SitePage, SurveyedPage } from "@platform/contracts";
+import type { Page, Request, Response } from "playwright-core";
 import type { StageContext } from "../orchestrator/stages";
-import { INVENTORY_SCRIPT, parseRawInventory, toPageInventory, type PageInventory, type RawPageInventory } from "./inventory";
+import { explorePage } from "./interactive";
+import { INVENTORY_SCRIPT, parseRawInventory, toPageInventory, type RawPageInventory } from "./inventory";
 import { chooseSurveyLinks, isAllowedPageHost, surveyPageUrl, surveyPath, type SurveyLink } from "./links";
 
 /**
  * Reads a website the way the survey does (spec 2026-09-28-suggest-tests, section 5), for the survey and —
  * since V1.3 — for the requirement analysis: platform code loads the start page and a few same-site links by
- * URL (`page.goto`) and reads each with a fixed in-page script. Nothing is clicked, typed or submitted, and
- * the model never drives the browser. Each page read gets a full-page screenshot (stored and announced) and
+ * URL (`page.goto`) and reads each with a fixed in-page script. A bounded model-guided pass also clicks
+ * browsing controls and fills inputs, recording resulting inventories, screenshots and network metadata. Each page read gets a full-page screenshot (stored and announced) and
  * a `page.surveyed` event (its path, never the query).
  */
 
@@ -43,8 +44,8 @@ export interface SiteRead {
   /** Every page tried, in order. */
   pages: SurveyedPage[];
   /** The pages read, with what the model may see of them. */
-  read: { url: string; inventory: PageInventory }[];
-  /** The start page's viewport screenshot (PNG), for the model; null when there is none. */
+  read: SitePage[];
+  /** The latest viewport discovered from the start page (PNG), for the model; null when there is none. */
   screenshot: Buffer | null;
   /** Why the start page could not be read; null when it was. */
   startFailure: string | null;
@@ -101,6 +102,24 @@ export async function readSite(ctx: StageContext, opts: ReadSiteOptions): Promis
   const pages: SurveyedPage[] = [];
   const read: SiteRead["read"] = [];
   let screenshot: Buffer | null = null;
+  const interactive = { visited: new Set<string>(), budget: { remaining: 6 } };
+  const network: SiteNetworkEntry[] = [];
+  const captureNetwork = (request: Request, status: number | null, failed: boolean) => {
+    if (network.length >= 300) return;
+    try {
+      const url = new URL(request.url());
+      if (!["http:", "https:"].includes(url.protocol)) return;
+      if (!failed && !["document", "xhr", "fetch"].includes(request.resourceType())) return;
+      network.push({ method: request.method().slice(0, 20), url: String(ctx.redact(surveyPageUrl(url))).slice(0, 2048),
+        resourceType: request.resourceType().slice(0, 30), status, failed });
+    } catch { /* Ignore malformed URLs from the page. */ }
+  };
+  const response = (r: Response) => captureNetwork(r.request(), r.status(), false);
+  const failed = (r: Request) => captureNetwork(r, null, true);
+  // Structural fake pages used by the deterministic engine need no event emitter.
+  sandbox.page.on?.("response", response);
+  sandbox.page.on?.("requestfailed", failed);
+  let networkOffset = 0;
 
   /** Loads `target` by URL and reads its inventory. */
   const load = async (target: URL): Promise<PageRead> => {
@@ -130,7 +149,7 @@ export async function readSite(ctx: StageContext, opts: ReadSiteOptions): Promis
   /** A screenshot of the current page, or null (never throws, except the abort reason). */
   const shoot = async (fullPage: boolean): Promise<Buffer | null> => {
     try {
-      return await race(sandbox.page.screenshot({ type: "png", fullPage }), AbortSignal.any([ctx.signal, AbortSignal.timeout(pageTimeoutMs)]));
+      return await race(sandbox.page.screenshot({ type: "png", fullPage }), AbortSignal.any([pagesBudget, AbortSignal.timeout(pageTimeoutMs)]));
     } catch {
       if (ctx.signal.aborted) throw ctx.signal.reason;
       return null;
@@ -161,7 +180,31 @@ export async function readSite(ctx: StageContext, opts: ReadSiteOptions): Promis
       });
     }
     pages.push({ url: surveyPageUrl(result.url), title: inventory.title, status: "READ" });
-    read.push({ url: surveyPageUrl(result.url), inventory });
+    const entry: SitePage = { url: surveyPageUrl(result.url), inventory };
+    read.push(entry);
+    if (interactive.budget.remaining > 0 && !pagesBudget.aborted && typeof sandbox.page.locator === "function") {
+      try {
+        const actionSignal = AbortSignal.any([pagesBudget, AbortSignal.timeout(20_000)]);
+        entry.interactions = [];
+        await explorePage(ctx, sandbox.page, { ...interactive, signal: actionSignal, interactions: entry.interactions,
+          screenshot: async () => {
+            const png = await shoot(true);
+            if (!png) return null;
+            // Give the criteria/suggestion model the latest state discovered from the start page too.
+            if (isStart) screenshot = await shoot(false) ?? screenshot;
+            const { artifactId } = await store.saveScreenshot({ png, fileName: `${opts.fileNamePrefix}-${pages.length}-action-${interactive.visited.size}.png`, sensitivity });
+            await ctx.publish({ type: "artifact.created", message: "Screenshot saved after exploring a live control", payload: { artifactId, type: "SCREENSHOT", sensitivity } });
+            return artifactId;
+          },
+        });
+      } catch {
+        // Interaction is best effort; inventories and network already gathered are still useful.
+        if (ctx.signal.aborted) throw ctx.signal.reason;
+      }
+    }
+    const captured = network.slice(networkOffset);
+    if (captured.length) entry.network = captured.slice(-50);
+    networkOffset = network.length;
     await ctx.publish({
       type: "page.surveyed",
       message: clip(`Loaded ${path} — ${inventory.title || "(no title)"}`, 300),
@@ -189,5 +232,7 @@ export async function readSite(ctx: StageContext, opts: ReadSiteOptions): Promis
     return { pages, read, screenshot, startFailure: null };
   } finally {
     unsubscribe?.();
+    sandbox.page.off?.("response", response);
+    sandbox.page.off?.("requestfailed", failed);
   }
 }

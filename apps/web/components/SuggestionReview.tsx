@@ -22,18 +22,6 @@ const TOO_LONG = "Keep the test under 20,000 characters.";
 
 const messageOf = (err: unknown) => (err instanceof ApiRequestError ? err.message : "Something went wrong. Please try again.");
 
-interface Need {
-  kind: "secret" | "testData";
-  name: string;
-  /** The run doesn't have it: only a separate test (with it entered) can provide it. */
-  missing: boolean;
-}
-
-const needsOf = (s: Suggestion, run: SuggestionSetResponse["run"]): Need[] => [
-  ...s.needs.secrets.map((name) => ({ kind: "secret" as const, name, missing: !run.secretNames.includes(name) })),
-  ...s.needs.testData.map((name) => ({ kind: "testData" as const, name, missing: !run.testDataKeys.includes(name) })),
-];
-
 /**
  * "Choose what to test" (AWAITING_SELECTION, spec 2026-09-28-suggest-tests section 6): one card per
  * suggested test. "Test this" opens its text for editing, "Continue with this test" chooses it for
@@ -120,7 +108,6 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
 
         <div className="suggestion-list">
           {set.suggestions.map((s) => {
-            const needs = needsOf(s, set.run);
             const editing = draft?.id === s.id ? draft : null;
             const textId = `${s.id}-text`;
             return (
@@ -157,22 +144,6 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
                   <p className="suggestion-text">{s.requirement}</p>
                 )}
                 {s.why && <p className="muted">Why: {s.why}</p>}
-                {needs.length > 0 && (
-                  <div className="needs">
-                    <span className="needs-label" aria-hidden="true">
-                      Needs
-                    </span>
-                    <ul aria-label={`Needs for ${s.title}`}>
-                      {needs.map((n) => (
-                        <li key={`${n.kind}-${n.name}`} className={n.missing ? "need need-missing" : "need"}>
-                          <Icon name={n.kind === "secret" ? "lock" : "data"} />
-                          {n.name}
-                          {n.missing && " — not provided: the run will make one up (start it as a separate test to give your own)"}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
                 {s.destructive && !set.run.destructiveActionsAllowed && (
                   <p className="hint">
                     <Icon name="info" /> Will be blocked: this run doesn&apos;t allow destructive actions

@@ -195,6 +195,7 @@ export type CreateTestRunRequest = z.output<typeof CreateTestRunRequestSchema>;
  * saved set it came from is named by `testDataSet` (its later edits never change this run).
  */
 export type StoredTestRunRequest = Omit<CreateTestRunRequest, "secrets" | "llm" | "testDataSetId" | "credentialProfileId"> & {
+  title?: string;
   secretNames: string[];
   testDataSet?: SavedRef;
   /** The saved credential profile whose values were copied into this run's secrets (V1.1 F4). */
@@ -266,6 +267,8 @@ export const TestRunSummarySchema = z.object({
   /** Effective for this run: `destructiveActionsAllowed(request)`. */
   allowDestructiveActions: z.boolean(),
   requirementPreview: z.string().max(200),
+  requirementText: z.string().optional(),
+  title: z.string().max(120).nullable().optional(),
   createdAt: IsoDateTime,
   startedAt: IsoDateTime.nullable(),
   finishedAt: IsoDateTime.nullable(),

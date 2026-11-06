@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { logout } from "../lib/api";
 import { isAdminUser, resetMe, useMe } from "../lib/me";
-import { isCurrent, MAIN_NAV, SETTINGS_NAV } from "../lib/nav";
+import { isCurrent, MAIN_NAV } from "../lib/nav";
 import { isSidebarCollapsed, setSidebarCollapsed } from "../lib/theme";
 import { Brand } from "./Brand";
 import { CommandPalette } from "./CommandPalette";
@@ -62,8 +62,6 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
 
   if (pathname === "/login") return null;
   const current = (href: string) => (isCurrent(href, pathname) ? "page" : undefined);
-  const inSettings = isCurrent("/settings", pathname);
-  const settingsLinks = SETTINGS_NAV.filter((l) => !l.admin || isAdminUser(me));
 
   async function signOut() {
     setSigningOut(true);
@@ -133,15 +131,7 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
                 <Icon name={n.icon} />
                 <span className="nav-label">{n.label}</span>
               </a>
-              {n.href === "/settings" && inSettings && (
-                <div className="nav-sub">
-                  {settingsLinks.map((l) => (
-                    <a key={l.href} className="nav-sub-link" href={l.href} aria-current={pathname === l.href ? "page" : undefined}>
-                      {l.label}
-                    </a>
-                  ))}
-                </div>
-              )}
+
             </div>
           ))}
         </nav>

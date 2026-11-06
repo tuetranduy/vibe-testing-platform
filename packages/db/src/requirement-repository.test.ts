@@ -2,7 +2,7 @@ import type { NormalizedRequirement } from "@platform/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RequirementFrozenError, RequirementStateError } from "./errors";
 import { RequirementRepository } from "./requirement-repository";
-import { RunRepository } from "./run-repository";
+import { toRunSummary, RunRepository } from "./run-repository";
 import { storedRequest } from "./test-helpers";
 import { TEST_TENANT_ID, createTestDatabase, type TestDatabase } from "./testing";
 
@@ -96,4 +96,16 @@ describe("RequirementRepository", () => {
     bad.facts = [];
     await expect(reqs.createRevision(run.id, bad)).rejects.toThrow(/not declared/);
   });
+});
+
+
+it("persists an LLM title for history and keeps the full input separate from the preview", async () => {
+  const run = await runIn("ANALYZING_REQUIREMENT");
+  const req = await reqs.createRevision(run.id, { ...requirement(), title: "Cart count increases" });
+  expect(req.title).toBe("Cart count increases");
+  const stored = await runs.getById(run.id);
+  const summary = toRunSummary(stored);
+  expect(summary.title).toBe("Cart count increases");
+  expect(summary.requirementText).toBe(stored.request.requirement);
+  expect(summary.requirementPreview).toBe(stored.request.requirement.slice(0, 200));
 });

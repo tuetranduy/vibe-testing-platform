@@ -28,7 +28,7 @@ const FILTERS: readonly { id: FilterId; label: string; test: (r: TestRunSummary)
 
 const matchesQuery = (r: TestRunSummary, query: string) => {
   const q = query.trim().toLowerCase();
-  return q === "" || `${r.targetUrl} ${runTitle(r)}`.toLowerCase().includes(q);
+  return q === "" || `${r.targetUrl} ${runTitle(r)} ${r.requirementText ?? r.requirementPreview}`.toLowerCase().includes(q);
 };
 
 /**
@@ -110,6 +110,7 @@ export function RunHistory() {
           </div>
         )}
       </div>
+      {hasRuns && <div className="history-header-actions"><a className="button button-primary" href="/runs/new"><Icon name="plus" />New test</a></div>}
       {hasRuns && (
         <div className="input-with-icon search-field">
           <label htmlFor={searchId} className="visually-hidden">
@@ -173,7 +174,7 @@ export function RunHistory() {
 
     body = (
       <>
-        <div className="overview">
+        <div className="overview compact-overview">
           <ResultsOverview runs={items} />
           <RunningNow runs={items} />
         </div>
@@ -271,7 +272,7 @@ function RunTable({ runs }: { runs: TestRunSummary[] }) {
                 {runTitle(r)}
               </a>
               <span className="history-host">{hostOf(r.targetUrl)}</span>
-              {r.environment === "production" && r.allowDestructiveActions && <span className="history-tag">Production · destructive</span>}
+              {r.environment === "production" && r.allowDestructiveActions && <span className="history-tag">Changes site data</span>}
               {r.kind === "rerun" && <span className="history-kind">Rerun</span>}
               {r.owner && <span className="history-owner">by {r.owner.name}</span>}
             </td>

@@ -82,7 +82,7 @@ describe("SuiteSchedules (V1.2 F3)", () => {
     api({ "GET /api/v1/suites/ste_1/schedules": () => json(200, { items: [] }) });
     render(<SuiteSchedules suite={suiteFixture({ secretNames: ["password"], missingSecretNames: ["password"] })} />);
     expect(await screen.findByText("No schedules.")).toBeInTheDocument();
-    expect(screen.getByText(/don't provide password/)).toBeInTheDocument();
+    expect(screen.getByText(/older setup/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add a schedule" })).toBeDisabled();
   });
 });

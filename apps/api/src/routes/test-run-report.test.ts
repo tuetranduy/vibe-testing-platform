@@ -18,12 +18,14 @@ import {
   PlanRepository,
   RequirementRepository,
   ResultRepository,
+  SuiteRepository,
+  SuiteRunRepository,
   RunRepository,
   type TestRun,
 } from "@platform/db";
 import { OTHER_TENANT_ID, TEST_TENANT_ID } from "@platform/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { auth, createTestApi, type TestApi } from "../test-support";
+import { auth, createTestApi, signInMember, type TestApi } from "../test-support";
 
 let t: TestApi;
 beforeAll(async () => {
@@ -86,10 +88,10 @@ const PATHS: Record<string, RunLifecycle[]> = {
  * A run walked through the state machine to `target` (QUEUED stays put). Its criteria are compiled
  * while ANALYZING_REQUIREMENT and confirmed before PLANNING, as the worker does.
  */
-async function runAt(target: RunLifecycle, tenantId = TEST_TENANT_ID): Promise<TestRun> {
+async function runAt(target: RunLifecycle, tenantId = TEST_TENANT_ID, extra: { ownerUserId?: string; suiteRunId?: string } = {}): Promise<TestRun> {
   const runs = new RunRepository(t.tdb.db);
   const reqs = new RequirementRepository(t.tdb.db);
-  let run = await runs.create({ tenantId, targetUrl: request.targetUrl, request });
+  let run = await runs.create({ tenantId, targetUrl: request.targetUrl, request, ...extra });
   let from: RunLifecycle = "QUEUED";
   for (const to of PATHS[target] ?? []) {
     if (to === "PLANNING") await reqs.confirm(run.id, 1);
@@ -345,5 +347,78 @@ describe("GET /v1/test-runs/:runId/report.md (V1.1 F6)", () => {
     expect((await getMarkdown(running.id)).statusCode).toBe(409);
     const other = await runAt("COMPLETED", OTHER_TENANT_ID);
     expect((await getMarkdown(other.id)).statusCode).toBe(404);
+  });
+});
+
+describe("manual review of inconclusive results", () => {
+  async function seedReviewable(tenantId = TEST_TENANT_ID, extra: { ownerUserId?: string; suiteRunId?: string } = {}) {
+    const run = await runAt("COMPLETED", tenantId, extra);
+    for (const criterionId of ["AC-1", "AC-2"]) {
+      await new ResultRepository(t.tdb.db).upsert(run.id, {
+        ...provisional(criterionId, "INCONCLUSIVE", []), reason: "UNVERIFIED_EVIDENCE",
+        verdictSource: null, rerunOutcome: "UNAVAILABLE", provisional: { status: "PASS", reason: null },
+        evidenceArtifactIds: ["art_evidence"], relatedStepIds: [], aiNote: null, critical: true,
+      });
+    }
+    return run;
+  }
+
+  it("persists concurrent decisions, original reasons, evidence and an aggregate verdict", async () => {
+    const run = await seedReviewable();
+    const responses = await Promise.all(["AC-1", "AC-2"].map((id) => t.app.inject({
+      method: "POST", url: `/v1/test-runs/${run.id}/results/${id}/review`, headers: auth, payload: { status: "PASS" },
+    })));
+    expect(responses.map((r) => r.statusCode)).toEqual([200, 200]);
+    const report = (await t.app.inject({ method: "GET", url: `/v1/test-runs/${run.id}/report`, headers: auth })).json();
+    expect(report).toMatchObject({ verdict: "PASSED", summary: { passed: 2, inconclusive: 0, confirmedByRerun: 0 } });
+    expect(report.criteria[0]).toMatchObject({ status: "PASS", verdictSource: "USER_REVIEW", evidenceArtifactIds: ["art_evidence"],
+      review: { originalStatus: "INCONCLUSIVE", originalReason: "UNVERIFIED_EVIDENCE", actorId: null } });
+    expect((await new RunRepository(t.tdb.db).getById(run.id)).verdict).toBe("PASSED");
+    const markdown = await t.app.inject({ method: "GET", url: `/v1/test-runs/${run.id}/report.md`, headers: auth });
+    expect(markdown.body).toContain("Reviewed by user");
+    const repeated = await t.app.inject({ method: "POST", url: `/v1/test-runs/${run.id}/results/AC-1/review`, headers: auth, payload: { status: "FAIL" } });
+    expect(repeated.statusCode).toBe(409);
+  });
+
+  it("limits members to their own runs and records the reviewer", async () => {
+    const owner = await signInMember(t);
+    const other = await signInMember(t);
+    const run = await seedReviewable(TEST_TENANT_ID, { ownerUserId: owner.userId });
+    const denied = await t.app.inject({ method: "POST", url: `/v1/test-runs/${run.id}/results/AC-1/review`, headers: other.headers, payload: { status: "PASS" } });
+    expect(denied.statusCode).toBe(404);
+    const saved = await t.app.inject({ method: "POST", url: `/v1/test-runs/${run.id}/results/AC-1/review`, headers: owner.headers, payload: { status: "PASS" } });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().criteria[0].review.actorId).toBe(owner.userId);
+  });
+
+  it("refreshes a completed suite verdict when its last inconclusive criteria are reviewed", async () => {
+    const suite = await new SuiteRepository(t.tdb.db).create({ tenantId: TEST_TENANT_ID, name: "Review suite", description: "", credentialProfileId: null, ownerUserId: null });
+    const suites = new SuiteRunRepository(t.tdb.db);
+    const parent = await suites.create({ tenantId: TEST_TENANT_ID, suiteId: suite.id, suiteName: suite.name, trigger: "manual", ownerUserId: null });
+    const run = await seedReviewable(TEST_TENANT_ID, { suiteRunId: parent.id });
+    await suites.settle(parent.id);
+    const finished = await suites.find({ tenantId: TEST_TENANT_ID }, parent.id);
+    for (const criterion of ["AC-1", "AC-2"]) {
+      const response = await t.app.inject({ method: "POST", url: `/v1/test-runs/${run.id}/results/${criterion}/review`, headers: auth, payload: { status: "PASS" } });
+      expect(response.statusCode).toBe(200);
+    }
+    const reviewed = await suites.find({ tenantId: TEST_TENANT_ID }, parent.id);
+    expect(reviewed?.verdict).toBe("PASSED");
+    expect(reviewed?.finishedAt).toEqual(finished?.finishedAt);
+  });
+
+  it("supports fail and rejects cross-tenant, non-terminal, unknown and invalid decisions", async () => {
+    const run = await seedReviewable();
+    const failed = await t.app.inject({ method: "POST", url: `/v1/test-runs/${run.id}/results/AC-1/review`, headers: auth, payload: { status: "FAIL" } });
+    expect(failed.statusCode).toBe(200);
+    expect(failed.json()).toMatchObject({ verdict: "FAILED", summary: { failed: 1, inconclusive: 1 } });
+    for (const [target, id, status, expected] of [
+      [await seedReviewable(OTHER_TENANT_ID), "AC-1", "PASS", 404],
+      [await runAt("RUNNING_PLAYWRIGHT"), "AC-1", "PASS", 409],
+      [run, "AC-99", "PASS", 404], [run, "AC-2", "BLOCKED", 400],
+    ] as const) {
+      const response = await t.app.inject({ method: "POST", url: `/v1/test-runs/${target.id}/results/${id}/review`, headers: auth, payload: { status } });
+      expect(response.statusCode).toBe(expected);
+    }
   });
 });

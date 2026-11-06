@@ -42,6 +42,11 @@ function routeFetch(routes: Record<string, Handler>) {
   return fetch;
 }
 
+async function openActivity() {
+  const button = await screen.findByRole("button", { name: "Run activity" });
+  if (button.getAttribute("aria-expanded") === "false") await userEvent.click(button);
+}
+
 const RUN = "/api/v1/test-runs/run_1";
 const summaries = (...list: TestRunSummary[]) => () => json(200, list.length > 1 ? list.shift()! : list[0]!);
 
@@ -89,6 +94,7 @@ describe("RunView", () => {
       ev(5, "page.surveyed", { path: "/account", title: "", status: "SKIPPED" }, { stage: "SURVEYING", message: "Skipped /account — blocked by policy" }),
     );
 
+    await openActivity();
     const stages = within(screen.getByRole("list", { name: /stages/i })).getAllByRole("listitem");
     expect(stages[0]).toHaveTextContent(/exploring for test ideas/i);
     expect(stages[0]).toHaveTextContent(/in progress/i);
@@ -159,6 +165,7 @@ describe("RunView", () => {
   it("a QUEUED blank-requirement run already lists the survey stage", async () => {
     routeFetch({ [`GET ${RUN}`]: summaries(surveyRun("QUEUED")) });
     render(<RunView runId="run_1" />);
+    await openActivity();
     const stages = await screen.findByRole("list", { name: /stages/i });
     expect(within(stages).getAllByRole("listitem")[0]).toHaveTextContent(/exploring for test ideas/i);
     expect(screen.queryByRole("heading", { name: /analyzing your requirement/i })).not.toBeInTheDocument();
@@ -167,6 +174,7 @@ describe("RunView", () => {
   it("a run created with a requirement shows no survey stage", async () => {
     routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "PLANNING" })) });
     render(<RunView runId="run_1" />);
+    await openActivity();
     const stages = await screen.findByRole("list", { name: /stages/i });
     expect(within(stages).queryByText(/exploring for test ideas/i)).not.toBeInTheDocument();
   });
@@ -198,7 +206,7 @@ describe("RunView", () => {
     render(<RunView runId="run_1" />);
     await screen.findByRole("heading", { name: /analyzing your requirement/i });
     await emit(ev(1, "stage.completed", { stage: "ANALYZING_REQUIREMENT" }));
-    expect(await screen.findByRole("heading", { name: /review the acceptance criteria/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /review your test/i })).toBeInTheDocument();
     expect(await screen.findAllByRole("article")).toHaveLength(3);
   });
 
@@ -217,6 +225,7 @@ describe("RunView", () => {
     const notice = await screen.findByRole("status", { name: /criteria confirmed/i });
     expect(within(notice).getByText("Criterion AC-2 will be reported as Inconclusive")).toBeInTheDocument();
     expect(within(notice).getByText("Criterion AC-3 will be reported as Inconclusive")).toBeInTheDocument();
+    await openActivity();
     expect(screen.getByRole("list", { name: /stages/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /confirm and start/i })).not.toBeInTheDocument();
   });
@@ -244,6 +253,7 @@ describe("RunView", () => {
       [`GET ${RUN}/artifacts/art_1/url`]: () => json(200, { url: "https://s3.test/a.png", expiresAt: "2026-09-26T10:05:00.000Z" }),
     });
     render(<RunView runId="run_1" />);
+    await openActivity();
     await screen.findByRole("list", { name: /stages/i });
     await emit(
       ...toExploring,
@@ -251,6 +261,7 @@ describe("RunView", () => {
       ev(9, "artifact.created", { artifactId: "art_1", type: "SCREENSHOT", sensitivity: "STANDARD" }, { stage: "EXPLORING", message: "Screenshot saved at checkpoint before_add" }),
     );
 
+    await openActivity();
     const stages = screen.getByRole("list", { name: /stages/i });
     expect(within(stages).getByText(/exploring website/i).closest("li")).toHaveTextContent(/in progress/i);
     expect(within(stages).getByText(/planning test/i).closest("li")).toHaveTextContent(/done/i);
@@ -313,6 +324,7 @@ describe("RunView", () => {
         json(200, { ...partialReport("ERRORED"), error: { category: "BROWSER_PROVIDER", message: "chromium: No usable sandbox! at /tmp/x" } }),
     });
     render(<RunView runId="run_1" />);
+    await openActivity();
     await screen.findByRole("list", { name: /stages/i });
     await emit(
       ...toExploring,
@@ -331,6 +343,7 @@ describe("RunView", () => {
     // The run's activity (stages + template-only timeline) stays available.
     await user.click(screen.getByRole("button", { name: /run activity/i }));
     expect(screen.getAllByText("Run stopped: browser failed").length).toBeGreaterThan(0);
+    await openActivity();
     expect(within(screen.getByRole("list", { name: /stages/i })).getByText(/exploring website/i).closest("li")).toHaveTextContent(/stopped/i);
   });
 
@@ -369,8 +382,8 @@ describe("RunView", () => {
   });
 
   it.each([
-    [{ environment: "production", allowDestructiveActions: true }, "Production · destructive actions allowed"],
-    [{ environment: "staging", allowDestructiveActions: true }, "Destructive actions allowed"],
+    [{ environment: "production", allowDestructiveActions: true }, "Changes site data"],
+    [{ environment: "staging", allowDestructiveActions: true }, "Changes site data"],
   ] as const)("marks a run that allows destructive actions (%j)", async (patch, text) => {
     routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING", ...patch })) });
     render(<RunView runId="run_1" />);
@@ -391,6 +404,7 @@ describe("RunView", () => {
     });
     render(<RunView runId="run_1" />);
     await screen.findAllByRole("article");
+    await openActivity();
     const stages = screen.getByRole("list", { name: /stages/i });
     expect(within(stages).getByText(/confirming criteria/i).closest("li")).toHaveAttribute("aria-current", "step");
     expect(within(stages).getByText(/analyzing requirement/i).closest("li")).toHaveTextContent(/done/i);
@@ -448,6 +462,7 @@ describe("RunView", () => {
         [`GET ${RUN}/report`]: () => json(200, report),
       });
       render(<RunView runId="run_1" />);
+      await openActivity();
       await screen.findByRole("list", { name: /stages/i });
       // The live region is there (and empty) before anything is announced, so the change is heard.
       expect(liveRegion()).toBeInTheDocument();
@@ -479,9 +494,21 @@ describe("RunView", () => {
   it("closes the event stream when unmounted", async () => {
     routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING" })) });
     const { unmount } = render(<RunView runId="run_1" />);
+    await openActivity();
     await screen.findByRole("list", { name: /stages/i });
     await subscribed();
     unmount();
     expect(streams.every((s) => s.closed)).toBe(true);
   });
+});
+
+
+it("shows a summarized title and discloses the full input requirement beyond its preview", async () => {
+  const text = "Search for a product. ".repeat(30) + "Keep this final instruction visible.";
+  routeFetch({ [`GET ${RUN}`]: summaries(summaryFixture({ lifecycle: "EXPLORING", title: "Product search", requirementPreview: text.slice(0, 200), requirementText: text })) });
+  render(<RunView runId="run_1" />);
+  expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Product search");
+  expect(screen.queryByText(/Keep this final instruction visible/)).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Input requirements" }));
+  expect(screen.getByText(/Keep this final instruction visible/)).toHaveTextContent(text);
 });

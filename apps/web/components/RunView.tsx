@@ -10,6 +10,7 @@ import { Disclosure } from "./Disclosure";
 import { Icon, type IconName } from "./Icon";
 import { LiveEvidence } from "./LiveEvidence";
 import { LiveStats } from "./LiveStats";
+import { RunFlow } from "./RunFlow";
 import { RunProgress } from "./RunProgress";
 import { RunReport } from "./RunReport";
 import { RunTimeline } from "./RunTimeline";
@@ -223,7 +224,7 @@ export function RunView({ runId }: { runId: string }) {
   const analyzing = !surveying && (lifecycle === "QUEUED" || lifecycle === "ANALYZING_REQUIREMENT");
 
   return (
-    <div className="stack-lg">
+    <div className="stack-lg run-workspace">
       <p className="visually-hidden" role="status" aria-live="polite" aria-atomic="true" data-announcer>
         {announcement}
       </p>
@@ -263,7 +264,7 @@ export function RunView({ runId }: { runId: string }) {
               {summary.allowDestructiveActions && (
                 <span className={`meta-chip ${summary.environment === "production" ? "meta-chip-danger" : "meta-chip-warning"}`}>
                   <Icon name="warning" />
-                  {summary.environment === "production" ? "Production · destructive actions allowed" : "Destructive actions allowed"}
+                  Changes site data
                 </span>
               )}
               {summary.llm && (
@@ -299,6 +300,14 @@ export function RunView({ runId }: { runId: string }) {
           </div>
         </div>
       </header>
+
+      <RunFlow lifecycle={lifecycle} />
+
+      {(summary.requirementText || summary.requirementPreview) && (
+        <Disclosure title="Input requirements" hint="The full requirement submitted for this test.">
+          <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{summary.requirementText ?? summary.requirementPreview}</p>
+        </Disclosure>
+      )}
 
       {!terminal && cancel === "confirming" && (
         <div role="group" aria-labelledby="cancel-title" className="banner banner-warning">
@@ -353,7 +362,9 @@ export function RunView({ runId }: { runId: string }) {
         </div>
       )}
 
-      {!terminal && <RunProgress progress={progress} lifecycle={lifecycle} survey={blank} />}
+      {!terminal && <Disclosure title="Run activity" hint="Detailed execution stages.">
+        <div className="stack"><RunProgress progress={progress} lifecycle={lifecycle} survey={blank} /></div>
+      </Disclosure>}
 
       {analyzing ? (
         <section className="card analyzing" aria-labelledby="analyzing-title">
@@ -372,8 +383,7 @@ export function RunView({ runId }: { runId: string }) {
             <div>
               <h2 id="surveying-title">Exploring the website for test ideas</h2>
               <p className="muted">
-                The agent reads the start page and up to 5 pages it links to — it never clicks, types or submits anything — then
-                suggests tests for you to choose from.
+                The agent explores pages and controls, captures screenshots, and suggests useful tests for you to choose from.
               </p>
             </div>
           </section>

@@ -1,6 +1,5 @@
-import { ContractError, type Suggestion } from "@platform/contracts";
+import { ContractError, type SitePage, type Suggestion } from "@platform/contracts";
 import type { LlmClient, LlmContentPart } from "@platform/llm";
-import type { PageInventory } from "./inventory";
 import { SurveyOutputSchema } from "./model-output";
 import { postValidateSuggestions } from "./post-validate";
 import { SURVEY_SYSTEM_PROMPT, buildSurveyPrompt } from "./prompts";
@@ -17,7 +16,7 @@ export interface SuggestTestsInput {
   /** Names only; values never reach the model. */
   testDataKeys: string[];
   secretNames: string[];
-  pages: { url: string; inventory: PageInventory }[];
+  pages: SitePage[];
   /** The start page's screenshot (PNG), shown as an image; null when there is none. */
   screenshot: Buffer | null;
   signal: AbortSignal;

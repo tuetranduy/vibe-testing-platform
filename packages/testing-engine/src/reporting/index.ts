@@ -9,3 +9,5 @@ export * from "./rerun-only";
 export * from "./markdown";
 export * from "./comparison";
 export * from "./junit";
+
+export { aggregateVerdict } from "../verification/aggregate";

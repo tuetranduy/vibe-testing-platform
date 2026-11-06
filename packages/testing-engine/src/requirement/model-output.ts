@@ -10,6 +10,7 @@ import { z } from "zod";
  * them (a model that ignores them, a scripted test answer) still parses.
  */
 export const CompilerOutputSchema = z.object({
+  title: z.string().trim().min(3).max(120).nullable().default(null),
   // `critical` is the user's call in review (V1.1), never the model's: it is not in the output schema.
   criteria: z.array(AcceptanceCriterionSchema.omit({ id: true, critical: true })).min(1).max(20),
   facts: z.array(FactRequestSchema).max(60),

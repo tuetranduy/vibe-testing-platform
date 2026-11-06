@@ -1,189 +1,50 @@
 "use client";
 
-import type { CredentialProfile } from "@platform/contracts";
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ApiRequestError, listCredentialProfiles, rerunRun } from "../lib/api";
+import { useRef, useState, type FormEvent } from "react";
+import { rerunRun } from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
 import { Icon } from "./Icon";
 
 interface Props {
   runId: string;
-  /** The secrets the saved test fills: their values were deleted when the run ended, so they are asked again. */
   secretNames: readonly string[];
-  /** How many criteria the saved test checks. */
   compiledCount: number;
-  /** The run allowed destructive actions: the rerun repeats them, so it must be confirmed. */
   destructive?: boolean;
   navigate?: (url: string) => void;
 }
 
-/**
- * "Rerun test" (V1.1 F5): starts a new run that reruns this run's saved Playwright test, with no exploration
- * and no AI. Asks for the secrets the test needs (typed, or saved credentials); opens the new run.
- */
+/** Saved tests can run directly. Older tests requiring retired manual inputs start through the new test flow. */
 export function RerunPanel({ runId, secretNames, compiledCount, destructive = false, navigate = (url) => window.location.assign(url) }: Props) {
   const [open, setOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [profiles, setProfiles] = useState<CredentialProfile[]>([]);
-  const [profileId, setProfileId] = useState("");
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const key = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (!open || secretNames.length === 0) return;
-    let live = true;
-    listCredentialProfiles().then(
-      (ps) => live && setProfiles(ps),
-      () => {},
-    );
-    return () => {
-      live = false;
-    };
-  }, [open, secretNames.length]);
-
-  const profile = profiles.find((p) => p.id === profileId);
-  const covered = new Set(profile?.secretNames ?? []);
-
-  async function start(e: FormEvent) {
-    e.preventDefault();
+  async function start(event?: FormEvent) {
+    event?.preventDefault();
     if (pending) return;
-    const next: Record<string, string> = {};
-    const secrets: Record<string, string> = {};
-    for (const name of secretNames) {
-      const v = values[name] ?? "";
-      if (v) {
-        if (v.length < 4) next[name] = "Enter at least 4 characters.";
-        else secrets[name] = v;
-      } else if (!covered.has(name)) next[name] = `Enter ${name}, or choose saved credentials that have it.`;
-    }
-    if (destructive && !confirmed) next.confirmDestructiveActions = "Confirm that the rerun repeats destructive actions.";
-    setErrors(next);
-    if (Object.keys(next).length > 0) return;
+    if (destructive && !confirmed) { setError("Confirm that the rerun repeats actions that change site data."); return; }
     setPending(true);
-    // Secret values leave the page as soon as the request is built.
-    setValues({});
+    setError(null);
     key.current ??= newIdempotencyKey();
     try {
-      const created = await rerunRun(
-        runId,
-        { secrets, ...(profileId ? { credentialProfileId: profileId } : {}), ...(destructive ? { confirmDestructiveActions: true } : {}) },
-        key.current,
-      );
+      const created = await rerunRun(runId, destructive ? { confirmDestructiveActions: true } : {}, key.current);
       navigate(`/runs/${encodeURIComponent(created.runId)}`);
     } catch (err) {
-      key.current = null;
-      if (err instanceof ApiRequestError && err.issues?.length) {
-        setErrors(Object.fromEntries(err.issues.map((i) => [String(i.path.at(-1) ?? "form"), i.message])));
-      } else {
-        setErrors({ form: err instanceof Error ? err.message : "The rerun couldn't be started." });
-      }
+      setError(err instanceof Error ? err.message : "The rerun couldn’t be started.");
       setPending(false);
     }
   }
 
-  return (
-    <section className="card stack rerun-panel" aria-labelledby="rerun-title">
-      <div className="section-head">
-        <h2 id="rerun-title" className="card-title">
-          <Icon name="restart" /> Rerun the saved test
-        </h2>
-        <p className="muted">
-          Runs this test&apos;s generated Playwright test again as a new run — no exploring and no AI. It checks{" "}
-          {compiledCount === 1 ? "1 criterion" : `${compiledCount} criteria`}; the others are reported as not rerun.
-        </p>
-      </div>
-      {!open ? (
-        <div className="actions">
-          <button type="button" className="button button-secondary" onClick={() => setOpen(true)}>
-            <Icon name="restart" />
-            Rerun test
-          </button>
-        </div>
-      ) : (
-        <form className="stack" onSubmit={start} noValidate aria-busy={pending}>
-          {secretNames.length > 0 && (
-            <>
-              <p className="hint">
-                <Icon name="lock" /> Secret values were deleted when this run ended. Enter them again, or use saved credentials.
-              </p>
-              {profiles.length > 0 && (
-                <div className="field">
-                  <label htmlFor="rerun-profile">Saved credentials</label>
-                  <select id="rerun-profile" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-                    <option value="">None</option>
-                    {profiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.secretNames.join(", ")})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {secretNames.map((name) => (
-                <div key={name} className="field">
-                  <label htmlFor={`rerun-secret-${name}`}>
-                    <span className="mono">{name}</span>
-                    {covered.has(name) && <span className="muted"> (from saved credentials unless you type one)</span>}
-                  </label>
-                  <input
-                    id={`rerun-secret-${name}`}
-                    type="password"
-                    autoComplete="new-password"
-                    value={values[name] ?? ""}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setValues((vs) => ({ ...vs, [name]: v }));
-                    }}
-                    aria-invalid={errors[name] ? true : undefined}
-                    aria-describedby={errors[name] ? `rerun-secret-${name}-error` : undefined}
-                  />
-                  {errors[name] && (
-                    <p id={`rerun-secret-${name}-error`} className="field-error">
-                      <Icon name="error" /> {errors[name]}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </>
-          )}
-          {destructive && (
-            <div className="note note-warning">
-              <p className="note-title">This run allowed destructive actions</p>
-              <p>The saved test repeats every action it recorded: whatever it deleted, ordered or paid for happens again.</p>
-              <label className="choice">
-                <input
-                  type="checkbox"
-                  checked={confirmed}
-                  onChange={(e) => setConfirmed(e.target.checked)}
-                  aria-invalid={errors.confirmDestructiveActions ? true : undefined}
-                  aria-describedby={errors.confirmDestructiveActions ? "rerun-destructive-error" : undefined}
-                />
-                I understand: repeat the destructive actions
-              </label>
-              {errors.confirmDestructiveActions && (
-                <p id="rerun-destructive-error" className="field-error">
-                  <Icon name="error" /> {errors.confirmDestructiveActions}
-                </p>
-              )}
-            </div>
-          )}
-          {(errors.form || errors.credentialProfileId) && (
-            <p role="alert" className="field-error">
-              <Icon name="error" /> {errors.form ?? errors.credentialProfileId}
-            </p>
-          )}
-          <div className="actions">
-            <button type="submit" className="button button-primary" disabled={pending}>
-              {pending ? "Starting…" : "Start rerun"}
-            </button>
-            <button type="button" className="button button-secondary" onClick={() => setOpen(false)} disabled={pending}>
-              Cancel
-            </button>
-          </div>
-        </form>
-      )}
-    </section>
-  );
+  return <section className="card stack" aria-labelledby="rerun-title">
+    <div className="section-head"><h2 id="rerun-title" className="card-title"><Icon name="restart" /> Run this test again</h2><p className="muted">Replay the saved test’s {compiledCount} checks without another planning step.</p></div>
+    {error && <p className="field-error" role="alert">{error}</p>}
+    {secretNames.length > 0 ? <div className="stack-tight"><p className="muted">This saved test uses an older setup. Start a fresh test with the same instructions.</p><a className="button button-secondary" href={`/runs/new?from=${encodeURIComponent(runId)}`}>Create a fresh test<Icon name="arrow" /></a></div>
+      : !open ? <div className="actions"><button type="button" className="button button-secondary" disabled={pending} onClick={() => destructive ? setOpen(true) : void start()}>{pending ? "Starting…" : "Rerun saved test"}</button></div>
+      : <form className="stack" onSubmit={start} aria-busy={pending}>
+        {destructive && <div className="note note-warning"><p>This saved test changes site data. Replaying it repeats those actions.</p><label className="choice"><input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />I understand: repeat these actions</label></div>}
+        <div className="actions"><button className="button button-primary" type="submit" disabled={pending}>{pending ? "Starting…" : "Start rerun"}</button><button type="button" className="button button-secondary" disabled={pending} onClick={() => setOpen(false)}>Cancel</button></div>
+      </form>}
+  </section>;
 }

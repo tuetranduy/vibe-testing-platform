@@ -40,8 +40,8 @@ describe("AppNav", () => {
     ["/runs", ["Test runs"]],
     ["/runs/run_123", ["Test runs"]],
     ["/runs/new", ["New test"]],
-    ["/settings", ["Settings", "AI models"]],
-    ["/settings/credentials", ["Settings", "Credentials"]],
+    ["/settings", ["Settings"]],
+    ["/settings/credentials", ["Settings"]],
     ["/usage", ["Usage"]],
     ["/suites", ["Suites"]],
     ["/suites/ste_1", ["Suites"]],
@@ -57,7 +57,7 @@ describe("AppNav", () => {
     testMe.current = userFixture({ role: "member" });
     const { unmount } = render(<AppNav />);
     const nav = screen.getByRole("navigation", { name: "Main" });
-    expect(within(nav).getByRole("link", { name: "Credentials" })).toBeInTheDocument();
+    expect(within(nav).queryByRole("link", { name: "AI models" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
     unmount();
 
