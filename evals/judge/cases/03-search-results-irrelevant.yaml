@@ -1,0 +1,10 @@
+# KI-046: expected does_not_hold.
+id: "search-results-irrelevant"
+tags: ["search", "does_not_hold"]
+requirement: "Search for running shoes and verify the results are relevant"
+criterion: {"statement": "The search results are relevant to the query.", "description": "The results listed for 'running shoes' are running shoes", "sourceText": "verify the results are relevant", "ambiguity": null}
+stepDescription: "Search for running shoes"
+url: "https://shop.example.com/search?q=running+shoes"
+inventory: {"title": "Search: running shoes — Example Shop", "description": "", "headings": [{"level": 1, "text": "4 results for “running shoes”"}], "links": [{"text": "Blender X200", "url": "https://shop.example.com/products/blender-x200", "area": "main"}, {"text": "Toaster Duo", "url": "https://shop.example.com/products/toaster-duo", "area": "main"}], "forms": [], "buttons": []}
+text: "4 results for “running shoes”\nBlender X200 — Kitchen — €89.00\nToaster Duo — Kitchen — €39.00\nKettle Steel — Kitchen — €29.00\nCoffee Grinder — Kitchen — €49.00"
+expect: {"relevant": true, "verdict": "DOES_NOT_HOLD", "forbidden": []}

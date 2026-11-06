@@ -255,6 +255,18 @@ describe("compilePlaywrightTest: the discovered flow (snapshot)", () => {
     expect(dataOf(out.dataJson).inputs.input1).toBe("42");
   });
 
+  it.each([
+    ["select", { inputRef: { source: "testData", key: "country" }, generatedValue: "de" }, /\.selectOption\(data\.inputs\.input1\);/],
+    ["check", { inputRef: { source: "literal", key: "on" } }, /getByRole\("combobox", \{ name: data\.locators\.loc\d+\.name, exact: true \}\)\.check\(\);/],
+    ["fill", { inputRef: { source: "testData", key: "first_name" }, generatedValue: "Alex" }, /\.fill\(data\.inputs\.input1\);/],
+  ] as const)("a required field the executor filled itself (KI-062) replays by its fillMethod %s, whatever its planned step's kind", (fillMethod, over, expected) => {
+    const steps = shopFlow({ fill: { element: byRole("combobox", "Field"), fillMethod, ...over } });
+    const out = compile({ steps, testData: {} });
+    expect(out.compiledCriteria.length).toBeGreaterThan(0);
+    expect(out.source).toMatch(expected);
+    expect(checkGeneratedSource(out.source)).toEqual([]);
+  });
+
   it("every page.goto waits, like the executor's navigation, for a quiet network (bounded, best effort)", () => {
     const steps = flow(
       { kind: "navigate", plannedStepId: "PS-1", instruction: `Navigate to ${TARGET}` },
@@ -462,11 +474,12 @@ describe("compilePlaywrightTest: assertions", () => {
     );
   });
 
-  it("numeric_delta → the polled difference is close to the expected delta", () => {
+  it("numeric_delta → the polled difference is close to the expected delta; counters read as the verifier reads them (KI-060)", () => {
     const out = compile({ requirement: requirementOf([criterion("AC-1", { kind: "numeric_delta", before, after, delta: 1 })]) });
     expect(stepBlock(out.source, "AC-1")).toMatch(
-      /await softExpect\.poll\(async \(\) => difference\(await readNumber\(page\.getByTestId\(data\.locators\.loc\d+\.value\), 0\), fact1\), \{ message \}\)\.toBeCloseTo\(data\.criteria\["AC-1"\]\.delta, 9\);/,
+      /await softExpect\.poll\(async \(\) => difference\(await readNumberOrZero\(page\.getByTestId\(data\.locators\.loc\d+\.value\), 0\), fact1\), \{ message \}\)\.toBeCloseTo\(data\.criteria\["AC-1"\]\.delta, 9\);/,
     );
+    expect(out.source).toMatch(/const fact1 = await readNumberOrZero\(page\.getByTestId\(data\.locators\.loc\d+\.value\)\);/);
     expect(dataOf(out.dataJson).criteria["AC-1"]!.delta).toBe(1);
   });
 

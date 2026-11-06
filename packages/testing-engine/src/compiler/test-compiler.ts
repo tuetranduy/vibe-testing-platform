@@ -52,7 +52,8 @@ import { SourceWriter, ident, lit, member } from "./source-builder";
  *                        the `url` fact are polled over the verifier's normalized text
  * - numeric_compare    → polled number vs the other side (`toBeGreaterThan`, …; eq/neq within 1e-9);
  *                        both facts at the checkpoint → their polled difference vs 0
- * - numeric_delta      → polled difference `toBeCloseTo(delta)`
+ * - numeric_delta      → polled difference `toBeCloseTo(delta)`; a counter is read with `readNumberOrZero` (one that is
+ *                        shown with no number is 0, like the verifier: an empty cart's hidden badge, KI-060)
  * - collection_contains → polled `listContains(readTextList(…), item)` (verifier matching); rows read through a
  *   recorded sub-element: `readItemTexts(…, data.items.itemN)`
  *
@@ -100,7 +101,7 @@ interface RunData {
 }
 
 /** How a fact is read back: a DOM read mode, or the page URL for the reserved `url` fact. */
-type ReadKind = NonNullable<ObservedFact["read"]>["mode"] | "url";
+type ReadKind = NonNullable<ObservedFact["read"]>["mode"] | "url" | "number_or_zero";
 
 interface FactRead {
   ref: FactRef;
@@ -129,10 +130,14 @@ const TEXT_KINDS: readonly ReadKind[] = ["text", "url"];
 const NUMBER_KINDS: readonly ReadKind[] = ["number", "count"];
 
 const refKey = (ref: FactRef) => `${ref.key}@${ref.checkpoint}`;
+/** A fact read into a variable: the same fact may be read two ways (a number, and a counter in a numeric_delta). */
+const readKey = (read: Pick<FactRead, "ref" | "kind">) => `${refKey(read.ref)}#${read.kind}`;
 
 const READ_HELPER: Partial<Record<ReadKind, string>> = {
   text: "readText",
   number: "readNumber",
+  // A numeric_delta's counter: one that shows no number counts as 0, as for the verifier (KI-060).
+  number_or_zero: "readNumberOrZero",
   count: "readCount",
   text_list: "readTextList",
 };
@@ -320,6 +325,7 @@ class Compiler {
         itemSelector = fact.read.itemSelector ?? null;
       }
       if (!allowed(path[0]!).includes(kind)) return `${label} was read as ${kind}, which this assertion cannot replay`;
+      if (outcome.kind === "numeric_delta" && kind === "number") kind = "number_or_zero";
       reads.push({ ref, kind, candidate, itemSelector, position, scenario });
     }
 
@@ -346,7 +352,7 @@ class Compiler {
       for (const read of plan.reads) {
         if (read.position === plan.position) continue;
         const list = saved.get(read.position) ?? [];
-        if (!list.some((r) => refKey(r.ref) === refKey(read.ref))) list.push(read);
+        if (!list.some((r) => readKey(r) === readKey(read))) list.push(read);
         saved.set(read.position, list);
       }
     }
@@ -373,8 +379,13 @@ class Compiler {
           return;
         }
         case "fill": {
+          if (step.fillMethod === "check") {
+            this.withLocator(w, step.element!, `Step ${step.index} (check)`, (l) => `await ${l}.check();`);
+            return;
+          }
           const value = this.inputValue(step);
-          const method = step.plannedStepId && this.plannedKind.get(step.plannedStepId) === "select" ? "selectOption" : "fill";
+          const planned = step.plannedStepId && this.plannedKind.get(step.plannedStepId) === "select";
+          const method = (step.fillMethod ?? (planned ? "select" : "fill")) === "select" ? "selectOption" : "fill";
           this.withLocator(w, step.element!, `Step ${step.index} (fill)`, (l) => `await ${l}.${method}(${value});`);
           return;
         }
@@ -422,7 +433,7 @@ class Compiler {
 
   private emitSavedRead(w: SourceWriter, read: FactRead): void {
     const name = ident(`fact${this.factVars.size + 1}`);
-    this.factVars.set(refKey(read.ref), name);
+    this.factVars.set(readKey(read), name);
     this.withReads(w, [read], (l) => (read.candidate ? `const ${name} = await ${this.readCall(read, l)};` : `const ${name} = page.url();`));
   }
 
@@ -440,7 +451,7 @@ class Compiler {
     w.block(`await test.step(${title}, async () => {`, () => {
       w.line(`const message = ${title};`);
       for (const read of plan.reads) {
-        if (read.position !== plan.position) w.line(`expect.soft(${this.factVars.get(refKey(read.ref))!}, message).not.toBeNull();`);
+        if (read.position !== plan.position) w.line(`expect.soft(${this.factVars.get(readKey(read))!}, message).not.toBeNull();`);
       }
       this.emitAssertion(w, plan, param);
     }, "});");
@@ -451,8 +462,8 @@ class Compiler {
     const isFresh = (read: FactRead) => read.position === plan.position;
     const fresh = plan.reads.filter(isFresh);
     /** A fact's value inside the poll callback: re-read when at the criterion's checkpoint, else its variable. */
-    const valueOf = (read: FactRead): string => (isFresh(read) ? this.freshRead(read) : this.factVars.get(refKey(read.ref))!);
-    const variableOf = (read: FactRead) => this.factVars.get(refKey(read.ref))!;
+    const valueOf = (read: FactRead): string => (isFresh(read) ? this.freshRead(read) : this.factVars.get(readKey(read))!);
+    const variableOf = (read: FactRead) => this.factVars.get(readKey(read))!;
     const readOf = (path: string) => plan.reads[factRefsOf(outcome).findIndex((r) => r.path[0] === path)]!;
     const poll = (value: string) => `await softExpect.poll(${value.includes("await ") ? "async " : ""}() => ${value}, { message })`;
     /** Emits one assertion over the fresh reads (brittle-locator comment when any is an XPath). */

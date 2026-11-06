@@ -52,6 +52,11 @@ export const EvalCaseSchema = z.object({
      * requirement needs an input that was not provided expects the precondition with the name it needs.
      */
     onlyProvidedInputRefs: z.boolean().default(false),
+    /**
+     * Every collection_contains checks for written text, never for a fact: the requirement names the item, so reading it
+     * back from the page (where it may only be in a passing popup) adds nothing and can fail (KI-061).
+     */
+    literalCollectionItems: z.boolean().default(false),
   }),
 });
 export type EvalCase = z.infer<typeof EvalCaseSchema>;
@@ -76,7 +81,7 @@ export function loadCases(dir = CASES_DIR): EvalCase[] {
 /** Score one compiled requirement against a case's expectations. */
 export function scoreCase(
   c: EvalCase,
-  criteria: { expectedOutcome: { kind: string; match?: unknown }; ambiguity: unknown; preconditions: { kind: string; ref?: string | null }[] }[],
+  criteria: { expectedOutcome: { kind: string; match?: unknown; item?: unknown }; ambiguity: unknown; preconditions: { kind: string; ref?: string | null }[] }[],
 ): string[] {
   const failures: string[] = [];
   const { min, max } = c.expect.criteriaCount;
@@ -99,6 +104,10 @@ export function scoreCase(
   }
   for (const kind of c.expect.forbiddenOutcomeKinds) {
     if (kinds.has(kind)) failures.push(`a criterion has outcome kind ${kind}, which this case forbids`);
+  }
+  if (c.expect.literalCollectionItems) {
+    const n = criteria.filter((x) => x.expectedOutcome.kind === "collection_contains" && typeof x.expectedOutcome.item !== "string").length;
+    if (n > 0) failures.push(`${n} collection_contains criteria read the item named in the requirement back from the page`);
   }
   if (c.expect.onlyProvidedInputRefs) {
     const provided = { test_data: new Set(Object.keys(caseTestData(c))), secret: new Set(c.secretNames) };

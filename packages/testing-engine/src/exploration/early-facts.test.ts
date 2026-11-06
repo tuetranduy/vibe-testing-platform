@@ -2,7 +2,7 @@ import type { AcceptanceCriterion, FactRequest, NormalizedRequirement, TestPlan 
 import type { ExplorerSession } from "@platform/stagehand-adapter/browser-explorer";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { captureEarlyNotificationFact } from "./early-facts";
+import { captureEarlyNotificationFact, notificationTexts } from "./early-facts";
 import { runExploration } from "./executor";
 import type { StageContext } from "../orchestrator/stages";
 import { verifyCriterion } from "../verification/verifier";
@@ -42,6 +42,47 @@ describe("early notification evidence", () => {
     const vague = [{ ...criteria[0]!, sourceText: "A popup should be displayed", statement: "A popup is displayed" }];
     expect(await captureEarlyNotificationFact(page, { ...request, description: "Whether a popup is shown" }, vague, "step_cp")).toBeNull();
     expect(await captureEarlyNotificationFact(page, request, [], "step_cp")).toBeNull();
+  });
+
+  describe("a notification the requirement names without its text (KI-059: frontends-demo's toast)", () => {
+    const TOAST = `<div role="alert" data-testid="toast"><div class="icon"></div>
+      <div class="message">ADELAIDE 2 has been added to cart.</div><button><span class="sr-only">Close</span>x</button></div>`;
+    const popupVisible: FactRequest = { key: "popupVisible", checkpoint: "after_add", valueType: "boolean",
+      description: "Whether a confirmation popup is shown right after clicking Add to cart for ADELAIDE 2" };
+    const popupText: FactRequest = { key: "popupText", checkpoint: "after_add", valueType: "string",
+      description: "Text content of the confirmation popup shown right after adding ADELAIDE 2 to the cart" };
+    const unquoted: AcceptanceCriterion[] = [
+      { id: "AC-1", sourceText: "Verify ADELAIDE 2 has been added to cart. popup displayed", statement: "After adding ADELAIDE 2, a confirmation popup is displayed.",
+        expectedOutcome: { kind: "visible", fact: { key: "popupVisible", checkpoint: "after_add" }, expected: true }, preconditions: [], critical: true, ambiguity: null },
+      { id: "AC-2", sourceText: "Verify ADELAIDE 2 has been added to cart", statement: "The confirmation popup shows that ADELAIDE 2 was the product added to the cart.",
+        expectedOutcome: { kind: "text_matches", fact: { key: "popupText", checkpoint: "after_add" }, match: { mode: "contains", value: "ADELAIDE 2", caseSensitive: false } },
+        preconditions: [], critical: true, ambiguity: null },
+    ];
+
+    it("reads the one notification that appeared since the action began: visible, and its message", async () => {
+      await page.setContent(`<button onclick="setTimeout(() => document.body.insertAdjacentHTML('beforeend', ${JSON.stringify(TOAST).replace(/"/g, "&quot;")}), 150)">Add</button>`);
+      const before = await notificationTexts(page);
+      await page.getByRole("button", { name: "Add", exact: true }).click();
+      expect(await captureEarlyNotificationFact(page, popupVisible, unquoted, "step_cp", before))
+        .toMatchObject({ key: "popupVisible", value: true, provenance: "DOM_VERIFIED", read: { mode: "visible" } });
+      const text = await captureEarlyNotificationFact(page, popupText, unquoted, "step_cp", before);
+      expect(text).toMatchObject({ key: "popupText", value: "ADELAIDE 2 has been added to cart.", provenance: "DOM_VERIFIED", read: { mode: "text" } });
+    });
+
+    it("never takes a notification that was already shown, nor guesses between two new ones, nor reads without a baseline", async () => {
+      await page.setContent(TOAST);
+      const before = await notificationTexts(page);
+      expect(await captureEarlyNotificationFact(page, popupVisible, unquoted, "step_cp", before)).toBeNull();
+      expect(await captureEarlyNotificationFact(page, popupVisible, unquoted, "step_cp")).toBeNull();
+      await page.setContent('<div role="status">Saved</div><div role="alert">Added</div>');
+      expect(await captureEarlyNotificationFact(page, popupVisible, unquoted, "step_cp", [])).toBeNull();
+    });
+
+    it("is only for criteria about a notification", async () => {
+      await page.setContent(TOAST);
+      const plain = unquoted.map((c) => ({ ...c, sourceText: "Verify ADELAIDE 2 has been added", statement: "ADELAIDE 2 is added." }));
+      expect(await captureEarlyNotificationFact(page, { ...popupVisible, description: "Whether ADELAIDE 2 is added" }, plain, "step_cp", [])).toBeNull();
+    });
   });
 
   it("uses the original unquoted notification text when the model paraphrases its description", async () => {

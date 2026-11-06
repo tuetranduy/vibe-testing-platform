@@ -135,7 +135,7 @@ export async function readItemTexts(locator: Locator, itemSelector: string, wait
 `;
 
 /** Keep the previous reviewed template accepted for saved suites created before KI-049. */
-export const HELPERS_SOURCE = PRE_ACTION_HELPERS_SOURCE.replace(
+export const ACTION_HELPERS_V1_SOURCE = PRE_ACTION_HELPERS_SOURCE.replace(
   'import type { Locator } from "@playwright/test";',
   'import type { Locator, Page, Request } from "@playwright/test";',
 ) + `
@@ -174,6 +174,46 @@ export function trackActionRequests(page: Page, timeoutMs = 5_000): () => Promis
 }
 `;
 
+/**
+ * The current template (KI-058, KI-060): a click also waits for the route code (scripts) it loads and for its requests
+ * to stay settled briefly, like the executor, and `readNumberOrZero` reads a counter the way the verifier does in a
+ * numeric_delta. Tests saved with ACTION_HELPERS_V1_SOURCE or PRE_ACTION_HELPERS_SOURCE stay accepted.
+ */
+export const HELPERS_SOURCE = ACTION_HELPERS_V1_SOURCE.replace(
+  `/**
+ * Subscribe before a click, then await the returned function before the next step (KI-049).
+ * Only the main frame's fetch/XHR requests matter; iframe traffic and images cannot hold the test.`,
+  `/**
+ * Subscribe before a click, then await the returned function before the next step (KI-049, KI-058).
+ * The main frame's fetch/XHR, script and document requests matter (a route change loads its code, then
+ * its data), until none has been pending for quietMs; iframe traffic and images cannot hold the test.`,
+).replace(
+  "export function trackActionRequests(page: Page, timeoutMs = 5_000): () => Promise<void> {",
+  "export function trackActionRequests(page: Page, timeoutMs = 5_000, quietMs = 300): () => Promise<void> {",
+).replace(
+  'if ((request.resourceType() === "fetch" || request.resourceType() === "xhr") && request.frame() === frame) pending.add(request);',
+  'if (["fetch", "xhr", "script", "document"].includes(request.resourceType()) && request.frame() === frame) pending.add(request);',
+).replace(
+  `      const deadline = Date.now() + timeoutMs;
+      while (pending.size > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(0, deadline - Date.now()))));
+      }`,
+  `      const deadline = Date.now() + timeoutMs;
+      let quietSince = Date.now();
+      for (;;) {
+        const now = Date.now();
+        if (pending.size > 0) quietSince = now;
+        if (now >= deadline || now - quietSince >= quietMs) break;
+        await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(0, deadline - now))));
+      }`,
+) + `
+/** A counter's number: the first number in its text, 0 when it shows none (an empty cart's badge, KI-060). */
+export async function readNumberOrZero(locator: Locator, waitMs = READ_TIMEOUT_MS): Promise<number | null> {
+  const text = await readText(locator, waitMs);
+  return text === null ? null : (parseNumber(text) ?? 0);
+}
+`;
+
 /** The names helpers.ts exports: the only ones a generated test may import from it (AST guard). */
 export const HELPER_EXPORTS = [
   "trackActionRequests",
@@ -185,6 +225,7 @@ export const HELPER_EXPORTS = [
   "secret",
   "readText",
   "readNumber",
+  "readNumberOrZero",
   "readCount",
   "readTextList",
   "readItemTexts",

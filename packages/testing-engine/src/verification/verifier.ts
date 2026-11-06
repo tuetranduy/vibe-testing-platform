@@ -43,7 +43,9 @@ import { describeExpected, evaluateRule, factLabel } from "./rules";
  *                                                                   (TARGET_BLOCKED_BY_POLICY when it has none);
  *     - stopped early (STEP_LIMIT_REACHED / EXPLORATION_BUDGET_EXHAUSTED) → INCONCLUSIVE, that stop reason;
  *     - otherwise, incl. COMPLETED after a trailing FAILED step (R25) → INCONCLUSIVE / FACT_NOT_OBSERVED.
- *  6. Evaluate the rule                                           → PASS / FAIL. An invalid regex →
+ *  6. Evaluate the rule                                           → PASS / FAIL. In a numeric_delta, a counter
+ *                                                                   read from the page showing no number counts as 0
+ *                                                                   (KI-060). An invalid regex →
  *                                                                   INCONCLUSIVE / AMBIGUOUS_CRITERION; a value of the
  *                                                                   wrong type for the rule (e.g. null) →
  *                                                                   INCONCLUSIVE / FACT_NOT_OBSERVED, never FAIL.
@@ -127,8 +129,16 @@ export function verifyCriterion(input: VerifyCriterionInput): ProvisionalResult 
   }
 
   // 6. Evaluate the rule over the recorded values.
-  const r = evaluateRule(outcome, (ref) => byRef.get(refKey(ref))!.value);
+  const r = evaluateRule(outcome, (ref) => byRef.get(refKey(ref))!.value, (ref) => showsNoNumber(byRef.get(refKey(ref))!));
   return result(r.status, r.reason, r.actual);
+}
+
+/**
+ * A number read from the DOM, on the one element located for it, that showed no number, and the model agreed nothing
+ * was shown (DOM_VERIFIED null): an empty counter (KI-060). The generated test reads it the same way (readNumberOrZero).
+ */
+function showsNoNumber(fact: ObservedFact): boolean {
+  return fact.value === null && fact.provenance === "DOM_VERIFIED" && fact.read?.mode === "number";
 }
 
 const stepName = (step: ExplorationStep) => step.plannedStepId ?? `step ${step.index}`;

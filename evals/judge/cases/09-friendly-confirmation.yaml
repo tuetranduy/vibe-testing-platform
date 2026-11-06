@@ -1,0 +1,10 @@
+# KI-046: expected holds.
+id: "friendly-confirmation"
+tags: ["tone", "holds"]
+requirement: "Place the order and verify the confirmation message is friendly"
+criterion: {"statement": "The order confirmation message is friendly.", "description": "The confirmation shown after ordering is friendly in tone", "sourceText": "verify the confirmation message is friendly", "ambiguity": null}
+stepDescription: "Click Place order"
+url: "https://shop.example.com/checkout/confirmation"
+inventory: {"title": "Thank you — Example Shop", "description": "", "headings": [{"level": 1, "text": "Thanks, Anna! Your order is on its way."}, {"level": 2, "text": "Order #10482"}], "links": [{"text": "Track your order", "url": "https://shop.example.com/account/orders/10482", "area": "main"}], "forms": [], "buttons": []}
+text: "Thanks, Anna! Your order is on its way.\nOrder #10482\nWe've sent a confirmation to your email. We hope you love your new shoes!\nTrack your order"
+expect: {"relevant": true, "verdict": "HOLDS", "forbidden": []}

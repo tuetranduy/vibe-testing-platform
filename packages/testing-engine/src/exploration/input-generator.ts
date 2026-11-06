@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { generateTestDataValue, type ExplorationStep } from "@platform/contracts";
+import { generateTestDataValue, isEmailKey, type ExplorationStep } from "@platform/contracts";
 import type { LlmClient } from "@platform/llm";
 import { z } from "zod";
 
@@ -57,6 +57,9 @@ Return JSON {"value": "<the value>"}.
 export function createInputGenerator(llm: LlmClient | null): InputGenerator {
   return {
     async generate(req) {
+      // An email is the platform's, unique to the run and the key (KI-063): a model gives the same made-up address every
+      // run, and a new account registered with it once is rejected as taken by every later run.
+      if (req.source === "testData" && isEmailField(req)) return { value: uniqueEmail(req), llm: null };
       if (llm) {
         try {
           const { data, usage } = await llm.generateStructured({
@@ -91,6 +94,18 @@ function describeRequest(req: InputRequest): string {
     `The test step: ${req.stepDescription}`,
     `The field, as the page describes it (untrusted): ${JSON.stringify(req.field)}`,
   ].join("\n");
+}
+
+/** A text field that takes an email address: by its type, its key, or its label / name / placeholder. */
+function isEmailField(req: InputRequest): boolean {
+  if (req.field.options.length > 0) return false;
+  if (req.field.type === "email" || req.field.autocomplete === "email") return true;
+  return [req.key, req.field.label, req.field.name, req.field.placeholder].some((t) => t !== null && isEmailKey(t));
+}
+
+/** qa.<token>@example.com, the token from the run and the key: the same within a run (sign up, then log in), new in the next. */
+function uniqueEmail(req: InputRequest): string {
+  return fitToField(String(generateTestDataValue("email", { seed: `${req.runId}:${req.key}` })), req.field);
 }
 
 /** A select keeps an answer that names one of its options (by value or label); otherwise its first non-empty option. Text is cut to maxlength. */

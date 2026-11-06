@@ -3,7 +3,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LOCATOR_STRATEGY_ORDER } from "../shared/locator-policy";
 import { captureCheckpoint, captureFact, modeForValueType, readFact } from "./fact-reader";
-import { describeElement, describeField, elementAction, fieldValue, fillElement, recordElement } from "./recorder";
+import { checkElement, describeElement, describeField, elementAction, fieldValue, fillElement, recordElement, requiredEmptyFields, selectElementOption } from "./recorder";
 
 /**
  * Real Chromium (Playwright's build, launched headless without a proxy) on a static fixture
@@ -360,5 +360,91 @@ describe("describeField (what a generated value must suit, 2026-10-07)", () => {
     await page.setContent(`<select id="c" aria-label="Country"><option value="">Choose…</option><option value="no">Norway</option></select><input id="q" type="number" min="1" max="9">`);
     expect(await describeField(page, "#c")).toMatchObject({ tag: "select", type: null, label: "Country", options: [{ value: "", label: "Choose…" }, { value: "no", label: "Norway" }] });
     expect(await describeField(page, "#q")).toMatchObject({ tag: "input", type: "number", min: "1", max: "9", maxLength: null });
+  });
+});
+
+describe("requiredEmptyFields (a form's required fields the plan left empty, KI-062)", () => {
+  /** Like Shopware's register form: "*" labels without `required`, a natively required country, an optional salutation. */
+  const FORM = `
+    <form id="f">
+      <label for="type">Account type *</label><select id="type"><option value="private" selected>Private</option></select>
+      <label for="sal">Salutation</label><select id="sal"><option value="">Choose salutation...</option><option value="mr">Mr.</option></select>
+      <label for="first">First name *</label><input id="first" name="firstName">
+      <label for="email">Email address *</label><input id="email" type="email">
+      <label for="pw">Password *</label><input id="pw" type="password">
+      <label for="street">Street address *</label><input id="street" value="">
+      <input id="hidden" type="hidden" required>
+      <input id="gone" required style="display:none">
+      <input id="off" required disabled>
+      <label for="country">Country</label><select id="country" required><option value="">Choose country...</option><option value="de">Germany</option></select>
+      <input id="terms" type="checkbox" aria-required="true"><label for="terms">I accept the terms</label>
+      <input type="radio" name="g" id="g1" required><input type="radio" name="g" id="g2" required>
+      <label for="note">Note</label><textarea id="note"></textarea>
+      <button id="submit">Submit</button>
+    </form>
+    <form><input id="elsewhere" required><button id="other">Go</button></form>`;
+  const xp = (id: string) => page.locator(`#${id}`).evaluate((el) => {
+    const parts: string[] = [];
+    for (let n: Element | null = el; n; n = n.parentElement) {
+      let i = 1;
+      for (let s = n.previousElementSibling; s; s = s.previousElementSibling) if (s.localName === n.localName) i++;
+      parts.unshift(`${n.localName}[${i}]`);
+    }
+    return `xpath=/${parts.join("/")}`;
+  });
+
+  it("lists the empty required fields of the submit control's form (\"*\" labels, required, aria-required), with how to fill each", async () => {
+    await page.setContent(FORM);
+    await page.fill("#email", "qa@demo.test");
+    await page.fill("#pw", "Pw-123456789!");
+    const out = await requiredEmptyFields(page, "#submit", [await xp("email")]);
+    expect(out.touched).toBe(true);
+    expect(out.fields).toEqual([
+      { selector: await xp("first"), how: "fill" },
+      { selector: await xp("street"), how: "fill" },
+      { selector: await xp("country"), how: "select" },
+      { selector: await xp("terms"), how: "check" },
+      { selector: await xp("g1"), how: "check" },
+    ]);
+    // Each selector is the field itself.
+    for (const f of out.fields) expect(await page.locator(f.selector).count()).toBe(1);
+  });
+
+  it("nothing typed into the form: untouched; a control outside any form: nothing; a filled field is no longer listed", async () => {
+    await page.setContent(FORM);
+    expect((await requiredEmptyFields(page, "#submit", [])).touched).toBe(false);
+    expect((await requiredEmptyFields(page, "#other", ["#email"])).touched).toBe(false);
+    await page.setContent(`<input id="q" required><button id="b">Go</button>`);
+    expect(await requiredEmptyFields(page, "#b", [])).toEqual({ touched: false, fields: [] });
+    await page.setContent(FORM);
+    for (const id of ["first", "email", "pw", "street"]) await page.fill(`#${id}`, "x");
+    await page.selectOption("#country", "de");
+    await checkElement(page, "#terms");
+    await checkElement(page, "#g2");
+    expect((await requiredEmptyFields(page, "#submit", [])).fields).toEqual([]);
+  });
+});
+
+describe("selectElementOption (a page that drops the first choice, KI-064)", () => {
+  /** Like the Shopware register page: the first change re-renders the select back to its placeholder. */
+  const DROPS_FIRST = `
+    <select id="country" required><option value="" disabled selected>Choose country...</option><option value="se">Sweden</option><option value="ie">Ireland</option></select>
+    <script>
+      const s = document.getElementById("country");
+      let first = true;
+      s.addEventListener("change", () => { if (first) { first = false; setTimeout(() => { s.selectedIndex = 0; }, 50); } });
+    </script>`;
+
+  it("selects again when the page puts the select back, and ends on the option chosen", async () => {
+    await page.setContent(DROPS_FIRST);
+    await selectElementOption(page, "#country", "se");
+    await page.waitForTimeout(200); // past the page's reset
+    expect(await page.locator("#country").inputValue()).toBe("se");
+  });
+
+  it("a page that never keeps the choice is an error, not a success", async () => {
+    await page.setContent(`<select id="c"><option value="">-</option><option value="a">A</option></select>
+      <script>document.getElementById("c").addEventListener("change", (e) => setTimeout(() => { e.target.selectedIndex = 0; }, 20));</script>`);
+    await expect(selectElementOption(page, "#c", "a")).rejects.toThrow(/did not keep/);
   });
 });

@@ -443,6 +443,29 @@ describe("runExploration (fake explorer)", () => {
     expect([...session.listeners.values()].every((ls) => ls.size === 0)).toBe(true); // nothing left listening
   });
 
+  it("a click that changes route waits for its code chunk and the data fetched after it (a single-page app's link)", async () => {
+    const { ctx } = fakeCtx();
+    const log: string[] = [];
+    const session: FakeSession = new FakeSession({
+      actOn: () => {
+        // Nuxt / Next: the link loads the next page's script, then (after a short gap) fetches its data.
+        const chunk = session.startRequest({ resourceType: "script" });
+        setTimeout(() => (log.push("chunk loaded"), chunk()), 30);
+        setTimeout(() => {
+          const data = session.startRequest();
+          setTimeout(() => (log.push("data fetched"), data()), 40);
+        }, 130);
+        return {};
+      },
+      navigate: (url) => void log.push(`navigate ${url}`),
+    });
+    const plan = planOf(step("navigate", "Open the cart"), step("click", "Click Checkout"), step("navigate", "Open https://shop.test/after"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(log).toEqual([`navigate ${TARGET}`, "chunk loaded", "data fetched", "navigate https://shop.test/after"]);
+    expect([...session.listeners.values()].every((ls) => ls.size === 0)).toBe(true);
+  });
+
   it("a click's request that never finishes holds the next step only up to the limit", async () => {
     const { ctx } = fakeCtx();
     const session: FakeSession = new FakeSession({ actOn: () => (session.startRequest(), {}) });
@@ -699,6 +722,119 @@ describe("runExploration (fake explorer)", () => {
     expect(selects.map((f) => f.value)).toEqual(["VN"]);
     // Read before the first click only: the phone and the city, never the select.
     expect(reads).toEqual(["xpath=/html[1]/body[1]/f[1]", "xpath=/html[1]/body[1]/f[2]"]);
+  });
+
+  describe("a form's required fields the plan left empty (KI-062)", () => {
+    const at = (n: number) => `xpath=/html[1]/body[1]/f[${n}]`;
+    /** f[1] email (planned), f[2] the submit button; the form's other required fields are r[1..]. */
+    function registerForm(required: { selector: string; how: "fill" | "select" | "check"; facts: Partial<FieldFacts> }[]) {
+      const session = new FakeSession({
+        observe: (instruction, n) => [{ selector: at(n + 1), description: `element for ${instruction}`, method: "fill", arguments: [] }],
+      });
+      const { recorder, fills, selects } = fakeRecorder({
+        describe: (selector) => (/f\[2\]$/.test(selector) ? { role: "button", name: "Submit", text: "Submit" } : { role: "textbox", name: "Email address *", text: null }),
+      });
+      const checks: string[] = [];
+      const asked: { submit: string; typed: string[] }[] = [];
+      recorder.check = async (_page, selector) => void checks.push(selector);
+      recorder.requiredEmptyFields = async (_page, submit, typed) => {
+        asked.push({ submit, typed: [...typed] });
+        // Once filled, a field is no longer empty: a second look finds nothing.
+        return asked.length === 1 ? { touched: typed.length > 0, fields: required.map(({ selector, how }) => ({ selector, how })) } : { touched: true, fields: [] };
+      };
+      recorder.describeField = async (_page, selector) => ({ ...FIELD, ...(required.find((r) => r.selector === selector)?.facts ?? {}) });
+      return { session, recorder, fills, selects, checks, asked };
+    }
+
+    it("are filled with generated values before the submit click, recorded as golden fills of the submit step", async () => {
+      const { ctx } = fakeCtx({ testData: { email: "qa@demo.test" } });
+      const form = registerForm([
+        { selector: "xpath=/html[1]/body[1]/r[1]", how: "fill", facts: { label: "First name *", name: "firstName" } },
+        { selector: "xpath=/html[1]/body[1]/r[2]", how: "select", facts: { tag: "select", type: null, label: "Country", name: "country", options: [{ value: "", label: "Choose country..." }, { value: "de", label: "Germany" }, { value: "us", label: "United States" }] } },
+        { selector: "xpath=/html[1]/body[1]/r[3]", how: "check", facts: { type: "checkbox", label: "I accept the terms" } },
+      ]);
+      const requests: InputRequest[] = [];
+      // The model would pick the United States; a required select takes the site's first option without asking (KI-064).
+      const inputs: InputGenerator = { generate: async (req) => (requests.push(req), { value: req.field.tag === "select" ? "us" : "Alex", llm: USAGE }) };
+      const plan = planOf(
+        step("navigate", "Open the register page"),
+        step("fill", "Type the email", { inputRef: { source: "testData", key: "email" } }),
+        step("submit", "Submit the registration form"),
+      );
+      const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session: form.session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: form.recorder, inputs });
+
+      expect(outcome.stopReason).toBe("COMPLETED");
+      expect(form.asked).toEqual([{ submit: at(2), typed: [at(1)] }]);
+      expect(form.fills).toEqual([
+        { selector: at(1), value: "qa@demo.test" },
+        { selector: "xpath=/html[1]/body[1]/r[1]", value: "Alex" },
+      ]);
+      expect(form.selects).toEqual([{ selector: "xpath=/html[1]/body[1]/r[2]", value: "de" }]);
+      expect(form.checks).toEqual(["xpath=/html[1]/body[1]/r[3]"]);
+      expect(requests.map((r) => [r.source, r.key])).toEqual([["testData", "first_name"]]);
+      expect(outcome.steps.filter((s) => s.kind !== "observe").map((s) => [s.kind, s.plannedStepId, s.outcome, s.onGoldenPath, s.fillMethod ?? null, s.generatedValue ?? null])).toEqual([
+        ["navigate", "PS-1", "SUCCESS", true, null, null],
+        ["fill", "PS-2", "SUCCESS", true, null, null],
+        ["fill", "PS-3", "SUCCESS", true, "fill", "Alex"],
+        ["fill", "PS-3", "SUCCESS", true, "select", "de"],
+        ["fill", "PS-3", "SUCCESS", true, "check", null],
+        ["act", "PS-3", "SUCCESS", true, null, null],
+      ]);
+      const auto = outcome.steps.filter((s) => s.kind === "fill" && s.plannedStepId === "PS-3");
+      expect(auto.map((s) => s.inputRef)).toEqual([
+        { source: "testData", key: "first_name" },
+        { source: "testData", key: "country" },
+        { source: "literal", key: "on" },
+      ]);
+      expect(auto[0]!.instruction).toBe('Fill the required field "First name" the plan left empty');
+    });
+
+    it("a field the run has test data for gets that value; a confirm field gets the value typed into the field it confirms", async () => {
+      const { ctx } = fakeCtx({ testData: { email: "qa@demo.test", last_name: "Doe" }, secrets: { password: "Pw-123456789!" } });
+      const session = new FakeSession({
+        observe: (instruction, n) => [{ selector: at(n + 1), description: `element for ${instruction}`, method: "fill", arguments: [] }],
+      });
+      const { recorder, fills } = fakeRecorder({
+        describe: (selector) => (/f\[3\]$/.test(selector) ? { role: "button", name: "Register", text: "Register" } : { role: "textbox", name: "Field", text: null }),
+      });
+      const facts: Record<string, Partial<FieldFacts>> = {
+        [at(1)]: { type: "email", label: "Email" },
+        [at(2)]: { type: "password", label: "Password" },
+        "xpath=/html[1]/body[1]/r[1]": { label: "Last name *" },
+        "xpath=/html[1]/body[1]/r[2]": { type: "password", label: "Repeat password *" },
+      };
+      recorder.describeField = async (_page, selector) => ({ ...FIELD, ...(facts[selector] ?? {}) });
+      let looks = 0;
+      recorder.requiredEmptyFields = async () =>
+        ++looks === 1 ? { touched: true, fields: [{ selector: "xpath=/html[1]/body[1]/r[1]", how: "fill" }, { selector: "xpath=/html[1]/body[1]/r[2]", how: "fill" }] } : { touched: true, fields: [] };
+      const inputs: InputGenerator = { generate: async () => ({ value: "never", llm: null }) };
+      const plan = planOf(
+        step("navigate", "Open the register page"),
+        step("fill", "Type the email", { inputRef: { source: "testData", key: "email" } }),
+        step("fill", "Type the password", { inputRef: { source: "secret", key: "password" } }),
+        step("click", "Click Register"),
+      );
+      const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder, inputs });
+
+      expect(outcome.stopReason).toBe("COMPLETED");
+      expect(fills.map((f) => f.value)).toEqual(["qa@demo.test", "Pw-123456789!", "Doe", "Pw-123456789!"]);
+      const auto = outcome.steps.filter((s) => s.kind === "fill" && s.plannedStepId === "PS-4");
+      expect(auto.map((s) => [s.inputRef, s.generatedValue ?? null])).toEqual([
+        [{ source: "testData", key: "last_name" }, null],
+        [{ source: "secret", key: "password" }, null],
+      ]);
+    });
+
+    it("a plain click into a form nothing was typed into fills nothing (a Sign up link inside the login form)", async () => {
+      const { ctx } = fakeCtx();
+      const form = registerForm([{ selector: "xpath=/html[1]/body[1]/r[1]", how: "fill", facts: { label: "Email *" } }]);
+      const plan = planOf(step("navigate", "Open the login page"), step("click", "Click Sign up"));
+      const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session: form.session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: form.recorder });
+
+      expect(outcome.stopReason).toBe("COMPLETED");
+      expect(form.fills).toEqual([]);
+      expect(outcome.steps.filter((s) => s.kind === "fill")).toEqual([]);
+    });
   });
 
   it("an action denied by assertActionAllowed (observed element's role/name/text) → BLOCKED_BY_POLICY, not executed, exploration stops", async () => {

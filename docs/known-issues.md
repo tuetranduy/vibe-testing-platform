@@ -47,7 +47,7 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-023 | Medium | Deployment | Production starts with the example encryption key and API token | Resolved (2026-09-29) |
 | KI-024 | Medium | Crash recovery | Lost runs are detected only while some worker is alive | Resolved (2026-09-29) |
 | KI-025 | Medium | Process | No CI; the repository has no remote | CI added; remote open |
-| KI-026 | Medium | LLM quality | Most models offered in Settings have never been evaluated | Resolved for DeepSeek (2026-10-07); Claude and Gemini need paid keys |
+| KI-026 | Medium | LLM quality | Most models offered in Settings have never been evaluated | Resolved for DeepSeek (re-scored 2026-11-05, all four suites); Claude and Gemini blocked: invalid Anthropic key, free-tier Gemini key |
 | KI-027 | Low | Data model | D6: only 4 tables carry `tenant_id`; child rows rely on `run_id` | Resolved `3a61f16` |
 | KI-028 | Low | Audit | Revealing a secret-bearing artifact is only a log line | Resolved `6026592` (V1.1) |
 | KI-029 | Low | Isolation | The rerun runner is a worker child process; its image was never built | Resolved `1e2081d`, `ca9ef74` |
@@ -67,9 +67,9 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-043 | Medium | LLM | The DeepSeek provider has not been run against the live API | Resolved (2026-09-30): run live; see KI-001 |
 | KI-044 | High | Exploration | A field typed before the page settles is emptied by the page, and the fill is recorded as a success | Resolved (2026-10-07) |
 | KI-045 | Medium | Recordings | The exploration video shows a gray screen | Resolved (2026-10-07) |
-| KI-046 | Medium | LLM quality | The unclear-criterion judge's prompt has no eval suite | Open |
+| KI-046 | Medium | LLM quality | The unclear-criterion judge's prompt has no eval suite | Resolved (2026-11-05): `pnpm eval judge`, 12 cases; DeepSeek 12/12 |
 | KI-047 | Medium | Survey | The site survey misses a form's other buttons and reads a single-page app before it renders | Resolved (2026-10-07) |
-| KI-048 | High | Planning | The planner never sees the site; a step planned on the wrong page is not recovered | Fixed (2026-10-07); eval pending |
+| KI-048 | High | Planning | The planner never sees the site; a step planned on the wrong page is not recovered | Resolved (2026-10-07; eval 2026-11-05: case 18 1/5 → 9/10) |
 | KI-049 | High | Exploration | A click's background request is cancelled by the next step's navigation | Resolved for exploration (2026-10-07) and newly generated tests (2026-11-05) |
 | KI-050 | High | Exploration | The "way there" recovery clicks the step's own target, then looks for it again on the next page | Resolved (2026-10-07) |
 | KI-051 | High | Exploration | A transient explorer error counts as "nothing found" and starts a navigating recovery | Resolved (2026-10-07) |
@@ -79,11 +79,20 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-055 | Medium | CI client | A hung HTTP poll ignores the suite wait timeout | Resolved in working tree (2026-11-05) |
 | KI-056 | High | Exploration | An observed coordinate click reports success while a fixed banner receives it | Resolved in working tree (2026-11-05) |
 | KI-057 | Medium | Evidence | A transient notification disappears during model lookup and loses DOM provenance | Fixed for named notification visibility/text checks in local worker; live validation blocked by target 403 (2026-11-05) |
+| KI-058 | High | Exploration | A click's route change (script first, then data) is not waited for; the next read sees the old page | Resolved in working tree (2026-11-05) |
+| KI-059 | High | Evidence | A popup the requirement names without quoting its text is never captured before it disappears | Resolved in working tree (2026-11-05) |
+| KI-060 | Medium | Verification | An empty counter (no badge shown) is "not observed", so "increased by 1" from an empty cart is inconclusive | Resolved in working tree (2026-11-05) |
+| KI-061 | Low | LLM quality | A compile may check the cart for a product name read back from a passing popup, though the requirement names it | Resolved in working tree (2026-11-05): prompt rule; compiler 33/33 |
+| KI-062 | High | Exploration | A form submitted with only the fields the plan names ("Fill information") is rejected; its other required fields stay empty | Resolved in working tree (2026-11-05) |
+| KI-063 | Medium | Generated inputs | A made-up new-account email is the same every run, so the account exists after the first run | Resolved in working tree (2026-11-05) |
+| KI-064 | High | Exploration | A select the page resets after the first choice is recorded as chosen; a model-picked country can make a form refuse to submit | Resolved in working tree (2026-11-05) |
+| KI-065 | High | Verification | A login in a popup (the URL does not change) is reported LOGIN_FAILED although it succeeded | Open |
 
 KI-056–KI-057: [Travel Luggage Set run investigation](reviews/run_0mw3gsjgke3a1923c465bb1e1.md), with the recorded
 timeline, reproduction, changes and rollout limits.
 The [AC-2 follow-up](reviews/run_0mw3htjel909be3105ae11b4f.md) covers unquoted source text, compiler
 paraphrases, waits before checkpoints and the deployed correction.
+KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0mw3iqd89b1e9265a528ed663.md).
 
 ---
 
@@ -444,6 +453,12 @@ paraphrases, waits before checkpoints and the deployed correction.
   The six models never scored (`claude-fable-5-1`, `claude-opus-5-5`, `claude-haiku-4-5`, `gemini-3.8-flash`,
   `gemini-3.5-flash`, `gemini-3.1-pro-preview`), and `claude-sonnet-5` and `gemini-3.5-flash-lite` at the current
   prompts, still need an `ANTHROPIC_API_KEY` with credit or a billing-enabled `GEMINI_API_KEY`; they stay in Settings.
+- **Re-scored 2026-11-05:** DeepSeek on all four suites at the current prompts (the judge suite is new, KI-046):
+  `deepseek-flash` compiler 33/33, planner 18/18, survey 4/6, judge 12/12; `deepseek-v4-pro` (thinking off) 31/33,
+  17/18, 5/6, 12/12. The Claude and Gemini models are still unscored. The `ANTHROPIC_API_KEY` in `.env` is rejected
+  (401 "invalid x-api-key") and Settings holds no Anthropic key; the `GEMINI_API_KEY` is on the free tier (20 requests a
+  day per model: `gemini-3.8-flash` ran out within the compiler suite). To close: a valid Anthropic key with credit and
+  a billing-enabled Gemini key, then `pnpm eval requirement-compiler | planner | survey | judge` per model.
 
 ## KI-027 — D6: only 4 tables carry `tenant_id`
 - **Severity:** Low (single tenant today).
@@ -706,6 +721,11 @@ paraphrases, waits before checkpoints and the deployed correction.
   step: it counts toward `maxExplorationSteps`.
 - **To close:** an eval suite of pages with a known answer (relevant / holds / does not hold / irrelevant), run on
   each provider, scores recorded in `evals/BASELINE.md`.
+- **Resolved (2026-11-05, working tree):** `pnpm eval judge` (`evals/judge/`): 12 pages with a known answer
+  (holds / does not hold for search results, error messages, forms and confirmations; cannot tell for a speed; not
+  relevant for a 404, a login wall and a 503 page carrying an injected instruction). Text only, no screenshot.
+  `deepseek-flash` and `deepseek-v4-pro` (thinking off) 12/12; `gemini-3.5-flash-lite` (free tier) 10/12, judging the
+  503 page relevant. Scores in `evals/BASELINE.md`; the other providers with KI-026.
 
 ## KI-047 — The site survey misses a form's other buttons and reads a single-page app before it renders
 - **Severity:** Medium (the requirement analysis is told a page lacks what it shows, and its notes say so).
@@ -735,6 +755,9 @@ paraphrases, waits before checkpoints and the deployed correction.
   The executor's recovery is unchanged.
 - **To close:** `pnpm eval planner` on DeepSeek with the new case 18 (`register-from-store`, this run's criteria and
   demoqa's pages), before and after the prompt change, recorded in `evals/BASELINE.md`.
+- **Eval (2026-11-05):** case 18 on `deepseek-flash`: without its pages (the planner as before the change) 1/5, with
+  them 9/10; the full planner suite 18/18. `deepseek-v4-pro` with thinking off: 17/18, case 18 passing; at thinking
+  high 6 of 10 case-18 runs hit the 180 s case budget and the 4 that answered passed. Recorded in `evals/BASELINE.md`.
 
 ## KI-049 — A click's background request is cancelled by the next step's navigation
 - **Severity:** High (a registration or login that works on the site is never sent; the run blocks on a "failed" login).
@@ -790,3 +813,120 @@ paraphrases, waits before checkpoints and the deployed correction.
   `BrowserProviderError`, so nothing else changes), and a lookup that fails with it is recorded and tried once more
   after the page settles, before any recovery. Covered by an adapter test (which errors are transient) and an executor
   test (the username lookup of the run, retried and filled on the same page, no recovery).
+
+## KI-058 — A click's route change is not waited for; the next read sees the old page
+- **Severity:** High (a checkpoint read right after a link click describes the page the click left).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`watchRequests`, after every click), and the generated
+  test's `trackActionRequests` (`compiler/helpers-template.ts`).
+- **What:** run `run_0mw3iqd89b1e9265a528ed663` (frontends-demo.vercel.app, a Nuxt app): the cart drawer's Checkout link
+  first loads the checkout route's scripts (~700 ms), then changes the URL and fetches its data. The click waited only
+  for fetch / XHR requests it started, so it returned after ~40 ms; the checkpoint's `extract` read the products page
+  and answered `checkoutPageVisible: false`, while the lookup that followed (on /checkout) found the heading. The fact
+  stayed MODEL_EXTRACTED (DOM true, model false) and AC-4 ended INCONCLUSIVE / UNVERIFIED_EVIDENCE.
+- **Resolved (2026-11-05, working tree):** a click also waits for the main frame's script and document requests, until
+  none has been pending for 300 ms (`ACTION_QUIET_MS`), still at most 5 s in all. The generated test's
+  `trackActionRequests` does the same (new helper template; the previous one stays accepted). Covered by an executor
+  test (script, gap, then fetch), a real-Chromium helper test and `exploration/cart-checkout-flow.test.ts`.
+
+## KI-059 — A popup named without its text is never captured before it disappears
+- **Severity:** High (a confirmation popup that works is reported "not visible").
+- **Where:** `packages/testing-engine/src/exploration/early-facts.ts` (`captureEarlyNotificationFact`).
+- **What:** same run. The requirement says "Verify ADELAIDE 2 has been added to cart. popup displayed": no quoted or
+  "popup <text> should be displayed" literal, so KI-057's early capture skipped it. The toast (`role="alert"`) shows for
+  ~5.5 s; the planned wait and the checkpoint's model calls took ~20 s, so the extract saw no popup, the lookup picked
+  the Add to cart button, and AC-1 (visible) and AC-2 (text contains "ADELAIDE 2") ended INCONCLUSIVE.
+- **Resolved (2026-11-05, working tree):** before an action whose next step is a checkpoint, the executor reads the
+  notifications the page shows (alert / status / dialog roles, live regions, open dialogs). When no literal is given, the
+  one notification that appeared since the action (waiting up to 1 s) is read from the DOM: visible, or its message
+  without its buttons' text. A notification already shown before, or two new ones, give nothing (the model path then
+  runs as before). A criterion qualifies when its source text, statement or fact description names a popup /
+  notification. Covered by `early-facts.test.ts` and `cart-checkout-flow.test.ts`.
+
+## KI-060 — An empty counter is "not observed"
+- **Severity:** Medium (a "count increased by 1" from an empty cart is inconclusive).
+- **Where:** `packages/testing-engine/src/verification/rules.ts` (`numeric_delta`), `verifier.ts`, and the compiler's
+  numeric_delta reads (`readNumberOrZero`).
+- **What:** same run. With the cart empty the site shows no badge, only the screen-reader text "items in cart, view
+  bag"; the DOM read and the model both gave null, and AC-3 (`after - before = +1`) ended INCONCLUSIVE /
+  FACT_NOT_OBSERVED although the count went from nothing to 1.
+- **Resolved (2026-11-05, working tree):** in a numeric_delta, a number read from the DOM on the one element located for
+  it that shows no number (DOM_VERIFIED null) counts as 0, reported as "(0, no number shown)". Not when the element was
+  not found or only the model said so. The generated test reads numeric_delta counters with `readNumberOrZero` (same
+  rule). Not handled: a model that answers 0 where the DOM shows no number (MODEL_EXTRACTED, still unverified).
+
+## KI-061 — A named product is read back from the page for a cart check
+- **Severity:** Low (one optional criterion inconclusive; the verdict follows it).
+- **Where:** the requirement compiler (`packages/testing-engine/src/requirement/prompts.ts`, the "pick an item and refer
+  back to it" rule).
+- **What:** run `run_0mw3k2qbn7425ae5696b0aa37`, the validation rerun of KI-058–KI-060: the compile added "the cart lists
+  `productName@after_add`" (collection_contains with a fact as item) although the requirement names the product
+  ("Add ADELAIDE 2 to cart"). Right after adding, the name was only in the toast; its lookup ran after the toast had gone,
+  so the fact stayed MODEL_EXTRACTED and the criterion INCONCLUSIVE / UNVERIFIED_EVIDENCE (the cart list itself was
+  DOM_VERIFIED ["ADELAIDE 2"]). The first run's compile had no such criterion.
+- **Not reproduced in evals:** cases 32 and 33 (`named-product-cart-checkout`, with and without that run's pages)
+  passed 6/6 and 8/8 on deepseek-flash before any change, with a new expectation `literalCollectionItems` (no fact as
+  item).
+- **Resolved (2026-11-05, working tree):** the compiler prompt's "pick an item and refer back to it" rule now says a
+  named item is checked as its text ("ADELAIDE 2"), never read back from the page. Compiler suite after it:
+  `deepseek-flash` 33/33, `deepseek-v4-pro` (thinking off) 31/33 (two failures seen before the change); cases 32–33
+  pass on both.
+
+## KI-062 — A form is submitted with only the fields the plan names
+- **Severity:** High (a sign-up that works is reported BLOCKED: the account is never created, so the login after it fails).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`completeRequiredFields`), `recorder.ts`
+  (`requiredEmptyFields`, `checkElement`), the compiler (`fillMethod`, `check` in the AST guard's allowlist).
+- **What:** run `run_0mw3mry56d3161609fb66537e` (frontends-demo.vercel.app, "Go to sign in page / Go to sign up page /
+  Fill information / Submit / Make sure user can login with newly created account"). The run did open /register, but
+  "Fill information" names no field, so the plan filled only the email and password (the criteria's preconditions).
+  First name, last name, street, ZIP, city and country stayed empty; the browser stopped the submit ("Please select an
+  item in the list" on Country), the page stayed on /register, and the second scenario's login with the never-created
+  account ended AC-5 BLOCKED / LOGIN_FAILED. AC-4 ("no error shown") was model-extracted as "no error": the native
+  validation bubble is not page text.
+- **Resolved (2026-11-05, working tree):** before the click on a step's own control, when the step submits (`submit`,
+  `login`) or the run typed into that control's form since the last click, the executor fills the form's required fields
+  that are still empty: visible, enabled, writable, required by `required`, `aria-required` or a label with "*". Values,
+  in order: what was typed into the field it confirms ("Repeat password"), the run's test data whose key names the field,
+  a provided secret for a password field, else a generated one (the input generator, as for any value nobody provided).
+  A select on its placeholder gets an option, a required checkbox (or radio group) is checked. Each is a golden `fill` of
+  the submit step with `fillMethod` (`fill` / `select` / `check`), so the generated test replays it. Checked on the real
+  page: the scan finds exactly those six fields and skips the optional salutation. Covered by executor tests, real-Chromium
+  recorder tests and compiler tests. Not handled: a form without a `<form>` element, and required fields marked only by
+  styling. Not yet validated by a live rerun of the run above.
+
+## KI-063 — A made-up new-account email is the same every run
+- **Severity:** Medium (a registration test passes once, then fails on "already registered" every later run).
+- **Where:** `packages/testing-engine/src/requirement/insights.ts` (suggested test data),
+  `packages/testing-engine/src/exploration/input-generator.ts`, `isEmailKey` in `packages/contracts/src/test-data-generator.ts`.
+- **What:** same run: the suggested `new_account_email` was the model's `new.user@example.com`, an address any earlier
+  run on that shared demo store may already have registered. The input generator also asked the model for emails, which
+  tends to answer the same address (`alex.tester@example.com`) every time.
+- **Resolved (2026-11-05, working tree):** an email the platform makes up is `qa.<token>@example.com`, the token from the
+  run id and the key: the same within a run (sign up, then log in), new in the next. In suggestions it replaces the
+  model's made-up address (one the site shows is kept); in exploration an email field (by type, autocomplete, key or
+  label) gets it without a model call. An email the user entered is still used as it is.
+
+## KI-064 — A reset select is recorded as chosen, and the model's country can block a submit
+- **Severity:** High (the form is submitted without the choice, or not submitted at all, while every step reports success).
+- **Where:** `packages/testing-engine/src/exploration/recorder.ts` (`selectElementOption`), `executor.ts`
+  (`requiredFieldInput`).
+- **What:** the re-runs of KI-062 on frontends-demo.vercel.app. `run_0mw3puf097100e87ac92d5859`: the register page's
+  first choice of a country is undone by its own re-render (a second choice holds); Playwright's `selectOption` returned,
+  the step was a SUCCESS, and the submit was stopped by the browser on an empty Country. `run_0mw3q5rom306cb1473717a7d8`:
+  the input generator's model picked the United States; with it the page sends no register request and shows no error
+  (Sweden, the first country listed, submits), so the account was never created and the login got 401.
+- **Resolved (2026-11-05, working tree):** a select is read back after 300 ms and chosen again, at most 3 times; a choice
+  the page never keeps is a failed step. A required select the plan left empty takes the site's first real option, not
+  the model's (no model call). Validated by `run_0mw3qf1kqdfef8ee989229c6e`: `POST /store-api/account/register` 200, then
+  `POST /store-api/account/login` 200 with the new account. Not handled: the generated test's `selectOption` has no such
+  read-back (a page that drops the first choice can fail the rerun).
+
+## KI-065 — A login in a popup is reported LOGIN_FAILED
+- **Severity:** High (a working login is reported BLOCKED).
+- **Where:** `packages/testing-engine/src/verification/verifier.ts` (rule 3, `failedLogin`, Ruling R15).
+- **What:** `run_0mw3qf1kqdfef8ee989229c6e`: frontends-demo.vercel.app signs in through a modal on the home page. The
+  login API answered 200, but the URL was `/` before and after the login step, so rule 3 ended AC-5 BLOCKED /
+  LOGIN_FAILED ("the page stayed at …").
+- **Open:** an unchanged URL is not enough evidence on a single-page app. Likely fix: the executor records, after a
+  `login` click, whether the fields it typed the credentials into are still shown; rule 3 then needs both (same page and
+  the login form still there).
+

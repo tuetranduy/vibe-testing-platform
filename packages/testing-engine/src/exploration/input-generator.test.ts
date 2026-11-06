@@ -37,15 +37,29 @@ function setup(...replies: FakeReply[]) {
 
 describe("createInputGenerator", () => {
   it("asks the model once with the key, the step and the field, and uses its value", async () => {
-    const { llm, transport } = setup({ json: { value: "alex.tester@example.com" }, usage: { inputTokens: 300, outputTokens: 20 } });
-    const out = await createInputGenerator(llm).generate(request());
-    expect(out).toEqual({ value: "alex.tester@example.com", llm: { model: "claude-sonnet-5", inputTokens: 300, outputTokens: 20, cacheHit: null } });
+    const { llm, transport } = setup({ json: { value: "Alex" }, usage: { inputTokens: 300, outputTokens: 20 } });
+    const out = await createInputGenerator(llm).generate(request({ key: "first_name", stepDescription: "Fill the first name", field: field({ label: "First name *" }) }));
+    expect(out).toEqual({ value: "Alex", llm: { model: "claude-sonnet-5", inputTokens: 300, outputTokens: 20, cacheHit: null } });
     expect(transport.requests).toHaveLength(1);
     expect(transport.requests[0]!.schemaName).toBe("generate_input");
     const sent = JSON.stringify(transport.requests[0]!.messages);
-    expect(sent).toContain("email");
-    expect(sent).toContain("Fill the email field");
-    expect(sent).toContain("Email address");
+    expect(sent).toContain("first_name");
+    expect(sent).toContain("Fill the first name");
+    expect(sent).toContain("First name *");
+  });
+
+  it("an email is never the model's (it repeats one address, KI-063): unique to the run and the key, with no model call", async () => {
+    const { llm, transport } = setup();
+    const gen = createInputGenerator(llm);
+    const a = await gen.generate(request());
+    expect(a).toEqual({ value: expect.stringMatching(/^qa\.[a-z0-9]+@example\.com$/), llm: null });
+    expect(transport.requests).toHaveLength(0);
+    expect((await gen.generate(request())).value).toBe(a.value);
+    expect((await gen.generate(request({ runId: "run_2" }))).value).not.toBe(a.value);
+    // By the field's type or label too, whatever the key is called.
+    expect((await gen.generate(request({ key: "login", field: field({ type: "text", label: "E-mail" }) }))).value).toMatch(/@example\.com$/);
+    expect((await gen.generate(request({ key: "contact", field: field({ type: "email" }) }))).value).toMatch(/@example\.com$/);
+    expect(transport.requests).toHaveLength(0);
   });
 
   it("tells the model a secret is a password to make up", async () => {
@@ -91,7 +105,7 @@ describe("createInputGenerator", () => {
     const ac = new AbortController();
     ac.abort(new Error("run cancelled"));
     const { llm } = setup({ json: { value: "x" } });
-    await expect(createInputGenerator(llm).generate(request({ signal: ac.signal }))).rejects.toThrow();
+    await expect(createInputGenerator(llm).generate(request({ key: "city", field: field(), signal: ac.signal }))).rejects.toThrow();
   });
 });
 

@@ -5,6 +5,7 @@ import {
   EngineError,
   ExplorationStepSchema,
   ObservedFactSchema,
+  keyWords,
   scenarioOfCriterion,
   type ArtifactSensitivity,
   type BlockReason,
@@ -42,8 +43,19 @@ import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-c
 import { INVENTORY_SCRIPT, parseRawInventory, toPageInventory, type PageInventory } from "../survey/inventory";
 import { createInputGenerator, type FieldFacts, type InputGenerator } from "./input-generator";
 import { JUDGE_TEXT_MAX_CHARS, createCriterionJudge, type CriterionJudge } from "./judge";
-import { describeElement, describeField, elementAction, fieldValue, fillElement, recordElement, selectElementOption } from "./recorder";
-import { captureEarlyNotificationFact } from "./early-facts";
+import {
+  checkElement,
+  describeElement,
+  describeField,
+  elementAction,
+  fieldValue,
+  fillElement,
+  recordElement,
+  requiredEmptyFields,
+  selectElementOption,
+  type RequiredField,
+} from "./recorder";
+import { captureEarlyNotificationFact, notificationTexts } from "./early-facts";
 
 /**
  * Exploration executor (Task 14): runs the confirmed plan's scenarios (V1.1 F9: in order, each from a clean
@@ -144,11 +156,21 @@ export interface RecorderPort {
   fill(page: Page, selector: string, value: string): Promise<void>;
   select(page: Page, selector: string, value: string): Promise<void>;
   captureFact(page: Page, input: FactCaptureInput): Promise<ObservedFact>;
-  captureEarlyFact?(page: Page, request: FactRequest, criteria: readonly AcceptanceCriterion[], stepId: string): Promise<ObservedFact | null>;
+  /** `before`: the notifications shown before the action (notificationTexts), when they were read (KI-059). */
+  captureEarlyFact?(page: Page, request: FactRequest, criteria: readonly AcceptanceCriterion[], stepId: string, before?: readonly string[] | null): Promise<ObservedFact | null>;
+  /** The texts of the notifications the page shows now, read before an action whose checkpoint may need them. */
+  notificationTexts?(page: Page): Promise<string[]>;
   /** What a field asks for, for a value nobody provided (2026-10-07). Absent: the generator sees only the step. */
   describeField?(page: Page, selector: string): Promise<FieldFacts>;
   /** What a filled field holds now, null when it cannot be read (fieldValue). Absent: typed values are never re-checked. */
   value?(page: Page, selector: string): Promise<string | null>;
+  /**
+   * The required fields still empty in the form a click submits, and whether the run typed into that form
+   * (requiredEmptyFields, KI-062). Absent: a form is submitted as the plan left it.
+   */
+  requiredEmptyFields?(page: Page, submitSelector: string, typedSelectors: readonly string[]): Promise<{ touched: boolean; fields: RequiredField[] }>;
+  /** Checks a checkbox or radio (checkElement, KI-062). */
+  check?(page: Page, selector: string): Promise<void>;
 }
 
 export const playwrightRecorder: RecorderPort = {
@@ -162,8 +184,11 @@ export const playwrightRecorder: RecorderPort = {
   select: (page, selector, value) => selectElementOption(page, selector, value),
   captureFact: (page, input) => captureFact(page, input),
   captureEarlyFact: captureEarlyNotificationFact,
+  notificationTexts: (page) => notificationTexts(page),
   describeField: (page, selector) => describeField(page, selector),
   value: (page, selector) => fieldValue(page, selector),
+  requiredEmptyFields: (page, submit, typed) => requiredEmptyFields(page, submit, typed),
+  check: (page, selector) => checkElement(page, selector),
 };
 
 export interface ExplorationInput {
@@ -189,6 +214,8 @@ export interface ExplorationDeps {
   pollIntervalMs?: number;
   /** How long a click's own requests may hold the next step (KI-049); default ACTION_REQUESTS_TIMEOUT_MS. */
   actionRequestsTimeoutMs?: number;
+  /** How long a click's requests must stay settled before the next step (KI-058); default ACTION_QUIET_MS. */
+  actionQuietMs?: number;
   /** Cached element lookups from earlier runs (V1.1 F8); absent: every lookup asks the explorer. */
   cache?: ObserveCache;
   /**
@@ -246,6 +273,13 @@ const NETWORK_QUIET_TIMEOUT_MS = 3_000;
  */
 const ACTION_REQUESTS_TIMEOUT_MS = 5_000;
 const ACTION_REQUESTS_POLL_MS = 50;
+/**
+ * How long no request of the click's may be pending before the next step goes (KI-058): a single-page app's link
+ * first loads the next page's script, then changes the URL and fetches its data, with a short gap in between.
+ */
+const ACTION_QUIET_MS = 300;
+/** The click's requests that hold the next step: data (fetch / XHR), a route's code (script) and a page load. */
+const ACTION_REQUEST_TYPES = new Set(["fetch", "xhr", "script", "document"]);
 /** The page's visible text, for the judge (a string: see INVENTORY_SCRIPT on why not a function). */
 const VISIBLE_TEXT_SCRIPT = String.raw`(() => String((document.body && document.body.innerText) || "").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim().slice(0, ${JUDGE_TEXT_MAX_CHARS}))()`;
 /** `other` steps may keep these observed methods (none takes a value); everything else clicks. */
@@ -283,6 +317,8 @@ interface StepDraft {
   llm?: LlmStepUsage | null;
   /** A fill's value that nobody provided (2026-10-07). */
   generatedValue?: string;
+  /** How a fill the executor added itself is replayed (KI-062). */
+  fillMethod?: ExplorationStep["fillMethod"];
   /** A `judge` step's judgment (2026-10-07). */
   judgment?: CriterionJudgment;
 }
@@ -327,6 +363,19 @@ export function urlInDescription(description: string, targetUrl: string): string
     return null;
   }
 }
+
+/** A field that repeats another one ("Repeat password", "Confirm email"): it gets the value typed into that one (KI-062). */
+const CONFIRM_FIELD = /\b(confirm|confirmation|repeat|re-?enter|retype|verify|again)\b/i;
+
+/** A field's name as the page shows it, without the required marker: its label, else its placeholder or name. */
+const fieldName = (f: FieldFacts): string => (f.label ?? f.placeholder ?? f.name ?? "").replace(/\*/g, "").replace(/\s+/g, " ").trim().slice(0, 100) || "field";
+
+/** A test data key for a field name, comparable with the run's keys: "First name *" and "firstName" → first_name. */
+const dataKey = (text: string): string =>
+  keyWords(text)
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 60) || "field";
 
 const sameUrl = (a: string, b: string): boolean => {
   try {
@@ -503,15 +552,17 @@ class ExplorationRun {
     if (opensTarget) await this.judgeCriteria(first, judgeAfter.get(first.id) ?? []);
     for (const step of planned.slice(opensTarget ? 1 : 0)) {
       await this.ctx.boundary();
-      await this.executePlanned(step);
       // A model-backed wait may outlast a toast. Capture the next checkpoint's notifications as
       // soon as its preceding action succeeds, provided no other action intervenes.
-      if (step.kind !== "wait_for" && step.kind !== "capture_checkpoint") {
-        const next = planned.slice(planned.indexOf(step) + 1).find((s) => s.kind !== "wait_for");
-        if (next?.kind === "capture_checkpoint") {
-          const early = await this.readEarlyCheckpoint(next, newStepId());
-          if (early.facts.size > 0) this.earlyCheckpoints.set(next.id, early);
-        }
+      const next = step.kind !== "wait_for" && step.kind !== "capture_checkpoint"
+        ? planned.slice(planned.indexOf(step) + 1).find((s) => s.kind !== "wait_for")
+        : undefined;
+      // What the page shows before the action, so a notification it brings up can be told apart (KI-059).
+      const before = next?.kind === "capture_checkpoint" ? await this.notificationBaseline() : null;
+      await this.executePlanned(step);
+      if (next?.kind === "capture_checkpoint") {
+        const early = await this.readEarlyCheckpoint(next, newStepId(), before);
+        if (early.facts.size > 0) this.earlyCheckpoints.set(next.id, early);
       }
       await this.judgeCriteria(step, judgeAfter.get(step.id) ?? []);
     }
@@ -651,14 +702,19 @@ class ExplorationRun {
   private async generatedInput(step: PlannedStep, located: Located): Promise<{ value: string; llm: LlmStepUsage | null }> {
     const ref = step.inputRef!;
     const source = ref.source === "secret" ? "secret" : "testData";
-    const id = `${source}:${ref.key}`;
+    if (this.generated.has(`${source}:${ref.key}`)) return this.generateFor(source, ref.key, step.description, NO_FIELD_FACTS);
+    const field = (await this.recorder.describeField?.(this.page, located.element.selector).catch(() => null)) ?? NO_FIELD_FACTS;
+    return this.generateFor(source, ref.key, step.description, field);
+  }
+
+  private async generateFor(source: "testData" | "secret", key: string, stepDescription: string, field: FieldFacts): Promise<{ value: string; llm: LlmStepUsage | null }> {
+    const id = `${source}:${key}`;
     const known = this.generated.get(id);
     if (known !== undefined) return { value: known, llm: null };
-    const field = (await this.recorder.describeField?.(this.page, located.element.selector).catch(() => null)) ?? NO_FIELD_FACTS;
     const out = await this.inputs.generate({
       source,
-      key: ref.key,
-      stepDescription: step.description,
+      key,
+      stepDescription,
       field,
       runId: this.ctx.runId,
       signal: this.input.budget,
@@ -734,12 +790,16 @@ class ExplorationRun {
       });
       return "failed";
     }
-    return this.click(step, instruction, located);
+    return this.click(step, instruction, located, searchField === undefined);
   }
 
-  /** Clicks a located element: the action policy first, then the explorer; recorded as an `act` step. */
-  private async click(step: PlannedStep, instruction: string, located: Located): Promise<Attempt> {
+  /**
+   * Clicks a located element: the action policy first, then the explorer; recorded as an `act` step. `completeForm`:
+   * the step's own control (not a way there, not a search's button), whose form gets its empty required fields first.
+   */
+  private async click(step: PlannedStep, instruction: string, located: Located, completeForm = false): Promise<Attempt> {
     await this.enforcePolicy(step, instruction, located, "act");
+    if (completeForm) await this.completeRequiredFields(step, located);
     await this.retypeCleared();
     // The click may change or replace the form: what was typed before it is not checked again.
     this.typed = [];
@@ -851,6 +911,119 @@ class ExplorationRun {
   }
 
   /**
+   * Fills, before the click that submits a form, the form's required fields that are still empty (KI-062): a requirement
+   * such as "Fill information" names no field, so the plan fills the ones it knows (email, password) and a registration
+   * form with a first name, an address and a country is submitted half empty and rejected. Only for the step's own
+   * control, and only when the step submits (`submit`, `login`) or the run typed into that form since the last click:
+   * a link inside a form nothing was typed into stays a plain click.
+   *
+   * Each field gets, in order: the value typed into the field it confirms ("Repeat password"), the run's test data whose
+   * key names it, or a generated value (the generator, as for any value nobody provided; a secret for a password field).
+   * A required checkbox is checked. Recorded as golden fills of the submit step with `fillMethod`, so the generated test
+   * replays them; a field that cannot be recorded or filled is skipped (the form then shows why it was rejected).
+   */
+  private async completeRequiredFields(step: PlannedStep, located: Located): Promise<void> {
+    if (!this.recorder.requiredEmptyFields) return;
+    const typed = this.typed.map((t) => t.located.element.selector);
+    const scan = await this.recorder.requiredEmptyFields(this.page, located.element.selector, typed).catch((err: unknown) => {
+      this.rethrowIfFatal(err);
+      return null;
+    });
+    if (!scan || scan.fields.length === 0) return;
+    if (!(step.kind === "submit" || step.kind === "login" || scan.touched)) return;
+    for (const field of scan.fields) await this.completeField(step, field);
+  }
+
+  private async completeField(step: PlannedStep, field: RequiredField): Promise<void> {
+    const facts = (await this.recorder.describeField?.(this.page, field.selector).catch(() => null)) ?? NO_FIELD_FACTS;
+    const name = fieldName(facts);
+    let ref: ElementRef;
+    try {
+      ref = await this.recorder.record(this.page, field.selector);
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      return; // nothing the generated test could replay: left as it is
+    }
+    const instruction =
+      field.how === "check"
+        ? `Check the required field "${name}" the plan left empty`
+        : field.how === "select"
+          ? `Choose an option in the required field "${name}" the plan left empty`
+          : `Fill the required field "${name}" the plan left empty`;
+    const input = field.how === "check" ? null : await this.requiredFieldInput(facts, name, instruction);
+
+    await this.reserve();
+    const base = {
+      plannedStepId: step.id,
+      kind: "fill" as const,
+      instruction,
+      element: ref,
+      inputRef: input?.inputRef ?? { source: "literal" as const, key: "on" },
+      urlBefore: this.url(),
+      startedAt: this.ctx.now(),
+      fillMethod: field.how,
+      ...(input?.generatedValue !== undefined ? { generatedValue: input.generatedValue } : {}),
+      ...(input?.llm ? { llm: input.llm } : {}),
+    };
+    try {
+      if (field.how === "check") {
+        if (!this.recorder.check) throw new Error("recorder: check is not supported");
+        await this.recorder.check(this.page, field.selector);
+      } else if (field.how === "select") await this.recorder.select(this.page, field.selector, input!.value);
+      else await this.recorder.fill(this.page, field.selector, input!.value);
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
+      return;
+    }
+    await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true });
+    if (field.how === "fill") {
+      const element: ObservedElement = { selector: field.selector, description: name, method: "fill", arguments: [] };
+      this.typed.push({
+        step,
+        located: { element, ref, info: { role: null, name, text: null } },
+        value: input!.value,
+        ...(input!.generatedValue !== undefined ? { generatedValue: input!.generatedValue } : {}),
+      });
+    }
+  }
+
+  /** The value of a required field the plan left empty: the field it confirms, the run's test data, or a generated one. */
+  private async requiredFieldInput(
+    facts: FieldFacts,
+    name: string,
+    instruction: string,
+  ): Promise<{ value: string; inputRef: InputRef; generatedValue?: string; llm?: LlmStepUsage | null }> {
+    if (CONFIRM_FIELD.test(`${facts.label ?? ""} ${facts.name ?? ""} ${facts.placeholder ?? ""}`)) {
+      for (const t of [...this.typed].reverse()) {
+        if (!t.step.inputRef) continue;
+        const other = await this.recorder.describeField?.(this.page, t.located.element.selector).catch(() => null);
+        if (!other || other.type !== facts.type) continue;
+        return { value: t.value, inputRef: t.step.inputRef, ...(t.generatedValue !== undefined ? { generatedValue: t.generatedValue } : {}) };
+      }
+    }
+    const key = dataKey(name);
+    const data = this.ctx.request.testData;
+    const provided = Object.keys(data).find((k) => dataKey(k) === key);
+    if (provided !== undefined && facts.type !== "password") {
+      return { value: String(data[provided] ?? ""), inputRef: { source: "testData", key: provided } };
+    }
+    // A required select takes the site's first real option, never the model's pick (KI-064): asked for a country, the
+    // model answers the United States, for which the Shopware demo's register form silently refuses to submit; a shop
+    // lists the countries it serves first.
+    const option = facts.options.find((o) => o.value.trim() !== "")?.value;
+    if (option !== undefined) return { value: option, inputRef: { source: "testData", key }, generatedValue: option, llm: null };
+    const source = facts.type === "password" ? "secret" : "testData";
+    const secretKey = source === "secret" ? (this.ctx.secrets.names.find((n) => dataKey(n) === key) ?? null) : null;
+    if (secretKey !== null) {
+      const value = this.ctx.secrets.get(secretKey);
+      if (value != null) return { value, inputRef: { source: "secret", key: secretKey } };
+    }
+    const generated = await this.generateFor(source, key, instruction, facts);
+    return { value: generated.value, inputRef: { source, key }, generatedValue: generated.value, llm: generated.llm };
+  }
+
+  /**
    * Types again, before a click, a value the page emptied after our recorder typed it (2026-10-07): a page still
    * starting up can reset its form (KI-044), and the click would then submit it without the value. Only a field now
    * empty is typed again; one the page reformatted, one gone from the page and a selection are left alone. Recorded
@@ -934,13 +1107,22 @@ class ExplorationRun {
     return { element: { selector: PASSWORD_FIELD, description: "the page's only password field", method: "fill", arguments: [] }, ref, info };
   }
 
-  private async readEarlyCheckpoint(step: PlannedStep, stepId: string) {
+  /** The notifications the page shows now (KI-059); null when they cannot be read (then only a named one is captured). */
+  private async notificationBaseline(): Promise<string[] | null> {
+    if (!this.recorder.notificationTexts) return null;
+    return this.recorder.notificationTexts(this.page).catch((err: unknown) => {
+      this.rethrowIfFatal(err);
+      return null;
+    });
+  }
+
+  private async readEarlyCheckpoint(step: PlannedStep, stepId: string, before: readonly string[] | null = null) {
     await this.reserve();
     const checkpoint = step.checkpoint!;
     const requests = this.input.requirement.facts.filter((f) => f.checkpoint === checkpoint);
     const facts = new Map<string, ObservedFact>();
     for (const request of requests) {
-      const fact = await this.recorder.captureEarlyFact?.(this.page, request, this.input.requirement.criteria, stepId).catch((err: unknown) => {
+      const fact = await this.recorder.captureEarlyFact?.(this.page, request, this.input.requirement.criteria, stepId, before).catch((err: unknown) => {
         this.rethrowIfFatal(err);
         return null;
       });
@@ -1292,16 +1474,17 @@ class ExplorationRun {
   }
 
   /**
-   * The fetch / XHR requests the page's own frame starts from now on (a click's, KI-049): `settle()` waits until they
-   * are answered or fail, at most `actionRequestsTimeoutMs`. An iframe's requests (ads) and other resources are not
-   * waited for. `dispose()` stops listening.
+   * The fetch / XHR / script / document requests the page's own frame starts from now on (a click's, KI-049, KI-058):
+   * `settle()` waits until none has been pending for `actionQuietMs` (a route change loads its script, then fetches its
+   * data), at most `actionRequestsTimeoutMs` in all. An iframe's requests (ads) and other resources (images, styles,
+   * fonts) are not waited for. `dispose()` stops listening.
    */
   private watchRequests(): { settle(): Promise<void>; dispose(): void } {
     const page = this.page;
     const pending = new Set<PwRequest>();
     const onRequest = (r: PwRequest) => {
       try {
-        if ((r.resourceType() === "fetch" || r.resourceType() === "xhr") && r.frame() === page.mainFrame()) pending.add(r);
+        if (ACTION_REQUEST_TYPES.has(r.resourceType()) && r.frame() === page.mainFrame()) pending.add(r);
       } catch {
         // A request without a frame (a service worker's) is not the click's.
       }
@@ -1313,11 +1496,17 @@ class ExplorationRun {
     return {
       settle: async () => {
         const deadline = Date.now() + (this.deps.actionRequestsTimeoutMs ?? ACTION_REQUESTS_TIMEOUT_MS);
-        while (pending.size > 0 && Date.now() < deadline) {
+        const quietMs = this.deps.actionQuietMs ?? ACTION_QUIET_MS;
+        let quietSince = Date.now();
+        for (;;) {
+          const now = Date.now();
+          if (pending.size > 0) quietSince = now;
+          if (now >= deadline || now - quietSince >= quietMs) break;
           try {
             await sleep(ACTION_REQUESTS_POLL_MS, this.input.budget);
           } catch (err) {
             this.rethrowIfFatal(err);
+            break; // the budget ran out: the next reserve() stops exploration
           }
         }
       },
@@ -1443,6 +1632,7 @@ class ExplorationRun {
       llm: draft.llm ?? null,
       ...(this.multiScenario ? { scenarioId: this.scenarioId } : {}),
       ...(draft.generatedValue !== undefined ? { generatedValue: draft.generatedValue } : {}),
+      ...(draft.fillMethod !== undefined ? { fillMethod: draft.fillMethod } : {}),
       ...(draft.judgment !== undefined ? { judgment: draft.judgment } : {}),
     }) as ExplorationStep;
     return ExplorationStepSchema.parse({

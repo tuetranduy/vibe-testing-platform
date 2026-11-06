@@ -280,16 +280,127 @@ export async function fieldValue(page: Page, selector: string): Promise<string |
   return locator.inputValue({ timeout: 1_000 }).catch(() => null);
 }
 
+/** A required field of the form a click submits that is still empty (KI-062), and how to fill it. */
+export interface RequiredField {
+  /** `xpath=/html[1]/…`: the field's positional XPath (the recorder builds its replayable locator). */
+  selector: string;
+  how: "fill" | "select" | "check";
+}
+
+/** At most this many fields are completed in one form: a page is not a reason to fill a hundred inputs. */
+export const MAX_REQUIRED_FIELDS = 20;
+
+/**
+ * The fields of the form `submit` belongs to (its `form`, else its closest `<form>`) that the form needs and are still
+ * empty (KI-062): visible, enabled, writable, and required by `required`, `aria-required="true"` or a label with a "*".
+ * A text field or textarea with no value → fill; a select on an empty or disabled placeholder option, with another option
+ * to choose → select; an unchecked required checkbox, or the first radio of a required group with none checked → check.
+ * `touched`: one of `typed` (selectors the run typed into since the last click) is in that form. No form: nothing.
+ */
+export async function requiredEmptyFields(page: Page, submit: string, typed: readonly string[]): Promise<{ touched: boolean; fields: RequiredField[] }> {
+  const handle = await resolveHandle(page, submit, { timeoutMs: 1_000 });
+  return handle.evaluate(scanForm, { typed: [...typed], max: MAX_REQUIRED_FIELDS });
+}
+
+/** Runs in the page: no named inner functions (keepNames would wrap them in a helper the page lacks). */
+function scanForm(el: Element, args: { typed: string[]; max: number }): { touched: boolean; fields: RequiredField[] } {
+  const own = (el as HTMLButtonElement).form ?? null;
+  const form = own ?? el.closest("form");
+  if (!form) return { touched: false, fields: [] };
+  const typed: Element[] = [];
+  for (const sel of args.typed) {
+    try {
+      const node = sel.startsWith("xpath=")
+        ? document.evaluate(sel.slice(6), document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue
+        : document.querySelector(sel);
+      if (node instanceof Element) typed.push(node);
+    } catch {
+      // a selector the page cannot evaluate: not in this form
+    }
+  }
+  const controls = Array.from(form.elements) as (HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement)[];
+  const touched = typed.some((t) => controls.includes(t as HTMLInputElement) || form.contains(t));
+  const fields: RequiredField[] = [];
+  const radioGroups = new Set<string>();
+  const skipTypes = new Set(["hidden", "submit", "button", "reset", "image", "file", "range", "color"]);
+  for (const c of controls) {
+    if (fields.length >= args.max) break;
+    const tag = c.localName;
+    if (tag !== "input" && tag !== "select" && tag !== "textarea") continue;
+    const type = tag === "input" ? ((c as HTMLInputElement).type || "text").toLowerCase() : tag;
+    if (skipTypes.has(type) || c.disabled || (c as HTMLInputElement).readOnly) continue;
+    // Visible as Playwright sees it (a box and not visibility: hidden), so the fill and the generated test can act on it.
+    const style = getComputedStyle(c);
+    const rect = c.getBoundingClientRect();
+    if (!(rect.width > 0 && rect.height > 0) || style.visibility === "hidden") continue;
+    const label = c.labels?.[0] ?? null;
+    const ids = (c.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean);
+    const labelText = [label?.textContent ?? "", ...ids.map((id) => document.getElementById(id)?.textContent ?? "")].join(" ");
+    const required = c.required || c.getAttribute("aria-required") === "true" || /\*/.test(labelText);
+    if (!required) continue;
+    const xpathParts: string[] = [];
+    for (let n: Element | null = c; n; n = n.parentElement) {
+      let i = 1;
+      for (let s = n.previousElementSibling; s; s = s.previousElementSibling) if (s.localName === n.localName) i++;
+      xpathParts.unshift(`${n.localName}[${i}]`);
+    }
+    const selector = `xpath=/${xpathParts.join("/")}`;
+    if (type === "checkbox") {
+      if (!(c as HTMLInputElement).checked) fields.push({ selector, how: "check" });
+    } else if (type === "radio") {
+      const name = c.name;
+      if (!name || radioGroups.has(name)) continue;
+      radioGroups.add(name);
+      const group = controls.filter((o) => o.localName === "input" && (o as HTMLInputElement).type === "radio" && o.name === name) as HTMLInputElement[];
+      if (!group.some((o) => o.checked)) fields.push({ selector, how: "check" });
+    } else if (tag === "select") {
+      const s = c as HTMLSelectElement;
+      const current = s.selectedIndex >= 0 ? s.options[s.selectedIndex] : null;
+      const placeholder = !current || current.value === "" || current.disabled;
+      const choice = Array.from(s.options).some((o) => o.value !== "" && !o.disabled);
+      if (placeholder && choice) fields.push({ selector, how: "select" });
+    } else if (c.value === "") {
+      fields.push({ selector, how: "fill" });
+    }
+  }
+  return { touched, fields };
+}
+
+/** Deterministic check of a checkbox or radio by our own code (KI-062). */
+export async function checkElement(page: Page, target: ElementTarget, opts: RecorderOptions = {}): Promise<void> {
+  const handle = await resolveHandle(page, target, opts);
+  try {
+    await handle.check({ timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+  } catch (err) {
+    const firstLine = (err instanceof Error ? err.message : String(err)).split("\n")[0] ?? "";
+    throw new Error(`recorder: check failed: ${firstLine.slice(0, 300)}`);
+  }
+}
+
 /**
  * Deterministic `<select>` choice by our own code (the value comes from test data, a secret or the
  * requirement, never from the model). Matches an option by value or label.
  */
 export async function selectElementOption(page: Page, target: ElementTarget, value: string, opts: RecorderOptions = {}): Promise<void> {
   const handle = await resolveHandle(page, target, opts);
-  try {
-    await handle.selectOption(value, { timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS });
-  } catch (err) {
-    const firstLine = (err instanceof Error ? err.message : String(err)).split("\n")[0] ?? "";
-    throw new Error(`recorder: select failed: ${firstLine.slice(0, 300)}`);
+  // A page can put the select back on its placeholder right after the change (KI-064: the Shopware register page's
+  // first choice of a country is undone by its own re-render; a second one holds). Read it back after a moment and
+  // choose again, a few times; a choice the page never keeps is an error, never a recorded success.
+  for (let attempt = 1; ; attempt++) {
+    let chosen: string[];
+    try {
+      chosen = await handle.selectOption(value, { timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+    } catch (err) {
+      const firstLine = (err instanceof Error ? err.message : String(err)).split("\n")[0] ?? "";
+      throw new Error(`recorder: select failed: ${firstLine.slice(0, 300)}`);
+    }
+    await page.waitForTimeout(SELECT_SETTLE_MS);
+    const now = await handle.evaluate((el) => (el as HTMLSelectElement).value).catch(() => null);
+    if (now === null || chosen.includes(now)) return; // gone from the page (the next step decides), or kept
+    if (attempt >= SELECT_ATTEMPTS) throw new Error(`recorder: select failed: the page did not keep the option (it shows "${now}")`);
   }
 }
+
+/** How long a chosen option must hold before it counts, and how many times it is chosen (KI-064). */
+const SELECT_SETTLE_MS = 300;
+const SELECT_ATTEMPTS = 3;

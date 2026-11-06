@@ -248,6 +248,21 @@ describe("numeric_delta", () => {
     );
   });
 
+  it("a counter on the page that shows no number counts as 0 (an empty cart hides its badge, KI-060)", () => {
+    const { checkpointStep } = cartExploration();
+    const shownNothing: ObservedFact = { ...before, value: null, provenance: "DOM_VERIFIED", read: { element, mode: "number" }, stepId: checkpointStep.before_add!.id, modelValue: null };
+    const one: ObservedFact = { ...after, value: 1, provenance: "DOM_VERIFIED", read: { element, mode: "number" }, stepId: checkpointStep.after_add!.id };
+    const r = run({ kind: "numeric_delta", before, after, delta: 1 }, { facts: [shownNothing, one] });
+    expect([r.status, r.actual]).toEqual(["PASS", "Cart count after add (1) - before add (0, no number shown) = +1"]);
+    expect(run({ kind: "numeric_delta", before, after, delta: 2 }, { facts: [shownNothing, one] }).status).toBe("FAIL");
+    // Not when the counter was not found, or only the model said so.
+    const notFound = { ...shownNothing, read: null };
+    const modelOnly = { ...shownNothing, provenance: "MODEL_EXTRACTED" as const };
+    for (const f of [notFound, modelOnly]) {
+      expect(statusOf(run({ kind: "numeric_delta", before, after, delta: 1 }, { facts: [f, one] }))).toEqual(["INCONCLUSIVE", "FACT_NOT_OBSERVED"]);
+    }
+  });
+
   it("a null before value → INCONCLUSIVE / FACT_NOT_OBSERVED", () => {
     expect(statusOf(run({ kind: "numeric_delta", before, after, delta: 1 }, { values: { before: null, after: 1 } }))).toEqual([
       "INCONCLUSIVE",

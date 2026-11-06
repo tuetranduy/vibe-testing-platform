@@ -1,0 +1,10 @@
+# KI-046: expected irrelevant.
+id: "not-found-page"
+tags: ["relevance", "irrelevant"]
+requirement: "Open the Trail Runner 3 product page and check that it looks complete"
+criterion: {"statement": "The product page is complete.", "description": "The product page shows everything a shopper needs to decide: name, price, description and a way to buy", "sourceText": "check that it looks complete", "ambiguity": null}
+stepDescription: "Open the Trail Runner 3 product page"
+url: "https://shop.example.com/products/trail-runner-3"
+inventory: {"title": "Page not found — Example Shop", "description": "", "headings": [{"level": 1, "text": "404 — Page not found"}], "links": [{"text": "Back to the home page", "url": "https://shop.example.com/", "area": "main"}], "forms": [], "buttons": []}
+text: "404 — Page not found\nThe page you are looking for does not exist or has moved.\nBack to the home page"
+expect: {"relevant": false, "verdict": "CANNOT_TELL", "forbidden": []}

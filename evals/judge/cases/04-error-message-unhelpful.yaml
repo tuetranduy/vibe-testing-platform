@@ -1,0 +1,10 @@
+# KI-046: expected does_not_hold.
+id: "error-message-unhelpful"
+tags: ["forms", "does_not_hold"]
+requirement: "Submit the sign-up form with an invalid email and verify the error message is helpful"
+criterion: {"statement": "The error message helps the user fix the problem.", "description": "The error shown for the invalid email tells the user what is wrong and how to fix it", "sourceText": "verify the error message is helpful", "ambiguity": null}
+stepDescription: "Submit the sign-up form with the email 'not-an-email'"
+url: "https://shop.example.com/signup"
+inventory: {"title": "Sign up — Example Shop", "description": "", "headings": [{"level": 1, "text": "Create your account"}], "links": [], "forms": [{"name": "Sign up", "fields": [{"label": "Email", "type": "email", "placeholder": ""}, {"label": "Password", "type": "password", "placeholder": ""}], "submit": "Create account"}], "buttons": []}
+text: "Create your account\nEmail\nnot-an-email\nPassword\nCreate account\nError 0x80040E14: VALIDATION_FAILED (code 22)"
+expect: {"relevant": true, "verdict": "DOES_NOT_HOLD", "forbidden": []}

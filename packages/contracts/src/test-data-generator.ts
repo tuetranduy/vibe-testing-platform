@@ -39,6 +39,9 @@ export const isCredentialKey = (key: string): boolean => CREDENTIAL.test(keyWord
 
 const has = (words: string, ...terms: string[]) => terms.some((t) => new RegExp(`\\b${t}\\b`).test(words));
 
+/** Whether a key (or a field label) names an email address: "new_account_email", "E-mail", "userEmail". */
+export const isEmailKey = (key: string): boolean => has(keyWords(key), "email", "e ?mail", "mail");
+
 /**
  * A synthetic value for `key`, or null for a credential-like key. `hint` (e.g. the criterion's description of
  * the value) is read too, after the key. `seed` fixes the random part (default: the key alone).
