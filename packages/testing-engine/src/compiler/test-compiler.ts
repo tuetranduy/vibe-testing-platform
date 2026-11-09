@@ -127,7 +127,7 @@ interface CriterionPlan {
 }
 
 /** Read modes an outcome can replay, per role of the fact in it. */
-const TEXT_KINDS: readonly ReadKind[] = ["text", "url"];
+const TEXT_KINDS: readonly ReadKind[] = ["text", "value", "url"];
 const NUMBER_KINDS: readonly ReadKind[] = ["number", "count"];
 
 const refKey = (ref: FactRef) => `${ref.key}@${ref.checkpoint}`;
@@ -135,6 +135,7 @@ const refKey = (ref: FactRef) => `${ref.key}@${ref.checkpoint}`;
 const readKey = (read: Pick<FactRead, "ref" | "kind">) => `${refKey(read.ref)}#${read.kind}`;
 
 const READ_HELPER: Partial<Record<ReadKind, string>> = {
+  value: "readText",
   text: "readText",
   number: "readNumber",
   // A numeric_delta's counter: one that shows no number counts as 0, as for the verifier (KI-060).
@@ -323,6 +324,10 @@ class Compiler {
         const problem = unreplayable(fact.read.element);
         if (problem) return `${label} is read through an element the test cannot locate`;
         candidate = fact.read.element.candidates[fact.read.element.chosenIndex]!;
+        // Older field facts used "text" because the DOM reader reads input values in that
+        // mode too. A web-first text-content assertion does not: replay the same field read.
+        if (kind === "text" && (candidate.strategy === "label" || candidate.strategy === "placeholder"
+          || (candidate.strategy === "role" && ["textbox", "spinbutton", "combobox"].includes(candidate.role)))) kind = "value";
         itemSelector = fact.read.itemSelector ?? null;
       }
       if (!allowed(path[0]!).includes(kind)) return `${label} was read as ${kind}, which this assertion cannot replay`;
@@ -377,10 +382,17 @@ class Compiler {
           w.line(`const ${action} = trackActionRequests(page);`);
           // A search without a submit button was submitted with Enter in its field (R1).
           const press = step.actMethod === "press_enter";
+          const pointer = step.actMethod === 'scroll_into_view' ? 'scrollIntoViewIfNeeded'
+            : step.actMethod === 'hover' ? 'hover' : step.actMethod === 'double_click' ? 'dblclick' : null;
           this.withLocator(w, step.element!, `Step ${step.index} (${press ? "press Enter" : "act"})`, (l) =>
-            press ? `await ${l}.press(${lit("Enter")});` : `await ${l}.click();`,
+            press ? `await ${l}.press(${lit("Enter")});` : `await ${l}.${pointer ?? 'click'}();`,
           );
           w.line(`await ${action}();`);
+          // SPA navigation can outlast the action's bounded network wait. Synchronize with
+          // the route actually reached in discovery before checking the next page's facts.
+          if (step.urlAfter !== step.urlBefore && /^https?:\/\//.test(step.urlAfter)) {
+            w.line(`await page.waitForURL(${this.url(step.urlAfter)}, { timeout: 30000 }).catch(() => {});`);
+          }
           return;
         }
         case "fill": {
@@ -490,10 +502,11 @@ class Compiler {
           return;
         }
         const expected = param("value", value);
-        if (read.kind === "url") {
+        if (read.kind === "url" || read.kind === "value") {
           const normalize = this.helper(caseSensitive ? "collapseText" : "foldText");
           const pollMatcher = mode === "equals" ? "toBe" : "toContain";
-          assert(() => `${poll(`${normalize}(page.url())`)}.${pollMatcher}(${normalize}(${expected}));`);
+          const actual = read.kind === "url" ? "page.url()" : this.freshRead(read);
+          assert(() => `${poll(`${normalize}(${actual})`)}.${pollMatcher}(${normalize}(${expected}));`);
           return;
         }
         const matcher = mode === "equals" ? "toHaveText" : "toContainText";
@@ -632,7 +645,7 @@ class Compiler {
         if (!NAMEABLE_ROLES.has(c.role)) throw new Error("compiler: unsupported role");
         return `page.getByRole(${lit(c.role)}, { name: ${d}.name, exact: ${lit(c.exact)} })`;
       case "label":
-        return `page.getByLabel(${d}.text, { exact: true })`;
+        return `page.getByLabel(${d}.text, { exact: ${lit(c.exact ?? true)} })`;
       case "placeholder":
         return `page.getByPlaceholder(${d}.text, { exact: true })`;
       case "text":

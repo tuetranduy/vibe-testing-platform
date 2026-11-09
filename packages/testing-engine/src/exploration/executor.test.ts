@@ -312,6 +312,36 @@ const summary = (steps: ExplorationStep[]) =>
 // ---------------------------------------------------------------------------------------------
 
 describe("runExploration (fake explorer)", () => {
+  it.each(['navigate', 'other'] as const)('reload via %s retains the current query instead of opening a bare path', async kind => {
+    const current = 'https://shop.test/search?search=nonexistent';
+    const { ctx } = fakeCtx({ targetUrl: current });
+    const session = new FakeSession();
+    const plan = planOf(step('navigate', `Open ${current}`), step(kind, 'Reload the search results page (/search)'));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(outcome.stopReason).toBe('COMPLETED');
+    expect(session.calls.filter(c => c.op === 'navigate').map(c => c.arg)).toEqual([current, current]);
+    expect(session.ops()).not.toContain('actOn');
+  });
+
+  it.each([
+    ['Scroll below the Browse collection link to the product card', 'scroll_into_view'],
+    ['Hover over the account menu', 'hover'],
+    ['Double click the preview', 'double_click'],
+  ] as const)('preserves %s instead of replacing it with a named link click', async (description, method) => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const { recorder } = fakeRecorder();
+    const actions: string[] = [];
+    recorder.pointerAction = async (_page, _selector, action) => { actions.push(action); };
+    const plan = planOf(step('navigate', 'Open the target URL'), step('other', description));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe('COMPLETED');
+    expect(actions).toEqual([method]);
+    expect(session.ops()).not.toContain('actOn');
+    expect(outcome.steps.find(s => s.kind === 'act')).toMatchObject({ actMethod: method, onGoldenPath: true, outcome: 'SUCCESS' });
+    expect(session.url).toBe(TARGET);
+  });
+
   it("navigate → observe → act (one retry) → extract { cartCount: 1 }: steps persisted in order, golden path only on successful planned executions", async () => {
     const { ctx, events } = fakeCtx();
     const session = new FakeSession({
@@ -351,7 +381,7 @@ describe("runExploration (fake explorer)", () => {
     expect(acted!.llm).toBeNull(); // actOn makes no model call
     expect(outcome.steps[1]!.llm).toEqual(USAGE); // observe usage (R21: cacheHit null)
     expect(extracted!.llm).toEqual(USAGE);
-    expect(checkpoint!.artifactIds).toEqual(["art_1"]);
+    expect(checkpoint!.artifactIds).toEqual(["art_8"]);
 
     // Facts: the reserved url fact first, then cartCount read from the DOM at the located element.
     expect(outcome.facts.map((f) => [f.key, f.checkpoint, f.value, f.provenance, f.stepId])).toEqual([
@@ -360,8 +390,9 @@ describe("runExploration (fake explorer)", () => {
     ]);
     expect(captures[0]).toMatchObject({ key: "cartCount", modelValue: 1, mode: "number" });
     expect(mem.facts).toEqual(outcome.facts);
-    expect(mem.screenshots).toMatchObject([{ sensitivity: "STANDARD", fileName: "after_add.png" }]);
-    expect(session.calls.filter((c) => c.op === "screenshot").map((c) => c.arg)).toEqual([{ fullPage: true }]); // V1.3: the whole page
+    expect(mem.screenshots).toHaveLength(outcome.steps.length);
+    expect(mem.screenshots.at(-1)).toMatchObject({ sensitivity: "STANDARD", fileName: "after_add.png" });
+    expect(session.calls.filter((c) => c.op === "screenshot").map((c) => c.arg)).toEqual([...Array.from({ length: 7 }, () => ({ fullPage: false })), { fullPage: true }]); // Live steps plus full-page checkpoint
 
     // Events: one step.recorded per step, fact.observed per fact (no value), artifact.created (no URL).
     expect(events.filter((e) => e.type === "step.recorded")).toHaveLength(8);
@@ -369,9 +400,16 @@ describe("runExploration (fake explorer)", () => {
       { key: "url", checkpoint: "after_add", provenance: "DOM_VERIFIED" },
       { key: "cartCount", checkpoint: "after_add", provenance: "DOM_VERIFIED" },
     ]);
-    expect(events.filter((e) => e.type === "artifact.created").map((e) => e.payload)).toEqual([
-      { artifactId: "art_1", type: "SCREENSHOT", sensitivity: "STANDARD" },
-    ]);
+    expect(events.filter((e) => e.type === "artifact.created").map((e) => e.payload)).toEqual(
+      outcome.steps.map((_, i) => ({ artifactId: `art_${i + 1}`, type: "SCREENSHOT", sensitivity: "STANDARD" })),
+    );
+    // Each screenshot is published before its step, including failed attempts.
+    for (const step of outcome.steps) {
+      const shot = events.findIndex((e) => e.type === "artifact.created" && e.payload.artifactId === step.artifactIds[0]);
+      const recorded = events.findIndex((e) => e.type === "step.recorded" && e.payload.stepId === step.id);
+      expect(shot).toBeGreaterThanOrEqual(0);
+      expect(shot).toBeLessThan(recorded);
+    }
     expect(events.find((e) => e.type === "step.recorded")).toMatchObject({
       message: "Step 1: navigate succeeded",
       payload: { stepId: nav!.id, index: 0, kind: "navigate", outcome: "SUCCESS", blockReason: null },
@@ -395,7 +433,7 @@ describe("runExploration (fake explorer)", () => {
     expect(outcome.stopReason).toBe("STEP_LIMIT_REACHED");
     expect(outcome.steps).toHaveLength(3);
     expect(mem.steps).toHaveLength(3);
-    expect(session.ops()).toEqual(["navigate", "observe", "actOn", "close"]); // nothing ran that couldn't be recorded
+    expect(session.ops()).toEqual(["navigate", "screenshot", "observe", "screenshot", "actOn", "screenshot", "close"]); // nothing ran that couldn't be recorded
     expect(outcome.facts).toEqual([]);
   });
 
@@ -538,7 +576,8 @@ describe("runExploration (fake explorer)", () => {
       ["PS-3", { source: "secret", key: "password" }, true, "SUCCESS"],
     ]);
     expect(outcome.steps.find((s) => s.plannedStepId === "PS-4" && s.onGoldenPath)).toMatchObject({ kind: "act", instruction: expect.stringContaining(SECRET) });
-    expect(mem.screenshots.map((s) => s.sensitivity)).toEqual(["STANDARD"]);
+    expect(mem.screenshots.length).toBeGreaterThan(0);
+    expect(mem.screenshots.every((s) => s.sensitivity === "STANDARD")).toBe(true);
     expect(events.find((e) => e.type === "artifact.created")?.payload).toMatchObject({ sensitivity: "STANDARD" });
     expect(JSON.stringify(mem.facts)).toContain(SECRET);
   });
@@ -560,8 +599,8 @@ describe("runExploration (fake explorer)", () => {
     };
 
     const fallback = await run((o) => o?.fullPage === true);
-    expect(fallback.session.calls.filter((c) => c.op === "screenshot").map((c) => c.arg)).toEqual([{ fullPage: true }, { fullPage: false }]);
-    expect(fallback.outcome.steps.at(-1)!.artifactIds).toEqual(["art_1"]);
+    expect(fallback.session.calls.filter((c) => c.op === "screenshot").map((c) => c.arg)).toEqual([{ fullPage: false }, { fullPage: false }, { fullPage: true }, { fullPage: false }]);
+    expect(fallback.outcome.steps.at(-1)!.artifactIds).toEqual(["art_3"]);
 
     const none = await run(() => true);
     expect(none.outcome.steps.at(-1)).toMatchObject({ outcome: "BLOCKED_BY_POLICY", artifactIds: [] });
@@ -856,7 +895,7 @@ describe("runExploration (fake explorer)", () => {
       [2, "act", "PS-2", "BLOCKED_BY_POLICY", false],
     ]);
     expect(outcome.steps[2]).toMatchObject({ blockReason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED", element: { chosenIndex: 0 } });
-    expect(session.ops()).toEqual(["navigate", "observe", "screenshot", "close"]); // never acted, never extracted
+    expect(session.ops()).toEqual(["navigate", "screenshot", "observe", "screenshot", "screenshot", "close"]); // never acted, never extracted
     expect(events.filter((e) => e.type === "step.recorded").at(-1)?.payload).toMatchObject({ outcome: "BLOCKED_BY_POLICY", blockReason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED" });
   });
 
@@ -950,7 +989,7 @@ describe("runExploration (fake explorer)", () => {
     const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
     expect(outcome.stopReason).toBe("BLOCKED_BY_POLICY");
     expect(outcome.steps.at(-1)).toMatchObject({ kind: "navigate", plannedStepId: "PS-2", outcome: "BLOCKED_BY_POLICY", blockReason: "OFF_DOMAIN_NAVIGATION" });
-    expect(session.ops()).toEqual(["navigate", "navigate", "screenshot", "close"]);
+    expect(session.ops()).toEqual(["navigate", "screenshot", "navigate", "screenshot", "close"]);
   });
 
   it("an action whose navigation the guard blocked → BLOCKED_BY_POLICY", async () => {
@@ -1511,7 +1550,7 @@ describe("runExploration (fake explorer)", () => {
     const outcome = await runExploration(ctx, { plan, requirement, session, budget: ctx.budgetSignal(1) }, {
       recorder, store: { ...mem.store, saveScreenshot: async (input) => { order.push("screenshot"); return mem.store.saveScreenshot(input); } },
     });
-    expect(order).toEqual(["early", "screenshot", "extract"]);
+    expect(order.slice(order.indexOf("early"), order.indexOf("extract") + 1)).toEqual(["early", "screenshot", "extract"]);
     expect(outcome.facts.find((f) => f.key === "bannerShown")).toMatchObject({ value: true, provenance: "DOM_VERIFIED" });
     expect(session.calls.filter((c) => c.op === "extract")[0]?.arg).not.toContain("bannerShown");
   });
@@ -2225,10 +2264,10 @@ describe("judging unclear criteria from what the page shows", () => {
     expect(judgeStep).toMatchObject({
       judgment: { criterionId: "AC-1", relevant: true, verdict: "HOLDS", observed: "The cart shows 1 item" },
       llm: USAGE,
-      artifactIds: ["art_1"],
+      artifactIds: ["art_6"],
     });
-    expect(mem.screenshots).toMatchObject([{ fileName: "judge-AC-1.png" }]);
-    expect(session.calls.filter((c) => c.op === "screenshot").map((c) => c.arg)).toEqual([{ fullPage: false }]); // what is on screen
+    expect(mem.screenshots[5]).toMatchObject({ fileName: "judge-AC-1.png" });
+    expect(session.calls.filter((c) => c.op === "screenshot").map((c) => c.arg)).toEqual(Array.from({ length: outcome.steps.length }, () => ({ fullPage: false }))); // what is on screen
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       requirement: "Add iPhone 17 Pro to the cart; the cart count increases.",

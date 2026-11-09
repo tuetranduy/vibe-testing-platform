@@ -1,0 +1,713 @@
+{
+  "cart-lifecycle": [
+    {
+      "id": "AC-1",
+      "statement": "The Ice Cream Scoop product page shows the price 9.90.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "priceText",
+          "checkpoint": "product_page"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "9.90",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-2",
+      "statement": "The header Sign in button is visible, so the page is interactive.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "signInVisible",
+          "checkpoint": "product_page"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-3",
+      "statement": "After clicking Increase quantity, the product page quantity is 2.",
+      "expectedOutcome": {
+        "kind": "numeric_compare",
+        "left": {
+          "key": "quantityValue",
+          "checkpoint": "after_increase"
+        },
+        "operator": "eq",
+        "right": 2
+      }
+    },
+    {
+      "id": "AC-4",
+      "statement": "An added-to-cart notification is shown after adding the product to the cart.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "addedNotificationVisible",
+          "checkpoint": "after_add"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-5",
+      "statement": "The Ice Cream Scoop line in the mini cart shows a cart item quantity of 2.",
+      "expectedOutcome": {
+        "kind": "numeric_compare",
+        "left": {
+          "key": "miniCartItemQuantity",
+          "checkpoint": "mini_cart"
+        },
+        "operator": "eq",
+        "right": 2
+      }
+    },
+    {
+      "id": "AC-6",
+      "statement": "The Ice Cream Scoop line in the mini cart shows the line price 19.80.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "miniCartLinePrice",
+          "checkpoint": "mini_cart"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "19.80",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-7",
+      "statement": "The cart page Order summary shows the Subtotal 19.80.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "cartSubtotal",
+          "checkpoint": "cart_page"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "19.80",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-8",
+      "statement": "The cart page Order summary shows Shipping costs of 20.00.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "cartShipping",
+          "checkpoint": "cart_page"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "20.00",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-9",
+      "statement": "The cart page Order summary shows an Order total of 39.80.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "cartOrderTotal",
+          "checkpoint": "cart_page"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "39.80",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-10",
+      "statement": "After changing the cart item quantity to 3 and blurring, the cart shows quantity 3.",
+      "expectedOutcome": {
+        "kind": "numeric_compare",
+        "left": {
+          "key": "cartItemQuantity",
+          "checkpoint": "cart_updated"
+        },
+        "operator": "eq",
+        "right": 3
+      }
+    },
+    {
+      "id": "AC-11",
+      "statement": "After the update, the Ice Cream Scoop line price is 29.70.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "linePrice",
+          "checkpoint": "cart_updated"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "29.70",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-12",
+      "statement": "After the update, the Order summary Subtotal is 29.70.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "cartSubtotal",
+          "checkpoint": "cart_updated"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "29.70",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-13",
+      "statement": "After the update, the Order summary Order total is 49.70.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "cartOrderTotal",
+          "checkpoint": "cart_updated"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "49.70",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-14",
+      "statement": "After reloading the cart page, the cart item quantity is still 3.",
+      "expectedOutcome": {
+        "kind": "numeric_compare",
+        "left": {
+          "key": "cartItemQuantity",
+          "checkpoint": "cart_reloaded"
+        },
+        "operator": "eq",
+        "right": 3
+      }
+    },
+    {
+      "id": "AC-15",
+      "statement": "After reloading the cart page, the Subtotal is still 29.70.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "cartSubtotal",
+          "checkpoint": "cart_reloaded"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "29.70",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-16",
+      "statement": "After reloading the cart page, the Order total is still 49.70.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "cartOrderTotal",
+          "checkpoint": "cart_reloaded"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "49.70",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-17",
+      "statement": "After removing the line, the cart page shows the heading Your cart is empty!.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "emptyCartHeading",
+          "checkpoint": "cart_empty"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "Your cart is empty!",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-18",
+      "statement": "After removing the line, no Ice Cream Scoop line is shown in the cart.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "scoopLineVisible",
+          "checkpoint": "cart_empty"
+        },
+        "expected": false
+      }
+    },
+    {
+      "id": "AC-19",
+      "statement": "After reloading, the cart page still shows the heading Your cart is empty!.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "emptyCartHeading",
+          "checkpoint": "cart_empty_reloaded"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "Your cart is empty!",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-20",
+      "statement": "After reloading, no Ice Cream Scoop line is shown in the cart.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "scoopLineVisible",
+          "checkpoint": "cart_empty_reloaded"
+        },
+        "expected": false
+      }
+    }
+  ],
+  "guest-wishlist-gate": [
+    {
+      "id": "AC-1",
+      "statement": "A static product card for Smoking Board Cedar Wood is visible on the home page below Browse collection, outside the moving product carousel.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "staticProductCardVisible",
+          "checkpoint": "home_page"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-2",
+      "statement": "After clicking Add to wishlist on that card, a login dialog appears whose heading is Sign in to your account.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "loginDialogHeading",
+          "checkpoint": "login_dialog"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "Sign in to your account",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-3",
+      "statement": "The login dialog shows an Email address input.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "emailInputVisible",
+          "checkpoint": "login_dialog"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-4",
+      "statement": "The login dialog shows a Password input.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "passwordInputVisible",
+          "checkpoint": "login_dialog"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-5",
+      "statement": "The login dialog shows a Sign in button.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "signInButtonInDialogVisible",
+          "checkpoint": "login_dialog"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-6",
+      "statement": "The login dialog shows a Sign up button.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "signUpButtonInDialogVisible",
+          "checkpoint": "login_dialog"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-7",
+      "statement": "Clicking Sign up inside the dialog navigates the browser to the /register path.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "url",
+          "checkpoint": "register_page"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "/register",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-8",
+      "statement": "On the registration page the login dialog is no longer shown.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "loginDialogVisible",
+          "checkpoint": "register_page"
+        },
+        "expected": false
+      }
+    },
+    {
+      "id": "AC-9",
+      "statement": "The registration page shows the heading I am new here.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "registrationHeading",
+          "checkpoint": "register_page"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "I am new here",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-10",
+      "statement": "The registration page shows an Account type selector.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "accountTypeSelectorVisible",
+          "checkpoint": "register_page"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-11",
+      "statement": "The registration page shows a First name field.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "firstNameFieldVisible",
+          "checkpoint": "register_page"
+        },
+        "expected": true
+      }
+    }
+  ],
+  "registration-account-toggle": [
+    {
+      "id": "AC-1",
+      "statement": "The register page becomes interactive with a visible header Sign in control.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "signInVisible",
+          "checkpoint": "register_page"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-2",
+      "statement": "With Account type Private, the Company text input is absent.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "companyInputVisible",
+          "checkpoint": "private_type"
+        },
+        "expected": false
+      }
+    },
+    {
+      "id": "AC-3",
+      "statement": "With Account type Private, the VAT ID text input is absent.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "vatIdInputVisible",
+          "checkpoint": "private_type"
+        },
+        "expected": false
+      }
+    },
+    {
+      "id": "AC-4",
+      "statement": "After setting Account type to Company, the Company text input is visible.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "companyInputVisible",
+          "checkpoint": "company_type"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-5",
+      "statement": "After setting Account type to Company, the VAT ID text input is visible.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "vatIdInputVisible",
+          "checkpoint": "company_type"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-6",
+      "statement": "After switching Account type back to Private, the Company input is no longer present.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "companyInputVisible",
+          "checkpoint": "private_again"
+        },
+        "expected": false
+      }
+    },
+    {
+      "id": "AC-7",
+      "statement": "After switching Account type back to Private, the VAT ID input is no longer present.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "vatIdInputVisible",
+          "checkpoint": "private_again"
+        },
+        "expected": false
+      }
+    },
+    {
+      "id": "AC-8",
+      "statement": "After switching back to Private, the First name value is still Regression.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "firstNameValue",
+          "checkpoint": "private_again"
+        },
+        "match": {
+          "mode": "equals",
+          "value": "Regression",
+          "caseSensitive": true
+        }
+      }
+    },
+    {
+      "id": "AC-9",
+      "statement": "After switching back to Private, the Last name value is still Tester.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "lastNameValue",
+          "checkpoint": "private_again"
+        },
+        "match": {
+          "mode": "equals",
+          "value": "Tester",
+          "caseSensitive": true
+        }
+      }
+    },
+    {
+      "id": "AC-10",
+      "statement": "After switching to Company again, the Company input is visible.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "companyInputVisible",
+          "checkpoint": "company_again"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-11",
+      "statement": "After switching to Company again, the VAT ID input is visible.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "vatIdInputVisible",
+          "checkpoint": "company_again"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-12",
+      "statement": "After switching to Company again, the First name value is still Regression.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "firstNameValue",
+          "checkpoint": "company_again"
+        },
+        "match": {
+          "mode": "equals",
+          "value": "Regression",
+          "caseSensitive": true
+        }
+      }
+    },
+    {
+      "id": "AC-13",
+      "statement": "After switching to Company again, the Last name value is still Tester.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "lastNameValue",
+          "checkpoint": "company_again"
+        },
+        "match": {
+          "mode": "equals",
+          "value": "Tester",
+          "caseSensitive": true
+        }
+      }
+    },
+    {
+      "id": "AC-14",
+      "statement": "The registration form is still displayed unsent and no account was created.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "registerFormVisible",
+          "checkpoint": "form_state"
+        },
+        "expected": true
+      }
+    }
+  ],
+  "search-no-match": [
+    {
+      "id": "AC-1",
+      "statement": "The header Sign in button is visible on the home page.",
+      "expectedOutcome": {
+        "kind": "visible",
+        "fact": {
+          "key": "signInButtonVisible",
+          "checkpoint": "home_page"
+        },
+        "expected": true
+      }
+    },
+    {
+      "id": "AC-2",
+      "statement": "After submitting the search, the browser is on the search results URL containing /search?search=codex-no-product-20261109.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "url",
+          "checkpoint": "search_results"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "/search?search=codex-no-product-20261109",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-3",
+      "statement": "The search results page heading contains the exact query codex-no-product-20261109.",
+      "expectedOutcome": {
+        "kind": "text_matches",
+        "fact": {
+          "key": "searchResultHeading",
+          "checkpoint": "search_results"
+        },
+        "match": {
+          "mode": "contains",
+          "value": "codex-no-product-20261109",
+          "caseSensitive": false
+        }
+      }
+    },
+    {
+      "id": "AC-4",
+      "statement": "The search result grid displays zero product result cards for the nonexistent query.",
+      "expectedOutcome": {
+        "kind": "numeric_compare",
+        "left": {
+          "key": "productResultCardCount",
+          "checkpoint": "search_results"
+        },
+        "operator": "eq",
+        "right": 0
+      }
+    },
+    {
+      "id": "AC-5",
+      "statement": "The result grid shows none of the unrelated products ILARIO Product Variants, LAVENDA Product Variants, LINE Product Variants or Spatial 3D product.",
+      "expectedOutcome": {
+        "kind": "numeric_compare",
+        "left": {
+          "key": "unrelatedProductCardCount",
+          "checkpoint": "search_results"
+        },
+        "operator": "eq",
+        "right": 0
+      }
+    },
+    {
+      "id": "AC-6",
+      "statement": "After reloading and finishing loading, the search result grid again shows zero product result cards.",
+      "expectedOutcome": {
+        "kind": "numeric_compare",
+        "left": {
+          "key": "productResultCardCount",
+          "checkpoint": "search_results_after_reload"
+        },
+        "operator": "eq",
+        "right": 0
+      }
+    }
+  ]
+}

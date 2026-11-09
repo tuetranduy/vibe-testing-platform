@@ -32,10 +32,13 @@ export interface UseArtifactUrl {
 export function useArtifactUrl(ref: ArtifactRef | null): UseArtifactUrl {
   const key = ref ? `${ref.runId}/${ref.artifactId}` : null;
   const [attempt, setAttempt] = useState({ key, n: 0 });
-  const [state, setState] = useState<ArtifactUrlState>({ status: "idle" });
+  const [result, setResult] = useState<{ key: string | null; state: ArtifactUrlState }>({ key: null, state: { status: "idle" } });
+  // Never label the previous artifact's URL as the new screenshot while its request is starting.
+  const state: ArtifactUrlState = result.key === key ? result.state : { status: key ? "loading" : "idle" };
   const n = attempt.key === key ? attempt.n : 0;
 
   useEffect(() => {
+    const setState = (state: ArtifactUrlState) => setResult({ key, state });
     if (!ref) {
       setState({ status: "idle" });
       return;

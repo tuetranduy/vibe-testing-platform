@@ -2981,11 +2981,11 @@ a.running-card:hover {
     grid-template-columns: minmax(0, 1fr) 380px;
   }
   .live-grid > .evidence {
-    position: sticky;
-    top: calc(var(--header-h) + 16px);
+    align-self: start;
   }
 }
 .live-side {
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -3069,19 +3069,45 @@ a.running-card:hover {
 .evidence-empty > p {
   max-width: 44ch;
 }
+.evidence-preview {
+  /* Reserve the same space before, during and after each screenshot request. */
+  height: clamp(240px, 50vh, 560px);
+  min-width: 0;
+  overflow: hidden;
+  contain: layout;
+}
+.evidence-preview > .evidence-empty {
+  height: 100%;
+  min-height: 0;
+}
 .evidence-figure {
+  height: 100%;
+  min-height: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
+.evidence-figure .artifact-zoom {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ink-raised);
+}
 .evidence-figure img {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: contain;
+  object-position: top;
   border-radius: var(--radius-md);
-  background: #ffffff;
+  background: var(--ink-raised);
 }
 .evidence-figure figcaption {
+  flex: none;
+  max-height: 4.5em;
+  overflow: auto;
+  overflow-wrap: anywhere;
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -3123,7 +3149,10 @@ a.running-card:hover {
   list-style: none;
   padding: 0;
   max-height: 28rem;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
 }

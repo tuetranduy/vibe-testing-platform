@@ -3,6 +3,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LOCATOR_STRATEGY_ORDER } from "../shared/locator-policy";
 import { captureCheckpoint, captureFact, modeForValueType, readFact } from "./fact-reader";
+import { captureNamedFact, namedFactSubject } from "./named-facts";
 import { checkElement, describeElement, describeField, elementAction, fieldValue, fillElement, hittableAlternative, isHittable, reachableNamedControl, recordElement, requiredEmptyFields, selectElementOption } from "./recorder";
 
 /**
@@ -63,6 +64,98 @@ beforeEach(async () => {
 const strategies = (ref: ElementRef) => ref.candidates.map((c) => c.strategy);
 const chosen = (ref: ElementRef): LocatorCandidate => ref.candidates[ref.chosenIndex]!;
 const rank = (s: LocatorCandidate["strategy"]) => LOCATOR_STRATEGY_ORDER.indexOf(s);
+
+describe('named fact grounding regressions', () => {
+  const request = (description: string, valueType: 'string' | 'number' | 'boolean' = 'boolean') => ({ key: 'subject', checkpoint: 'current', description, valueType });
+
+  it('reads the actual named input, including required markers, instead of a model summary or label', async () => {
+    await page.setContent('<label for="first">First name *</label><input id="first" value="Regression"><label for="last">Last name *</label><input id="last" value="Tester">');
+    const fact = await captureNamedFact(page, request('Current value of the Last name input after switching back to Private', 'string'), 'text', 'step');
+    expect(fact).toMatchObject({ value: 'Tester', provenance: 'DOM_VERIFIED', read: { mode: 'value' } });
+    expect(fact?.modelValue).toBeUndefined();
+    await page.locator('#last').fill('Changed');
+    expect(await readFact(page, fact!.read!.element, 'text')).toMatchObject({ value: 'Changed' });
+  });
+
+  it('reads quantity from an input rather than its caption or nearby product price', async () => {
+    await page.setContent('<label for="qty">Cart item quantity</label><input type="number" id="qty" value="2"><p>€19.80</p>');
+    expect(await captureNamedFact(page, request('Cart item quantity shown for the Ice Cream Scoop line in the mini cart', 'number'), 'number', 'step'))
+      .toMatchObject({ value: 2, provenance: 'DOM_VERIFIED', read: { mode: 'number' } });
+  });
+
+  it('records an absent named field and detects it if it later appears with a required marker', async () => {
+    await page.setContent('<label for="type">Account type *</label><select id="type"><option>Private</option><option>Company</option></select>');
+    const fact = await captureNamedFact(page, request('Whether the Company text input is present while Account type is Private'), 'visible', 'step');
+    expect(fact).toMatchObject({ value: false, provenance: 'DOM_VERIFIED', read: { element: { candidates: [{ strategy: 'label', text: 'Company', exact: false }] } } });
+    await page.locator('body').evaluate(el => { el.insertAdjacentHTML('beforeend', '<label for="company">Company *</label><input id="company">'); });
+    expect(await readFact(page, fact!.read!.element, 'visible')).toMatchObject({ value: true });
+  });
+
+  it('declines ambiguous or only partially matching fields rather than verifying absence', async () => {
+    await page.setContent('<label>First name<input></label><label>First name<input></label><label>Company address<input></label>');
+    expect(await captureNamedFact(page, request('Current value of the First name input', 'string'), 'text', 'step')).toBeNull();
+    expect(await captureNamedFact(page, request('Whether the Company input is visible'), 'visible', 'step')).toBeNull();
+  });
+
+  it('restricts named fields to the requested dialog', async () => {
+    await page.setContent('<button>Sign in</button><label>Email address<input value="background"></label><div role="dialog"><button id="modal-sign-in">Sign in</button><label>Email address<input value="dialog"></label></div>');
+    expect(await captureNamedFact(page, request('Whether an Email address input is visible inside the login dialog'), 'visible', 'step'))
+      .toMatchObject({ value: true, provenance: 'DOM_VERIFIED' });
+    const button = await captureNamedFact(page, request('Whether a Sign in button is visible inside the login dialog'), 'visible', 'step');
+    expect(button).toMatchObject({ value: true, provenance: 'DOM_VERIFIED' });
+    await page.locator('#modal-sign-in').evaluate(el => { (el as HTMLElement).style.display = 'none'; });
+    expect(await readFact(page, button!.read!.element, 'visible')).toMatchObject({ value: false });
+  });
+
+  it('records a disappearing dialog without confusing another visible modal with that subject', async () => {
+    await page.setContent('<h1>Registration</h1>');
+    const fact = await captureNamedFact(page, request('Whether the login dialog is still shown after navigating to the registration page'), 'visible', 'step');
+    expect(fact).toMatchObject({ value: false, provenance: 'DOM_VERIFIED' });
+    await page.locator('body').evaluate(el => { el.insertAdjacentHTML('beforeend', '<div role="dialog">Newsletter</div>'); });
+    expect(await readFact(page, fact!.read!.element, 'visible')).toMatchObject({ value: true });
+    expect(await captureNamedFact(page, request('Whether the login dialog is visible'), 'visible', 'step')).toBeNull();
+    await page.setContent('<dialog>Hidden native dialog</dialog>');
+    expect(await captureNamedFact(page, request('Whether the login dialog is visible'), 'visible', 'step'))
+      .toMatchObject({ value: false, provenance: 'DOM_VERIFIED' });
+  });
+
+  it('grounds a uniquely named card and a removed line without using an expected value to find it', async () => {
+    await page.setContent('<a href="/product">Smoking Board Cedar Wood</a>');
+    expect(namedFactSubject('Whether the static Smoking Board Cedar Wood product card (943280, €17.90) below Browse collection is visible'))
+      .toEqual({ name: 'Smoking Board Cedar Wood', kind: 'product card' });
+    expect(await captureNamedFact(page, request('Whether the static Smoking Board Cedar Wood product card is visible'), 'visible', 'step'))
+      .toMatchObject({ value: true, provenance: 'DOM_VERIFIED' });
+    const fact = await captureNamedFact(page, request('Whether an Ice Cream Scoop line is shown on the cart page after removing the line'), 'visible', 'step');
+    expect(fact).toMatchObject({ value: false, provenance: 'DOM_VERIFIED' });
+    await page.locator('body').evaluate(el => { el.insertAdjacentHTML('beforeend', '<a href="/scoop">Ice Cream Scoop</a>'); });
+    expect(await readFact(page, fact!.read!.element, 'visible')).toMatchObject({ value: true });
+    expect(namedFactSubject('Whether any unrelated product card such as ILARIO Product Variants appears in the result grid')).toBeNull();
+    expect(await captureNamedFact(page, request('Whether any unrelated product card appears in the result grid'), 'visible', 'step')).toBeNull();
+  });
+
+  it('counts repeated result rows instead of the internal children of the first card', async () => {
+    await page.setContent('<main><div id="grid">' + Array.from({ length: 12 }, (_, i) => `<article data-testid="card"><img><h2>Product ${i}</h2><p>€10</p><button>Add</button></article>`).join('') + '</div></main>');
+    const element = await recordElement(page, 'article:first-child');
+    const input = { key: 'products', checkpoint: 'results', stepId: 'step', element, mode: 'count' as const, description: 'Number of product result cards in the search result grid' };
+    expect(await captureFact(page, { ...input, modelValue: 4 })).toMatchObject({ provenance: 'MODEL_EXTRACTED', domValue: 12 });
+    const fact = await captureFact(page, { ...input, modelValue: 12 });
+    expect(fact).toMatchObject({ value: 12, provenance: 'DOM_VERIFIED' });
+    await page.locator('#grid').evaluate(el => { el.append(el.firstElementChild!.cloneNode(true)); });
+    expect(await readFact(page, fact.read!.element, 'count')).toMatchObject({ value: 13 });
+  });
+
+  it('reads an amount beside its requested label and never steals a matching amount from another row', async () => {
+    await page.setContent('<aside><div><p id="subtotal">Subtotal</p><p><span>€19.80</span></p></div><div><p>Shipping costs</p><p>€20.00</p></div></aside>');
+    const element = await recordElement(page, '#subtotal');
+    const base = { key: 'subtotal', checkpoint: 'cart', stepId: 'step', element, mode: 'text' as const, description: 'Order summary Subtotal text on the cart page' };
+    const fact = await captureFact(page, { ...base, modelValue: '€19.80' });
+    expect(fact).toMatchObject({ value: '€19.80', provenance: 'DOM_VERIFIED' });
+    await page.locator('#subtotal + p').evaluate(el => { el.textContent = '€29.70'; });
+    expect(await readFact(page, fact.read!.element, 'text')).toMatchObject({ value: '€29.70' });
+    expect(await captureFact(page, { ...base, modelValue: '€20.00' })).toMatchObject({ provenance: 'MODEL_EXTRACTED' });
+    expect(await captureFact(page, { ...base, description: 'Product price', modelValue: '€29.70' })).toMatchObject({ provenance: 'MODEL_EXTRACTED' });
+  });
+});
 
 function expectRanked(ref: ElementRef) {
   const ranks = strategies(ref).map(rank);

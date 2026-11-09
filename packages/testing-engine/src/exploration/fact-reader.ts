@@ -142,6 +142,8 @@ export interface FactCaptureInput {
   stepId: string;
   /** What the model extracted (MODEL_EXTRACTED until the DOM confirms it). */
   modelValue: FactValue;
+  /** The requested subject; used to distinguish a row's label from a disagreeing value. */
+  description?: string;
   /** Where the model says the value is shown, recorded with `recordElement`; null if not located. */
   element: ElementRef | null;
   /** How to read it from the DOM, chosen by the caller; null = no deterministic read (MODEL_EXTRACTED). */
@@ -212,12 +214,38 @@ const MAX_TEXT_DESCENDANTS = 500;
  * at a product card, the model reads its name) — recorded as the fact's element (KI-001). Exact (normalized) matching
  * still decides provenance. Null when the element cannot be read.
  */
-async function readText(page: Page, element: ElementRef, modelValue: FactValue): Promise<DomReading | null> {
+async function readText(page: Page, element: ElementRef, modelValue: FactValue, description?: string): Promise<DomReading | null> {
   const own = await readFact(page, element, "text");
   if (!own) return null;
   const reading: DomReading = { value: own.value, read: { element: own.element, mode: "text" } };
   if (typeof modelValue !== "string" || factValuesEqual(modelValue, own.value)) return reading;
   const { locator } = await resolveElement(page, element);
+  // A label and its value commonly occupy separate children of the same row. Inspect
+  // only the nearest branching container, never another row or a page-wide value match.
+  const label = typeof own.value === 'string' ? collapse(own.value).toLowerCase() : '';
+  const isLabel = label !== '' && label.length <= 80 && parseNumber(label) === null
+    && ` ${collapse(description ?? '').toLowerCase()} `.includes(` ${label} `);
+  const sibling = isLabel ? await locator.evaluateHandle(el => {
+    let branch: Element = el;
+    for (let depth = 0; depth < 3; depth++) {
+      const parent = branch.parentElement;
+      if (!parent || parent === document.body) return null;
+      const peers = Array.from(parent.children).filter(n => n !== branch && (n instanceof HTMLElement ? n.innerText : n.textContent ?? '').trim() !== '');
+      if (peers.length) return peers.length === 1 ? peers[0]! : null;
+      branch = parent;
+    }
+    return null;
+  }) : null;
+  try {
+    const siblingElement = sibling?.asElement();
+    if (siblingElement) {
+      const ref = await recordElement(page, siblingElement);
+      const read = await readFact(page, ref, 'text');
+      if (read && factValuesEqual(modelValue, read.value)) return { value: read.value, read: { element: read.element, mode: 'text' } };
+    }
+  } finally {
+    await sibling?.dispose();
+  }
   const texts = await locator.evaluate((el, levels) => {
     const out: string[] = [];
     for (let node = el.parentElement; node && node !== document.body && out.length < levels; node = node.parentElement) out.push(node.innerText);
@@ -253,12 +281,37 @@ export async function captureFact(page: Page, input: FactCaptureInput): Promise<
   if (input.element && mode === "text_list") {
     dom = await readList(page, input.element, input.modelValue).catch(() => null);
   } else if (input.element && mode === "text") {
-    dom = await readText(page, input.element, input.modelValue).catch(() => null);
+    dom = await readText(page, input.element, input.modelValue, input.description).catch(() => null);
+  } else if (input.element && mode === 'count' && input.description && /\b(?:number|count|how many|total)\b[^.]{0,60}\b(?:products?|results?|items?|entries|rows|cards|articles|listings?)\b/i.test(input.description)) {
+    dom = await readListedCount(page, input.element).catch(() => null);
   } else if (input.element && mode) {
     const reading = await readFact(page, input.element, mode).catch(() => null);
     if (reading) dom = { value: reading.value, read: { element: reading.element, mode } };
   }
   return factFromReadings({ key: input.key, checkpoint: input.checkpoint, stepId: input.stepId, modelValue: input.modelValue, dom });
+}
+
+/** A lookup can identify one repeated row instead of its list. Count its owning list,
+ * not the row's internal image/title/price/buttons. Do not climb through mixed siblings. */
+async function readListedCount(page: Page, element: ElementRef): Promise<DomReading | null> {
+  const { locator, count } = await resolveElement(page, element);
+  if (count !== 1) return null;
+  const parent = await locator.evaluateHandle(el => {
+    const owner = el.parentElement;
+    if (!owner) return null;
+    const testId = el.getAttribute('data-testid');
+    const rows = Array.from(owner.children);
+    const listItem = el.matches('li, [role="listitem"], tr, [role="row"]');
+    if (rows.length && rows.every(row => row.tagName === el.tagName
+      && (testId ? row.getAttribute('data-testid') === testId : listItem && row.matches('li, [role="listitem"], tr, [role="row"]')))) return owner;
+    return null;
+  });
+  try {
+    const handle = parent.asElement();
+    const ref = handle ? await recordElement(page, handle) : element;
+    const read = await readFact(page, ref, 'count');
+    return read ? { value: read.value, read: { element: read.element, mode: 'count' } } : null;
+  } finally { await parent.dispose(); }
 }
 
 export interface CheckpointCaptureInput {

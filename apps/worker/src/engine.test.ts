@@ -327,7 +327,11 @@ describe("createEngines (Ruling R7: both engines, chosen per run)", () => {
     expect(facts.filter((f) => f.key === "url").map((f) => f.checkpoint).sort()).toEqual(["after_add", "before_add", "cart_page"]);
     expect(facts.find((f) => f.key === "cartCount")).toMatchObject({ provenance: "MODEL_EXTRACTED", value: null });
     const artifacts = await new ArtifactRepository(h.tdb.db).listByRun(run.id);
-    expect(artifacts).toHaveLength(3);
+    expect(artifacts).toHaveLength(steps.length);
+    for (const step of steps) {
+      expect(step.artifactIds).toHaveLength(1);
+      expect(artifacts.some((artifact) => artifact.id === step.artifactIds[0])).toBe(true);
+    }
     expect(artifacts.every((a) => a.type === "SCREENSHOT" && a.sensitivity === "STANDARD")).toBe(true);
 
     const events = await eventsOf(h, run.id);

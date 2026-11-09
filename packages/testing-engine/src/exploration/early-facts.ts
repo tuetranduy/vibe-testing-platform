@@ -2,6 +2,7 @@ import type { AcceptanceCriterion, FactRequest, ObservedFact } from "@platform/c
 import type { Page } from "playwright-core";
 import { readFact } from "./fact-reader";
 import { recordElement } from "./recorder";
+import { namedFactSubject } from "./named-facts";
 
 /** Read the literal the user asks a notification to show; model paraphrases are not the authority. */
 function notificationLiteral(source: string): string | null {
@@ -90,6 +91,9 @@ export async function captureEarlyNotificationFact(
   stepId: string,
   before?: readonly string[] | null,
 ): Promise<ObservedFact | null> {
+  const subject = namedFactSubject(request.description);
+  if ((subject && ['input', 'field', 'button', 'selector', 'control'].includes(subject.kind))
+    || /\b(?:heading|input|field|button|selector)\b.*\b(?:inside|within|in)\b.*\b(?:dialog|popup|toast)\b/i.test(request.description)) return null;
   const checks = criteria.filter((c) => {
     const outcome = c.expectedOutcome;
     return ((outcome.kind === "visible" && request.valueType === "boolean")

@@ -25,33 +25,35 @@ export function LiveEvidence({ runId, screenshot }: Props) {
           Latest screenshot
         </h2>
       </div>
-      {!screenshot ? (
-        <div className="evidence-empty">
-          <Icon name="image" />
-          <p>No screenshot yet. Screenshots appear here as the run captures checkpoints.</p>
-        </div>
-      ) : state.status === "ready" ? (
-        <figure className="evidence-figure">
-          <button type="button" className="artifact-zoom" aria-label={`View full size: ${screenshot.message}`} onClick={() => setZoomed(true)}>
-            {/* Short-lived signed URL: an error means it expired, so fetch a fresh one. */}
-            <img src={state.url} alt={screenshot.message} onError={onLoadError} />
-          </button>
-          {zoomed && <ImageLightbox src={state.url} alt={screenshot.message} caption={screenshot.message} onClose={() => setZoomed(false)} onError={onLoadError} />}
-          <figcaption>
-            <span>{screenshot.message}</span>
-            <time dateTime={screenshot.timestamp}>{formatTime(screenshot.timestamp)}</time>
-          </figcaption>
-        </figure>
-      ) : state.status === "error" ? (
-        <div className="evidence-empty" role="status">
-          <Icon name="warning" />
-          <p>{state.message}</p>
-        </div>
-      ) : (
-        <p className="muted" role="status">
-          Loading screenshot…
-        </p>
-      )}
+      <div className="evidence-preview">
+        {!screenshot ? (
+          <div className="evidence-empty">
+            <Icon name="image" />
+            <p>No screenshot yet. A live screenshot appears here after each browser step.</p>
+          </div>
+        ) : state.status === "ready" ? (
+          <figure className="evidence-figure">
+            <button type="button" className="artifact-zoom" aria-label={`View full size: ${screenshot.message}`} onClick={() => setZoomed(true)}>
+              {/* Short-lived signed URL: an error means it expired, so fetch a fresh one. */}
+              <img src={state.url} alt={screenshot.message} onError={onLoadError} />
+            </button>
+            {zoomed && <ImageLightbox src={state.url} alt={screenshot.message} caption={screenshot.message} onClose={() => setZoomed(false)} onError={onLoadError} />}
+            <figcaption>
+              <span>{screenshot.message}</span>
+              <time dateTime={screenshot.timestamp}>{formatTime(screenshot.timestamp)}</time>
+            </figcaption>
+          </figure>
+        ) : state.status === "error" ? (
+          <div className="evidence-empty" role="status">
+            <Icon name="warning" />
+            <p>{state.message}</p>
+          </div>
+        ) : (
+          <p className="muted" role="status">
+            Loading screenshot…
+          </p>
+        )}
+      </div>
     </section>
   );
 }

@@ -1,0 +1,30 @@
+[
+  {
+    "id": "cart-lifecycle",
+    "title": "Cart quantity, totals, reload persistence and removal",
+    "targetUrl": "https://frontends-demo.vercel.app/Ice-Cream-Scoop/SW10423",
+    "expectedVerdict": "PASSED",
+    "requirement": "In a fresh guest browser, open Ice Cream Scoop (SW10423), priced at €9.90. Wait until the page is interactive (header Sign in button is visible). Increase Quantity from 1 to 2 using Increase quantity, then Add to cart. Wait for the added-to-cart notification before opening Mini cart. Verify its Ice Cream Scoop line has Cart item quantity 2 and line price €19.80. Follow Go to shopping cart (/checkout/cart). Verify Order summary Subtotal €19.80, Shipping costs €20.00 and Order total €39.80. Change Cart item quantity to 3 and blur the input (Tab); wait for the update. Verify quantity 3, line price and Subtotal €29.70, Order total €49.70. Reload the cart and verify quantity 3 and those totals persist. Click Remove for this line and verify the heading Your cart is empty! and the Ice Cream Scoop line is absent. Reload and verify the empty cart persists. Complete every checkpoint in order; no checkout or order submission. The mini-cart's Subtotal includes shipping on this demo; only assert the full cart Order summary subtotal."
+  },
+  {
+    "id": "guest-wishlist-gate",
+    "title": "Guest wishlist authentication gate and signup navigation",
+    "targetUrl": "https://frontends-demo.vercel.app/",
+    "expectedVerdict": "PASSED",
+    "requirement": "In a fresh guest browser on the home page, wait for the header Sign in button. Scroll to the static Smoking Board Cedar Wood product card (943280, €17.90), below Browse collection, outside the moving product carousel. Click that card's Add to wishlist button. Verify a dialog containing Login form and heading Sign in to your account appears, with Email address and Password inputs and Sign in and Sign up buttons. Do not enter credentials. Click Sign up inside this dialog. Verify navigation to /register, the login dialog is gone, and the registration heading I am new here., Account type selector and First name field are visible. Do not create an account."
+  },
+  {
+    "id": "registration-account-toggle",
+    "title": "Registration conditional company fields preserve personal data",
+    "targetUrl": "https://frontends-demo.vercel.app/register",
+    "expectedVerdict": "PASSED",
+    "requirement": "Open /register in a fresh guest browser and wait until interactive (header Sign in is visible). With Account type set to Private, verify Company and VAT ID text inputs are absent. Fill First name with Regression and Last name with Tester. Set Account type to Company. Verify Company * and VAT ID text inputs become visible. Fill Company with Example QA and VAT ID with QA-123456. Switch Account type back to Private. Verify Company and VAT ID inputs disappear and First name still equals Regression and Last name still equals Tester. Switch to Company once more and verify both company inputs become visible while both personal names remain unchanged. Do not submit the form or create an account."
+  },
+  {
+    "id": "search-no-match",
+    "title": "Nonexistent product search must not return unrelated products",
+    "targetUrl": "https://frontends-demo.vercel.app/",
+    "expectedVerdict": "FAILED",
+    "requirement": "In a fresh guest browser on the home page, wait until the header Sign in button is visible. Enter codex-no-product-20261109 in Search for products and press Enter. Wait for /search?search=codex-no-product-20261109 and the Search Result for heading containing the exact query. The expected requirement is that a nonexistent product query displays zero product result cards and no unrelated products. Check the result grid, not the header or autocomplete. Reload the results page, wait for it to finish loading, and verify again that there are zero result product cards. Any unrelated product result, including ILARIO Product Variants, LAVENDA Product Variants, LINE Product Variants or Spatial 3D product, fails the zero-result requirement. Record this as a real failure if observed; do not change the expected behavior to match the defect."
+  }
+]

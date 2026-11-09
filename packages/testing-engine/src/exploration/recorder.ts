@@ -201,7 +201,7 @@ export function locatorFor(page: Page, c: LocatorCandidate): Locator {
     case "role":
       return page.getByRole(c.role as Parameters<Page["getByRole"]>[0], { name: c.name, exact: c.exact });
     case "label":
-      return page.getByLabel(c.text, { exact: true });
+      return page.getByLabel(c.text, { exact: c.exact ?? true });
     case "placeholder":
       return page.getByPlaceholder(c.text, { exact: true });
     case "text":

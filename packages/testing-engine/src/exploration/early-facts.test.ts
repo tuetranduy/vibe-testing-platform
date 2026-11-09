@@ -19,6 +19,18 @@ beforeAll(async () => { browser = await chromium.launch(); page = await browser.
 afterAll(async () => { await browser?.close(); });
 
 describe("early notification evidence", () => {
+  it.each([
+    'Whether an Email address input is visible inside the login dialog',
+    'Whether a Password input is visible inside the login dialog',
+    'Whether a Sign in button is visible inside the login dialog',
+    'Text of the heading inside the login dialog opened by the wishlist button',
+  ])('does not use the whole dialog as evidence for its child: %s', async description => {
+    await page.setContent('<div role="dialog"><h2>Sign in</h2><label>Email address<input></label><label>Password<input type="password"></label><button>Sign in</button></div>');
+    const child = { ...request, description };
+    const checks = [{ ...criteria[0]!, sourceText: description, statement: description }];
+    expect(await captureEarlyNotificationFact(page, child, checks, 'step_cp', [])).toBeNull();
+  });
+
   it("keeps a DOM reading of a notification after it disappears", async () => {
     await page.setContent('<div role="status"><span id="toast">Item added to cart</span></div>');
     const fact = await captureEarlyNotificationFact(page, request, criteria, "step_cp");

@@ -63,6 +63,20 @@ describe("LiveEvidence", () => {
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
+  it("does not show the old image under the new step while its URL is loading", async () => {
+    let resolveNew!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).includes("art_2")
+      ? new Promise<Response>((resolve) => { resolveNew = resolve; })
+      : json(200, { url: "https://s3.test/old.png", expiresAt: "2026-09-26T10:05:00.000Z" })));
+    const { rerender } = render(<LiveEvidence runId="run_1" screenshot={shot("art_1", "STANDARD")} />);
+    await screen.findByRole("img");
+    rerender(<LiveEvidence runId="run_1" screenshot={shot("art_2", "STANDARD")} />);
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getByText("Loading screenshot…")).toBeInTheDocument();
+    resolveNew(json(200, { url: "https://s3.test/new.png", expiresAt: "2026-09-26T10:05:00.000Z" }));
+    expect(await screen.findByRole("img", { name: /art_2/ })).toHaveAttribute("src", "https://s3.test/new.png");
+  });
+
   it("switches to the newest screenshot", async () => {
     urlFetch();
     const { rerender } = render(<LiveEvidence runId="run_1" screenshot={shot("art_1", "STANDARD")} />);

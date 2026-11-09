@@ -5,7 +5,7 @@ import { BlockReasonSchema } from "./run";
 
 export const LocatorCandidateSchema = z.discriminatedUnion("strategy", [
   z.object({ strategy: z.literal("role"), role: z.string(), name: z.string(), exact: z.boolean() }),
-  z.object({ strategy: z.literal("label"), text: z.string() }),
+  z.object({ strategy: z.literal("label"), text: z.string(), exact: z.boolean().optional() }),
   z.object({ strategy: z.literal("placeholder"), text: z.string() }),
   z.object({ strategy: z.literal("text"), text: z.string(), exact: z.boolean() }),
   z.object({ strategy: z.literal("testId"), value: z.string() }),
@@ -82,9 +82,10 @@ export const ExplorationStepSchema = z.object({
   fillMethod: z.enum(["fill", "select", "check"]).optional(),
   /**
    * How an `act` step was performed: `press_enter` when a search without a submit button was submitted by pressing
-   * Enter in its field (2026-11-06, R1). Absent: a click.
+   * Enter in its field (2026-11-06, R1). Pointer actions retain their method too, so
+   * scrolling, hovering and double clicking are not replayed as ordinary clicks. Absent: a click.
    */
-  actMethod: z.enum(["click", "press_enter"]).optional(),
+  actMethod: z.enum(["click", "press_enter", "scroll_into_view", "hover", "double_click"]).optional(),
   /** A `judge` step's judgment (2026-10-07); absent on every other step, and on a judge step that failed. */
   judgment: CriterionJudgmentSchema.optional(),
 });

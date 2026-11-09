@@ -217,6 +217,26 @@ const dataOf = (dataJson: string) => JSON.parse(dataJson) as { targetUrl: string
 // ---------------------------------------------------------------------------------------------
 
 describe("compilePlaywrightTest: the discovered flow (snapshot)", () => {
+  it('waits for the observed SPA destination before checking the destination page', () => {
+    const destination = TARGET + 'register';
+    const steps = shopFlow().map(s => s.kind === 'act' && s.plannedStepId === 'PS-4' ? { ...s, urlAfter: destination } : s);
+    const out = compile({ steps });
+    expect(out.source).toMatch(/await page\.waitForURL\(data\.urls\.url\d+, \{ timeout: 30000 \}\)\.catch\(\(\) => \{\}\);/);
+    expect(out.source.indexOf('waitForURL')).toBeLessThan(out.source.indexOf('// Checkpoint 1'));
+    expect(Object.values(dataOf(out.dataJson).urls)).toContain(destination);
+    expect(checkGeneratedSource(out.source)).toEqual([]);
+  });
+
+  it.each([
+    ['scroll_into_view', 'scrollIntoViewIfNeeded'], ['hover', 'hover'], ['double_click', 'dblclick'],
+  ] as const)('replays %s with %s, without changing it to a click', (actMethod, method) => {
+    const steps = shopFlow().map(s => s.kind === 'act' ? { ...s, actMethod } : s);
+    const out = compile({ steps });
+    expect(out.source).toContain(`.${method}();`);
+    expect(out.source).not.toContain('.click();');
+    expect(checkGeneratedSource(out.source)).toEqual([]);
+  });
+
   it("replays the golden path with semantic locators; every value comes from run-data.json", () => {
     const out = compile();
     expect(out.source).toMatchSnapshot();
@@ -457,6 +477,24 @@ describe("compilePlaywrightTest: assertions", () => {
     expect(stepBlock(out.source, "AC-2")).toMatch(/await expect\.soft\(page\.getByTestId\(data\.locators\.loc\d+\.value\), message\)\.toBeVisible\(\);/);
     const hidden = compile({ requirement: requirementOf([criterion("AC-2", { kind: "visible", fact: { key: "toast", checkpoint: "after_add" }, expected: false })]) });
     expect(stepBlock(hidden.source, "AC-2")).toMatch(/\.toBeHidden\(\);/);
+  });
+
+  it('replays a grounded absent field with the same label matching semantics', () => {
+    const absent = shopFacts().map(f => f.key === 'toast' ? { ...f, value: false, read: { element: ref({ strategy: 'label', text: 'Company', exact: false }), mode: 'visible' as const } } : f);
+    const out = compile({ facts: absent, requirement: requirementOf([criterion('AC-2', { kind: 'visible', fact: { key: 'toast', checkpoint: 'after_add' }, expected: false })]) });
+    expect(stepBlock(out.source, 'AC-2')).toMatch(/getByLabel\(data\.locators\.loc\d+\.text, \{ exact: false \}\).*toBeHidden/);
+    expect(checkGeneratedSource(out.source)).toEqual([]);
+  });
+
+  it.each(['text', 'value'] as const)('replays %s field reads as input values, not empty text content', mode => {
+    const facts = shopFacts().map(f => f.key === 'message' ? { ...f, value: 'Tester', read: { element: byRole('textbox', 'Last name *'), mode } } : f);
+    const requirement = requirementOf([criterion('AC-3', { kind: 'text_matches', fact: { key: 'message', checkpoint: 'after_add' }, match: { mode: 'equals', value: 'Tester', caseSensitive: true } })]);
+    const out = compile({ facts, requirement });
+    const block = stepBlock(out.source, 'AC-3');
+    expect(block).toContain('softExpect.poll(');
+    expect(block).toContain('readText(');
+    expect(block).not.toContain('toHaveText(');
+    expect(checkGeneratedSource(out.source)).toEqual([]);
   });
 
   it("text_matches → toHaveText / toContainText (case per criterion); regex and URL facts are polled with the verifier's normalization", () => {

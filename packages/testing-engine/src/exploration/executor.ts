@@ -61,6 +61,7 @@ import {
   type RequiredField,
 } from "./recorder";
 import { captureEarlyNotificationFact, notificationTexts } from "./early-facts";
+import { captureNamedFact } from "./named-facts";
 
 /**
  * Exploration executor (Task 14): runs the confirmed plan's scenarios (V1.1 F9: in order, each from a clean
@@ -103,7 +104,9 @@ import { captureEarlyNotificationFact, notificationTexts } from "./early-facts";
  *                nothing). The fill is golden only when the submit succeeds in the same attempt (its steps are
  *                persisted after the attempt, with their final flags).
  * - capture_checkpoint
- *                One `extract` of every FactRequest at that checkpoint (model values) → for each fact
+ *                First read explicitly named fields and visibility subjects directly from the DOM (including
+ *                replayable absence predicates); ambiguous subjects fall back. One `extract` of remaining
+ *                FactRequests at that checkpoint (model values) → for each remaining fact
  *                with a DOM read mode, `observe` its element → recorder `captureFact` (DOM_VERIFIED
  *                when the DOM agrees, else MODEL_EXTRACTED). Read mode = `modeForValueType`, except
  *                a boolean is read as `visible` only when a `visible` outcome references that
@@ -163,6 +166,9 @@ export interface ExplorationStore {
 
 /** Deterministic page access (DOM reads, our own fills). The default is the Playwright recorder. */
 export interface RecorderPort {
+  pointerAction?(page: Page, selector: string, method: "scroll_into_view" | "hover" | "double_click"): Promise<void>;
+  /** Named controls read directly from the DOM, including replayable absence checks. */
+  captureNamedFact?(page: Page, request: FactRequest, mode: FactReadMode, stepId: string): Promise<ObservedFact | null>;
   describe(page: Page, selector: string): Promise<{ role: string | null; name: string | null; text: string | null }>;
   record(page: Page, selector: string): Promise<ElementRef>;
   /** What the element does (elementAction); used to check a cached lookup (KI-032). Absent: never checked. */
@@ -194,6 +200,13 @@ export interface RecorderPort {
 }
 
 export const playwrightRecorder: RecorderPort = {
+  async pointerAction(page, selector, method) {
+    const locator = page.locator(selector);
+    if (method === 'scroll_into_view') await locator.scrollIntoViewIfNeeded();
+    else if (method === 'hover') await locator.hover();
+    else await locator.dblclick();
+  },
+  captureNamedFact,
   async describe(page, selector) {
     const d = await describeElement(page, selector);
     return { role: d.role, name: d.name, text: d.text };
@@ -693,6 +706,11 @@ class ExplorationRun {
   // -------------------------------------------------------------------------------------------
 
   private async executePlanned(step: PlannedStep): Promise<void> {
+    if ((step.kind === 'navigate' || step.kind === 'other') && /^\s*(?:reload|refresh)\b/i.test(step.description)) {
+      // A path mentioned in a reload instruction is not a new destination. In particular,
+      // opening /search would lose the current query and test a different result set.
+      return this.withRetry(() => this.navigate(this.url(), step));
+    }
     switch (step.kind) {
       case "navigate": {
         const url = urlInDescription(step.description, this.ctx.request.targetUrl);
@@ -851,6 +869,32 @@ class ExplorationRun {
    */
   private async act(step: PlannedStep, observeInstruction = step.description, searchField?: string): Promise<Attempt> {
     let located = await this.locate(step, observeInstruction);
+    const pointer = step.kind === 'other'
+      ? /^\s*scroll\b/i.test(step.description) ? 'scroll_into_view'
+        : /^\s*hover\b/i.test(step.description) ? 'hover'
+          : /^\s*double[ -]?click\b/i.test(step.description) ? 'double_click'
+            : located?.element.method === 'scrollIntoView' ? 'scroll_into_view'
+              : located?.element.method === 'hover' ? 'hover'
+                : located?.element.method === 'doubleClick' ? 'double_click' : null
+      : null;
+    if (pointer && this.recorder.pointerAction) {
+      if (!located) return 'failed';
+      await this.enforcePolicy(step, observeInstruction, located, 'act');
+      await this.reserve();
+      const base: Omit<StepDraft, 'outcome'> = { plannedStepId: step.id, kind: 'act', instruction: observeInstruction,
+        element: located.ref, urlBefore: this.url(), startedAt: this.ctx.now(), actMethod: pointer };
+      const requests = this.watchRequests();
+      try {
+        await this.recorder.pointerAction(this.page, located.element.selector, pointer);
+        await requests.settle();
+        await this.record({ ...base, outcome: 'SUCCESS', onGoldenPath: true });
+        return 'ok';
+      } catch (err) {
+        this.rethrowIfFatal(err);
+        await this.record({ ...base, outcome: 'FAILED', error: firstLine(err) });
+        return 'failed';
+      } finally { requests.dispose(); }
+    }
     // Another control than the one the step names (the header's "wishlist" link for "the Add to wishlist button",
     // KI-072): the named one, or none (then the recoveries below run as for nothing found).
     if (located && searchField === undefined) located = await this.namedTarget(step, located);
@@ -1269,6 +1313,15 @@ class ExplorationRun {
     const capture = prepared ?? await this.readEarlyCheckpoint(step, newStepId());
     if (capture.facts.size > 0) this.earlyCheckpoints.set(step.id, capture);
     const { stepId, facts: early, artifacts: earlyArtifacts } = capture;
+    for (const request of requests) {
+      const mode = this.modeFor(request);
+      if (early.has(request.key) || !mode || !this.recorder.captureNamedFact) continue;
+      const bound = await this.recorder.captureNamedFact(this.page, request, mode, stepId).catch((err: unknown) => {
+        this.rethrowIfFatal(err);
+        return null;
+      });
+      if (bound) early.set(request.key, bound);
+    }
     const remaining = requests.filter((r) => !early.has(r.key));
 
     let values: Record<string, FactValue> = {};
@@ -1293,7 +1346,7 @@ class ExplorationRun {
         if (!element && request.valueType === "string_list") element = (await this.locate(step, `Find the element that shows: ${request.description}`))?.ref ?? null;
       }
       const capture = (modelValue: FactValue) =>
-        this.recorder.captureFact(this.page, { key: request.key, checkpoint, stepId, modelValue, element, mode }).catch((err: unknown) => {
+        this.recorder.captureFact(this.page, { key: request.key, checkpoint, stepId, modelValue, element, mode, description: request.description }).catch((err: unknown) => {
           this.rethrowIfFatal(err);
           return factFromReadings({ key: request.key, checkpoint, stepId, modelValue, dom: null });
         });
@@ -1324,7 +1377,7 @@ class ExplorationRun {
         const list = await this.locate(step, `Find the list or container whose items are counted: ${request.description}`);
         if (list) {
           const counted = await this.recorder
-            .captureFact(this.page, { key: request.key, checkpoint, stepId, modelValue: fact.modelValue, element: list.ref, mode: "count" })
+            .captureFact(this.page, { key: request.key, checkpoint, stepId, modelValue: fact.modelValue, element: list.ref, mode: "count", description: request.description })
             .catch((err: unknown) => {
               this.rethrowIfFatal(err);
               return null;
@@ -1711,7 +1764,7 @@ class ExplorationRun {
   private locateInstruction(request: FactRequest): string {
     return request.valueType === "string_list"
       ? `Find the list or container whose items are: ${request.description} (or the message shown in its place, e.g. that it is empty)`
-      : `Find the element that shows: ${request.description}`;
+      : `Find the element that shows: ${request.description}. For a form value, select the input itself, not its label. For a labeled amount, select the value in that label's row, not the label or a different row.`;
   }
 
   private async settle(): Promise<void> {
@@ -1839,10 +1892,14 @@ class ExplorationRun {
   }
 
   private async record(draft: StepDraft): Promise<ExplorationStep> {
-    // A step blocked by policy keeps what the page showed when it was stopped (V1.3): the blocked criteria's
-    // evidence. Never for a stop caused by the budget or a cancel (those throw before a step is recorded).
-    if (draft.outcome === "BLOCKED_BY_POLICY" && !draft.artifactIds?.length) {
-      draft = { ...draft, artifactIds: await this.screenshot(`blocked-step-${this.recordedCount() + 1}.png`, "where exploration was blocked") };
+    // Capture at recording time, before another browser action (including held multi-action executions).
+    // Checkpoints and judgments already captured their evidence; reuse it instead of taking a duplicate.
+    if (draft.artifactIds === undefined) {
+      const number = this.recordedCount() + 1;
+      const artifactIds = draft.outcome === "BLOCKED_BY_POLICY"
+        ? await this.screenshot(`blocked-step-${number}.png`, "where exploration was blocked")
+        : (await this.capture(`step-${number}.png`, `after step ${number}: ${draft.kind}`, false)).artifactIds;
+      draft = { ...draft, artifactIds };
     }
     const step = this.build(draft);
     if (this.held) {
