@@ -72,10 +72,6 @@ export class WebContainer extends Container<Env> {
   defaultPort = 3000;
   sleepAfter = "30m";
 
-  static outboundByHost = {
-    "api.internal": (request: Request, env: Env) => getContainer(env.API).fetch(request),
-  };
-
   constructor(ctx: DurableObjectState<object>, env: Env) {
     super(ctx, env);
     this.envVars = {
@@ -86,6 +82,12 @@ export class WebContainer extends Container<Env> {
     };
   }
 }
+
+// Assigned, not a `static` field: a field would define its own property and skip the setter that registers the
+// handler, and the request would then go out to the public internet.
+WebContainer.outboundByHost = {
+  "api.internal": (request, env) => getContainer((env as Env).API).fetch(request),
+};
 
 export default {
   fetch(request: Request, env: Env): Promise<Response> {
