@@ -120,6 +120,13 @@
       "when": 1790766872884,
       "tag": "0016_run_child_tenant_id",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794203712612,
+      "tag": "0017_enable_row_level_security",
+      "breakpoints": true
     }
   ]
 }
