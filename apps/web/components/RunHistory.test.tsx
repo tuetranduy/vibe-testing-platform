@@ -31,6 +31,27 @@ function listFetch(pages: Record<string, () => Response>) {
 const FIRST = "/api/v1/test-runs?limit=50";
 
 describe("RunHistory", () => {
+  it("summarizes loaded runs and refreshes the latest results", async () => {
+    let items = [run(1), run(2, { verdict: "FAILED" }), run(3, { lifecycle: "EXPLORING", verdict: null, finishedAt: null })];
+    listFetch({ [FIRST]: () => json(200, { items, nextCursor: null }) });
+    render(<RunHistory />);
+    const stats = await screen.findByRole("region", { name: "Run statistics" });
+    expect(stats).toHaveTextContent("50%");
+    expect(stats).toHaveTextContent("1 of 2 with a verdict");
+    items = [run(1), run(2)];
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(screen.getByRole("region", { name: "Run statistics" })).toHaveTextContent("100%"));
+    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(3);
+  });
+
+  it("shows an unavailable pass rate while no run has a verdict", async () => {
+    listFetch({ [FIRST]: () => json(200, { items: [run(1, { lifecycle: "EXPLORING", verdict: null, finishedAt: null })], nextCursor: null }) });
+    render(<RunHistory />);
+    const stats = await screen.findByRole("region", { name: "Run statistics" });
+    expect(stats).toHaveTextContent("—");
+    expect(stats).not.toHaveTextContent("NaN");
+  });
+
   it("titles a run exploring for test ideas by its website, in the list and in 'Running now'", async () => {
     listFetch({
       [FIRST]: () =>

@@ -1,0 +1,40 @@
+- generic [active] [ref=f2e1]:
+  - link "Skip to content" [ref=f2e2] [cursor=pointer]:
+    - /url: "#main"
+  - generic [ref=f2e3]:
+    - complementary "Sidebar" [ref=f2e4]:
+      - generic [ref=f2e5]:
+        - link "AI Testing Platform" [ref=f2e6] [cursor=pointer]:
+          - /url: /
+        - button "Collapse sidebar" [ref=f2e13] [cursor=pointer]
+      - link "New test" [ref=f2e17] [cursor=pointer]:
+        - /url: /runs/new
+      - button "Search or jump to…" [ref=f2e21] [cursor=pointer]:
+        - generic [aria-hidden] [ref=f2e26]: ⌘K
+      - navigation "Main" [ref=f2e27]:
+        - generic [aria-hidden] [ref=f2e28]: Workspace
+        - link "Test runs" [ref=f2e30] [cursor=pointer]:
+          - /url: /runs
+        - link "Suites" [ref=f2e35] [cursor=pointer]:
+          - /url: /suites
+        - link "Usage" [ref=f2e40] [cursor=pointer]:
+          - /url: /usage
+        - link "Settings" [ref=f2e45] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=f2e50]:
+        - group "Theme" [ref=f2e51]:
+          - button "Light" [pressed] [ref=f2e52] [cursor=pointer]
+          - button "System" [ref=f2e57] [cursor=pointer]
+          - button "Dark" [ref=f2e62] [cursor=pointer]
+        - generic [ref=f2e66]:
+          - link "Administrator (your account)" [ref=f2e67] [cursor=pointer]:
+            - /url: /account
+            - generic [aria-hidden] [ref=f2e68]: AD
+            - generic [ref=f2e69]:
+              - generic [ref=f2e70]: Administrator
+              - generic [aria-hidden] [ref=f2e71]: admin@example.com
+            - generic [ref=f2e72]: (your account)
+          - button "Sign out" [ref=f2e73] [cursor=pointer]
+    - main [ref=f2e76]:
+      - status [ref=f2e77]: Loading run…
+  - alert [ref=f2e78]

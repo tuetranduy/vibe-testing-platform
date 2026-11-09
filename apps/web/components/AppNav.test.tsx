@@ -79,6 +79,28 @@ describe("AppNav", () => {
     expect(menu).toHaveFocus();
   });
 
+  it("locks the background while the drawer is open and restores it on close", async () => {
+    pathname = "/runs";
+    const main = document.createElement("main");
+    main.id = "main";
+    main.inert = false;
+    document.body.append(main);
+    const originalOverflow = document.body.style.overflow;
+    const { unmount } = render(<AppNav />);
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "Open menu" }));
+      expect(main.inert).toBe(true);
+      expect(document.body.style.overflow).toBe("hidden");
+      await userEvent.click(screen.getByRole("button", { name: "Close menu" }));
+      expect(main.inert).toBe(false);
+      expect(document.body.style.overflow).toBe(originalOverflow);
+      expect(screen.getByRole("button", { name: "Open menu" })).toHaveFocus();
+    } finally {
+      unmount();
+      main.remove();
+    }
+  });
+
   it("collapses the sidebar to a rail and remembers it", async () => {
     pathname = "/runs";
     render(<AppNav />);

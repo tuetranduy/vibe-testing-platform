@@ -1,0 +1,18 @@
+- generic [active] [ref=e1]:
+  - link "Skip to content" [ref=e2] [cursor=pointer]:
+    - /url: "#main"
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: AI Testing Platform
+      - form [ref=e13]:
+        - generic [ref=e14]:
+          - heading "Sign in" [level=1] [ref=e15]
+          - paragraph [ref=e16]: Use the account your administrator created for you.
+        - generic [ref=e17]:
+          - generic [ref=e18]: E-mail address
+          - textbox "E-mail address" [ref=e19]
+        - generic [ref=e20]:
+          - generic [ref=e21]: Password
+          - textbox "Password" [ref=e22]
+        - button "Sign in" [ref=e24] [cursor=pointer]
+  - alert [ref=e25]

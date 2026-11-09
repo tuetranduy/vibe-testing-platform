@@ -54,10 +54,36 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
 
   useEffect(() => {
     if (!drawerOpen) return;
-    sidebar.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && closeDrawer(true);
+    const panel = sidebar.current;
+    const previousOverflow = document.body.style.overflow;
+    const main = document.getElementById("main");
+    const wasInert = main?.inert ?? false;
+    document.body.style.overflow = "hidden";
+    if (main) main.inert = true;
+    panel?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeDrawer(true);
+      if (e.key !== "Tab" || !panel) return;
+      const controls = Array.from(panel.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]'))
+        .filter((el) => el.getClientRects().length > 0);
+      const first = controls[0];
+      const last = controls.at(-1);
+      if (!first) { e.preventDefault(); return; }
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
+        e.preventDefault(); last?.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || document.activeElement === panel)) {
+        e.preventDefault(); first.focus();
+      }
+    };
+    const onResize = () => { if (window.innerWidth > 900) closeDrawer(false); };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (main) main.inert = wasInert;
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+    };
   }, [drawerOpen, closeDrawer]);
 
   if (pathname === "/login") return null;
@@ -99,6 +125,7 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
       <aside id="sidebar" ref={sidebar} className="sidebar" data-open={drawerOpen} tabIndex={-1} aria-label="Sidebar">
         <div className="sidebar-head">
           <Brand />
+          <button type="button" className="icon-button drawer-close" aria-label="Close menu" onClick={() => closeDrawer(true)}><Icon name="x" /></button>
           <button
             type="button"
             className="icon-button sidebar-collapse"
@@ -126,7 +153,7 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
             Workspace
           </div>
           {MAIN_NAV.map((n) => (
-            <div key={n.href}>
+            <div key={n.href} onClick={() => closeDrawer(false)}>
               <a className="nav-link" href={n.href} aria-current={current(n.href)} title={n.label}>
                 <Icon name={n.icon} />
                 <span className="nav-label">{n.label}</span>

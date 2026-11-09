@@ -91,6 +91,7 @@ export function RunHistory() {
   const head = (
     <div className="page-head">
       <div className="title-block">
+        <p className="eyebrow">Workspace overview</p>
         <h1 className="page-title">Test runs</h1>
         <p className="page-lede">
           {me && !isAdmin ? "Your runs, their verdicts, and the evidence behind them." : "Every run, its verdict, and the evidence behind it."}
@@ -110,33 +111,21 @@ export function RunHistory() {
           </div>
         )}
       </div>
-      {hasRuns && <div className="history-header-actions"><a className="button button-primary" href="/runs/new"><Icon name="plus" />New test</a></div>}
-      {hasRuns && (
-        <div className="input-with-icon search-field">
-          <label htmlFor={searchId} className="visually-hidden">
-            Filter runs by website or requirement
-          </label>
-          <Icon name="search" />
-          <input
-            id={searchId}
-            type="search"
-            placeholder="Filter by website or requirement"
-            autoComplete="off"
-            spellCheck={false}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-      )}
+      <div className="history-header-actions actions">
+        {hasRuns && <button type="button" className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}><Icon name="restart" />Refresh</button>}
+        {hasRuns && <a className="button button-primary" href="/runs/new"><Icon name="plus" />New test</a>}
+      </div>
     </div>
   );
 
   let body;
   if (load.status === "loading") {
     body = (
-      <p className="muted" role="status">
-        Loading test runs…
-      </p>
+      <div className="history-loading" role="status">
+        <span className="visually-hidden">Loading test runs…</span>
+        <div className="summary-grid" aria-hidden="true">{[0, 1, 2, 3].map((n) => <div className="skeleton skeleton-stat" key={n} />)}</div>
+        <div className="card skeleton-table" aria-hidden="true">{[0, 1, 2, 3].map((n) => <div className="skeleton skeleton-row" key={n} />)}</div>
+      </div>
     );
   } else if (load.status === "error") {
     body = (
@@ -158,7 +147,12 @@ export function RunHistory() {
       <section className="card empty-state" aria-labelledby="empty-title">
         <Icon name="file" />
         <h2 id="empty-title">No test runs yet</h2>
-        <p className="muted">Start a test: give a URL and describe what should work. Its report will be listed here.</p>
+        <p className="muted">Turn a user flow into a browser test. Your results and evidence will appear here.</p>
+        <ol className="empty-steps">
+          <li><span>1</span>Enter your website</li>
+          <li><span>2</span>Describe what should work</li>
+          <li><span>3</span>Review the evidence</li>
+        </ol>
         <a className="button button-primary" href="/runs/new">
           <Icon name="plus" />
           New test
@@ -174,6 +168,7 @@ export function RunHistory() {
 
     body = (
       <>
+        <RunSummary runs={items} />
         <div className="overview compact-overview">
           <ResultsOverview runs={items} />
           <RunningNow runs={items} />
@@ -183,6 +178,24 @@ export function RunHistory() {
           <h2 id="runs-title" className="visually-hidden">
             All runs
           </h2>
+          <div className="history-list-head">
+            <div><h2 className="panel-title">Run history</h2><p className="hint">Find a test and open its report.</p></div>
+            <div className="input-with-icon search-field">
+              <label htmlFor={searchId} className="visually-hidden">
+                Filter runs by website or requirement
+              </label>
+              <Icon name="search" />
+              <input
+                id={searchId}
+                type="search"
+                placeholder="Filter by website or requirement"
+                autoComplete="off"
+                spellCheck={false}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+          </div>
           <div className="table-toolbar">
             <div role="group" aria-label="Show" className="filter-chips">
               {chips.map((f) => (
@@ -239,6 +252,25 @@ export function RunHistory() {
       {body}
     </div>
   );
+}
+
+/** Counts describe the loaded history, including additional pages. */
+function RunSummary({ runs }: { runs: TestRunSummary[] }) {
+  const finished = runs.filter((r) => r.verdict !== null);
+  const passed = finished.filter((r) => r.verdict === "PASSED").length;
+  const stats: { label: string; value: string | number; detail: string; icon: IconName; tone: string }[] = [
+    { label: "Total runs", value: runs.length, detail: "In loaded history", icon: "layers", tone: "default" },
+    { label: "Pass rate", value: finished.length ? `${Math.round(passed / finished.length * 100)}%` : "—", detail: `${passed} of ${finished.length} with a verdict`, icon: "pass", tone: "success" },
+    { label: "Failed tests", value: runs.filter((r) => r.verdict === "FAILED").length, detail: "With a failed verdict", icon: "fail", tone: "danger" },
+    { label: "In progress", value: runs.filter((r) => !isTerminalLifecycle(r.lifecycle)).length, detail: "Active or awaiting review", icon: "activity", tone: "accent" },
+  ];
+  return <section className="summary-grid" aria-label="Run statistics">{stats.map((stat) => (
+    <div className={`summary-card summary-${stat.tone}`} key={stat.label}>
+      <div className="summary-label">{stat.label}<span className="summary-icon"><Icon name={stat.icon} /></span></div>
+      <p className="summary-value">{stat.value}</p>
+      <p className="summary-detail">{stat.detail}</p>
+    </div>
+  ))}</section>;
 }
 
 function RunTable({ runs }: { runs: TestRunSummary[] }) {

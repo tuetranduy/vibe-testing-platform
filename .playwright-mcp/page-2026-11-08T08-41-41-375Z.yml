@@ -1,0 +1,562 @@
+- generic [active] [ref=f1e1]:
+  - link "Skip to content" [ref=f1e2] [cursor=pointer]:
+    - /url: "#main"
+  - generic [ref=f1e3]:
+    - complementary "Sidebar" [ref=f1e4]:
+      - generic [ref=f1e5]:
+        - link "AI Testing Platform" [ref=f1e6] [cursor=pointer]:
+          - /url: /
+        - button "Collapse sidebar" [ref=f1e13] [cursor=pointer]
+      - link "New test" [ref=f1e17] [cursor=pointer]:
+        - /url: /runs/new
+      - button "Search or jump to…" [ref=f1e21] [cursor=pointer]:
+        - generic [aria-hidden] [ref=f1e26]: ⌘K
+      - navigation "Main" [ref=f1e27]:
+        - generic [aria-hidden] [ref=f1e28]: Workspace
+        - link "Test runs" [ref=f1e30] [cursor=pointer]:
+          - /url: /runs
+        - link "Suites" [ref=f1e35] [cursor=pointer]:
+          - /url: /suites
+        - link "Usage" [ref=f1e40] [cursor=pointer]:
+          - /url: /usage
+        - link "Settings" [ref=f1e45] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=f1e50]:
+        - group "Theme" [ref=f1e51]:
+          - button "Light" [pressed] [ref=f1e52] [cursor=pointer]
+          - button "System" [ref=f1e57] [cursor=pointer]
+          - button "Dark" [ref=f1e62] [cursor=pointer]
+        - generic [ref=f1e66]:
+          - link "Administrator (your account)" [ref=f1e67] [cursor=pointer]:
+            - /url: /account
+            - generic [aria-hidden] [ref=f1e68]: AD
+            - generic [ref=f1e69]:
+              - generic [ref=f1e70]: Administrator
+              - generic [aria-hidden] [ref=f1e71]: admin@example.com
+            - generic [ref=f1e72]: (your account)
+          - button "Sign out" [ref=f1e73] [cursor=pointer]
+    - main [ref=f1e76]:
+      - generic [ref=f1e77]:
+        - generic [ref=f1e78]:
+          - generic [ref=f1e79]:
+            - heading "Test runs" [level=1] [ref=f1e80]
+            - paragraph [ref=f1e81]: Every run, its verdict, and the evidence behind it.
+            - group "Whose runs" [ref=f1e82]:
+              - button "Everyone's runs" [pressed] [ref=f1e83] [cursor=pointer]
+              - button "My runs" [ref=f1e84] [cursor=pointer]
+          - link "New test" [ref=f1e86] [cursor=pointer]:
+            - /url: /runs/new
+          - generic [ref=f1e89]:
+            - generic [ref=f1e90]: Filter runs by website or requirement
+            - searchbox "Filter runs by website or requirement" [ref=f1e91]
+        - generic [ref=f1e92]:
+          - region [ref=f1e93]:
+            - generic [ref=f1e94]:
+              - heading "Results of the last 50 runs" [level=2] [ref=f1e95]
+              - paragraph [ref=f1e96]: 49 with a verdict
+            - paragraph [ref=f1e97]:
+              - generic [ref=f1e98]: 25 of 49
+              - generic [ref=f1e99]: finished runs passed
+            - list [ref=f1e106]:
+              - listitem [ref=f1e107]: 25 passed
+              - listitem [ref=f1e109]: 2 failed
+              - listitem [ref=f1e111]: 2 blocked
+              - listitem [ref=f1e113]: 20 inconclusive
+              - listitem [ref=f1e115]: 1 running, cancelled or errored
+          - region [ref=f1e117]:
+            - paragraph [ref=f1e118]: Nothing running
+            - heading "Test something new" [level=2] [ref=f1e119]
+            - paragraph [ref=f1e120]: Describe what should work, then follow a real browser as it checks it.
+            - link "New test" [ref=f1e121] [cursor=pointer]:
+              - /url: /runs/new
+        - region [ref=f1e124]:
+          - heading "All runs" [level=2] [ref=f1e125]
+          - generic [ref=f1e126]:
+            - group "Show" [ref=f1e127]:
+              - button "All 50" [pressed] [ref=f1e128] [cursor=pointer]:
+                - text: All
+                - generic [ref=f1e129]: "50"
+              - button "Passed 25" [ref=f1e130] [cursor=pointer]:
+                - text: Passed
+                - generic [ref=f1e131]: "25"
+              - button "Failed 2" [ref=f1e132] [cursor=pointer]:
+                - text: Failed
+                - generic [ref=f1e133]: "2"
+              - button "Blocked or inconclusive 22" [ref=f1e134] [cursor=pointer]:
+                - text: Blocked or inconclusive
+                - generic [ref=f1e135]: "22"
+              - button "Cancelled or errored 1" [ref=f1e136] [cursor=pointer]:
+                - text: Cancelled or errored
+                - generic [ref=f1e137]: "1"
+            - status [ref=f1e138]: Newest first
+          - table [ref=f1e139]:
+            - caption [ref=f1e140]: Test runs
+            - rowgroup [ref=f1e141]:
+              - row [ref=f1e142]:
+                - columnheader "Result" [ref=f1e143]
+                - columnheader "Requirement" [ref=f1e144]
+                - columnheader "Created" [ref=f1e145]
+                - columnheader "Duration" [ref=f1e146]
+            - rowgroup [ref=f1e147]:
+              - row [ref=f1e148]:
+                - cell "Inconclusive" [ref=f1e149]
+                - cell "Check availability of Burj Khalifa At The Top Tickets for a next-week date www.raynatours.com Changes site data by Tue Tran" [ref=f1e154]:
+                  - link "Check availability of Burj Khalifa At The Top Tickets for a next-week date" [ref=f1e155] [cursor=pointer]:
+                    - /url: /runs/run_0mw6hn7y27af27d6257fc78f5
+                  - generic [ref=f1e156]: www.raynatours.com
+                  - generic [ref=f1e157]: Changes site data
+                  - generic [ref=f1e158]: by Tue Tran
+                - cell [ref=f1e159]:
+                  - time [ref=f1e160]: Yesterday, 09:17 PM
+                - cell "2m 51s" [ref=f1e161]
+              - row [ref=f1e166]:
+                - cell "Inconclusive" [ref=f1e167]
+                - cell "Verify signup functionality on the storefront registration page frontends-demo.vercel.app Changes site data by Tue Tran" [ref=f1e172]:
+                  - link "Verify signup functionality on the storefront registration page" [ref=f1e173] [cursor=pointer]:
+                    - /url: /runs/run_0mw6georuf362183ade3ae0cd
+                  - generic [ref=f1e174]: frontends-demo.vercel.app
+                  - generic [ref=f1e175]: Changes site data
+                  - generic [ref=f1e176]: by Tue Tran
+                - cell [ref=f1e177]:
+                  - time [ref=f1e178]: Yesterday, 08:43 PM
+                - cell "1m 43s" [ref=f1e179]
+              - row [ref=f1e184]:
+                - cell "Cancelled" [ref=f1e185]
+                - cell "Signup functionality verification frontends-demo.vercel.app Changes site data by Tue Tran" [ref=f1e190]:
+                  - link "Signup functionality verification" [ref=f1e191] [cursor=pointer]:
+                    - /url: /runs/run_0mw4wwopd0fe0ffef846c85f1
+                  - generic [ref=f1e192]: frontends-demo.vercel.app
+                  - generic [ref=f1e193]: Changes site data
+                  - generic [ref=f1e194]: by Tue Tran
+                - cell [ref=f1e195]:
+                  - time [ref=f1e196]: Nov 6, 06:49 PM
+                - cell "—" [ref=f1e197]
+              - row [ref=f1e202]:
+                - cell "Passed" [ref=f1e203]
+                - cell "Add ADELAIDE 2 to cart, check cart quantity rises and product appears in cart frontends-demo.vercel.app Changes site data by Tue Tran" [ref=f1e208]:
+                  - link "Add ADELAIDE 2 to cart, check cart quantity rises and product appears in cart" [ref=f1e209] [cursor=pointer]:
+                    - /url: /runs/run_0mw4wma7e47c685eb5330f90a
+                  - generic [ref=f1e210]: frontends-demo.vercel.app
+                  - generic [ref=f1e211]: Changes site data
+                  - generic [ref=f1e212]: by Tue Tran
+                - cell [ref=f1e213]:
+                  - time [ref=f1e214]: Nov 6, 06:41 PM
+                - cell "1m 26s" [ref=f1e215]
+              - row [ref=f1e220]:
+                - cell "Failed" [ref=f1e221]
+                - cell "Add ADELAIDE 1 to cart and verify the mini cart line, quantity and price frontends-demo.vercel.app Changes site data by Tue Tran" [ref=f1e226]:
+                  - link "Add ADELAIDE 1 to cart and verify the mini cart line, quantity and price" [ref=f1e227] [cursor=pointer]:
+                    - /url: /runs/run_0mw4w64fv14d83877a5c01c32
+                  - generic [ref=f1e228]: frontends-demo.vercel.app
+                  - generic [ref=f1e229]: Changes site data
+                  - generic [ref=f1e230]: by Tue Tran
+                - cell [ref=f1e231]:
+                  - time [ref=f1e232]: Nov 6, 06:29 PM
+                - cell "1m 21s" [ref=f1e233]
+              - row [ref=f1e238]:
+                - cell "Blocked" [ref=f1e239]
+                - cell "New customer can sign up for an account frontends-demo.vercel.app" [ref=f1e244]:
+                  - link "New customer can sign up for an account" [ref=f1e245] [cursor=pointer]:
+                    - /url: /runs/run_0mw4uqmhl3054c66d73751382
+                  - generic [ref=f1e246]: frontends-demo.vercel.app
+                - cell [ref=f1e247]:
+                  - time [ref=f1e248]: Nov 6, 05:49 PM
+                - cell "45s" [ref=f1e249]
+              - row [ref=f1e254]:
+                - cell "Passed" [ref=f1e255]
+                - cell "Website loads and displays its home page content frontends-demo.vercel.app" [ref=f1e260]:
+                  - link "Website loads and displays its home page content" [ref=f1e261] [cursor=pointer]:
+                    - /url: /runs/run_0mw4uqima94535056d19a3fe4
+                  - generic [ref=f1e262]: frontends-demo.vercel.app
+                - cell [ref=f1e263]:
+                  - time [ref=f1e264]: Nov 6, 05:48 PM
+                - cell "29s" [ref=f1e265]
+              - row [ref=f1e270]:
+                - cell "Passed" [ref=f1e271]
+                - cell "Product search returns results relevant to the searched term frontends-demo.vercel.app" [ref=f1e276]:
+                  - link "Product search returns results relevant to the searched term" [ref=f1e277] [cursor=pointer]:
+                    - /url: /runs/run_0mw4uol1s88e822087cc82fcb
+                  - generic [ref=f1e278]: frontends-demo.vercel.app
+                - cell [ref=f1e279]:
+                  - time [ref=f1e280]: Nov 6, 05:47 PM
+                - cell "49s" [ref=f1e281]
+              - row [ref=f1e286]:
+                - cell "Passed" [ref=f1e287]
+                - cell "Add a grill from the Grills category to the basket and verify the basket contains it frontends-demo.vercel.app" [ref=f1e292]:
+                  - link "Add a grill from the Grills category to the basket and verify the basket contains it" [ref=f1e293] [cursor=pointer]:
+                    - /url: /runs/run_0mw4unu055cdcc8efbdaa29b3
+                  - generic [ref=f1e294]: frontends-demo.vercel.app
+                - cell [ref=f1e295]:
+                  - time [ref=f1e296]: Nov 6, 05:46 PM
+                - cell "1m 19s" [ref=f1e297]
+              - row [ref=f1e302]:
+                - cell "Inconclusive" [ref=f1e303]
+                - cell "Selecting a different product variant updates the product page correctly frontends-demo.vercel.app" [ref=f1e308]:
+                  - link "Selecting a different product variant updates the product page correctly" [ref=f1e309] [cursor=pointer]:
+                    - /url: /runs/run_0mw4umnfn33d6a764cb0c584e
+                  - generic [ref=f1e310]: frontends-demo.vercel.app
+                - cell [ref=f1e311]:
+                  - time [ref=f1e312]: Nov 6, 05:45 PM
+                - cell "57s" [ref=f1e313]
+              - row [ref=f1e318]:
+                - cell "Passed" [ref=f1e319]
+                - cell "Product page visual quality and price display frontends-demo.vercel.app" [ref=f1e324]:
+                  - link "Product page visual quality and price display" [ref=f1e325] [cursor=pointer]:
+                    - /url: /runs/run_0mw4umfpzb1d5326ea7618352
+                  - generic [ref=f1e326]: frontends-demo.vercel.app
+                - cell [ref=f1e327]:
+                  - time [ref=f1e328]: Nov 6, 05:45 PM
+                - cell "29s" [ref=f1e329]
+              - row [ref=f1e334]:
+                - cell "Passed" [ref=f1e335]
+                - cell "Error message shown when signing in with a wrong password frontends-demo.vercel.app" [ref=f1e340]:
+                  - link "Error message shown when signing in with a wrong password" [ref=f1e341] [cursor=pointer]:
+                    - /url: /runs/run_0mw4ukpvz89b98dd3a081f40c
+                  - generic [ref=f1e342]: frontends-demo.vercel.app
+                - cell [ref=f1e343]:
+                  - time [ref=f1e344]: Nov 6, 05:44 PM
+                - cell "45s" [ref=f1e345]
+              - row [ref=f1e350]:
+                - cell "Inconclusive" [ref=f1e351]
+                - cell "Product added to wishlist appears on the wishlist page frontends-demo.vercel.app" [ref=f1e356]:
+                  - link "Product added to wishlist appears on the wishlist page" [ref=f1e357] [cursor=pointer]:
+                    - /url: /runs/run_0mw4uk6l412899d349cfb85e9
+                  - generic [ref=f1e358]: frontends-demo.vercel.app
+                - cell [ref=f1e359]:
+                  - time [ref=f1e360]: Nov 6, 05:43 PM
+                - cell "55s" [ref=f1e361]
+              - row [ref=f1e366]:
+                - cell "Inconclusive" [ref=f1e367]
+                - cell "Adding a product to the cart updates the cart frontends-demo.vercel.app" [ref=f1e372]:
+                  - link "Adding a product to the cart updates the cart" [ref=f1e373] [cursor=pointer]:
+                    - /url: /runs/run_0mw4uisc6670b4609faaea840
+                  - generic [ref=f1e374]: frontends-demo.vercel.app
+                - cell [ref=f1e375]:
+                  - time [ref=f1e376]: Nov 6, 05:42 PM
+                - cell "47s" [ref=f1e377]
+              - row [ref=f1e382]:
+                - cell "Passed" [ref=f1e383]
+                - cell "Verify the site search works for a search term frontends-demo.vercel.app" [ref=f1e388]:
+                  - link "Verify the site search works for a search term" [ref=f1e389] [cursor=pointer]:
+                    - /url: /runs/run_0mw4uigref77b25c25a2c7cba
+                  - generic [ref=f1e390]: frontends-demo.vercel.app
+                - cell [ref=f1e391]:
+                  - time [ref=f1e392]: Nov 6, 05:42 PM
+                - cell "33s" [ref=f1e393]
+              - row [ref=f1e398]:
+                - cell "Passed" [ref=f1e399]
+                - cell "Search results for pepper contain pepper in every product name frontends-demo.vercel.app" [ref=f1e404]:
+                  - link "Search results for pepper contain pepper in every product name" [ref=f1e405] [cursor=pointer]:
+                    - /url: /runs/run_0mw4ugqui88b2ce9c679b3d0f
+                  - generic [ref=f1e406]: frontends-demo.vercel.app
+                - cell [ref=f1e407]:
+                  - time [ref=f1e408]: Nov 6, 05:41 PM
+                - cell "31s" [ref=f1e409]
+              - row [ref=f1e414]:
+                - cell "Passed" [ref=f1e415]
+                - cell "Grills page add to cart appears in the cart frontends-demo.vercel.app" [ref=f1e420]:
+                  - link "Grills page add to cart appears in the cart" [ref=f1e421] [cursor=pointer]:
+                    - /url: /runs/run_0mw4ugqui27e1bfcad59985d2
+                  - generic [ref=f1e422]: frontends-demo.vercel.app
+                - cell [ref=f1e423]:
+                  - time [ref=f1e424]: Nov 6, 05:41 PM
+                - cell "51s" [ref=f1e425]
+              - row [ref=f1e430]:
+                - cell "Passed" [ref=f1e431]
+                - cell "Add a grill to the basket and verify the basket contains it frontends-demo.vercel.app" [ref=f1e436]:
+                  - link "Add a grill to the basket and verify the basket contains it" [ref=f1e437] [cursor=pointer]:
+                    - /url: /runs/run_0mw4ucleh41d0ece3d218ce23
+                  - generic [ref=f1e438]: frontends-demo.vercel.app
+                - cell [ref=f1e439]:
+                  - time [ref=f1e440]: Nov 6, 05:38 PM
+                - cell "54s" [ref=f1e441]
+              - row [ref=f1e446]:
+                - cell "Passed" [ref=f1e447]
+                - cell "Search results for \"pepper\" all have pepper in the product name frontends-demo.vercel.app" [ref=f1e452]:
+                  - link "Search results for \"pepper\" all have pepper in the product name" [ref=f1e453] [cursor=pointer]:
+                    - /url: /runs/run_0mw4uajyrdd7a1c51a0317bc9
+                  - generic [ref=f1e454]: frontends-demo.vercel.app
+                - cell [ref=f1e455]:
+                  - time [ref=f1e456]: Nov 6, 05:36 PM
+                - cell "47s" [ref=f1e457]
+              - row [ref=f1e462]:
+                - cell "Inconclusive" [ref=f1e463]
+                - 'cell "Test the product search: search field and result list frontends-demo.vercel.app" [ref=f1e468]':
+                  - 'link "Test the product search: search field and result list" [ref=f1e469] [cursor=pointer]':
+                    - /url: /runs/run_0mw4uajyr8cb92d3c451c64e1
+                  - generic [ref=f1e470]: frontends-demo.vercel.app
+                - cell [ref=f1e471]:
+                  - time [ref=f1e472]: Nov 6, 05:36 PM
+                - cell "46s" [ref=f1e473]
+              - row [ref=f1e478]:
+                - cell "Blocked" [ref=f1e479]
+                - cell "New customer can complete sign-up for an account frontends-demo.vercel.app" [ref=f1e484]:
+                  - link "New customer can complete sign-up for an account" [ref=f1e485] [cursor=pointer]:
+                    - /url: /runs/run_0mw4u37f636599a5be4067b78
+                  - generic [ref=f1e486]: frontends-demo.vercel.app
+                - cell [ref=f1e487]:
+                  - time [ref=f1e488]: Nov 6, 05:30 PM
+                - cell "1m 27s" [ref=f1e489]
+              - row [ref=f1e494]:
+                - cell "Passed" [ref=f1e495]
+                - cell "Website home page loads and displays its main content frontends-demo.vercel.app" [ref=f1e500]:
+                  - link "Website home page loads and displays its main content" [ref=f1e501] [cursor=pointer]:
+                    - /url: /runs/run_0mw4u24u8c6745113191aef56
+                  - generic [ref=f1e502]: frontends-demo.vercel.app
+                - cell [ref=f1e503]:
+                  - time [ref=f1e504]: Nov 6, 05:29 PM
+                - cell "23s" [ref=f1e505]
+              - row [ref=f1e510]:
+                - cell "Passed" [ref=f1e511]
+                - cell "Search for \"salt\" and verify the results are relevant frontends-demo.vercel.app" [ref=f1e516]:
+                  - link "Search for \"salt\" and verify the results are relevant" [ref=f1e517] [cursor=pointer]:
+                    - /url: /runs/run_0mw4u19upeca122e0391a548c
+                  - generic [ref=f1e518]: frontends-demo.vercel.app
+                - cell [ref=f1e519]:
+                  - time [ref=f1e520]: Nov 6, 05:29 PM
+                - cell "41s" [ref=f1e521]
+              - row [ref=f1e526]:
+                - cell "Inconclusive" [ref=f1e527]
+                - cell "Add a grill from the Grills category to the basket and see it in the cart frontends-demo.vercel.app" [ref=f1e532]:
+                  - link "Add a grill from the Grills category to the basket and see it in the cart" [ref=f1e533] [cursor=pointer]:
+                    - /url: /runs/run_0mw4u0iv4a6ceb7816c35e949
+                  - generic [ref=f1e534]: frontends-demo.vercel.app
+                - cell [ref=f1e535]:
+                  - time [ref=f1e536]: Nov 6, 05:28 PM
+                - cell "28s" [ref=f1e537]
+              - row [ref=f1e542]:
+                - cell "Inconclusive" [ref=f1e543]
+                - cell "Changing the variant selection on a product page works frontends-demo.vercel.app" [ref=f1e548]:
+                  - link "Changing the variant selection on a product page works" [ref=f1e549] [cursor=pointer]:
+                    - /url: /runs/run_0mw4tz0po138f779af266c1e3
+                  - generic [ref=f1e550]: frontends-demo.vercel.app
+                - cell [ref=f1e551]:
+                  - time [ref=f1e552]: Nov 6, 05:27 PM
+                - cell "1m 11s" [ref=f1e553]
+              - row [ref=f1e558]:
+                - cell "Inconclusive" [ref=f1e559]
+                - cell "Product page visual quality and price display frontends-demo.vercel.app" [ref=f1e564]:
+                  - link "Product page visual quality and price display" [ref=f1e565] [cursor=pointer]:
+                    - /url: /runs/run_0mw4tyt19686b12f4fee9c784
+                  - generic [ref=f1e566]: frontends-demo.vercel.app
+                - cell [ref=f1e567]:
+                  - time [ref=f1e568]: Nov 6, 05:27 PM
+                - cell "44s" [ref=f1e569]
+              - row [ref=f1e574]:
+                - cell "Passed" [ref=f1e575]
+                - cell "Sign in with wrong password shows an error frontends-demo.vercel.app" [ref=f1e580]:
+                  - link "Sign in with wrong password shows an error" [ref=f1e581] [cursor=pointer]:
+                    - /url: /runs/run_0mw4tx34z3e1d826a08bcb380
+                  - generic [ref=f1e582]: frontends-demo.vercel.app
+                - cell [ref=f1e583]:
+                  - time [ref=f1e584]: Nov 6, 05:26 PM
+                - cell "36s" [ref=f1e585]
+              - row [ref=f1e590]:
+                - cell "Inconclusive" [ref=f1e591]
+                - cell "Verify the wishlist feature works frontends-demo.vercel.app" [ref=f1e596]:
+                  - link "Verify the wishlist feature works" [ref=f1e597] [cursor=pointer]:
+                    - /url: /runs/run_0mw4twjtg343a8b9e6757f685
+                  - generic [ref=f1e598]: frontends-demo.vercel.app
+                - cell [ref=f1e599]:
+                  - time [ref=f1e600]: Nov 6, 05:25 PM
+                - cell "1m 11s" [ref=f1e601]
+              - row [ref=f1e606]:
+                - cell "Passed" [ref=f1e607]
+                - cell "Adding a product to the cart updates the cart frontends-demo.vercel.app" [ref=f1e612]:
+                  - link "Adding a product to the cart updates the cart" [ref=f1e613] [cursor=pointer]:
+                    - /url: /runs/run_0mw4tuao39304dee7ad7e4e14
+                  - generic [ref=f1e614]: frontends-demo.vercel.app
+                - cell [ref=f1e615]:
+                  - time [ref=f1e616]: Nov 6, 05:23 PM
+                - cell "1m 24s" [ref=f1e617]
+              - row [ref=f1e622]:
+                - cell "Inconclusive" [ref=f1e623]
+                - cell "Search for a product and verify matching results are shown frontends-demo.vercel.app" [ref=f1e628]:
+                  - link "Search for a product and verify matching results are shown" [ref=f1e629] [cursor=pointer]:
+                    - /url: /runs/run_0mw4tuao35e368015bf4d10c2
+                  - generic [ref=f1e630]: frontends-demo.vercel.app
+                - cell [ref=f1e631]:
+                  - time [ref=f1e632]: Nov 6, 05:23 PM
+                - cell "53s" [ref=f1e633]
+              - row [ref=f1e638]:
+                - cell "Passed" [ref=f1e639]
+                - cell "Search results for \"pepper\" list only products whose names contain pepper frontends-demo.vercel.app" [ref=f1e644]:
+                  - link "Search results for \"pepper\" list only products whose names contain pepper" [ref=f1e645] [cursor=pointer]:
+                    - /url: /runs/run_0mw4tsd3gc32e7e5410782cdc
+                  - generic [ref=f1e646]: frontends-demo.vercel.app
+                - cell [ref=f1e647]:
+                  - time [ref=f1e648]: Nov 6, 05:22 PM
+                - cell "44s" [ref=f1e649]
+              - row [ref=f1e654]:
+                - cell "Passed" [ref=f1e655]
+                - cell "Add a grill from the Grills category to the cart and verify the cart lists it frontends-demo.vercel.app" [ref=f1e660]:
+                  - link "Add a grill from the Grills category to the cart and verify the cart lists it" [ref=f1e661] [cursor=pointer]:
+                    - /url: /runs/run_0mw4tsd3e4b567b6eb4d05407
+                  - generic [ref=f1e662]: frontends-demo.vercel.app
+                - cell [ref=f1e663]:
+                  - time [ref=f1e664]: Nov 6, 05:22 PM
+                - cell "44s" [ref=f1e665]
+              - row [ref=f1e670]:
+                - cell "Inconclusive" [ref=f1e671]
+                - cell "New customer sign-up capability frontends-demo.vercel.app" [ref=f1e676]:
+                  - link "New customer sign-up capability" [ref=f1e677] [cursor=pointer]:
+                    - /url: /runs/run_0mw4o8qip631bca3d1b0be3ea
+                  - generic [ref=f1e678]: frontends-demo.vercel.app
+                - cell [ref=f1e679]:
+                  - time [ref=f1e680]: Nov 6, 02:47 PM
+                - cell "1m 36s" [ref=f1e681]
+              - row [ref=f1e686]:
+                - cell "Passed" [ref=f1e687]
+                - cell "Smoke test of the demo store website frontends-demo.vercel.app" [ref=f1e692]:
+                  - link "Smoke test of the demo store website" [ref=f1e693] [cursor=pointer]:
+                    - /url: /runs/run_0mw4o83d88d3c65413ceef517
+                  - generic [ref=f1e694]: frontends-demo.vercel.app
+                - cell [ref=f1e695]:
+                  - time [ref=f1e696]: Nov 6, 02:46 PM
+                - cell "44s" [ref=f1e697]
+              - row [ref=f1e702]:
+                - cell "Passed" [ref=f1e703]
+                - cell "Search for \"salt\" and verify the results are relevant frontends-demo.vercel.app" [ref=f1e708]:
+                  - link "Search for \"salt\" and verify the results are relevant" [ref=f1e709] [cursor=pointer]:
+                    - /url: /runs/run_0mw4o6sy02155f2d52cd7beff
+                  - generic [ref=f1e710]: frontends-demo.vercel.app
+                - cell [ref=f1e711]:
+                  - time [ref=f1e712]: Nov 6, 02:45 PM
+                - cell "47s" [ref=f1e713]
+              - row [ref=f1e718]:
+                - cell "Inconclusive" [ref=f1e719]
+                - cell "Add a grill to the basket and verify the basket contains it frontends-demo.vercel.app" [ref=f1e724]:
+                  - link "Add a grill to the basket and verify the basket contains it" [ref=f1e725] [cursor=pointer]:
+                    - /url: /runs/run_0mw4o570h849676e545842d1f
+                  - generic [ref=f1e726]: frontends-demo.vercel.app
+                - cell [ref=f1e727]:
+                  - time [ref=f1e728]: Nov 6, 02:44 PM
+                - cell "1m 32s" [ref=f1e729]
+              - row [ref=f1e734]:
+                - cell "Passed" [ref=f1e735]
+                - cell "Product page visual quality and price display frontends-demo.vercel.app" [ref=f1e740]:
+                  - link "Product page visual quality and price display" [ref=f1e741] [cursor=pointer]:
+                    - /url: /runs/run_0mw4o3d8b7d154e90fd20e646
+                  - generic [ref=f1e742]: frontends-demo.vercel.app
+                - cell [ref=f1e743]:
+                  - time [ref=f1e744]: Nov 6, 02:42 PM
+                - cell "52s" [ref=f1e745]
+              - row [ref=f1e750]:
+                - cell "Inconclusive" [ref=f1e751]
+                - cell "Choosing a different product variant updates the product and cart frontends-demo.vercel.app" [ref=f1e756]:
+                  - link "Choosing a different product variant updates the product and cart" [ref=f1e757] [cursor=pointer]:
+                    - /url: /runs/run_0mw4o3d8b8d57271ec9f17cb9
+                  - generic [ref=f1e758]: frontends-demo.vercel.app
+                - cell [ref=f1e759]:
+                  - time [ref=f1e760]: Nov 6, 02:42 PM
+                - cell "1m 41s" [ref=f1e761]
+              - row [ref=f1e766]:
+                - cell "Passed" [ref=f1e767]
+                - cell "Signing in with a wrong password shows an error frontends-demo.vercel.app" [ref=f1e772]:
+                  - link "Signing in with a wrong password shows an error" [ref=f1e773] [cursor=pointer]:
+                    - /url: /runs/run_0mw4o1r5j15420b6406cd1422
+                  - generic [ref=f1e774]: frontends-demo.vercel.app
+                - cell [ref=f1e775]:
+                  - time [ref=f1e776]: Nov 6, 02:41 PM
+                - cell "29s" [ref=f1e777]
+              - row [ref=f1e782]:
+                - cell "Inconclusive" [ref=f1e783]
+                - cell "Verify that the wishlist works frontends-demo.vercel.app" [ref=f1e788]:
+                  - link "Verify that the wishlist works" [ref=f1e789] [cursor=pointer]:
+                    - /url: /runs/run_0mw4o1jfj6355cff4c606a5bc
+                  - generic [ref=f1e790]: frontends-demo.vercel.app
+                - cell [ref=f1e791]:
+                  - time [ref=f1e792]: Nov 6, 02:41 PM
+                - cell "41s" [ref=f1e793]
+              - row [ref=f1e798]:
+                - cell "Inconclusive" [ref=f1e799]
+                - cell "Adding a product to the cart works frontends-demo.vercel.app" [ref=f1e804]:
+                  - link "Adding a product to the cart works" [ref=f1e805] [cursor=pointer]:
+                    - /url: /runs/run_0mw4nzpoq61df94822fd2aa6f
+                  - generic [ref=f1e806]: frontends-demo.vercel.app
+                - cell [ref=f1e807]:
+                  - time [ref=f1e808]: Nov 6, 02:40 PM
+                - cell "40s" [ref=f1e809]
+              - row [ref=f1e814]:
+                - cell "Inconclusive" [ref=f1e815]
+                - cell "Product search returns matching results frontends-demo.vercel.app" [ref=f1e820]:
+                  - link "Product search returns matching results" [ref=f1e821] [cursor=pointer]:
+                    - /url: /runs/run_0mw4nzhym83b9d92d0ff44b14
+                  - generic [ref=f1e822]: frontends-demo.vercel.app
+                - cell [ref=f1e823]:
+                  - time [ref=f1e824]: Nov 6, 02:39 PM
+                - cell "57s" [ref=f1e825]
+              - row [ref=f1e830]:
+                - cell "Inconclusive" [ref=f1e831]
+                - cell "Search results only list products whose name contains the search term frontends-demo.vercel.app" [ref=f1e836]:
+                  - link "Search results only list products whose name contains the search term" [ref=f1e837] [cursor=pointer]:
+                    - /url: /runs/run_0mw4nxkdf00e3b311060de046
+                  - generic [ref=f1e838]: frontends-demo.vercel.app
+                - cell [ref=f1e839]:
+                  - time [ref=f1e840]: Nov 6, 02:38 PM
+                - cell "54s" [ref=f1e841]
+              - row [ref=f1e846]:
+                - cell "Passed" [ref=f1e847]
+                - cell "Cart shows the added Fred - 3 Burner Gas Grill frontends-demo.vercel.app" [ref=f1e852]:
+                  - link "Cart shows the added Fred - 3 Burner Gas Grill" [ref=f1e853] [cursor=pointer]:
+                    - /url: /runs/run_0mw4nxkdead05070cc92896e5
+                  - generic [ref=f1e854]: frontends-demo.vercel.app
+                - cell [ref=f1e855]:
+                  - time [ref=f1e856]: Nov 6, 02:38 PM
+                - cell "45s" [ref=f1e857]
+              - row [ref=f1e862]:
+                - cell "Inconclusive" [ref=f1e863]
+                - cell "Product page visual quality and displayed price frontends-demo.vercel.app" [ref=f1e868]:
+                  - link "Product page visual quality and displayed price" [ref=f1e869] [cursor=pointer]:
+                    - /url: /runs/run_0mw4nnvzs61e91ea3bec0930a
+                  - generic [ref=f1e870]: frontends-demo.vercel.app
+                - cell [ref=f1e871]:
+                  - time [ref=f1e872]: Nov 6, 02:30 PM
+                - cell "52s" [ref=f1e873]
+              - row [ref=f1e878]:
+                - cell "Failed" [ref=f1e879]
+                - 'cell "Wishlist: add a product and remove it again frontends-demo.vercel.app" [ref=f1e884]':
+                  - 'link "Wishlist: add a product and remove it again" [ref=f1e885] [cursor=pointer]':
+                    - /url: /runs/run_0mw4nnvzs3ca8330b00696bb8
+                  - generic [ref=f1e886]: frontends-demo.vercel.app
+                - cell [ref=f1e887]:
+                  - time [ref=f1e888]: Nov 6, 02:30 PM
+                - cell "1m 11s" [ref=f1e889]
+              - row [ref=f1e894]:
+                - cell "Passed" [ref=f1e895]
+                - cell "New customer sign-up from the sign-in dialog frontends-demo.vercel.app" [ref=f1e900]:
+                  - link "New customer sign-up from the sign-in dialog" [ref=f1e901] [cursor=pointer]:
+                    - /url: /runs/run_0mw4ni3x3701f620a710e6f16
+                  - generic [ref=f1e902]: frontends-demo.vercel.app
+                - cell [ref=f1e903]:
+                  - time [ref=f1e904]: Nov 6, 02:26 PM
+                - cell "1m 13s" [ref=f1e905]
+              - row [ref=f1e910]:
+                - cell "Passed" [ref=f1e911]
+                - cell "Verify the website loads and displays its homepage frontends-demo.vercel.app" [ref=f1e916]:
+                  - link "Verify the website loads and displays its homepage" [ref=f1e917] [cursor=pointer]:
+                    - /url: /runs/run_0mw4ngxco99d314d9f355b6c0
+                  - generic [ref=f1e918]: frontends-demo.vercel.app
+                - cell [ref=f1e919]:
+                  - time [ref=f1e920]: Nov 6, 02:25 PM
+                - cell "24s" [ref=f1e921]
+              - row [ref=f1e926]:
+                - cell "Passed" [ref=f1e927]
+                - cell "Search for salt and verify the results are relevant frontends-demo.vercel.app" [ref=f1e932]:
+                  - link "Search for salt and verify the results are relevant" [ref=f1e933] [cursor=pointer]:
+                    - /url: /runs/run_0mw4nfj54823f8e6319a74777
+                  - generic [ref=f1e934]: frontends-demo.vercel.app
+                - cell [ref=f1e935]:
+                  - time [ref=f1e936]: Nov 6, 02:24 PM
+                - cell "1m 13s" [ref=f1e937]
+              - row [ref=f1e942]:
+                - cell "Inconclusive" [ref=f1e943]
+                - cell "Add a grill to the basket and verify the basket contains it frontends-demo.vercel.app" [ref=f1e948]:
+                  - link "Add a grill to the basket and verify the basket contains it" [ref=f1e949] [cursor=pointer]:
+                    - /url: /runs/run_0mw4ncb665b5a829fdaf4a469
+                  - generic [ref=f1e950]: frontends-demo.vercel.app
+                - cell [ref=f1e951]:
+                  - time [ref=f1e952]: Nov 6, 02:21 PM
+                - cell "1m 43s" [ref=f1e953]
+        - button "Load more" [ref=f1e959] [cursor=pointer]
+  - alert [ref=f1e960]
