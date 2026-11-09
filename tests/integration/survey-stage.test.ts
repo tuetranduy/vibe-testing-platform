@@ -15,19 +15,23 @@ import { openRunSandbox } from "../../apps/worker/src/sandbox/run-sandbox";
  * The survey against real Chromium (spec "Testing"): the worker's sandbox — egress proxy, Chromium
  * WITHOUT the Stagehand extension, navigation guard — on the in-process demo shop reached as
  * `shop.test`, the in-page inventory script (transpiled with keepNames, as the worker runs), and the
- * real LlmClient over a transport that answers the one `test_suggestions` call. No API key.
+ * real LlmClient over a transport that stops the exploration at once and answers the `test_suggestions` call. No API key.
  */
 
 const silent = { info() {}, warn() {}, error() {} };
 const SECRET = "hunter2-Survey-Secret";
 
-/** Answers the survey's model call with three suggestions, and keeps what it was sent. */
+/** Ends the exploration on its first choice, answers the survey's call with three suggestions, and keeps what it was sent. */
 class SuggestionTransport implements LlmTransport {
   readonly provider = "scripted";
   readonly requests: LlmTransportRequest[] = [];
 
   async complete(req: LlmTransportRequest): Promise<LlmTransportResponse> {
     this.requests.push(req);
+    if (req.schemaName === "site_exploration_action") {
+      const stop = { observation: "Everything needed is on screen.", missing: "", candidate: -1, source: "generated", key: "" };
+      return { text: JSON.stringify(stop), model: req.model, usage: { inputTokens: 100, outputTokens: 20 } };
+    }
     if (req.schemaName !== "test_suggestions") throw new Error(`unexpected model call ${req.schemaName}`);
     const suggestions = [
       ["Add a product to the cart", "A visitor can add iPhone 17 Pro to the cart and sees the cart count go up."],
@@ -190,9 +194,10 @@ describe("the survey through the real sandbox (demo shop, scripted model)", () =
         shots.map((_, i) => ({ artifactId: `art_${i + 1}`, type: "SCREENSHOT", sensitivity: "STANDARD" })),
       );
 
-      // One model call: the inventories the in-page script read, the start page's screenshot, names never values.
-      expect(transport.requests).toHaveLength(1);
-      const content = transport.requests[0]!.messages[0]!.content as { type: string; text?: string }[];
+      // One exploration choice (it stops, so nothing is clicked), then the suggestions call: the inventories the
+      // in-page script read, the start page's screenshot, names never values.
+      expect(transport.requests.map((r) => r.schemaName)).toEqual(["site_exploration_action", "test_suggestions"]);
+      const content = transport.requests[1]!.messages[0]!.content as { type: string; text?: string }[];
       expect(content.map((p) => p.type)).toEqual(["text", "image"]);
       expect(content[0]!.text).toContain('"title":"Site map · Demo Shop"');
       expect(content[0]!.text).toContain('"text":"Delete my account"'); // the model sees the link; the survey never followed it
