@@ -12,9 +12,11 @@ Production runs at https://testing.tuetran.dev.
 
 ## Continuous deployment
 
-`.github/workflows/deploy.yml` runs after CI passes on a push to `main`, in this order: database migrations, worker
-server, Cloudflare, then a check of `/healthz`. It can also be started by hand from the Actions tab. A failed CI run
-deploys nothing.
+`.github/workflows/deploy.yml` runs on every push to `main`, in this order: database migrations, worker server,
+Cloudflare, then a check of `/healthz`. It can also be started by hand from the Actions tab.
+
+CI does not run the tests, so nothing stops a broken commit from deploying. Run them locally before pushing, with
+`pnpm infra:up` first: `pnpm typecheck`, `pnpm test`, `pnpm test:integration`, `pnpm test:e2e`.
 
 Migrations run first, so each one must work with the previous version of the code still running.
 

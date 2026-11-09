@@ -1,11 +1,10 @@
-# Deploys main after CI has passed on it: database migrations, then the worker server, then Cloudflare.
+# Deploys every push to main: database migrations, then the worker server, then Cloudflare.
+# Tests are not run here; run them locally before pushing (docs/deployment.md).
 # Secrets are set once with scripts/deploy/set-github-secrets.sh (docs/deployment.md).
 name: Deploy
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  push:
     branches: [main]
   workflow_dispatch:
 
@@ -19,14 +18,11 @@ permissions:
   packages: write
 
 env:
-  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  SHA: ${{ github.sha }}
   WORKER_IMAGE_NAME: ghcr.io/tuetranduy/vibe-testing-worker
 
 jobs:
   deploy:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: production
