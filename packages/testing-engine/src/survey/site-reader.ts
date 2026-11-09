@@ -102,7 +102,7 @@ export async function readSite(ctx: StageContext, opts: ReadSiteOptions): Promis
   const pages: SurveyedPage[] = [];
   const read: SiteRead["read"] = [];
   let screenshot: Buffer | null = null;
-  const interactive = { visited: new Set<string>(), budget: { remaining: 6 } };
+  const interactive = { visited: new Set<string>(), budget: { remaining: 6 } as { remaining: number; goalReached?: boolean } };
   const network: SiteNetworkEntry[] = [];
   const captureNetwork = (request: Request, status: number | null, failed: boolean) => {
     if (network.length >= 300) return;
@@ -182,11 +182,13 @@ export async function readSite(ctx: StageContext, opts: ReadSiteOptions): Promis
     pages.push({ url: surveyPageUrl(result.url), title: inventory.title, status: "READ" });
     const entry: SitePage = { url: surveyPageUrl(result.url), inventory };
     read.push(entry);
-    if (interactive.budget.remaining > 0 && !pagesBudget.aborted && typeof sandbox.page.locator === "function") {
+    if (interactive.budget.remaining > 0 && !interactive.budget.goalReached && !pagesBudget.aborted && typeof sandbox.page.locator === "function") {
       try {
-        const actionSignal = AbortSignal.any([pagesBudget, AbortSignal.timeout(20_000)]);
+        // One budget for the whole read (each action is bounded by ACTION_TIMEOUT_MS), so a flow can be followed
+        // several actions deep on the page that leads to it (Sign in → the dialog's Sign up) instead of 20s a page.
         entry.interactions = [];
-        await explorePage(ctx, sandbox.page, { ...interactive, signal: actionSignal, interactions: entry.interactions,
+        const history = read.slice(0, -1).flatMap((p) => p.interactions ?? []);
+        await explorePage(ctx, sandbox.page, { ...interactive, signal: pagesBudget, interactions: entry.interactions, history,
           screenshot: async () => {
             const png = await shoot(true);
             if (!png) return null;

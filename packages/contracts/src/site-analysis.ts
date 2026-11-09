@@ -66,6 +66,8 @@ export type SiteNetworkEntry = z.infer<typeof SiteNetworkEntrySchema>;
 export const SiteInteractionSchema = z.object({
   kind: z.enum(["click", "fill"]), label: z.string().max(160), inputKey: z.string().max(100).nullable(),
   url: z.string().max(2048), inventory: PageInventorySchema, screenshotArtifactId: z.string().nullable(),
+  /** The exploring model's review of the state this action led to, against the requirement (model text from untrusted pages). */
+  observation: z.string().max(300).optional(),
 });
 export type SiteInteraction = z.infer<typeof SiteInteractionSchema>;
 

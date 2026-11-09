@@ -96,6 +96,7 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-073 | Medium | Exploration | A click that opens a sign-in prompt (a guest's "Add to wishlist") is not recognised: the criterion ends INCONCLUSIVE, not "needs a login" | Open |
 | KI-071 | Medium | Verification | Facts read on a search results page stay MODEL_EXTRACTED or have the wrong type, so the criteria end UNVERIFIED_EVIDENCE | Resolved in working tree (2026-11-06) |
 | KI-074 | Medium | Target site | frontends-demo sometimes serves its own Error 500 in the sandbox ("[PATCH] …/store-api/context: <no response> Failed to fetch") | Open: not yet known whether site-side or egress-proxy-side |
+| KI-075 | High | Requirement analysis | "Verify signup functionality" stops at the sign-in dialog: the site read never opens Sign up, so the criteria guess the sign-up form | Resolved in working tree (2026-11-07) |
 
 KI-056–KI-057: [Travel Luggage Set run investigation](reviews/run_0mw3gsjgke3a1923c465bb1e1.md), with the recorded
 timeline, reproduction, changes and rollout limits.
@@ -1069,4 +1070,29 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
 - **Open:** check whether the store API's PATCH fails through the egress proxy (CONNECT tunnel, timeouts) or on the
   site. Either way, a checkpoint whose page is an error page (an HTTP 5xx document, or "500" / "something went wrong"
   as the main heading) should be reported as such: retried once, or marked INCONCLUSIVE with a "site error" reason.
+
+## KI-075 — The site read before confirmation stops at the sign-in dialog
+- **Severity:** High (the criteria are proposed without seeing the flow the requirement is about).
+- **Where:** `packages/testing-engine/src/survey/interactive.ts`, `survey/site-reader.ts`.
+- **What:** `run_0mw4wwopd0fe0ffef846c85f1` (frontends-demo.vercel.app, "verify signup functionality for this website",
+  deepseek-v4-pro, 2026-11-06) clicked Sign in on `/` and on `/Summer-Trends/`, never Sign up, and the site checks
+  for the sign-up form's fields came back UNCLEAR. Five causes:
+  1. `canExplore` dropped every control labelled sign up / register / create, though opening a sign-up form persists
+     nothing (only its submit would, and submits are filtered separately).
+  2. Each page got 20 s for its actions; with the model's own reasoning level the second choice on `/` ran out of output
+     tokens ("empty answer (length)", ~30 s per attempt, retried), so one action fitted per page.
+  3. The model picked by index with no notion of where it was against the requirement, so it wandered to a category page.
+  4. With a dialog open, controls behind its backdrop were candidates (a product link was picked and the click timed out).
+  5. The dialog's Sign up navigates to `/register` ~1.6 s after the click; the state was read before that.
+- **Fix:** (1) opening a sign-up / register / create-account control is allowed; its submit and fills inside it are not,
+  nor any other "create". (2) One budget for the whole read, each action bounded by `ACTION_TIMEOUT_MS` (25 s); the choice
+  runs with thinking off ("minimal") unless the run chose a level. (3) Each choice first reviews the current state
+  against the requirement (`observation`, `missing`); the review is stored on the interaction it describes
+  (`SiteInteraction.observation`), earlier pages' actions are shown to the next page, and once nothing is missing later
+  pages are not explored. (4) With a full-viewport fixed layer open, only its controls are candidates. (5) A click waits
+  up to 2.5 s for a navigation it started before the state is read.
+- **Checked:** live on frontends-demo with deepseek-v4-pro: Sign in → Sign up chosen (candidates in the dialog: Email
+  address, Password, Sign in, Sign up); `/register` reached by hand 1.6 s after the click. Not yet re-run end to end.
+- **Open:** the header's Sign in button is sometimes missing on load (rendered late), and DeepSeek calls sometimes
+  stall; both end the read early.
 
