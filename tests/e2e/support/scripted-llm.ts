@@ -26,7 +26,7 @@ export class ScenarioTransport implements LlmTransport {
       json = { findings: [], notes: [] };
     } else if (req.system === SITE_EXPLORATION_SYSTEM_PROMPT) {
       // Interactive discovery is covered by its real-browser unit tests; preserve each scenario's initial state.
-      json = { candidate: -1, source: "generated", key: "" };
+      json = { observation: "Nothing more to explore.", missing: "", candidate: -1, source: "generated", key: "" };
     } else if (req.system === INPUT_SYSTEM_PROMPT) {
       json = { value: SCRIPTED_INPUT };
     } else if (req.system === SURVEY_SYSTEM_PROMPT) {

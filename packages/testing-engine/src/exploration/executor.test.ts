@@ -1064,8 +1064,18 @@ describe("runExploration (fake explorer)", () => {
     expect(outcome.steps.at(-1)!.urlAfter).toBe("https://shop.test/products");
   });
 
+  it.each(["Open the shop home page", "Go to the website's homepage", "Visit the main landing page."])("%s opens the target, with no lookup", async (description) => {
+    const { ctx } = fakeCtx({ targetUrl: "https://shop.test/" });
+    const session = new FakeSession();
+    await runExploration(ctx, {
+      plan: planOf(step("navigate", description)), requirement: requirementWith([]), session, budget: ctx.budgetSignal(1),
+    }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(session.ops()).not.toContain("observe");
+  });
+
   it.each([
     ["https://shop.test/", false],
+    ["https://shop.test/?bug=empty_cart", false],
     [TARGET, true],
   ] as const)("a home-page instruction from %s is skipped only when the target is the home page", async (targetUrl, shouldClick) => {
     const { ctx } = fakeCtx({ targetUrl });

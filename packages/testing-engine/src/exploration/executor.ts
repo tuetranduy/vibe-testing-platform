@@ -397,9 +397,8 @@ function opensTargetPage(description: string, targetUrl: string): boolean {
   const text = description.replace(/\s+/g, " ").trim();
   if (/^(?:open|navigate(?: to)?|go to|visit|load)(?: (?:the )?(?:(?:target|initial|starting) )?(?:url|page|site|website|shop|store))?[.!]?$/i.test(text)) return true;
   // A home-page instruction is only satisfied by opening a root URL, not an arbitrary deep link.
-  const target = new URL(targetUrl);
-  return target.pathname === "/" && target.search === "" && target.hash === ""
-    && /^(?:open|navigate to|go to|visit|load) (?:the )?(?:home ?page|landing page)[.!]?$/i.test(text);
+  return new URL(targetUrl).pathname === "/"
+    && /^(?:open|navigate to|go to|visit|load) (?:the )?(?:(?:shop|store|site|website|main)(?:'s)? )?(?:home ?page|landing page)[.!]?$/i.test(text);
 }
 
 /** A field that repeats another one ("Repeat password", "Confirm email"): it gets the value typed into that one (KI-062). */
