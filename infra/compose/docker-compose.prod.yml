@@ -1,0 +1,50 @@
+# The worker server: the worker and its isolated Playwright runner. Everything else is managed (Supabase, Redis,
+# R2, Cloudflare). .github/workflows/deploy.yml copies this file to /opt/vibe-testing and writes the .env beside it.
+# Both services use the one worker image; the runner only overrides the command.
+name: vibe-testing
+
+services:
+  worker:
+    image: ${WORKER_IMAGE:?}
+    security_opt: ["seccomp=./worker.json"]
+    init: true
+    env_file: .env
+    environment:
+      RUNNER_URL: http://runner:3100
+      RUNNER_WORKSPACE_DIR: /work/runs
+      # Loopback-free: nothing on this server scrapes it, and it must not be published.
+      WORKER_METRICS_PORT: "0"
+    volumes: ["runs:/work/runs"]
+    networks: [default, runner]
+    # This server is shared with other apps.
+    mem_limit: 2g
+    depends_on:
+      runner: { condition: service_healthy }
+    restart: unless-stopped
+
+  # No gateway on its network: it reaches the workers only, never the database, Redis, storage or the internet.
+  runner:
+    image: ${WORKER_IMAGE:?}
+    command: ["pnpm", "--filter", "@platform/worker", "runner"]
+    security_opt: ["seccomp=./worker.json"]
+    init: true
+    environment:
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?}
+      RUNNER_WORKSPACE_DIR: /work/runs
+      LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    volumes: ["runs:/work/runs"]
+    networks: [runner]
+    mem_limit: 1g
+    restart: unless-stopped
+
+volumes:
+  runs:
+
+networks:
+  runner:
+    internal: true

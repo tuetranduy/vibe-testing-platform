@@ -10,3 +10,4 @@ playwright-report/
 spikes/**/node_modules/
 .sync/
 *.tsbuildinfo
+.env.production

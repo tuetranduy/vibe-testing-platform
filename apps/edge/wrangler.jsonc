@@ -1,0 +1,40 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "vibe-testing-platform",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "0aa33be34354cada10bebf66ea994e23",
+  "workers_dev": false,
+  "routes": [{ "pattern": "testing.tuetran.dev", "custom_domain": true }],
+  "observability": { "enabled": true },
+  // Keeps the API awake (suite schedules, the reaper).
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "vars": {
+    "WEB_ALLOWED_HOSTS": "testing.tuetran.dev",
+    "S3_ENDPOINT": "https://0aa33be34354cada10bebf66ea994e23.r2.cloudflarestorage.com",
+    "ARTIFACT_BUCKET": "vibe-testing-artifacts"
+  },
+  // __IMAGE_TAG__ is replaced with the commit SHA by .github/workflows/deploy.yml.
+  "containers": [
+    {
+      "class_name": "ApiContainer",
+      "image": "registry.cloudflare.com/0aa33be34354cada10bebf66ea994e23/vibe-testing-api:__IMAGE_TAG__",
+      "instance_type": "basic",
+      "max_instances": 1
+    },
+    {
+      "class_name": "WebContainer",
+      "image": "registry.cloudflare.com/0aa33be34354cada10bebf66ea994e23/vibe-testing-web:__IMAGE_TAG__",
+      "instance_type": "basic",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "API", "class_name": "ApiContainer" },
+      { "name": "WEB", "class_name": "WebContainer" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ApiContainer", "WebContainer"] }]
+}

@@ -1,0 +1,127 @@
+# Deploys main after CI has passed on it: database migrations, then the worker server, then Cloudflare.
+# Secrets are set once with scripts/deploy/set-github-secrets.sh (docs/deployment.md).
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# Deploys run one at a time, in order; a newer push waits rather than interrupting a migration.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  WORKER_IMAGE_NAME: ghcr.io/tuetranduy/vibe-testing-worker
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Port 5432 is Supabase's session pooler (migrations); the apps use the transaction pooler on 6543.
+      - name: Apply database migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: DATABASE_URL="${DATABASE_URL/:6543\//:5432/}" pnpm db:migrate
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: worker
+          push: true
+          tags: ${{ env.WORKER_IMAGE_NAME }}:${{ env.SHA }}
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,scope=worker,mode=max
+
+      - name: Deploy the worker server
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          API_TOKEN: ${{ secrets.API_TOKEN }}
+          SECRETS_ENCRYPTION_KEY: ${{ secrets.SECRETS_ENCRYPTION_KEY }}
+          RUNNER_TOKEN: ${{ secrets.RUNNER_TOKEN }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'anthropic' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: scripts/deploy/deploy-worker.sh
+
+      - name: Build and push the API and web images to Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 0aa33be34354cada10bebf66ea994e23
+        run: |
+          for target in api web; do
+            docker buildx build --load --target "$target" -t "vibe-testing-$target:$SHA" \
+              --cache-from "type=gha,scope=$target" --cache-to "type=gha,scope=$target,mode=max" .
+            pnpm --filter @platform/edge exec wrangler containers push "vibe-testing-$target:$SHA"
+          done
+
+      - name: Deploy to Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 0aa33be34354cada10bebf66ea994e23
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'anthropic' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+        run: |
+          cd apps/edge
+          sed -i "s/__IMAGE_TAG__/$SHA/g" wrangler.jsonc
+          umask 077
+          node -e '
+            const s = JSON.parse(process.env.SECRETS_JSON);
+            const names = ["DATABASE_URL","REDIS_URL","S3_ACCESS_KEY_ID","S3_SECRET_ACCESS_KEY","API_TOKEN","SECRETS_ENCRYPTION_KEY","BOOTSTRAP_ADMIN_EMAIL","BOOTSTRAP_ADMIN_PASSWORD","ANTHROPIC_API_KEY","GEMINI_API_KEY","DEEPSEEK_API_KEY"];
+            const out = Object.fromEntries(names.filter((n) => s[n]).map((n) => [n, s[n]]));
+            require("fs").writeFileSync("/tmp/worker-secrets.json", JSON.stringify(out));
+          '
+          vars=(--var "LLM_PROVIDER:$LLM_PROVIDER")
+          if [ -n "$LLM_MODEL" ]; then vars+=(--var "LLM_MODEL:$LLM_MODEL"); fi
+          pnpm exec wrangler deploy --secrets-file /tmp/worker-secrets.json "${vars[@]}"
+          rm -f /tmp/worker-secrets.json
+
+      - name: Check the live site
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null https://testing.tuetran.dev/healthz; then echo "live"; exit 0; fi
+            sleep 10
+          done
+          echo "::error::https://testing.tuetran.dev/healthz did not become healthy"
+          exit 1
