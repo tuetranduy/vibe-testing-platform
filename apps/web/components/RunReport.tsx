@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { getReport, reportMarkdownPath } from "../lib/api";
 import type { ArtifactInfo, StepInfo } from "../lib/progress-reducer";
 import { ArtifactList } from "./ArtifactList";
+import { Assumptions } from "./Assumptions";
 import { CriteriaResults } from "./CriteriaResults";
 import { Disclosure } from "./Disclosure";
 import { FailureDiagnostics } from "./FailureDiagnostics";
@@ -90,6 +91,7 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
   return (
     <>
       <ReportSummary report={report} cancelReason={cancelReason} llm={llm} />
+      <Assumptions requirement={report.requirement} />
       <div className="actions report-actions">
         <a className="button button-secondary" href={reportMarkdownPath(runId)} download>
           <Icon name="download" />

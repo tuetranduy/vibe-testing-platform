@@ -8,6 +8,7 @@ export * from "./api-tokens";
 export * from "./usage";
 export * from "./run";
 export * from "./requirement";
+export * from "./assumptions";
 export * from "./describe-outcome";
 export * from "./suggestions";
 export * from "./site-analysis";

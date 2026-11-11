@@ -73,7 +73,8 @@ function compiles(pattern: string, caseSensitive: boolean): boolean {
  * may change its literal values. For an edited criterion the server writes the statement from the
  * check and clears `ambiguity`, so the wording can never describe a different check than the one
  * the verifier runs. `critical` (V1.1) may change on any criterion, alone or with its check; it never
- * changes the wording. Anything else is rejected. Unedited criteria are returned exactly as in the
+ * changes the wording. `origin` and `rationale` never change; an edited check loses its `assumption`
+ * (2026-11-11). Anything else is rejected. Unedited criteria are returned exactly as in the
  * latest revision (with their weight as sent).
  */
 export function applyCriteriaEdit(latest: NormalizedRequirement, body: Pick<NormalizedRequirement, "criteria" | "facts">): EditResult {
@@ -97,6 +98,9 @@ export function applyCriteriaEdit(latest: NormalizedRequirement, body: Pick<Norm
     }
     if (c.sourceText !== before.sourceText) invalid.push({ path: at("sourceText"), message: "sourceText cannot change" });
     if (!same(c.preconditions, before.preconditions)) invalid.push({ path: at("preconditions"), message: "preconditions cannot change" });
+    // Where a criterion came from is the analysis' record, never the user's (2026-11-11); absent means stated / none.
+    if ((c.origin ?? "stated") !== (before.origin ?? "stated")) invalid.push({ path: at("origin"), message: "origin cannot change" });
+    if ((c.rationale ?? null) !== (before.rationale ?? null)) invalid.push({ path: at("rationale"), message: "rationale cannot change" });
     if (!same(fixedParts(c.expectedOutcome), fixedParts(before.expectedOutcome))) {
       invalid.push({ path: at("expectedOutcome"), message: "Only the check's values can change, not what it reads" });
       return;
@@ -108,8 +112,10 @@ export function applyCriteriaEdit(latest: NormalizedRequirement, body: Pick<Norm
         invalid.push({ path: at("expectedOutcome", "match", "value"), message: "Not a valid pattern" });
         return;
       }
+      // The check is now the user's: what the analysis assumed about the old one no longer applies.
+      const { assumption: _assumed, ...kept } = before;
       criteria.push({
-        ...before,
+        ...kept,
         critical: c.critical,
         expectedOutcome: outcome,
         statement: describeExpectedOutcome(outcome, body.facts),
@@ -119,6 +125,7 @@ export function applyCriteriaEdit(latest: NormalizedRequirement, body: Pick<Norm
     }
     if (c.statement !== before.statement) wordingOnly.push({ path: at("statement"), message: "Change the check, not only its wording" });
     if (!same(c.ambiguity, before.ambiguity)) invalid.push({ path: at("ambiguity"), message: "ambiguity changes only with the check" });
+    if ((c.assumption ?? null) !== (before.assumption ?? null)) invalid.push({ path: at("assumption"), message: "assumption changes only with the check" });
     criteria.push({ ...before, critical: c.critical });
   });
 

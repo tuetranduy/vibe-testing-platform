@@ -4,7 +4,12 @@ import {
   CriterionResultSchema,
   destructiveActionsAllowed,
   ElementRefSchema,
+  ADDED_BY_PLATFORM,
   NormalizedRequirementSchema,
+  PASSED_ON_ASSUMED,
+  assumptionsOf,
+  passedOnAssumedChecks,
+  isInferred,
   ObservedFactSchema,
   PlannedStepSchema,
   RerunResultSchema,
@@ -284,6 +289,57 @@ const scenario = {
   steps: [{ id: "PS-1", kind: "navigate", description: "Open the home page" }],
 };
 
+describe("intent and inferred criteria (2026-11-11)", () => {
+  const base = () => requirement() as { originalText: string; criteria: Record<string, unknown>[] };
+  const withCriteria = (patch: (c: Record<string, unknown>, i: number) => Record<string, unknown>, extra: Record<string, unknown> = {}) => {
+    const r = base();
+    return { ...r, ...extra, criteria: r.criteria.map((c, i) => ({ ...c, ...patch(c, i) })) };
+  };
+  const messages = (r: { success: boolean; error?: { issues: { message: string }[] } }) => (r.success ? [] : r.error!.issues.map((i) => i.message));
+
+  it("a requirement stored before the change parses unchanged: every criterion is stated, with no rationale or assumption", () => {
+    const parsed = NormalizedRequirementSchema.parse(requirement());
+    for (const c of parsed.criteria) {
+      expect(isInferred(c)).toBe(false);
+      expect(c.rationale ?? null).toBeNull();
+      expect(c.assumption ?? null).toBeNull();
+    }
+    expect(parsed.intent ?? null).toBeNull();
+  });
+
+  it("an inferred criterion says why it was added", () => {
+    const ok = withCriteria((_c, i) => (i === 1 ? { origin: "inferred", rationale: "A cart is how the user sees what was added" } : {}));
+    expect(NormalizedRequirementSchema.safeParse(ok).success).toBe(true);
+    const r = NormalizedRequirementSchema.safeParse(withCriteria((_c, i) => (i === 1 ? { origin: "inferred" } : {})));
+    expect(messages(r)).toContain("An inferred criterion says why it was added");
+  });
+
+  it("only an inferred criterion has a rationale", () => {
+    const r = NormalizedRequirementSchema.safeParse(withCriteria((_c, i) => (i === 0 ? { rationale: "Because" } : {})));
+    expect(messages(r)).toContain("Only an inferred criterion has a rationale");
+  });
+
+  it("at most 5 criteria are inferred", () => {
+    const r = base();
+    const inferred = Array.from({ length: 6 }, (_x, i) => ({ ...r.criteria[1], id: `AC-${i + 2}`, origin: "inferred", rationale: "A usual check" }));
+    const parsed = NormalizedRequirementSchema.safeParse({ ...r, criteria: [r.criteria[0], ...inferred] });
+    expect(messages(parsed)).toContain("At most 5 inferred criteria");
+  });
+
+  it("an inferred criterion still quotes the requirement", () => {
+    const r = NormalizedRequirementSchema.safeParse(
+      withCriteria((_c, i) => (i === 1 ? { origin: "inferred", rationale: "A usual check", sourceText: "Something the user never wrote" } : {})),
+    );
+    expect(messages(r)).toContain("sourceText must be a verbatim substring of originalText");
+  });
+
+  it("an intent has a clarity and a goal; its notes default to none", () => {
+    const parsed = NormalizedRequirementSchema.parse({ ...base(), intent: { clarity: "vague", goal: "The cart works", feature: null } });
+    expect(parsed.intent).toEqual({ clarity: "vague", goal: "The cart works", feature: null, notes: [] });
+    expect(NormalizedRequirementSchema.safeParse({ ...base(), intent: { clarity: "unknown", goal: "x y z", feature: null } }).success).toBe(false);
+  });
+});
+
 describe("TestPlanSchema", () => {
   const plan = { runId: "run_1", requirementRevision: 1, scenarios: [scenario], blockedCriteria: [], stopConditions: [] };
 
@@ -548,5 +604,47 @@ describe("TestPlanSchema with several scenarios (V1.1 F9)", () => {
     expect(scenarioOfCriterion(p, "AC-9").id).toBe("SC-1");
     expect(stepScenario({})).toBe("SC-1");
     expect(stepScenario({ scenarioId: "SC-3" })).toBe("SC-3");
+  });
+});
+
+describe("assumptionsOf / passedOnAssumedChecks (2026-11-11)", () => {
+  const criterion = (id: string, patch: Record<string, unknown> = {}) => ({
+    id,
+    sourceText: "Test the search",
+    statement: `${id} holds`,
+    expectedOutcome: { kind: "semantic" as const, description: `${id} holds` },
+    preconditions: [],
+    critical: true,
+    ambiguity: null,
+    ...patch,
+  });
+  const inferred = (id: string, patch: Record<string, unknown> = {}) => criterion(id, { origin: "inferred" as const, rationale: `Why ${id}`, ...patch });
+  const intent = (notes: string[]) => ({ clarity: "feature" as const, goal: "Search works", feature: "Search", notes });
+
+  it("lists what was added, then what was assumed, then the notes", () => {
+    const requirement = { criteria: [criterion("AC-1", { assumption: "Checked as shown" }), inferred("AC-2"), inferred("AC-3", { assumption: "Also assumed" })], intent: intent(["Left out: x"]) };
+    expect(assumptionsOf(requirement)).toEqual([
+      { kind: "added", criterionId: "AC-2", text: "Why AC-2" },
+      { kind: "added", criterionId: "AC-3", text: "Why AC-3" },
+      { kind: "assumed", criterionId: "AC-1", text: "Checked as shown" },
+      { kind: "assumed", criterionId: "AC-3", text: "Also assumed" },
+      { kind: "note", criterionId: null, text: "Left out: x" },
+    ]);
+  });
+
+  it("is empty for a requirement with nothing added or assumed, and for none", () => {
+    expect(assumptionsOf({ criteria: [criterion("AC-1")], intent: null })).toEqual([]);
+    expect(assumptionsOf({ criteria: [criterion("AC-1")] })).toEqual([]);
+    expect(assumptionsOf(null)).toEqual([]);
+  });
+
+  it("a pass rests on assumed checks only when every critical criterion was added by the platform", () => {
+    const onlyInferred = { criteria: [inferred("AC-1"), criterion("AC-2", { critical: false })] };
+    expect(passedOnAssumedChecks({ verdict: "PASSED", requirement: onlyInferred })).toBe(true);
+    expect(passedOnAssumedChecks({ verdict: "FAILED", requirement: onlyInferred })).toBe(false);
+    expect(passedOnAssumedChecks({ verdict: "PASSED", requirement: { criteria: [inferred("AC-1"), criterion("AC-2")] } })).toBe(false);
+    expect(passedOnAssumedChecks({ verdict: "PASSED", requirement: null })).toBe(false);
+    expect(passedOnAssumedChecks({ verdict: null, requirement: onlyInferred })).toBe(false);
+    expect([ADDED_BY_PLATFORM, PASSED_ON_ASSUMED]).toEqual(["Added by the platform", "Passed (on assumed checks)"]);
   });
 });

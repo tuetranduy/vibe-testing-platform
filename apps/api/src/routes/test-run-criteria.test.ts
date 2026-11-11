@@ -205,6 +205,19 @@ describe("PUT /v1/test-runs/:runId/criteria", () => {
     expect(JSON.stringify(latest.criteria[1]!.expectedOutcome)).toContain("pw hunter2-long-pw");
   });
 
+  it("an edit keeps what the analysis understood, whatever the body says (2026-11-11)", async () => {
+    const intent = { clarity: "feature" as const, goal: "A visitor can add a product to the cart", feature: "Cart", notes: ["Left out: something"] };
+    const runId = await setupAwaitingConfirmation({ ...baseRequirement(), intent });
+    const current = getCriteriaBody(await getCriteria(runId));
+    expect(current.intent).toEqual(intent);
+    const criteria = current.criteria.map((c, i) => (i === 1 ? { ...c, critical: false } : c));
+    const saved = await putCriteria(runId, { ...current, intent: { ...intent, goal: "Something the client made up" }, criteria });
+    expect(saved.statusCode).toBe(200);
+    const after = getCriteriaBody(await getCriteria(runId));
+    expect(after.revision).toBe(2);
+    expect(after.intent).toEqual(intent);
+  });
+
   /** "The cart holds 1 item": a numeric check against a literal. */
   function oneItemRequirement(): Draft {
     const base = baseRequirement();

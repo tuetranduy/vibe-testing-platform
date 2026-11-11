@@ -17,6 +17,7 @@ import { runExecution, type RunPorts } from "../orchestrator/orchestrator";
 import { createRealStages } from "../orchestrator/real-stages";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
 import { actionPolicyFor, createPlanStage, planTest, type PlanTestInput } from "./planner";
+import { PLANNER_SYSTEM_PROMPT, buildPlannerPrompt } from "./prompts";
 
 /** A redactor that masks the given values: the run's redactor is key-based, but the plumbing applies whatever it is given. */
 const maskValues =
@@ -814,5 +815,40 @@ describe("PlannerOutputSchema: stop conditions are optional (KI-001)", () => {
     const scenarios = [{ title: "Add to cart", steps: [{ kind: "navigate", description: "Open the shop", inputRef: null, checkpoint: null, criterionIds: [], destructive: false }] }];
     expect(PlannerOutputSchema.parse({ scenarios })).toMatchObject({ stopConditions: [] });
     expect(PlannerOutputSchema.parse({ scenarios, stopConditions: ["Login fails"] })).toMatchObject({ stopConditions: ["Login fails"] });
+  });
+});
+
+describe("buildPlannerPrompt: what the user wants to know (2026-11-11)", () => {
+  const prompt = (intent: NormalizedRequirement["intent"]) =>
+    buildPlannerPrompt({ targetUrl: "https://shop.test/", requirement: { ...cartRequirement(), intent }, testDataKeys: [], secretNames: [] });
+
+  it("tells the planner the goal and the feature, right after the requirement", () => {
+    const text = prompt({ clarity: "feature", goal: "A visitor can search the shop and get matching products", feature: "Search", notes: [] });
+    const lines = text.split("\n");
+    const end = lines.indexOf("REQUIREMENT>>>");
+    expect(lines.slice(end + 1, end + 4)).toEqual([
+      "",
+      "What the user wants to know: A visitor can search the shop and get matching products",
+      "Feature under test: Search",
+    ]);
+  });
+
+  it("leaves the feature line out when there is none, and both lines out without an intent", () => {
+    const noFeature = prompt({ clarity: "vague", goal: "The shop works", feature: null, notes: [] });
+    expect(noFeature).toContain("What the user wants to know: The shop works");
+    expect(noFeature).not.toContain("Feature under test");
+    for (const none of [null, undefined]) {
+      expect(prompt(none)).not.toContain("What the user wants to know");
+      expect(prompt(none)).not.toContain("Feature under test");
+    }
+  });
+
+  it("marks the criteria the analysis added, and says the intent never changes the criteria", () => {
+    const req = cartRequirement();
+    const criteria = req.criteria.map((c, i) => (i === 3 ? { ...c, origin: "inferred" as const, rationale: "A tidy cart is part of a working cart" } : c));
+    const text = buildPlannerPrompt({ targetUrl: "https://shop.test/", requirement: { ...req, criteria }, testDataKeys: [], secretNames: [] });
+    const sent = JSON.parse(text.slice(text.indexOf("[\n"), text.indexOf("\n]\n") + 2)) as { id: string; origin: string }[];
+    expect(sent.map((c) => c.origin)).toEqual(["stated", "stated", "stated", "inferred"]);
+    expect(PLANNER_SYSTEM_PROMPT).toContain("it never adds or removes a criterion");
   });
 });

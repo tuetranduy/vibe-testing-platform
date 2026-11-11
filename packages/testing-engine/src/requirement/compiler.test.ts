@@ -112,12 +112,35 @@ describe("compileRequirement", () => {
     expect(JSON.stringify(transport.requests[1]!.messages.at(-1))).toMatch(/criteria\.1\.sourceText.*verbatim/);
   });
 
-  it("sourceText still not verbatim after the correction → ContractError", async () => {
+  it("sourceText still not verbatim after the correction → that criterion is left out, the others are kept (2026-11-11)", async () => {
     const bad = cartOutput();
     bad.criteria[0]!.sourceText = "Users add products.";
     const { llm, transport } = setup({ json: bad }, { json: bad }, { json: cartOutput() });
-    await expect(compileRequirement(llm, input(CART_TEXT))).rejects.toBeInstanceOf(ContractError);
+    const draft = await compileRequirement(llm, input(CART_TEXT));
     expect(transport.requests).toHaveLength(2); // at most one correction round per compile
+    expect(draft.criteria.map((c) => [c.id, c.statement])).toEqual([["AC-1", "The cart count increases after adding a product"]]);
+    expect(draft.facts.map((f) => `${f.key}@${f.checkpoint}`)).toEqual(["cartCount@before_add", "cartCount@after_add"]);
+    expect(draft.intent?.notes).toEqual(["Left out: The product appears in the cart after adding it (could not be turned into a check)"]);
+    persist(draft);
+  });
+
+  it("every criterion still invalid after the correction → the requirement is judged as a whole, never an errored run", async () => {
+    const bad = cartOutput();
+    bad.criteria[0]!.sourceText = "Users add products.";
+    bad.criteria[1]!.sourceText = "The counter goes up.";
+    const { llm } = setup({ json: bad }, { json: bad });
+    const draft = await compileRequirement(llm, input(CART_TEXT));
+    expect(draft.criteria).toHaveLength(1);
+    expect(draft.criteria[0]).toMatchObject({ id: "AC-1", sourceText: CART_TEXT, expectedOutcome: { kind: "semantic", description: CART_TEXT }, critical: true });
+    expect(draft.facts).toEqual([]);
+    expect(draft.intent?.notes.at(-1)).toMatch(/judged as a whole/);
+    persist(draft);
+  });
+
+  it("an answer that does not match the output schema after the correction is still a ContractError", async () => {
+    const { llm, transport } = setup({ json: { criteria: "none" } }, { json: { criteria: "none" } });
+    await expect(compileRequirement(llm, input(CART_TEXT))).rejects.toBeInstanceOf(ContractError);
+    expect(transport.requests).toHaveLength(2);
   });
 
   it("an undeclared FactRef is corrected the same way", async () => {
@@ -370,5 +393,143 @@ describe("summarized test titles", () => {
     expect(draft.title).toBe("Cart [REDACTED]");
     const old = setup({ json: cartOutput() });
     expect((await compileRequirement(old.llm, input(CART_TEXT))).title).toBeUndefined();
+  });
+});
+
+
+describe("compileRequirement: intent and inferred criteria (2026-11-11)", () => {
+  const SEARCH_TEXT = "Test the search";
+  const page = {
+    url: "https://shop.test/",
+    inventory: { title: "Shop", description: "", headings: [], links: [], forms: [{ name: "Search", fields: [{ label: "Search", type: "search", placeholder: "Search products" }], submit: "" }], buttons: [] },
+  };
+  const site = { pages: [page], screenshot: null };
+  const visible = (key: string, checkpoint: string, extra: Record<string, unknown> = {}) => ({
+    sourceText: SEARCH_TEXT,
+    statement: `The ${key} is shown`,
+    expectedOutcome: { kind: "visible", fact: { key, checkpoint }, expected: true },
+    preconditions: [],
+    ambiguity: null,
+    ...extra,
+  });
+  const fact = (key: string, checkpoint: string) => ({ key, checkpoint, description: `Whether the ${key} is shown`, valueType: "boolean" });
+  const searchOutput = () => ({
+    title: "Search finds products",
+    intent: { clarity: "feature", goal: "A visitor can search the shop and get matching products", feature: "Search" },
+    criteria: [
+      visible("searchField", "home"),
+      visible("matchingProduct", "results", { origin: "inferred", rationale: "A search that works lists a product the shop sells" }),
+      visible("emptyState", "no_results", { origin: "inferred", rationale: "A search that matches nothing should say so" }),
+    ],
+    facts: [fact("searchField", "home"), fact("matchingProduct", "results"), fact("emptyState", "no_results")],
+    siteChecks: [1, 2, 3].map((criterion) => ({ criterion, status: "found", note: `The home page has a search field (${criterion})` })),
+  });
+
+  it("keeps grounded inferred criteria with their rationale, and returns the intent", async () => {
+    const { llm, transport } = setup({ json: searchOutput() });
+    const draft = await compileRequirement(llm, { ...input(SEARCH_TEXT), site });
+    expect(transport.requests).toHaveLength(1);
+    expect(draft.criteria.map((c) => [c.id, c.origin ?? "stated", c.rationale ?? null])).toEqual([
+      ["AC-1", "stated", null],
+      ["AC-2", "inferred", "A search that works lists a product the shop sells"],
+      ["AC-3", "inferred", "A search that matches nothing should say so"],
+    ]);
+    expect(draft.criteria.every((c) => c.critical)).toBe(true);
+    expect(draft.intent).toEqual({ clarity: "feature", goal: "A visitor can search the shop and get matching products", feature: "Search", notes: [] });
+    expect(draft.insights.checks.map((c) => c.criterionId)).toEqual(["AC-1", "AC-2", "AC-3"]);
+    persist(draft);
+  });
+
+  it("without pages read the inferred criteria are left out, and that costs no correction round", async () => {
+    const { llm, transport } = setup({ json: searchOutput() });
+    const draft = await compileRequirement(llm, input(SEARCH_TEXT));
+    expect(transport.requests).toHaveLength(1);
+    expect(draft.criteria.map((c) => c.statement)).toEqual(["The searchField is shown"]);
+    expect(draft.facts).toHaveLength(1);
+    expect(draft.intent?.notes).toEqual([
+      "Left out: The matchingProduct is shown (no pages of the site were read)",
+      "Left out: The emptyState is shown (no pages of the site were read)",
+    ]);
+    persist(draft);
+  });
+
+  it("an invalid inferred criterion is left out without a correction round when the rest is valid", async () => {
+    const out = searchOutput();
+    out.siteChecks[2]!.status = "not_found";
+    out.facts.pop(); // the dropped criterion's fact is not even declared
+    const { llm, transport } = setup({ json: out });
+    const draft = await compileRequirement(llm, { ...input(SEARCH_TEXT), site });
+    expect(transport.requests).toHaveLength(1);
+    expect(draft.criteria).toHaveLength(2);
+    expect(draft.insights.checks.map((c) => c.criterionId)).toEqual(["AC-1", "AC-2"]);
+  });
+
+  it("a grounded added check that is invalid in itself is left out at once: the correction round is for the user's own criteria", async () => {
+    const out = searchOutput();
+    out.facts.pop(); // AC-3 (added) reads a fact that is not declared
+    const { llm, transport } = setup({ json: out });
+    const draft = await compileRequirement(llm, { ...input(SEARCH_TEXT), site });
+    expect(transport.requests).toHaveLength(1);
+    expect(draft.criteria.map((c) => c.id)).toEqual(["AC-1", "AC-2"]);
+    expect(draft.intent?.notes).toEqual(["Left out: The emptyState is shown (could not be turned into a check)"]);
+  });
+
+  it("an invalid stated criterion still gets its correction round, even next to an invalid added one", async () => {
+    const bad = searchOutput();
+    bad.facts.shift(); // AC-1 (stated) reads an undeclared fact
+    const { llm, transport } = setup({ json: bad }, { json: searchOutput() });
+    const draft = await compileRequirement(llm, { ...input(SEARCH_TEXT), site });
+    expect(transport.requests).toHaveLength(2);
+    expect(draft.criteria).toHaveLength(3);
+  });
+
+  it("only inferred criteria for a requirement the model calls specific → judged as a whole", async () => {
+    const out = searchOutput();
+    out.intent.clarity = "specific";
+    out.criteria.shift();
+    out.facts.shift();
+    const { llm } = setup({ json: out });
+    const draft = await compileRequirement(llm, { ...input(SEARCH_TEXT), site });
+    expect(draft.criteria.map((c) => c.expectedOutcome)).toEqual([{ kind: "semantic", description: SEARCH_TEXT }]);
+    expect(draft.intent?.notes).toHaveLength(3);
+    persist(draft);
+  });
+
+  it("an answer in the shape before this change compiles as before, with no intent", async () => {
+    const { llm } = setup({ json: cartOutput() });
+    const draft = await compileRequirement(llm, input(CART_TEXT));
+    expect(draft.intent ?? null).toBeNull();
+    expect(draft.criteria.every((c) => (c.origin ?? "stated") === "stated")).toBe(true);
+  });
+
+  it("wording an inferred criterion made up becomes a visibility check (KI-070 applies to it too)", async () => {
+    const out = searchOutput();
+    out.criteria[2] = {
+      ...out.criteria[2]!,
+      expectedOutcome: { kind: "text_matches", fact: { key: "emptyState", checkpoint: "no_results" }, match: { mode: "contains", value: "No products found" } },
+    } as never;
+    out.facts[2] = { ...out.facts[2]!, valueType: "string" };
+    const { llm } = setup({ json: out });
+    const draft = await compileRequirement(llm, { ...input(SEARCH_TEXT), site });
+    expect(draft.criteria[2]).toMatchObject({ origin: "inferred", expectedOutcome: { kind: "visible", expected: true } });
+  });
+
+  it("a vague phrase checked concretely keeps what was assumed; secrets in the model's own words are masked", async () => {
+    const out = searchOutput();
+    out.criteria[0] = { ...out.criteria[0]!, assumption: "'Test the search' is checked as: hunter2 the search field is shown" } as never;
+    out.intent.goal = "A visitor with hunter2 can search";
+    const { llm } = setup({ json: out });
+    const draft = await compileRequirement(llm, { ...input(SEARCH_TEXT), site, redact: maskValues("hunter2") });
+    expect(draft.criteria[0]!.assumption).toBe("'Test the search' is checked as: [REDACTED] the search field is shown");
+    expect(draft.intent?.goal).toBe("A visitor with [REDACTED] can search");
+  });
+
+  it("the prompt asks for the intent and allows inferred criteria only with pages", async () => {
+    const { llm, transport } = setup({ json: searchOutput() });
+    await compileRequirement(llm, { ...input(SEARCH_TEXT), site });
+    const system = String(transport.requests[0]!.system);
+    expect(system).toContain('"intent"');
+    expect(system).toContain('"origin":"inferred"');
+    expect(system).toMatch(/only when .*pages are provided/i);
   });
 });

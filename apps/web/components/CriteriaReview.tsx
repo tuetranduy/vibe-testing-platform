@@ -1,6 +1,6 @@
 "use client";
 
-import { describeExpectedOutcome, type NormalizedRequirement, type SiteAnalysis } from "@platform/contracts";
+import { ADDED_BY_PLATFORM, describeExpectedOutcome, isInferred, type NormalizedRequirement, type SiteAnalysis } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ApiRequestError, cancelRun, confirmCriteria, getCriteria, getSiteAnalysis, updateCriteria, type ConfirmResult } from "../lib/api";
@@ -139,6 +139,33 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
   const aiJudged = criteria.filter((c) => c.expectedOutcome.kind === "semantic").length;
   const nonCritical = criteria.filter((c) => !c.critical).length;
   const openEdits = criteria.map((c) => c.id).filter((id) => editing.has(id));
+  // What the analysis added on its own is reviewed apart from the user's own checks (2026-11-11).
+  const stated = criteria.filter((c) => !isInferred(c));
+  const added = criteria.filter(isInferred);
+  const notes = requirement.intent?.notes ?? [];
+  const card = (c: (typeof criteria)[number]) => (
+    <CriterionCard
+      key={c.id}
+      siteCheck={analysis?.checks.find((check) => check.criterionId === c.id)}
+      criterion={c}
+      facts={requirement.facts}
+      busy={saving || confirming}
+      canRemove={criteria.length > 1}
+      onSave={(outcome) =>
+        save(
+          criteria.map((x) =>
+            x.id === c.id
+              ? { ...x, expectedOutcome: outcome, statement: describeExpectedOutcome(outcome, requirement.facts), ambiguity: null }
+              : x,
+          ),
+        )
+      }
+      onRemove={() => void save(criteria.filter((x) => x.id !== c.id)).then((err) => err && setError(err))}
+      onCriticalChange={(critical) => save(criteria.map((x) => (x.id === c.id ? { ...x, critical } : x)))}
+      canMakeNonCritical={criteria.filter((x) => x.critical).length > 1}
+      onEditingChange={(open) => editingChange(c.id, open)}
+    />
+  );
 
   return (
     <section className="review" aria-labelledby="review-title">
@@ -164,32 +191,32 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
 
         {analysis && <LiveSiteSummary analysis={analysis} />}
 
-        <div className="criteria-list">
-          {criteria.map((c) => (
-            <CriterionCard
-              key={c.id}
-              siteCheck={analysis?.checks.find((check) => check.criterionId === c.id)}
-              criterion={c}
-              facts={requirement.facts}
-              busy={saving || confirming}
-              canRemove={criteria.length > 1}
-              onSave={(outcome) =>
-                save(
-                  criteria.map((x) =>
-                    x.id === c.id
-                      ? { ...x, expectedOutcome: outcome, statement: describeExpectedOutcome(outcome, requirement.facts), ambiguity: null }
-                      : x,
-                  ),
-                )
-              }
-              onRemove={() => void save(criteria.filter((x) => x.id !== c.id)).then((err) => err && setError(err))}
-              onCriticalChange={(critical) => save(criteria.map((x) => (x.id === c.id ? { ...x, critical } : x)))}
-              canMakeNonCritical={criteria.filter((x) => x.critical).length > 1}
-              onEditingChange={(open) => editingChange(c.id, open)}
-            />
-          ))}
-        </div>
+        {requirement.intent && (
+          <p className="review-understood">
+            <span className="note-title">What I understood</span> <span>{requirement.intent.goal}</span>
+          </p>
+        )}
 
+        <div className="criteria-list">{stated.map(card)}</div>
+
+        {(added.length > 0 || notes.length > 0) && (
+          <div className="criteria-added" role="group" aria-labelledby="added-title">
+            <h3 id="added-title" className="criteria-added-title">
+              {ADDED_BY_PLATFORM}
+            </h3>
+            <p className="muted">
+              Your instructions were short, so these checks were added from what the site shows. Remove any that you did not mean.
+            </p>
+            <div className="criteria-list">{added.map(card)}</div>
+            {notes.length > 0 && (
+              <ul className="assumption-list">
+                {notes.map((n, i) => (
+                  <li key={`${i}-${n}`}>{n}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
       </div>
 

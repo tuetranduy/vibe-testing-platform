@@ -1,0 +1,16 @@
+id: login-works-with-pages
+tags: [intent, feature, login]
+# "Works" for a login includes a rejected one: with the sign-in form on the pages, the analysis adds a check that a
+# wrong password shows an error, as a visible fact (the site's wording is unknown).
+input: "Make sure login works"
+testDataKeys: []
+secretNames: []
+# A small hand-written shop, in the shape the analysis records pages.
+pages: [{"url": "https://shop.example.com/", "inventory": {"title": "Example Shop", "description": "Outdoor gear", "headings": [{"level": 1, "text": "Gear for the outdoors"}, {"level": 2, "text": "Popular products"}], "links": [{"text": "Home", "url": "https://shop.example.com/", "area": "nav"}, {"text": "Products", "url": "https://shop.example.com/products", "area": "nav"}, {"text": "Cart", "url": "https://shop.example.com/cart", "area": "nav"}, {"text": "Sign in", "url": "https://shop.example.com/login", "area": "nav"}, {"text": "Trail Running Shoes", "url": "https://shop.example.com/products/101", "area": "main"}, {"text": "Canvas Backpack", "url": "https://shop.example.com/products/102", "area": "main"}, {"text": "Steel Water Bottle", "url": "https://shop.example.com/products/103", "area": "main"}], "forms": [{"name": "Search", "fields": [{"label": "Search products", "type": "search", "placeholder": "Search products"}], "submit": "Search"}], "buttons": ["Search", "Add to cart", "Add to cart", "Add to cart"]}}, {"url": "https://shop.example.com/login", "inventory": {"title": "Sign in | Example Shop", "description": "", "headings": [{"level": 1, "text": "Sign in"}], "links": [{"text": "Home", "url": "https://shop.example.com/", "area": "nav"}, {"text": "Products", "url": "https://shop.example.com/products", "area": "nav"}, {"text": "Cart", "url": "https://shop.example.com/cart", "area": "nav"}, {"text": "Sign in", "url": "https://shop.example.com/login", "area": "nav"}, {"text": "Forgot your password?", "url": "https://shop.example.com/reset", "area": "main"}], "forms": [{"name": "Sign in", "fields": [{"label": "Email", "type": "email", "placeholder": ""}, {"label": "Password", "type": "password", "placeholder": ""}], "submit": "Sign in"}], "buttons": ["Sign in"]}}]
+expect:
+  criteriaCount: { min: 2, max: 6 }
+  inferred: { min: 1, max: 5 }
+  requiredOutcomeKinds:
+    - visible
+  noInventedText: true
+  mustFlagAmbiguous: false

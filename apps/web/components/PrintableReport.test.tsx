@@ -36,4 +36,23 @@ describe("PrintableReport (V1.1)", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("The report is available once the run ends");
     expect(print).not.toHaveBeenCalled();
   });
+
+  it("prints what the platform understood and assumed, and marks the checks it added (2026-11-11)", async () => {
+    const report = reportFixture();
+    const understood = {
+      ...report,
+      requirement: {
+        ...report.requirement!,
+        intent: { clarity: "feature" as const, goal: "A visitor can buy a product", feature: null, notes: [] },
+        criteria: report.requirement!.criteria.map((c) => (c.id === "AC-2" ? { ...c, origin: "inferred" as const, rationale: "A usual check" } : c)),
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => (String(input).endsWith("/report") ? json(200, understood) : json(200, summaryFixture({ lifecycle: "COMPLETED", verdict: "FAILED" })))));
+    vi.stubGlobal("print", vi.fn());
+    render(<PrintableReport runId="run_1" />);
+    expect(await screen.findByRole("heading", { name: "Assumptions" })).toBeInTheDocument();
+    expect(screen.getByText("A visitor can buy a product")).toBeInTheDocument();
+    expect(screen.getByText("A usual check")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^AC-2 — .*\(added by the platform\)$/ })).toBeInTheDocument();
+  });
 });

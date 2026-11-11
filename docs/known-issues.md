@@ -46,7 +46,7 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-022 | Medium | Secrets | A secret typed into an edited suggestion or criterion is stored in plain text | Resolved (2026-09-29) |
 | KI-023 | Medium | Deployment | Production starts with the example encryption key and API token | Resolved (2026-09-29) |
 | KI-024 | Medium | Crash recovery | Lost runs are detected only while some worker is alive | Resolved (2026-09-29) |
-| KI-025 | Medium | Process | No CI; the repository has no remote | CI added; remote open |
+| KI-025 | Medium | Process | No CI; the repository has no remote | Remote added; CI removed again 2026-11-09 (`a69ef9e`), by decision: tests run locally |
 | KI-026 | Medium | LLM quality | Most models offered in Settings have never been evaluated | Resolved for DeepSeek (re-scored 2026-11-05, all four suites); Claude and Gemini blocked: invalid Anthropic key, free-tier Gemini key |
 | KI-027 | Low | Data model | D6: only 4 tables carry `tenant_id`; child rows rely on `run_id` | Resolved `3a61f16` |
 | KI-028 | Low | Audit | Revealing a secret-bearing artifact is only a log line | Resolved `6026592` (V1.1) |
@@ -57,7 +57,7 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-033 | Low | Secrets | Saved credential profiles are decrypted by the API at run creation | Closed: decision (2026-09-30) |
 | KI-034 | Low | Users | Sessions: no list, no "sign out everywhere" short of a password change | Resolved `9a5bfa0` |
 | KI-035 | Low | Users | Users exist only in the default tenant | Resolved `8e0d47a` |
-| KI-036 | Medium | CI | The GitHub Action has never run on GitHub | Open (needs KI-025's remote) |
+| KI-036 | Medium | CI | The GitHub Action has never run on GitHub | Open (the remote and a deployed web app now exist) |
 | KI-037 | Low | Schedules | Schedules fire only while an API process is up; a missed firing runs late, once | Resolved `ad47ad2` |
 | KI-038 | Low | Admission | A suite run takes one slot but queues all of its tests at once | Resolved `f41b0d6` |
 | KI-039 | Low | Performance | Suite-run views compare every child with its previous run on each read | Resolved `c0c9e09` |
@@ -96,6 +96,7 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-073 | Medium | Exploration | A click that opens a sign-in prompt (a guest's "Add to wishlist") is not recognised: the criterion ends INCONCLUSIVE, not "needs a login" | Open |
 | KI-071 | Medium | Verification | Facts read on a search results page stay MODEL_EXTRACTED or have the wrong type, so the criteria end UNVERIFIED_EVIDENCE | Resolved in working tree (2026-11-06) |
 | KI-074 | Medium | Target site | frontends-demo sometimes serves its own Error 500 in the sandbox ("[PATCH] …/store-api/context: <no response> Failed to fetch") | Open: not yet known whether site-side or egress-proxy-side |
+| KI-076 | Medium | LLM quality | The intent prompts (requirement compiler, planner) changed on 2026-11-11 and have not been scored on any model | Open (needs a paid model key) |
 | KI-075 | High | Requirement analysis | "Verify signup functionality" stops at the sign-in dialog: the site read never opens Sign up, so the criteria guess the sign-up form | Resolved in working tree (2026-11-07) |
 
 KI-056–KI-057: [Travel Luggage Set run investigation](reviews/run_0mw3gsjgke3a1923c465bb1e1.md), with the recorded
@@ -438,6 +439,10 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
 - **Partly resolved:** `.github/workflows/ci.yml` (see `docs/operations.md`, "Release checks"); it has not run yet.
 - **To close:** add a remote (e.g. a private GitHub repository), push, add the `GEMINI_API_KEY` secret, and check the
   first run.
+- **2026-11-09:** the repository has a remote (`origin`, GitHub). The CI workflow was removed (`a69ef9e`) and
+  `.github/workflows/deploy.yml` now deploys every push to `main` without running a test, so the first half of this
+  issue is open again by decision: the suites run locally before a push (`docs/operations.md`, "Release checks").
+  The plan's A14 (tests on every push, the live suite nightly) is not met.
 
 ## KI-026 — Most models offered in Settings have never been evaluated
 - **Severity:** Medium.
@@ -597,7 +602,7 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   stack (the web app's `/api/ext` path emulated by the test), but the action has never run inside GitHub Actions: the
   repository has no remote (KI-025). Input names, `$GITHUB_OUTPUT` / `$GITHUB_STEP_SUMMARY` handling and the
   `node24` runtime follow GitHub's documentation, unverified.
-- **To close:** with KI-025's remote, run the example workflow in `integrations/README.md` against a deployed web app.
+- **To close:** the remote exists and the web app is deployed (`docs/deployment.md`): run the example workflow in `integrations/README.md` against a deployed web app.
 
 ## KI-037 — Schedules fire only while an API process is up
 - **Severity:** Low (by design, V1.2 F3).
@@ -1096,3 +1101,14 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
 - **Open:** the header's Sign in button is sometimes missing on load (rendered late), and DeepSeek calls sometimes
   stall; both end the read early.
 
+## KI-076 — The intent prompts have not been scored on any model
+- **Severity:** Medium (the prompt headers require an eval run before a prompt change ships).
+- **Where:** `packages/testing-engine/src/requirement/prompts.ts`, `packages/testing-engine/src/planner/prompts.ts`;
+  spec `docs/superpowers/specs/2026-11-11-intent-understanding-design.md`.
+- **What:** the requirement compiler now returns the user's intent and may add inferred criteria for a short or vague
+  requirement; the planner is told the goal and the feature. Deterministic code drops an inferred criterion that is
+  not grounded, and unit tests cover that, but how often a model follows the new instructions (adds useful checks for
+  "Test the search", adds none for a specific requirement, records an assumption instead of parking vague wording) is
+  not measured. Cases 36–40 were written for it and load; none has been run.
+- **To close:** `pnpm eval requirement-compiler` and `pnpm eval planner` on every offered model (as KI-026), record the
+  rows in `evals/BASELINE.md`, and re-run the 12-case `evals/e2e-unclear` corpus to compare with the 2026-11-06 table.

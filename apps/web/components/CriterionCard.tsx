@@ -1,6 +1,6 @@
 "use client";
 
-import { describeExpectedOutcome, type AcceptanceCriterion, type ExpectedOutcome, type FactRequest, type SiteCheck } from "@platform/contracts";
+import { describeExpectedOutcome, isInferred, type AcceptanceCriterion, type ExpectedOutcome, type FactRequest, type SiteCheck } from "@platform/contracts";
 import { useEffect, useRef, useState } from "react";
 import { CheckEditor } from "./CheckEditor";
 import { Icon } from "./Icon";
@@ -113,6 +113,12 @@ export function CriterionCard({
         )}
 
         <p className="criterion-statement">{c.statement}</p>
+        {isInferred(c) && c.rationale && (
+          <p className="criterion-rationale">
+            <span className="note-title">Why it was added</span> <span>{c.rationale}</span>
+          </p>
+        )}
+        {c.assumption && <p className="criterion-assumption">Assumed: {c.assumption}</p>}
 
         <div className="criterion-check" role="group" aria-labelledby={`${c.id}-check`}>
           <p id={`${c.id}-check`} className="criterion-check-title">

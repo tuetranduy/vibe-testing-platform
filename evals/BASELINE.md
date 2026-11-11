@@ -63,6 +63,12 @@ requirement (seen in the Milestone B demo: "Search for iPhone 17 Pro…" got a `
 it, `onlyProvidedInputRefs: true`) failed 1 of 20 samples before the change and 0 of 60 after.
 **Re-run the full suite and replace that row.**
 
+**2026-11-11 — prompt changed, not re-scored (KI-076).** The requirement-compiler prompt now asks for the user's
+intent and may add grounded `origin: "inferred"` criteria (spec
+`docs/superpowers/specs/2026-11-11-intent-understanding-design.md`), with cases 36–40 and the `inferred`,
+`minStructured` and `mustRecordAssumption` expectations. Every case defaults to no inferred criteria; cases 34 and
+36–39 allow them. No model has been scored on the new prompt: every row above is for an earlier one.
+
 What a case checks (`evals/requirement-compiler/cases/*.yaml`): the compiled criterion count is in
 `expect.criteriaCount`, every `expect.requiredOutcomeKinds` entry is matched by at least one criterion
 (a list entry means "any of these kinds"), and when `mustFlagAmbiguous` is true at least one criterion
@@ -111,6 +117,10 @@ Record the `Total:` line with the commit of `packages/testing-engine/src/planner
 | 2026-11-05 | deepseek-flash (thinking high), full suite | ba3b4a1 | 18/18 (100%) | 40,247 / 21,834 | $0.02 | — (122 s) |
 | 2026-11-06 | deepseek-flash, R3 rule "open a page read with a navigate step to its URL; name only controls on the current page" (two runs) | a0b6cf8 + this change | 17/18, 17/18 | 44,441 / 30,155; 44,441 / 29,394 | $0.05 each | search-results in both (no pages in the case, so the new rule does not apply): split into 2 scenarios; once also fill + click instead of a `search` step. Both modes are recorded above for this case |
 | 2026-11-05 | deepseek-v4-pro (`LLM_REASONING=minimal`), full suite | ba3b4a1 | 17/18 (94.4%) | 39,743 / 9,363 | $0.04 | search-results (2 scenarios). Case 18 passes. At thinking high, 6 of 10 case-18 runs hit the 180 s case budget (all 4 that answered passed) |
+
+**2026-11-11 — prompt changed, not re-scored (KI-076).** The planner is now told what the user wants to know and the
+feature under test, and each criterion's origin; one sentence was added to its system prompt. The cases are unchanged
+(they carry no intent), so a re-score measures only the added sentence.
 
 The failures at a2538bc were all the model marking "Add to cart" / "Remove the item from the cart"
 `destructive: true`, which blocks the criterion (`DESTRUCTIVE_ACTION_NOT_AUTHORIZED`) even though the

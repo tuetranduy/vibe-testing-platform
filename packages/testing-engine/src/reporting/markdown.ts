@@ -1,4 +1,14 @@
-import { STATUS_REASON_TEXT, type CriterionChange, type CriterionResult, type RunVerdict, type TestReport } from "@platform/contracts";
+import {
+  PASSED_ON_ASSUMED,
+  STATUS_REASON_TEXT,
+  assumptionsOf,
+  isInferred,
+  passedOnAssumedChecks,
+  type CriterionChange,
+  type CriterionResult,
+  type RunVerdict,
+  type TestReport,
+} from "@platform/contracts";
 import type { ResultComparison } from "./comparison";
 
 /**
@@ -75,12 +85,14 @@ export interface MarkdownComparison {
 export function renderReportMarkdown(report: TestReport, compared: MarkdownComparison | null = null): string {
   const out: string[] = [];
   const statementOf = new Map((report.requirement?.criteria ?? []).map((c) => [c.id, c.statement]));
+  const addedIds = new Set((report.requirement?.criteria ?? []).filter(isInferred).map((c) => c.id));
   const push = (...lines: string[]) => out.push(...lines);
 
   push("# Test report", "");
   push(`- **Website:** ${escapeMarkdown(report.targetUrl)}`);
   push(`- **Run:** ${escapeMarkdown(report.runId)}${report.rerunOf ? ` (rerun of ${escapeMarkdown(report.rerunOf)})` : ""}`);
-  push(`- **Result:** ${report.verdict ? VERDICT[report.verdict] : `${escapeMarkdown(report.lifecycle)} (no verdict)`}`);
+  const verdict = report.verdict ? (passedOnAssumedChecks(report) ? PASSED_ON_ASSUMED : VERDICT[report.verdict]) : null;
+  push(`- **Result:** ${verdict ?? `${escapeMarkdown(report.lifecycle)} (no verdict)`}`);
   push(
     `- **Started:** ${when(report.startedAt)} · **Finished:** ${when(report.finishedAt)} · **Duration:** ${duration(report.durationMs)}`,
   );
@@ -91,6 +103,18 @@ export function renderReportMarkdown(report: TestReport, compared: MarkdownCompa
   if (report.requirement) {
     push("## Requirement", "");
     for (const line of report.requirement.originalText.split(/\r?\n/).filter((l) => l.trim())) push(`> ${escapeMarkdown(line)}`);
+    push("");
+    if (report.requirement.intent) push(`**What was understood:** ${escapeMarkdown(report.requirement.intent.goal)}`, "");
+  }
+
+  // What the analysis added or assumed on its own (2026-11-11): the reader must know which checks are not their words.
+  const assumptions = assumptionsOf(report.requirement);
+  if (assumptions.length > 0) {
+    const label = { added: " (added by the platform)", assumed: " (assumed)", note: "" } as const;
+    push("## Assumptions", "");
+    for (const a of assumptions) {
+      push(`- ${a.criterionId ? `${escapeMarkdown(a.criterionId)}${label[a.kind]}: ` : ""}${escapeMarkdown(a.text)}`);
+    }
     push("");
   }
 
@@ -126,7 +150,7 @@ export function renderReportMarkdown(report: TestReport, compared: MarkdownCompa
   if (report.criteria.length === 0) push("No criterion results were recorded.", "");
   for (const c of report.criteria) {
     const statement = statementOf.get(c.criterionId) ?? `Criterion ${c.criterionId}`;
-    push(`### ${escapeMarkdown(c.criterionId)} — ${STATUS[c.status]}${c.critical ? "" : " (non-critical)"}`, "");
+    push(`### ${escapeMarkdown(c.criterionId)} — ${STATUS[c.status]}${c.critical ? "" : " (non-critical)"}${addedIds.has(c.criterionId) ? " (added by the platform)" : ""}`, "");
     push(escapeMarkdown(statement), "");
     push(`- **How it was decided:** ${escapeMarkdown(confirmation(c))}`);
     push(`- **Expected:** ${escapeMarkdown(c.expected)}`);

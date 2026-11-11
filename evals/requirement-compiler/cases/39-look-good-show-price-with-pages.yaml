@@ -1,0 +1,18 @@
+id: look-good-show-price-with-pages
+tags: [intent, vague]
+# FD-07: "show the price" has an objective reading the pages support (a price is visible on the product page) and
+# is checked that way, with the assumption recorded; "look good" stays AI-judged.
+input: "The product page should look good and show the price"
+testDataKeys: []
+secretNames: []
+# A small hand-written shop, in the shape the analysis records pages.
+pages: [{"url": "https://shop.example.com/", "inventory": {"title": "Example Shop", "description": "Outdoor gear", "headings": [{"level": 1, "text": "Gear for the outdoors"}, {"level": 2, "text": "Popular products"}], "links": [{"text": "Home", "url": "https://shop.example.com/", "area": "nav"}, {"text": "Products", "url": "https://shop.example.com/products", "area": "nav"}, {"text": "Cart", "url": "https://shop.example.com/cart", "area": "nav"}, {"text": "Sign in", "url": "https://shop.example.com/login", "area": "nav"}, {"text": "Trail Running Shoes", "url": "https://shop.example.com/products/101", "area": "main"}, {"text": "Canvas Backpack", "url": "https://shop.example.com/products/102", "area": "main"}, {"text": "Steel Water Bottle", "url": "https://shop.example.com/products/103", "area": "main"}], "forms": [{"name": "Search", "fields": [{"label": "Search products", "type": "search", "placeholder": "Search products"}], "submit": "Search"}], "buttons": ["Search", "Add to cart", "Add to cart", "Add to cart"]}}, {"url": "https://shop.example.com/products/101", "inventory": {"title": "Trail Running Shoes | Example Shop", "description": "", "headings": [{"level": 1, "text": "Trail Running Shoes"}, {"level": 2, "text": "Description"}], "links": [{"text": "Home", "url": "https://shop.example.com/", "area": "nav"}, {"text": "Products", "url": "https://shop.example.com/products", "area": "nav"}, {"text": "Cart", "url": "https://shop.example.com/cart", "area": "nav"}, {"text": "Sign in", "url": "https://shop.example.com/login", "area": "nav"}], "forms": [{"name": "Search", "fields": [{"label": "Search products", "type": "search", "placeholder": "Search products"}], "submit": "Search"}], "buttons": ["Search", "Add to cart", "Size 42", "Size 43"]}}]
+expect:
+  criteriaCount: { min: 2, max: 6 }
+  inferred: { min: 0, max: 5 }
+  requiredOutcomeKinds:
+    - visible
+    - semantic
+  mustRecordAssumption: true
+  noInventedText: true
+  mustFlagAmbiguous: true

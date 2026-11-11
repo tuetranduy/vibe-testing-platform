@@ -1,6 +1,6 @@
 "use client";
 
-import type { AcceptanceCriterion, CriterionResult, NormalizedRequirement, TestReport } from "@platform/contracts";
+import { ADDED_BY_PLATFORM, isInferred, type AcceptanceCriterion, type CriterionResult, type NormalizedRequirement, type TestReport } from "@platform/contracts";
 import { useState } from "react";
 import { reviewResult } from "../lib/api";
 import type { ArtifactInfo, StepInfo } from "../lib/progress-reducer";
@@ -121,6 +121,11 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
             {!r.critical && (
               <span className="weight-tag" title="A non-critical criterion is reported but never changes the verdict">
                 Non-critical
+              </span>
+            )}
+            {criterion && isInferred(criterion) && (
+              <span className="weight-tag origin-tag" title={criterion.rationale ?? undefined}>
+                {ADDED_BY_PLATFORM}
               </span>
             )}
             {decided && r.verdictSource ? (

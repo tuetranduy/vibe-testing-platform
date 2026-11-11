@@ -446,3 +446,56 @@ describe("CriteriaReview: the live-site analysis and suggested test data (V1.3)"
     expect(init!.body).toBeUndefined();
   });
 });
+
+describe("CriteriaReview: what the platform understood, added and assumed (2026-11-11)", () => {
+  /** AC-1 stated with an assumption; AC-2 and AC-3 added by the platform. */
+  const understood = (): NormalizedRequirement => {
+    const r = requirementFixture();
+    return {
+      ...r,
+      intent: { clarity: "feature", goal: "A visitor can add a product and see the cart grow", feature: "Cart", notes: ["Left out: Delete the cart (it would change or delete data)"] },
+      criteria: r.criteria.map((c, i) =>
+        i === 0
+          ? { ...c, assumption: "'goes up' is checked as: the count is higher than before" }
+          : { ...c, origin: "inferred" as const, rationale: i === 1 ? "A working cart counts what was added" : "<b>Speed</b> is part of a working page" },
+      ),
+    };
+  };
+
+  it("says what it understood, and groups the checks it added under their own heading with the reason for each", async () => {
+    routeFetch({ [`GET ${CRITERIA}`]: () => json(200, understood()) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    expect(await screen.findByText("A visitor can add a product and see the cart grow")).toBeInTheDocument();
+    expect(screen.getByText("What I understood")).toBeInTheDocument();
+    const added = screen.getByRole("group", { name: "Added by the platform" });
+    const cards = within(added).getAllByRole("article");
+    expect(cards.map((c) => within(c).getByRole("heading", { level: 3 }).textContent)).toEqual(["AC-2", "AC-3"]);
+    expect(within(cards[0]!).getByText("A working cart counts what was added")).toBeInTheDocument();
+    expect(within(cards[0]!).getByRole("button", { name: /remove/i })).toBeInTheDocument();
+    // The model's text is shown as text, never as markup.
+    expect(within(cards[1]!).getByText("<b>Speed</b> is part of a working page")).toBeInTheDocument();
+    expect(within(added).getByText("Left out: Delete the cart (it would change or delete data)")).toBeInTheDocument();
+    // The stated criterion stays outside the group, with what was assumed about it.
+    const stated = screen.getAllByRole("article")[0]!;
+    expect(added).not.toContainElement(stated);
+    expect(within(stated).getByText(/Assumed:/)).toHaveTextContent("Assumed: 'goes up' is checked as: the count is higher than before");
+  });
+
+  it("shows no heading, goal or note for a requirement with nothing added or assumed", async () => {
+    routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    await screen.findAllByRole("article");
+    expect(screen.queryByText("What I understood")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Added by the platform" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Assumed:/)).not.toBeInTheDocument();
+  });
+
+  it("the group goes once every added check is removed and there are no notes", async () => {
+    const r = understood();
+    routeFetch({ [`GET ${CRITERIA}`]: () => json(200, { ...r, intent: { ...r.intent!, notes: [] }, criteria: r.criteria.slice(0, 1) }) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    await screen.findAllByRole("article");
+    expect(screen.getByText("What I understood")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Added by the platform" })).not.toBeInTheDocument();
+  });
+});

@@ -193,3 +193,57 @@ describe("renderReportMarkdown — compared with the previous run (V1.2 F2)", ()
     expect(renderReportMarkdown(report())).not.toContain("Compared with the previous run");
   });
 });
+
+describe("renderReportMarkdown: what the platform understood and assumed (2026-11-11)", () => {
+  /** AC-1 stated with an assumption; AC-2 added by the platform. */
+  const understood = (patch: Partial<TestReport> = {}, over: { critical1?: boolean; goal?: string } = {}) => {
+    const base = report();
+    const [ac1, ac2] = base.requirement!.criteria;
+    return report({
+      ...patch,
+      requirement: {
+        ...base.requirement!,
+        intent: { clarity: "feature", goal: over.goal ?? "A visitor can add a product to the cart", feature: "Cart", notes: ["Left out: a *third* check (the pages read do not show it)"] },
+        criteria: [
+          { ...ac1!, critical: over.critical1 ?? true, assumption: "'goes up' is checked as: the count is higher than before" },
+          { ...ac2!, statement: "The cart lists the product", critical: true, origin: "inferred", rationale: "A product that was added shows in the cart" },
+        ],
+      },
+    });
+  };
+
+  it("prints the goal under the requirement and an Assumptions section", () => {
+    const md = renderReportMarkdown(understood());
+    expect(md).toContain("**What was understood:** A visitor can add a product to the cart");
+    const section = md.slice(md.indexOf("## Assumptions"), md.indexOf("## Summary"));
+    expect(section.split("\n").filter((l) => l.startsWith("- "))).toEqual([
+      "- AC-2 (added by the platform): A product that was added shows in the cart",
+      "- AC-1 (assumed): 'goes up' is checked as: the count is higher than before",
+      "- Left out: a \\*third\\* check (the pages read do not show it)",
+    ]);
+  });
+
+  it("marks the result of a criterion the platform added", () => {
+    const md = renderReportMarkdown(understood());
+    expect(md).toContain("### AC-2 — INCONCLUSIVE (non-critical) (added by the platform)"); // that result row is non-critical
+    expect(md).toContain("### AC-1 — FAIL\n");
+  });
+
+  it("says a pass rests on assumed checks only when it does; a failure is never softened", () => {
+    expect(renderReportMarkdown(understood({ verdict: "PASSED" }, { critical1: false }))).toContain("- **Result:** Passed (on assumed checks)");
+    expect(renderReportMarkdown(understood({ verdict: "PASSED" }))).toContain("- **Result:** Passed\n");
+    expect(renderReportMarkdown(understood({ verdict: "FAILED" }, { critical1: false }))).toContain("- **Result:** Failed\n");
+  });
+
+  it("has no Assumptions section and no goal line for a report without them", () => {
+    const md = renderReportMarkdown(report());
+    expect(md).not.toContain("## Assumptions");
+    expect(md).not.toContain("What was understood");
+  });
+
+  it("escapes the goal: it is the model's text", () => {
+    const md = renderReportMarkdown(understood({}, { goal: "**bold** <script>alert(1)</script>" }));
+    expect(md).not.toContain("<script>");
+    expect(md).not.toContain("**bold**");
+  });
+});

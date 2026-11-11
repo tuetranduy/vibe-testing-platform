@@ -1,8 +1,9 @@
 "use client";
 
-import type { TestReport, TestRunSummary } from "@platform/contracts";
+import { PASSED_ON_ASSUMED, assumptionsOf, isInferred, passedOnAssumedChecks, type TestReport, type TestRunSummary } from "@platform/contracts";
 import { useEffect, useRef, useState } from "react";
 import { getReport, getRun } from "../lib/api";
+import { AssumptionItems } from "./Assumptions";
 import { ERROR_CATEGORY_LABEL, VERDICT_LABEL } from "./format";
 import { CRITERION_STATUS_UI, VERDICT_SOURCE_TEXT, formatDuration, formatWhen, reasonText, runTitle } from "./report-format";
 
@@ -55,6 +56,7 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
 
   const { report, summary } = state;
   const statementOf = new Map((report.requirement?.criteria ?? []).map((c) => [c.id, c.statement]));
+  const addedIds = new Set((report.requirement?.criteria ?? []).filter(isInferred).map((c) => c.id));
   const s = report.summary;
   return (
     <article className="print-report theme-light">
@@ -75,7 +77,7 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
             <dt>Result</dt>
             <dd>
               <strong>
-                {report.verdict ? VERDICT_LABEL[report.verdict] : report.partial ? "Partial report (no verdict)" : "No verdict"}
+                {report.verdict ? (passedOnAssumedChecks(report) ? PASSED_ON_ASSUMED : VERDICT_LABEL[report.verdict]) : report.partial ? "Partial report (no verdict)" : "No verdict"}
               </strong>
             </dd>
           </div>
@@ -114,6 +116,18 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
         <section>
           <h2>Requirement</h2>
           <blockquote className="print-quote">{report.requirement.originalText}</blockquote>
+        </section>
+      )}
+
+      {report.requirement && assumptionsOf(report.requirement).length > 0 && (
+        <section>
+          <h2>Assumptions</h2>
+          {report.requirement.intent && (
+            <p>
+              What was understood: <span>{report.requirement.intent.goal}</span>
+            </p>
+          )}
+          <AssumptionItems requirement={report.requirement} />
         </section>
       )}
 
@@ -156,6 +170,7 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
             <h3>
               {c.criterionId} — {CRITERION_STATUS_UI[c.status].label}
               {!c.critical && " (non-critical)"}
+              {addedIds.has(c.criterionId) && " (added by the platform)"}
             </h3>
             <p>{statementOf.get(c.criterionId) ?? `Criterion ${c.criterionId}`}</p>
             <dl className="print-facts">

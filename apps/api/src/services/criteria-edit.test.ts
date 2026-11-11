@@ -208,3 +208,64 @@ describe("applyCriteriaEdit", () => {
     expect(!r.ok && r.code).toBe("VALIDATION_FAILED");
   });
 });
+
+describe("applyCriteriaEdit: what the analysis added and assumed (2026-11-11)", () => {
+  /** AC-5 was added by the analysis; AC-2 is a vague phrase checked concretely. */
+  function analysed(): NormalizedRequirement {
+    const l = latest();
+    return {
+      ...l,
+      criteria: l.criteria.map((c) =>
+        c.id === "AC-5"
+          ? { ...c, origin: "inferred" as const, rationale: "A working page has no blocking banner" }
+          : c.id === "AC-2"
+            ? { ...c, assumption: "'A message appears' is checked as: the page says added" }
+            : c,
+      ),
+    };
+  }
+  const edit = (l: NormalizedRequirement, id: string, change: (c: AcceptanceCriterion) => AcceptanceCriterion) =>
+    applyCriteriaEdit(l, { criteria: l.criteria.map((c) => (c.id === id ? change(c) : c)), facts: l.facts });
+  const issues = (r: ReturnType<typeof applyCriteriaEdit>) => (r.ok ? [] : r.issues.map((i) => `${i.path.join(".")}: ${i.message}`));
+
+  it("returns the origin, rationale and assumption untouched for an unchanged body", () => {
+    const l = analysed();
+    expect(applyCriteriaEdit(l, { criteria: l.criteria, facts: l.facts })).toEqual({ ok: true, criteria: l.criteria, facts: l.facts });
+  });
+
+  it("refuses a body that changes where a criterion came from, or why it was added", () => {
+    expect(issues(edit(analysed(), "AC-1", (c) => ({ ...c, origin: "inferred", rationale: "Mine now" })))).toEqual(
+      expect.arrayContaining(["criteria.0.origin: origin cannot change", "criteria.0.rationale: rationale cannot change"]),
+    );
+    expect(issues(edit(analysed(), "AC-5", (c) => ({ ...c, origin: "stated", rationale: null })))).toEqual(
+      expect.arrayContaining(["criteria.4.origin: origin cannot change"]),
+    );
+    expect(issues(edit(analysed(), "AC-5", (c) => ({ ...c, rationale: "Another reason" })))).toEqual(["criteria.4.rationale: rationale cannot change"]);
+  });
+
+  it("refuses a changed assumption while the check stays the same", () => {
+    expect(issues(edit(analysed(), "AC-2", (c) => ({ ...c, assumption: "Something else" })))).toEqual(["criteria.1.assumption: assumption changes only with the check"]);
+  });
+
+  it("an edited check is the user's: its assumption is cleared with its ambiguity, its origin stays", () => {
+    const r = edit(analysed(), "AC-2", (c) => ({ ...c, expectedOutcome: { ...outcomeOf(c, "text_matches"), match: { mode: "contains", value: "in your cart", caseSensitive: false } } }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.criteria[1]!.assumption ?? null).toBeNull();
+    expect(r.criteria[1]!.ambiguity).toBeNull();
+    const banner = edit(analysed(), "AC-5", (c) => ({ ...c, expectedOutcome: { ...outcomeOf(c, "visible"), expected: true } }));
+    expect(banner.ok && banner.criteria[4]).toMatchObject({ origin: "inferred", rationale: "A working page has no blocking banner" });
+  });
+
+  it("an inferred criterion can be removed like any other, with the facts only it read", () => {
+    const l = analysed();
+    const r = applyCriteriaEdit(l, { criteria: l.criteria.filter((c) => c.id !== "AC-5"), facts: l.facts.filter((f) => f.key !== "banner") });
+    expect(r.ok && r.criteria.map((c) => c.id)).toEqual(["AC-1", "AC-2", "AC-3", "AC-4", "AC-6"]);
+  });
+
+  it("a revision stored before the change takes a body that spells the defaults out", () => {
+    const l = latest();
+    const r = applyCriteriaEdit(l, { criteria: l.criteria.map((c) => ({ ...c, origin: "stated" as const, rationale: null, assumption: null })), facts: l.facts });
+    expect(r.ok).toBe(true);
+  });
+});

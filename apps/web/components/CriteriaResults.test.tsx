@@ -190,4 +190,15 @@ describe("manual reviews", () => {
     expect(onReview).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Mark as fail" })).toBeEnabled();
   });
+
+  it("tags the result of a check the platform added (2026-11-11)", () => {
+    const report = reportFixture();
+    const requirement = {
+      ...report.requirement!,
+      criteria: report.requirement!.criteria.map((c) => (c.id === "AC-2" ? { ...c, origin: "inferred" as const, rationale: "A usual check" } : c)),
+    };
+    renderResults({ ...report, requirement });
+    expect(within(row("AC-2")).getByText("Added by the platform")).toBeInTheDocument();
+    expect(within(row("AC-1")).queryByText("Added by the platform")).not.toBeInTheDocument();
+  });
 });

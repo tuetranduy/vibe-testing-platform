@@ -9,6 +9,7 @@ The web app now starts from **Website URL + Test instructions**, or an explicit 
 
 The redesigned workspace defaults to light (saved theme preferences still apply), uses a four-step run guide, and keeps detailed activity, optional settings and saved test code behind disclosures. Desktop and mobile share the same flow.
 
+- **Intent understanding (2026-11-11, [spec](docs/superpowers/specs/2026-11-11-intent-understanding-design.md)).** For a short or vague requirement ("Test the search", "Test this website") the analysis says what it understood and adds up to five checks a tester would run, each kept only when the pages it read show what it checks and never a destructive one. Vague wording with an objective reading is checked that way and the assumption recorded. The review groups these under **Added by the platform** with the reason for each; the report and the Markdown report list them under **Assumptions**, and a pass decided only by added checks reads **Passed (on assumed checks)**. A precise requirement gets nothing added. An answer with one invalid criterion keeps the others instead of failing the run. The changed prompts are not yet scored on a model ([KI-076](docs/known-issues.md#ki-076--the-intent-prompts-have-not-been-scored-on-any-model)).
 - Completed runs offer **Mark as pass** and **Mark as fail** for inconclusive criterion results. Reviews preserve the automated reason, evidence, reviewer and timestamp, are labeled **Reviewed by user**, and update report totals and run/suite verdicts. `POST /v1/test-runs/:runId/results/:criterionId/review` accepts `{ "status": "PASS" | "FAIL" }` with the run's usual ownership checks.
 - Requirement analysis asks the run's LLM for a short test title in the existing criteria call. Run history, run pages and suites use it; older runs retain their requirement preview. **Input requirements** on the run page shows the full submitted requirement.
 - Site discovery during surveys and live requirement analysis now performs up to six browsing/search/sign-in interactions (up to three per page) within the existing time budget. Values come from supplied test data/secrets or synthetic inputs; the model selects controls and input keys. Each resulting state retains an inventory and screenshot. Bounded document/fetch/XHR request metadata (method, endpoint, status/failure; no query strings, bodies or headers) accompanies the page context used for suggestions, criteria and planning. Discovery filters controls identified as persistent-data submissions, destructive actions or sign-out. Cancellation, the egress proxy and navigation policy still apply. The older read-only survey descriptions below describe the original implementation.
@@ -514,7 +515,9 @@ worker must share the `LLM_*` variables (see [`docs/operations.md`](docs/operati
     60 s, so a lost run is ended within about 90 s even when no worker is up (Section 6: within 2 minutes).
   - **Production refuses placeholder secrets**: the all-zero example `SECRETS_ENCRYPTION_KEY` and the development
     `API_TOKEN` fail start-up when `NODE_ENV=production`.
-  - **CI**: `.github/workflows/ci.yml` (see [`docs/operations.md`](docs/operations.md#release-checks)).
+  - **CI**: `.github/workflows/ci.yml` was added here and removed on 2026-11-09: the tests are run locally before a
+    push, and every push to `main` deploys (see [`docs/operations.md`](docs/operations.md#release-checks),
+    [`docs/deployment.md`](docs/deployment.md)).
 - **V1.1 (2026-09-29; spec [`docs/superpowers/specs/2026-09-29-v1.1-design.md`](docs/superpowers/specs/2026-09-29-v1.1-design.md)):**
   - **Built before the V1 live gate passed** (Revision 3 said V1.1 starts after it): the gate is still open and
     covers this code.

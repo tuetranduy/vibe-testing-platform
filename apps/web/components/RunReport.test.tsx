@@ -188,4 +188,62 @@ describe("RunReport", () => {
     await user.click(within(alert).getByRole("button", { name: /try again/i }));
     expect(await screen.findByRole("heading", { name: /verdict: failed/i })).toBeInTheDocument();
   });
+
+  describe("what the platform understood and assumed (2026-11-11)", () => {
+    /** Every critical criterion was added by the platform when `allAdded`; otherwise only AC-2. */
+    const understood = (verdict: "PASSED" | "FAILED", allAdded: boolean) => {
+      const report = reportFixture();
+      return {
+        ...report,
+        verdict,
+        requirement: {
+          ...report.requirement!,
+          intent: { clarity: "feature" as const, goal: "A visitor can buy a product", feature: "Cart", notes: ["Left out: Pay (it would change or delete data)"] },
+          criteria: report.requirement!.criteria.map((c) =>
+            allAdded || c.id === "AC-2"
+              ? { ...c, origin: "inferred" as const, rationale: `<b>Why</b> ${c.id}` }
+              : c.id === "AC-1"
+                ? { ...c, assumption: "Checked as the cart listing the product" }
+                : c,
+          ),
+        },
+      };
+    };
+
+    it("lists what was added (with why), what was assumed, and the notes", async () => {
+      reportFetch(() => json(200, understood("FAILED", false)));
+      renderReport();
+      const section = await screen.findByRole("region", { name: "Assumptions" });
+      expect(within(section).getByText("A visitor can buy a product")).toBeInTheDocument();
+      const items = within(section).getAllByRole("listitem").map((li) => li.textContent);
+      expect(items).toEqual([
+        "AC-2 · Added by the platform<b>Why</b> AC-2",
+        "AC-1 · AssumedChecked as the cart listing the product",
+        "Left out: Pay (it would change or delete data)",
+      ]);
+    });
+
+    it("says a pass rests on assumed checks when the platform added every deciding check", async () => {
+      reportFetch(() => json(200, understood("PASSED", true)));
+      renderReport();
+      expect(await screen.findByRole("heading", { name: /verdict: passed \(on assumed checks\)/i })).toBeInTheDocument();
+    });
+
+    it("never softens a failure, and a pass on the user's own checks reads as a plain pass", async () => {
+      reportFetch(() => json(200, understood("FAILED", true)));
+      const { unmount } = renderReport();
+      expect(await screen.findByRole("heading", { name: /^verdict: failed$/i })).toBeInTheDocument();
+      unmount();
+      reportFetch(() => json(200, understood("PASSED", false)));
+      renderReport();
+      expect(await screen.findByRole("heading", { name: /^verdict: passed$/i })).toBeInTheDocument();
+    });
+
+    it("has no Assumptions section for a report with none", async () => {
+      reportFetch(() => json(200, reportFixture()));
+      renderReport();
+      await screen.findByRole("heading", { name: /verdict: failed/i });
+      expect(screen.queryByRole("region", { name: "Assumptions" })).not.toBeInTheDocument();
+    });
+  });
 });

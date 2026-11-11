@@ -1,0 +1,17 @@
+id: test-the-search-with-pages
+tags: [intent, feature]
+# 2026-11-11 (spec intent-understanding): a feature-level requirement states no check. With pages that show the
+# search form and the products, the analysis adds what a tester would check (a term the shop sells is found; one it
+# does not sell says so), structured, and with no made-up wording.
+input: "Test the search"
+testDataKeys: []
+secretNames: []
+# A small hand-written shop, in the shape the analysis records pages.
+pages: [{"url": "https://shop.example.com/", "inventory": {"title": "Example Shop", "description": "Outdoor gear", "headings": [{"level": 1, "text": "Gear for the outdoors"}, {"level": 2, "text": "Popular products"}], "links": [{"text": "Home", "url": "https://shop.example.com/", "area": "nav"}, {"text": "Products", "url": "https://shop.example.com/products", "area": "nav"}, {"text": "Cart", "url": "https://shop.example.com/cart", "area": "nav"}, {"text": "Sign in", "url": "https://shop.example.com/login", "area": "nav"}, {"text": "Trail Running Shoes", "url": "https://shop.example.com/products/101", "area": "main"}, {"text": "Canvas Backpack", "url": "https://shop.example.com/products/102", "area": "main"}, {"text": "Steel Water Bottle", "url": "https://shop.example.com/products/103", "area": "main"}], "forms": [{"name": "Search", "fields": [{"label": "Search products", "type": "search", "placeholder": "Search products"}], "submit": "Search"}], "buttons": ["Search", "Add to cart", "Add to cart", "Add to cart"]}}, {"url": "https://shop.example.com/products", "inventory": {"title": "Products | Example Shop", "description": "", "headings": [{"level": 1, "text": "Products"}], "links": [{"text": "Home", "url": "https://shop.example.com/", "area": "nav"}, {"text": "Products", "url": "https://shop.example.com/products", "area": "nav"}, {"text": "Cart", "url": "https://shop.example.com/cart", "area": "nav"}, {"text": "Sign in", "url": "https://shop.example.com/login", "area": "nav"}, {"text": "Trail Running Shoes", "url": "https://shop.example.com/products/101", "area": "main"}, {"text": "Canvas Backpack", "url": "https://shop.example.com/products/102", "area": "main"}, {"text": "Steel Water Bottle", "url": "https://shop.example.com/products/103", "area": "main"}], "forms": [{"name": "Search", "fields": [{"label": "Search products", "type": "search", "placeholder": "Search products"}], "submit": "Search"}], "buttons": ["Search", "Add to cart", "Add to cart", "Add to cart", "Sort by price"]}}]
+expect:
+  criteriaCount: { min: 2, max: 6 }
+  inferred: { min: 1, max: 5 }
+  minStructured: 2
+  forbiddenPreconditions: [authenticated]
+  noInventedText: true
+  mustFlagAmbiguous: false

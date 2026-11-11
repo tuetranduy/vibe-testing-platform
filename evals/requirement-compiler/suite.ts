@@ -62,6 +62,15 @@ export const EvalCaseSchema = z.object({
      * `visible` (TEXT_NOT_STATED), so this counts those rewrites: each is the model guessing a text.
      */
     noInventedText: z.boolean().default(false),
+    /**
+     * How many criteria the analysis may add on its own (`origin: "inferred"`, 2026-11-11). By default none: a
+     * requirement that says what to check gets exactly that. A short or vague one with pages sets `min`.
+     */
+    inferred: z.object({ min: z.number().int().min(0).default(0), max: z.number().int().min(0).default(0) }).default({ min: 0, max: 0 }),
+    /** At least this many criteria have a structured (not `semantic`) outcome. */
+    minStructured: z.number().int().min(0).default(0),
+    /** Some criterion records what a vague phrase was taken to mean (`assumption`). */
+    mustRecordAssumption: z.boolean().default(false),
   }),
 });
 export type EvalCase = z.infer<typeof EvalCaseSchema>;
@@ -86,9 +95,24 @@ export function loadCases(dir = CASES_DIR): EvalCase[] {
 /** Score one compiled requirement against a case's expectations. */
 export function scoreCase(
   c: EvalCase,
-  criteria: { expectedOutcome: { kind: string; match?: unknown; item?: unknown }; ambiguity: unknown; preconditions: { kind: string; ref?: string | null }[] }[],
+  criteria: {
+    expectedOutcome: { kind: string; match?: unknown; item?: unknown };
+    ambiguity: unknown;
+    preconditions: { kind: string; ref?: string | null }[];
+    origin?: string;
+    assumption?: string | null;
+  }[],
 ): string[] {
   const failures: string[] = [];
+  const inferred = criteria.filter((x) => x.origin === "inferred").length;
+  if (inferred < c.expect.inferred.min || inferred > c.expect.inferred.max) {
+    failures.push(`${inferred} criteria added by the analysis, expected ${c.expect.inferred.min} to ${c.expect.inferred.max}`);
+  }
+  const structured = criteria.filter((x) => x.expectedOutcome.kind !== "semantic").length;
+  if (structured < c.expect.minStructured) failures.push(`${structured} structured criteria, expected at least ${c.expect.minStructured}`);
+  if (c.expect.mustRecordAssumption && !criteria.some((x) => typeof x.assumption === "string" && x.assumption !== "")) {
+    failures.push("no criterion records what the vague wording was taken to mean");
+  }
   const { min, max } = c.expect.criteriaCount;
   if (criteria.length < min || criteria.length > max) failures.push(`criteria count ${criteria.length} not in [${min}, ${max}]`);
   const kinds = new Set(criteria.map((x) => x.expectedOutcome.kind));

@@ -84,8 +84,37 @@ export const AcceptanceCriterionSchema = z.object({
       suggestions: z.array(z.string().max(300)).max(3),
     })
     .nullable(),
+  /**
+   * 2026-11-11: `stated` comes from the requirement's own words; `inferred` was added by the analysis because the
+   * requirement is short or vague (and the pages read show what it checks). Both quote the requirement in
+   * `sourceText`; an inferred one says why it was added in `rationale`.
+   */
+  origin: z.enum(["stated", "inferred"]).optional(),
+  rationale: z.string().min(3).max(300).nullable().optional(),
+  /** A vague phrase checked in a concrete way: what the analysis assumed it means. Cleared when the user edits the check. */
+  assumption: z.string().min(3).max(300).nullable().optional(),
 });
 export type AcceptanceCriterion = z.infer<typeof AcceptanceCriterionSchema>;
+
+/** Absent on criteria stored before 2026-11-11: those are all stated. */
+export const isInferred = (c: Pick<AcceptanceCriterion, "origin">): boolean => c.origin === "inferred";
+
+/** A requirement's inferred criteria are capped: they expand what the user wrote, they do not replace it. */
+export const MAX_INFERRED_CRITERIA = 5;
+
+/**
+ * What the analysis understood the user wants to test (2026-11-11, spec intent-understanding). `notes` are the
+ * things it did on its own that belong to no single criterion (e.g. a criterion it left out).
+ */
+export const RequirementIntentSchema = z.object({
+  clarity: z.enum(["specific", "feature", "vague", "site_wide"]),
+  /** One sentence: what the user wants to know. */
+  goal: z.string().min(3).max(300),
+  /** The feature under test as the site names it ("Search", "Wishlist"), when there is one. */
+  feature: z.string().min(1).max(80).nullable(),
+  notes: z.array(z.string().max(300)).max(10).default([]),
+});
+export type RequirementIntent = z.infer<typeof RequirementIntentSchema>;
 
 /** Every FactRef used by an expected outcome, with its path inside the outcome. */
 export function factRefsOf(outcome: ExpectedOutcome): { ref: FactRef; path: string[] }[] {
@@ -122,11 +151,26 @@ export const NormalizedRequirementSchema = z
     criteria: z.array(AcceptanceCriterionSchema).min(1).max(20),
     facts: z.array(FactRequestSchema).max(60),
     confirmedAt: IsoDateTime.nullable(),
+    intent: RequirementIntentSchema.nullable().optional(),
   })
   .superRefine((req, ctx) => {
     // 0. the verdict needs something to decide it (V1.1)
     if (!req.criteria.some((c) => c.critical)) {
       ctx.addIssue({ code: "custom", path: ["criteria"], message: "Keep at least one critical criterion: only critical criteria decide the verdict" });
+    }
+
+    // 0b. where a criterion came from (2026-11-11)
+    req.criteria.forEach((c, i) => {
+      const rationale = c.rationale ?? null;
+      if (isInferred(c) && rationale === null) {
+        ctx.addIssue({ code: "custom", path: ["criteria", i, "rationale"], message: "An inferred criterion says why it was added" });
+      }
+      if (!isInferred(c) && rationale !== null) {
+        ctx.addIssue({ code: "custom", path: ["criteria", i, "rationale"], message: "Only an inferred criterion has a rationale" });
+      }
+    });
+    if (req.criteria.filter(isInferred).length > MAX_INFERRED_CRITERIA) {
+      ctx.addIssue({ code: "custom", path: ["criteria"], message: `At most ${MAX_INFERRED_CRITERIA} inferred criteria` });
     }
 
     // 1. unique criterion ids

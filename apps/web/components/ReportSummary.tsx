@@ -1,4 +1,4 @@
-import type { CancelReason, RunVerdict, TestReport, TestRunSummary } from "@platform/contracts";
+import { PASSED_ON_ASSUMED, passedOnAssumedChecks, type CancelReason, type RunVerdict, type TestReport, type TestRunSummary } from "@platform/contracts";
 import { useId, type ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
 import { CANCEL_REASON_TEXT, ERROR_CATEGORY_LABEL, formatTime } from "./format";
@@ -82,7 +82,7 @@ function Headline({ report, cancelReason, titleId }: Props & { titleId: string }
           <div className="hero-text">
             <p className="eyebrow">Final report</p>
             <h2 id={titleId} className="hero-title">
-              <span className="visually-hidden">Verdict:</span> {ui.label}
+              <span className="visually-hidden">Verdict:</span> {passedOnAssumedChecks(report) ? PASSED_ON_ASSUMED : ui.label}
             </h2>
             <p className="hero-lede">
               {passed} of {plural(totalCriteria, "criterion", "criteria")} passed. {VERDICT_EXPLAIN[report.verdict]}

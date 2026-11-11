@@ -11,6 +11,14 @@ import { z } from "zod";
  */
 export const CompilerOutputSchema = z.object({
   title: z.string().trim().min(3).max(120).nullable().default(null),
+  /**
+   * What the user wants to test (2026-11-11), deliberately loose like the advisory fields: `requirement/intent.ts`
+   * clips it to the contract. Null (a model that ignores it, a scripted answer) is read as a specific requirement.
+   */
+  intent: z
+    .object({ clarity: z.enum(["specific", "feature", "vague", "site_wide"]), goal: z.string(), feature: z.string().nullable().default(null) })
+    .nullable()
+    .default(null),
   // `critical` is the user's call in review (V1.1), never the model's: it is not in the output schema.
   criteria: z.array(AcceptanceCriterionSchema.omit({ id: true, critical: true })).min(1).max(20),
   facts: z.array(FactRequestSchema).max(60),

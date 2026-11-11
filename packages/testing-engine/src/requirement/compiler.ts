@@ -1,7 +1,9 @@
 import {
   CancelledError,
   ContractError,
+  isInferred,
   liveSiteAnalysisOn,
+  type RequirementIntent,
   type SiteAnalysisDraft,
   type SitePage,
   type StoredTestRunRequest,
@@ -13,7 +15,8 @@ import { requireLlm, type AnalyzedRequirement, type RequirementDraft, type Stage
 import type { SurveyLink } from "../survey/links";
 import { readSite, type SiteRead, type SurveySandbox, type SurveyStore } from "../survey/site-reader";
 import { validateInsights, type RequirementInsights } from "./insights";
-import { CompilerOutputSchema } from "./model-output";
+import { WHOLE_REQUIREMENT_NOTE, groundInferred, salvage, wholeRequirementFallback } from "./intent";
+import { CompilerOutputSchema, type CompilerOutput } from "./model-output";
 import { postValidate } from "./post-validate";
 import { REQUIREMENT_SYSTEM_PROMPT, buildRequirementPrompt } from "./prompts";
 
@@ -39,10 +42,81 @@ export interface CompileRequirementInput {
 /** A compiled draft plus the advisory insights (V1.3): site checks and suggested test data. */
 export type CompiledRequirement = RequirementDraft & { insights: RequirementInsights };
 
+type Source = { originalText: string; testData: Record<string, TestDataValue>; secretNames: string[] };
+type Settled = { ok: true; draft: RequirementDraft; output: CompilerOutput; notes: string[] } | { ok: false; issues: string[] };
+
+const clip = (text: string, max: number): string => text.replace(/\s+/g, " ").trim().slice(0, max);
+
+/** The model's own words about a criterion, to the contract: a rationale only on an inferred one, nothing too short to say anything. */
+function tidy(output: CompilerOutput): CompilerOutput {
+  const criteria = output.criteria.map((c) => {
+    const { rationale, assumption, ...rest } = c;
+    const why = isInferred(c) && rationale ? clip(rationale, 300) : "";
+    const assumed = assumption ? clip(assumption, 300) : "";
+    return { ...rest, ...(why.length >= 3 ? { rationale: why } : {}), ...(assumed.length >= 3 ? { assumption: assumed } : {}) };
+  });
+  return { ...output, criteria };
+}
+
+/**
+ * The model's answer → a valid draft (2026-11-11, spec intent-understanding). Inferred criteria that are not grounded
+ * are left out first, so they never cost the correction round. On the last answer (`final`) what is still invalid is
+ * left out criterion by criterion, and when nothing is left the requirement is judged as a whole: an answer that
+ * matches the output schema never fails the analysis.
+ */
+function settle(raw: CompilerOutput, source: Source, pagesRead: boolean, final: boolean): Settled {
+  const grounded = groundInferred(tidy(raw), { pagesRead, secretNames: source.secretNames });
+  const notes = [...grounded.notes];
+  const whole = (output: CompilerOutput): Settled => {
+    const fallback = { ...output, ...wholeRequirementFallback(source.originalText), siteChecks: [], testData: [] };
+    const result = postValidate(fallback, source);
+    return result.ok ? { ok: true, draft: result.draft, output: fallback, notes: [...notes, WHOLE_REQUIREMENT_NOTE] } : result;
+  };
+  let output = grounded.output;
+  if (output.criteria.length === 0) return whole(output);
+  // Leaving a criterion out can only remove issues, but each pass is checked again; the loop ends within the criteria count.
+  for (;;) {
+    const result = postValidate(output, source);
+    if (result.ok) return { ok: true, draft: result.draft, output, notes };
+    // Before the last answer only the analysis' own additions are left out: a fault in a criterion the user stated
+    // is worth the correction round, one in a check nobody asked for is not.
+    if (!final && !onlyInferred(output, result.issues)) return result;
+    const kept = salvage(output, result.issues);
+    if (!kept) return final ? whole(output) : result;
+    notes.push(...kept.notes);
+    output = kept.output;
+  }
+}
+
+/** Every issue names a criterion (`criteria.<i>.…`) the analysis added. */
+function onlyInferred(output: CompilerOutput, issues: readonly string[]): boolean {
+  return issues.every((issue) => {
+    const index = /^criteria\.(\d+)\b/.exec(issue)?.[1];
+    const criterion = index === undefined ? undefined : output.criteria[Number(index)];
+    return criterion !== undefined && isInferred(criterion);
+  });
+}
+
+/** The intent as stored: the model's, clipped and masked; with notes and no intent from the model, a minimal one to carry them. */
+function intentOf(output: CompilerOutput, notes: string[], originalText: string, redact: (v: unknown) => unknown): RequirementIntent | null {
+  const said = output.intent;
+  if (!said && notes.length === 0) return null;
+  const mask = (text: string, max: number) => clip(String(redact(text)), max);
+  const goal = mask(said?.goal || output.title || originalText, 300);
+  const feature = said?.feature ? mask(said.feature, 80) : "";
+  return {
+    clarity: said?.clarity ?? "specific",
+    goal: goal.length >= 3 ? goal : "The requirement holds",
+    feature: feature === "" ? null : feature,
+    notes: notes.slice(0, 10).map((n) => mask(n, 300)),
+  };
+}
+
 /**
  * Natural-language requirement → structured criteria (the future revision 1). At most one correction
- * round covers both schema and post-validation failures; after that the compile fails with
- * ContractError. The orchestrator persists the draft and publishes the events. With `site`, the same call
+ * round covers both schema and post-validation failures; after that what is valid is kept (see `settle`), and
+ * the compile fails with ContractError only when the answer does not match the output schema at all. The
+ * orchestrator persists the draft and publishes the events. With `site`, the same call
  * sees the live site's pages and also returns site checks and test data values (validateInsights).
  */
 export async function compileRequirement(llm: RequirementLlm, input: CompileRequirementInput): Promise<CompiledRequirement> {
@@ -70,8 +144,8 @@ export async function compileRequirement(llm: RequirementLlm, input: CompileRequ
     schemaName: "requirement_criteria",
     system: REQUIREMENT_SYSTEM_PROMPT,
     messages: [{ role: "user", content }],
-    check: (output) => {
-      const result = postValidate(output, source);
+    check: (output, context) => {
+      const result = settle(output, source, pages.length > 0, context.corrected);
       return result.ok ? [] : result.issues;
     },
     stage: "ANALYZING_REQUIREMENT",
@@ -80,12 +154,23 @@ export async function compileRequirement(llm: RequirementLlm, input: CompileRequ
     deadlineAt: input.deadlineAt ?? null,
     redact: input.redact,
   });
-  const result = postValidate(data, source);
+  const result = settle(data, source, pages.length > 0, true);
   // Unreachable in practice (`check` already passed), but never hand an invalid draft on.
   if (!result.ok) throw new ContractError(`Compiled requirement is invalid: ${result.issues.join("; ")}`);
+  const masked = (text: string | null | undefined) => (text ? { text: clip(String(input.redact(text)), 300) } : null);
+  const draft: RequirementDraft = {
+    ...result.draft,
+    criteria: result.draft.criteria.map((c) => {
+      const { rationale, assumption, ...rest } = c;
+      const why = masked(rationale);
+      const assumed = masked(assumption);
+      return { ...rest, ...(why ? { rationale: why.text } : {}), ...(assumed ? { assumption: assumed.text } : {}) };
+    }),
+    intent: intentOf(result.output, result.notes, input.originalText, input.redact),
+  };
   const insights = validateInsights({
-    draft: result.draft,
-    output: data,
+    draft,
+    output: result.output,
     testData: input.testData,
     secretNames: input.secretNames,
     siteRead: pages.length > 0,
@@ -93,7 +178,7 @@ export async function compileRequirement(llm: RequirementLlm, input: CompileRequ
     seed: input.runId,
     redact: input.redact,
   });
-  return { ...result.draft, ...(data.title ? { title: String(input.redact(data.title)).slice(0, 120) } : {}), insights };
+  return { ...draft, ...(data.title ? { title: String(input.redact(data.title)).slice(0, 120) } : {}), insights };
 }
 
 /** The live-site read of the analysis (V1.3): the survey's sandbox (no Stagehand) and screenshot store. */

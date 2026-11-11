@@ -5524,3 +5524,44 @@ body::before { display: none; }
   .empty-steps { flex-direction: column; align-items: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+/* Intent understanding (2026-11-11): what the platform understood, added and assumed. */
+.review-understood,
+.assumption-goal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem .5rem;
+  align-items: baseline;
+  margin: 0;
+}
+.criteria-added {
+  display: grid;
+  gap: .75rem;
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+.criteria-added-title { margin: 0; font-size: 1rem; }
+.criteria-added > .muted { margin: 0; }
+.criterion-rationale,
+.criterion-assumption {
+  margin: .35rem 0 0;
+  font-size: .875rem;
+  color: var(--text-muted);
+}
+.assumptions { display: grid; gap: .6rem; }
+.assumption-list {
+  display: grid;
+  gap: .4rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: .9rem;
+}
+.assumption-tag {
+  display: inline-block;
+  margin-right: .5rem;
+  font-size: .75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.origin-tag { margin-left: .35rem; }

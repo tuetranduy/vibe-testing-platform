@@ -17,6 +17,8 @@ Return JSON with:
   - "steps": the ordered steps (at most ${MAX_PLANNED_STEPS}; prefer the shortest path that gathers every fact). Start with a "navigate" step to the target URL.
 - "stopConditions": up to 10 short conditions under which exploration should stop early (e.g. "The login is rejected"); may be empty.
 
+When the message says what the user wants to know and the feature under test, plan the path a visitor takes to use that feature; it never adds or removes a criterion. A criterion with "origin":"inferred" was added by the platform to check what the user meant: plan it like any other.
+
 Each step:
 - "kind": one of
   - "navigate" — open a URL or page
@@ -55,7 +57,7 @@ The message may also contain what a browser read on a few pages of the website b
 
 export interface PlannerPromptInput {
   targetUrl: string;
-  requirement: Pick<NormalizedRequirement, "originalText" | "criteria" | "facts">;
+  requirement: Pick<NormalizedRequirement, "originalText" | "criteria" | "facts"> & Pick<Partial<NormalizedRequirement>, "intent">;
   testDataKeys: string[];
   secretNames: string[];
   /** Credentials taken from the requirement text (V1.3.1): names only. */
@@ -71,6 +73,7 @@ export function buildPlannerPrompt(input: PlannerPromptInput): string {
   const criteria = requirement.criteria.map((c) => ({
     id: c.id,
     statement: c.statement,
+    origin: c.origin ?? "stated",
     expectedOutcome: c.expectedOutcome,
     preconditions: c.preconditions,
   }));
@@ -86,6 +89,9 @@ export function buildPlannerPrompt(input: PlannerPromptInput): string {
     "<<<REQUIREMENT",
     requirement.originalText,
     "REQUIREMENT>>>",
+    ...(requirement.intent
+      ? ["", `What the user wants to know: ${requirement.intent.goal}`, ...(requirement.intent.feature ? [`Feature under test: ${requirement.intent.feature}`] : [])]
+      : []),
     "",
     "Confirmed acceptance criteria (JSON):",
     JSON.stringify(criteria, null, 2),
