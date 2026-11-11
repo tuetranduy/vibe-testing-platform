@@ -286,13 +286,12 @@ when it is created; a profile's copy is purged with the run's other secrets when
 
 ## Release checks
 
-CI (`.github/workflows/ci.yml`, GitHub Actions) runs typecheck, `pnpm test` (with the S3 tests), `pnpm
-test:integration` and `pnpm test:e2e` on every push and pull request; nightly, the live E2E suite on DeepSeek; on
-demand (`workflow_dispatch` with `live-gate`), the release gate. The live jobs need a `DEEPSEEK_API_KEY` repository
-secret. The runners are Ubuntu 24.04, whose AppArmor denies the unprivileged user
-namespaces Chromium's sandbox needs; the workflow lifts that (`kernel.apparmor_restrict_unprivileged_userns=0`).
+Nothing on GitHub runs the tests. The CI workflow (`.github/workflows/ci.yml`: typecheck, the unit, integration
+and E2E suites on every push, the live suite nightly) was removed on 2026-11-09 (`a69ef9e`), and
+`.github/workflows/deploy.yml` deploys every push to `main` without checks (`docs/deployment.md`). The checks below
+are therefore run by hand, before pushing to `main`:
 
-
+- `pnpm typecheck`.
 - `pnpm test`, `pnpm test:integration` and `pnpm test:e2e` (CI mode: scripted model and explorer, deterministic)
   on every change, with `pnpm infra:up` running.
 - `./scripts/e2e-live-gate.sh` before a release: the E2E suite against the real model and Stagehand, green three

@@ -291,12 +291,13 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
       expect(facts).toHaveLength(4);
       expect(new Set(facts.map((f) => `${f.key}@${f.checkpoint}`))).toEqual(new Set(outcome.facts.map((f) => `${f.key}@${f.checkpoint}`)));
       const artifacts = await new ArtifactRepository(tdb.db).listByRun(run.id);
-      expect(artifacts.map((a) => [a.type, a.sensitivity, a.contentType])).toEqual([
-        ["SCREENSHOT", "STANDARD", "image/png"],
-        ["SCREENSHOT", "STANDARD", "image/png"],
-      ]);
+      // A screenshot after every browser step (2026-11-09: the live view shows the page after each one), the two
+      // checkpoints' among them: one artifact per step, in step order.
+      expect(artifacts).toHaveLength(outcome.steps.length);
+      expect(artifacts.every((a) => a.type === "SCREENSHOT" && a.sensitivity === "STANDARD" && a.contentType === "image/png")).toBe(true);
       expect(artifacts.every((a) => a.bytes > 1000)).toBe(true);
-      expect([outcome.steps[3]!.artifactIds, outcome.steps[8]!.artifactIds].flat()).toEqual(artifacts.map((a) => a.id));
+      expect(outcome.steps.flatMap((s) => s.artifactIds)).toEqual(artifacts.map((a) => a.id));
+      expect([outcome.steps[3]!.artifactIds, outcome.steps[8]!.artifactIds].every((ids) => ids.length === 1)).toBe(true);
 
       // Events: step.recorded per step, fact.observed per fact (no values), artifact.created (no URL).
       expect(events.filter((e) => e.type === "step.recorded")).toHaveLength(outcome.steps.length);

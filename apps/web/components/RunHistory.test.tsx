@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { json, summaryFixture } from "../test/fixtures";
-import { RunHistory } from "./RunHistory";
+import { ACTIVE_REFRESH_MS, RunHistory } from "./RunHistory";
 
 const run = (n: number, patch: Partial<TestRunSummary> = {}) =>
   summaryFixture({
@@ -317,5 +317,49 @@ describe("RunHistory owners (V1.1)", () => {
     await screen.findByRole("link", { name: "Requirement number 1" });
     expect(screen.queryByRole("button", { name: "My runs" })).not.toBeInTheDocument();
     expect(screen.getByText("Your runs, their verdicts, and the evidence behind them.")).toBeInTheDocument();
+  });
+  it("reads the list again on its own while a run is in progress, then stops", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let items = [run(2, { lifecycle: "EXPLORING", verdict: null, finishedAt: null }), run(1)];
+      const fetch = listFetch({ [FIRST]: () => json(200, { items, nextCursor: null }) });
+      render(<RunHistory />);
+      const table = await screen.findByRole("table");
+      expect(within(table).getByText("Running…")).toBeInTheDocument();
+      // Meanwhile the run fails and another one is created.
+      items = [run(3), run(2, { verdict: "FAILED" }), run(1)];
+      await vi.advanceTimersByTimeAsync(ACTIVE_REFRESH_MS);
+      await waitFor(() => expect(within(screen.getByRole("table")).queryByText("Running…")).not.toBeInTheDocument());
+      const links = within(screen.getByRole("table")).getAllByRole("link").map((a) => a.textContent);
+      expect(links).toEqual(["Requirement number 3", "Requirement number 2", "Requirement number 1"]);
+      // Nothing is in progress any more: no further reads.
+      const calls = fetch.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(ACTIVE_REFRESH_MS * 3);
+      expect(fetch.mock.calls.length).toBe(calls);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops a 'Load more' page that answers after the admin switched to their own runs", async () => {
+    const { testMe, userFixture } = await import("../test/me");
+    testMe.current = userFixture({ role: "admin" });
+    let answerMore: (r: Response) => void = () => {};
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === FIRST) return json(200, { items: [run(1)], nextCursor: "c1" });
+      if (url === `${FIRST}&cursor=c1`) return new Promise<Response>((resolve) => (answerMore = resolve));
+      if (url === `${FIRST}&owner=me`) return json(200, { items: [run(3)], nextCursor: null });
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(<RunHistory />);
+    await screen.findByRole("link", { name: "Requirement number 1" });
+    await userEvent.click(screen.getByRole("button", { name: /load more/i }));
+    await userEvent.click(screen.getByRole("button", { name: "My runs" }));
+    await screen.findByRole("link", { name: "Requirement number 3" });
+    answerMore(json(200, { items: [run(2)], nextCursor: "c2" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /load/i })).not.toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: "Requirement number 2" })).not.toBeInTheDocument();
   });
 });

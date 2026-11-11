@@ -99,6 +99,8 @@ In priority order. None blocks development; items 1–3 block the V1 release gat
 3. **Milestone C live demo**: `./scripts/milestone-c-demo.sh` against a real model (never completed).
 4. **Repository remote and first CI run** (KI-025): add a remote, push, add the `GEMINI_API_KEY` secret, and fix
    whatever the first run of `.github/workflows/ci.yml` finds (it has not run yet).
+   *(2026-11-09: the remote exists; the CI workflow was removed and every push to `main` deploys untested — A14 is
+   not met, KI-025.)*
 5. **Runner isolation** (KI-029): the rerun is a child process of the worker (same user, filesystem and network);
    `infra/runner/Dockerfile` has never been built. With no navigation guard in the rerun (A4), public hosts are
    reachable from it.

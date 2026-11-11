@@ -120,4 +120,37 @@ describe("fitToField", () => {
     expect(fitToField("1234567890", field({ maxLength: 4 }))).toBe("1234");
     expect(fitToField("12", field({ maxLength: 4 }))).toBe("12");
   });
+  it("a number field gets a number inside min and max, whatever the model said", () => {
+    const qty = field({ type: "number", min: "1", max: "9" });
+    expect(fitToField("3", qty)).toBe("3");
+    expect(fitToField("25", qty)).toBe("9");
+    expect(fitToField("0", qty)).toBe("1");
+    expect(fitToField("about 4 items", qty)).toBe("4");
+    expect(fitToField("several", qty)).toBe("1");
+    expect(fitToField("many", field({ type: "number" }))).toBe("1");
+    expect(fitToField("2.5", field({ type: "range", min: "0", max: "1" }))).toBe("1");
+  });
+
+  it("a date or time field gets the browser's format, moved inside min and max", () => {
+    expect(fitToField("2031-05-20", field({ type: "date" }))).toBe("2031-05-20");
+    expect(fitToField("May 20, 2031", field({ type: "date" }))).toBe("2030-01-15");
+    expect(fitToField("2031-13-40", field({ type: "date" }))).toBe("2030-01-15");
+    expect(fitToField("2030-01-15", field({ type: "date", max: "2026-11-11" }))).toBe("2026-11-11");
+    expect(fitToField("1990-01-15", field({ type: "date", min: "2027-01-01" }))).toBe("2027-01-01");
+    expect(fitToField("soon", field({ type: "date", min: "not a date" }))).toBe("2030-01-15");
+    expect(fitToField("10am", field({ type: "time" }))).toBe("10:00");
+    expect(fitToField("2031-05", field({ type: "month" }))).toBe("2031-05");
+    expect(fitToField("next year", field({ type: "datetime-local" }))).toBe("2030-01-15T10:00");
+  });
+
+  it("a value the field's pattern refuses is rewritten when dropping separators is enough; otherwise it is kept", () => {
+    const digits = field({ type: "tel", pattern: "[0-9]{6,12}" });
+    expect(fitToField("5550123456", digits)).toBe("5550123456");
+    expect(fitToField("+1 555 0123", digits)).toBe("15550123");
+    expect(fitToField("TEST-AB12", field({ pattern: "[A-Z0-9]+" }))).toBe("TESTAB12");
+    expect(fitToField("Alex", field({ pattern: "[0-9]+" }))).toBe("Alex");
+    // A pattern that does not compile is ignored, and the rewrite still respects maxlength.
+    expect(fitToField("Alex", field({ pattern: "[a-" }))).toBe("Alex");
+    expect(fitToField("12-34-56-78", field({ pattern: "\\d{4}", maxLength: 4 }))).toBe("1234");
+  });
 });

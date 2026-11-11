@@ -1,7 +1,7 @@
 "use client";
 
 import { isTerminalLifecycle, type TestRunSummary } from "@platform/contracts";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { listRuns } from "../lib/api";
 import { isAdminUser, useMe } from "../lib/me";
 import { PROGRESS_STAGES, STAGE_LABELS, type ProgressStage } from "../lib/progress-reducer";
@@ -25,6 +25,9 @@ const FILTERS: readonly { id: FilterId; label: string; test: (r: TestRunSummary)
   { id: "active", label: "In progress", test: (r) => !isTerminalLifecycle(r.lifecycle) },
   { id: "stopped", label: "Cancelled or errored", test: (r) => r.lifecycle === "CANCELLED" || r.lifecycle === "ERRORED" },
 ];
+
+/** How often the list is read again while a loaded run is still in progress. */
+export const ACTIVE_REFRESH_MS = 10_000;
 
 const matchesQuery = (r: TestRunSummary, query: string) => {
   const q = query.trim().toLowerCase();
@@ -51,9 +54,14 @@ export function RunHistory() {
   const isAdmin = isAdminUser(me);
   const ownerParam = owner === "me" ? "me" : undefined;
 
+  /** Counts the lists shown (a reload or another owner starts a new one): an answer for an earlier list is dropped. */
+  const listRef = useRef(0);
+
   useEffect(() => {
     let live = true;
+    listRef.current += 1;
     setLoad({ status: "loading" });
+    setNextCursor(null);
     listRuns(null, 50, ownerParam).then(
       (page) => {
         if (!live) return;
@@ -72,8 +80,11 @@ export function RunHistory() {
     if (!nextCursor) return;
     setLoadingMore(true);
     setMoreError(null);
+    const list = listRef.current;
     try {
       const page = await listRuns(nextCursor, 50, ownerParam);
+      // The owner changed or the list was reloaded meanwhile: these rows belong to the list that is gone.
+      if (list !== listRef.current) return;
       // A run can appear on two pages if runs were created meanwhile; keep the first copy.
       setItems((prev) => {
         const seen = new Set(prev.map((r) => r.runId));
@@ -81,11 +92,39 @@ export function RunHistory() {
       });
       setNextCursor(page.nextCursor);
     } catch (err) {
-      setMoreError(message(err));
+      if (list === listRef.current) setMoreError(message(err));
     } finally {
       setLoadingMore(false);
     }
   }, [nextCursor, ownerParam]);
+
+  // A list left open would show "Running…" for a run that ended long ago. While a loaded run is in progress the first
+  // page is read again quietly: its rows replace their loaded copies and runs created meanwhile go on top. Pages loaded
+  // with "Load more" stay, and a failed read is simply tried again at the next tick.
+  const hasActive = load.status === "ready" && items.some((r) => !isTerminalLifecycle(r.lifecycle));
+  useEffect(() => {
+    if (!hasActive) return;
+    const list = listRef.current;
+    let reading = false;
+    const timer = setInterval(() => {
+      if (reading || document.hidden) return;
+      reading = true;
+      listRuns(null, 50, ownerParam)
+        .then((page) => {
+          if (list !== listRef.current) return;
+          setItems((prev) => {
+            const fresh = new Map(page.items.map((r) => [r.runId, r]));
+            const loaded = new Set(prev.map((r) => r.runId));
+            return [...page.items.filter((r) => !loaded.has(r.runId)), ...prev.map((r) => fresh.get(r.runId) ?? r)];
+          });
+        })
+        .catch(() => {})
+        .finally(() => {
+          reading = false;
+        });
+    }, ACTIVE_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [hasActive, ownerParam]);
 
   const hasRuns = load.status === "ready" && items.length > 0;
   const head = (

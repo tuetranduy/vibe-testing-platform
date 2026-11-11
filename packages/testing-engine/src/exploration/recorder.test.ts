@@ -454,6 +454,11 @@ describe("describeField (what a generated value must suit, 2026-10-07)", () => {
     expect(await describeField(page, "#c")).toMatchObject({ tag: "select", type: null, label: "Country", options: [{ value: "", label: "Choose…" }, { value: "no", label: "Norway" }] });
     expect(await describeField(page, "#q")).toMatchObject({ tag: "input", type: "number", min: "1", max: "9", maxLength: null });
   });
+
+  it("leaves out options that cannot be chosen: disabled ones and those of a disabled group", async () => {
+    await page.setContent(`<select id="c"><option value="" disabled selected>Choose…</option><option value="no" disabled>Norway</option><optgroup label="Sold out" disabled><option value="fi">Finland</option></optgroup><option value="se">Sweden</option></select>`);
+    expect((await describeField(page, "#c")).options).toEqual([{ value: "se", label: "Sweden" }]);
+  });
 });
 
 describe("requiredEmptyFields (a form's required fields the plan left empty, KI-062)", () => {

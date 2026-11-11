@@ -108,7 +108,12 @@ function uniqueEmail(req: InputRequest): string {
   return fitToField(String(generateTestDataValue("email", { seed: `${req.runId}:${req.key}` })), req.field);
 }
 
-/** A select keeps an answer that names one of its options (by value or label); otherwise its first non-empty option. Text is cut to maxlength. */
+/**
+ * A select keeps an answer that names one of its options (by value or label); otherwise its first non-empty option.
+ * Other fields get a value the browser accepts: a number or date in the field's format and inside min / max, text cut
+ * to maxlength and, where a simple rewrite does it, matching the field's pattern. A value the field would reject is
+ * typed and then refused by the page (or silently dropped by a date or number input), so the step would look done.
+ */
 export function fitToField(value: string, field: FieldFacts): string {
   if (field.options.length > 0) {
     const lower = value.toLowerCase();
@@ -116,7 +121,62 @@ export function fitToField(value: string, field: FieldFacts): string {
     if (match) return match.value;
     return firstOption(field) ?? value;
   }
-  return field.maxLength !== null && field.maxLength >= 0 ? value.slice(0, field.maxLength) : value;
+  const typed = fitToType(value, field);
+  const cut = (v: string) => (field.maxLength !== null && field.maxLength >= 0 ? v.slice(0, field.maxLength) : v);
+  const pattern = typed === value ? fieldPattern(field) : null;
+  if (!pattern || pattern.test(cut(value))) return cut(typed);
+  // Not what the pattern asks for: the usual causes are separators in digits-only fields and spaces or symbols in codes.
+  const rewrites = [value.replace(/[^\p{L}\p{N}]/gu, ""), value.replace(/\D/g, "")].map(cut);
+  return rewrites.find((v) => v !== "" && pattern.test(v)) ?? cut(value);
+}
+
+/** Formats the browser enforces on its own: anything else typed into these inputs is dropped. Values compare as text. */
+const TEMPORAL: Record<string, { format: RegExp; fallback: string }> = {
+  date: { format: /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, fallback: "2030-01-15" },
+  month: { format: /^\d{4}-(0[1-9]|1[0-2])$/, fallback: "2030-01" },
+  week: { format: /^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/, fallback: "2030-W03" },
+  time: { format: /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, fallback: "10:00" },
+  "datetime-local": { format: /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, fallback: "2030-01-15T10:00" },
+};
+
+function fitToType(value: string, field: FieldFacts): string {
+  if (field.type === "number" || field.type === "range") {
+    const min = finite(field.min);
+    const max = finite(field.max);
+    const direct = finite(value);
+    const said = direct ?? finite(/-?\d+(\.\d+)?/.exec(value)?.[0] ?? null);
+    let n = said ?? min ?? max ?? 1;
+    if (min !== null && n < min) n = min;
+    if (max !== null && n > max) n = max;
+    return direct !== null && n === direct ? value.trim() : String(n);
+  }
+  const temporal = field.type ? TEMPORAL[field.type] : undefined;
+  if (temporal) {
+    const within = (bound: string | null) => (bound !== null && temporal.format.test(bound) ? bound : null);
+    const min = within(field.min);
+    const max = within(field.max);
+    let v = temporal.format.test(value.trim()) ? value.trim() : temporal.fallback;
+    if (min !== null && v < min) v = min;
+    if (max !== null && v > max) v = max;
+    return v;
+  }
+  return value;
+}
+
+const finite = (text: string | null): number | null => {
+  if (text === null || text.trim() === "") return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+};
+
+/** The field's pattern as the browser applies it (the whole value must match); null when there is none or it does not compile. */
+function fieldPattern(field: FieldFacts): RegExp | null {
+  if (!field.pattern || field.pattern.length > 200) return null;
+  try {
+    return new RegExp(`^(?:${field.pattern})$`, "u");
+  } catch {
+    return null;
+  }
 }
 
 const firstOption = (field: FieldFacts): string | undefined => field.options.find((o) => o.value.trim() !== "")?.value;

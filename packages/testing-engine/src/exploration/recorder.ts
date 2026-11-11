@@ -103,6 +103,8 @@ function readField(el: Element): FieldFacts {
   const options =
     tag === "select"
       ? Array.from((el as HTMLSelectElement).options)
+          // A disabled option cannot be chosen: selecting it throws, or leaves the select as it was.
+          .filter((o) => !o.disabled && !(o.parentElement instanceof HTMLOptGroupElement && o.parentElement.disabled))
           .slice(0, 50)
           .map((o) => ({ value: o.value, label: (o.label || o.text).replace(/\s+/g, " ").trim() }))
       : [];
