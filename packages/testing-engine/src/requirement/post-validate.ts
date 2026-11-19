@@ -56,7 +56,7 @@ export function postValidate(
 }
 
 /** A text check's test data key comes with that key's `test_data` precondition (added when missing). */
-function withTestDataPreconditions(draft: RequirementDraft): RequirementDraft {
+export function withTestDataPreconditions(draft: RequirementDraft): RequirementDraft {
   const criteria = draft.criteria.map((c): AcceptanceCriterion => {
     const key = c.expectedOutcome.kind === "text_matches" ? c.expectedOutcome.match.testDataKey : undefined;
     if (key === undefined || c.preconditions.some((p) => p.kind === "test_data" && p.ref === key)) return c;

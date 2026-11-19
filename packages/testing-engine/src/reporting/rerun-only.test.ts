@@ -105,3 +105,9 @@ describe("rerunOnlyResults (V1.1 F5)", () => {
     expect(aggregateVerdict(rerunOnlyResults(onlyCompiled, test, rerun({ "AC-1": "PASSED", "AC-3": "ASSERTION_FAILED" })))).toBe("PASSED");
   });
 });
+
+describe("rerunOnlyResults with a flaky rerun (2026-11-19)", () => {
+  it("passed on one attempt and failed on the other: INCONCLUSIVE / RERUN_FLAKY", () => {
+    expect(rows(rerunOnlyResults(requirement, test, rerun({ "AC-1": "FLAKY", "AC-3": "PASSED" }, { status: "FAILED" })))[0]).toEqual(["AC-1", "INCONCLUSIVE", "RERUN_FLAKY", null, "FLAKY"]);
+  });
+});

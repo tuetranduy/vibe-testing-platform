@@ -56,6 +56,8 @@ export const BlockReasonSchema = z.enum([
   "OFF_DOMAIN_NAVIGATION",
   "LOGIN_FAILED",
   "PRECONDITION_NOT_MET",
+  // A click opened the site's sign-in prompt and the check did not pass without it (KI-073).
+  "SIGN_IN_REQUIRED",
 ]);
 export type BlockReason = z.infer<typeof BlockReasonSchema>;
 
@@ -70,6 +72,10 @@ export const InconclusiveReasonSchema = z.enum([
   // A rerun-only run (V1.1 F5): the saved test did not reach the criterion's assertion, or does not have one.
   "RERUN_NOT_REACHED",
   "NOT_IN_GENERATED_TEST",
+  // The check's page was a server error page (KI-074).
+  "SITE_ERROR",
+  // The generated test passed on one rerun and failed on another (2026-11-19).
+  "RERUN_FLAKY",
 ]);
 export type InconclusiveReason = z.infer<typeof InconclusiveReasonSchema>;
 

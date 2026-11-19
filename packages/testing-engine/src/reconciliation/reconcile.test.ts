@@ -192,3 +192,18 @@ describe("reconcile: record keeping", () => {
     }
   });
 });
+
+describe("a flaky rerun (2026-11-19)", () => {
+  it("a PASS or FAIL whose rerun passed once and failed once is INCONCLUSIVE / RERUN_FLAKY", () => {
+    for (const status of ["PASS", "FAIL"] as const) {
+      const r = reconcile(provisional(status), "FLAKY", dom, extras);
+      expect([r.status, r.reason, r.verdictSource, r.rerunOutcome]).toEqual(["INCONCLUSIVE", "RERUN_FLAKY", null, "FLAKY"]);
+      expect(r.provisional).toEqual({ status, reason: null });
+    }
+  });
+
+  it("a BLOCKED or INCONCLUSIVE result is unchanged, and an AI judgment stands", () => {
+    expect(reconcile(provisional("INCONCLUSIVE", "FACT_NOT_OBSERVED"), "FLAKY", dom, extras).reason).toBe("FACT_NOT_OBSERVED");
+    expect(reconcile({ ...provisional("PASS"), aiJudged: true, factRefs: [] }, "FLAKY", [], extras).verdictSource).toBe("AI_JUDGMENT");
+  });
+});

@@ -7,7 +7,7 @@ import path from "node:path";
 import { RerunResultSchema, type GeneratedTest } from "@platform/contracts";
 import { createRunRedactor } from "@platform/security";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ACTION_HELPERS_V1_SOURCE, ACTION_HELPERS_V2_SOURCE, HELPERS_SOURCE, PRE_ACTION_HELPERS_SOURCE } from "../compiler/helpers-template";
+import { ACTION_HELPERS_V1_SOURCE, ACTION_HELPERS_V2_SOURCE, ACTION_HELPERS_V3_SOURCE, HELPERS_SOURCE, PRE_ACTION_HELPERS_SOURCE } from "../compiler/helpers-template";
 import type { EvidenceStore, EvidenceUpload } from "../evidence/collector";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
 import { buildPlaywrightConfig } from "./config-template";
@@ -352,7 +352,7 @@ describe("runGeneratedTest", () => {
     expect(out.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it.each([["before KI-049", PRE_ACTION_HELPERS_SOURCE], ["before KI-058", ACTION_HELPERS_V1_SOURCE], ["before KI-077", ACTION_HELPERS_V2_SOURCE]])("reruns a saved test with a previous reviewed helper template (%s) using the current fixed helpers", async (_when, helpersSource) => {
+  it.each([["before KI-049", PRE_ACTION_HELPERS_SOURCE], ["before KI-058", ACTION_HELPERS_V1_SOURCE], ["before KI-077", ACTION_HELPERS_V2_SOURCE], ["before made-up usernames", ACTION_HELPERS_V3_SOURCE]])("reruns a saved test with a previous reviewed helper template (%s) using the current fixed helpers", async (_when, helpersSource) => {
     const spawn = fakeSpawn(writesResults({ steps: [{ title: title("AC-1") }] }, 0));
     const test = { ...generated(["AC-1"]), helpersSource };
     const out = await runGeneratedTest(runInput(test), { spawn, workspace: { baseDir: base } });
@@ -523,7 +523,7 @@ describe("runGeneratedTest: infrastructure failures are logged", () => {
 describe("createRunTestStage", () => {
   const SECRET = "pw-Stage-Secret-9";
 
-  function harness(opts: { spawn: SpawnRunner; openProxy?: () => Promise<RerunProxy>; signal?: AbortSignal; logger?: { error(obj: object, msg?: string): void }; deadlineAt?: Date; now?: Date; onSave?: () => void }) {
+  function harness(opts: { spawn: SpawnRunner; openProxy?: () => Promise<RerunProxy>; signal?: AbortSignal; logger?: { error(obj: object, msg?: string): void }; deadlineAt?: Date; now?: Date; clock?: () => Date; onSave?: () => void; allowDestructiveActions?: boolean }) {
     const events: EventDraft[] = [];
     const cleanups: (() => Promise<void> | void)[] = [];
     const uploads: (EvidenceUpload & { workspaceExisted: boolean })[] = [];
@@ -539,7 +539,7 @@ describe("createRunTestStage", () => {
       runId: "run_1",
       tenantId: "t_1",
       // Read: the options (V1.3: recordVideo / recordTrace, both on by default) and the target (the navigation guard).
-      request: { targetUrl: "https://shop.test/", options: { additionalAllowedHosts: ["cdn.example"] } },
+      request: { targetUrl: "https://shop.test/", environment: "staging", options: { additionalAllowedHosts: ["cdn.example"], allowDestructiveActions: opts.allowDestructiveActions ?? false } },
       signal: opts.signal ?? new AbortController().signal,
       budgets: { explorationMs: 1_000, rerunMs: 60_000 },
       secrets: { names: ["password"], get: (n: string) => (n === "password" ? SECRET : undefined) },
@@ -547,7 +547,7 @@ describe("createRunTestStage", () => {
       publish: async (e: EventDraft) => void events.push(e),
       addCleanup: (fn: () => Promise<void> | void) => void cleanups.push(fn),
       deadlineAt: opts.deadlineAt ?? null,
-      now: () => opts.now ?? new Date(),
+      now: () => opts.clock?.() ?? opts.now ?? new Date(),
     } as unknown as StageContext;
     const stage = createRunTestStage({
       openProxy: opts.openProxy ?? (async () => proxy),
@@ -577,19 +577,90 @@ describe("createRunTestStage", () => {
     expect(spawn.calls[0]!.env).toEqual({ SECRET_PASSWORD: SECRET });
     expect(spawn.snapshot[0]!["playwright.config.js"]).toContain(JSON.stringify(PROXY));
     expect(RerunResultSchema.parse(rerun)).toEqual(rerun);
-    expect(rerun).toMatchObject({ status: "FAILED", perCriterion: { "AC-1": "ASSERTION_FAILED" }, artifactIds: ["art_1", "art_2"] });
+    // A failed rerun runs once more (2026-11-19): both attempts' evidence is kept.
+    expect(rerun).toMatchObject({ status: "FAILED", perCriterion: { "AC-1": "ASSERTION_FAILED" }, artifactIds: ["art_1", "art_2", "art_3", "art_4"] });
     expect(rerun.errorText["AC-1"]).toBe(`Error: [AC-1] typed ${SECRET}`);
     expect(h.uploads.map((u) => [u.type, u.sensitivity, u.workspaceExisted])).toEqual([
+      ["SCREENSHOT", "STANDARD", true],
+      ["TRACE", "STANDARD", true],
       ["SCREENSHOT", "STANDARD", true],
       ["TRACE", "STANDARD", true],
     ]);
     expect(h.events.map((e) => [e.type, (e.payload as { type: string }).type])).toEqual([
       ["artifact.created", "SCREENSHOT"],
       ["artifact.created", "TRACE"],
+      ["artifact.created", "SCREENSHOT"],
+      ["artifact.created", "TRACE"],
     ]);
     expect(existsSync(path.join(base, "run_1"))).toBe(false);
     expect(h.proxy.closed).toBeGreaterThanOrEqual(1);
     await h.runCleanups(); // idempotent
+  });
+
+  describe("a failed rerun runs once more (2026-11-19)", () => {
+    const failing = { status: "failed", steps: [{ title: title("AC-1"), error: "Error: [AC-1] no" }], errors: ["Error: [AC-1] no"], attachments: ["screenshot"] };
+    const passing = { steps: [{ title: title("AC-1") }] };
+
+    it("failed, then passed: FLAKY, both attempts' evidence kept, durations summed", async () => {
+      let n = 0;
+      const spawn = fakeSpawn((input) => writesResults(n++ === 0 ? failing : passing, n === 1 ? 1 : 0)(input));
+      const h = harness({ spawn });
+      const rerun = await h.stage(h.ctx, generated(["AC-1"]));
+      expect(spawn.calls).toHaveLength(2);
+      expect(rerun).toMatchObject({ status: "FAILED", perCriterion: { "AC-1": "FLAKY" }, artifactIds: ["art_1"] });
+      expect(rerun.errorText["AC-1"]).toBe("Error: [AC-1] no");
+      expect(existsSync(path.join(base, "run_1"))).toBe(false);
+    });
+
+    it("failed twice the same way: still ASSERTION_FAILED", async () => {
+      const spawn = fakeSpawn(writesResults(failing));
+      const h = harness({ spawn });
+      const rerun = await h.stage(h.ctx, generated(["AC-1"]));
+      expect(spawn.calls).toHaveLength(2);
+      expect(rerun).toMatchObject({ status: "FAILED", perCriterion: { "AC-1": "ASSERTION_FAILED" }, artifactIds: ["art_1", "art_2"] });
+    });
+
+    it("the second attempt gets only what the first left of the rerun budget (review finding)", async () => {
+      let t = Date.parse("2026-11-19T10:00:00.000Z");
+      // The first attempt takes 50 s of the 60 s budget: 10 s are left, under the 15 s a second attempt needs.
+      const slow = fakeSpawn(async (input) => {
+        t += 50_000;
+        return writesResults(failing)(input);
+      });
+      const h = harness({ spawn: slow, clock: () => new Date(t) });
+      await h.stage(h.ctx, generated(["AC-1"]));
+      expect(slow.calls).toHaveLength(1);
+      // 30 s taken: the second attempt runs with the 30 s left, not a fresh 60 s.
+      let u = Date.parse("2026-11-19T10:00:00.000Z");
+      const half = fakeSpawn(async (input) => {
+        u += 30_000;
+        return writesResults(failing)(input);
+      });
+      const h2 = harness({ spawn: half, clock: () => new Date(u) });
+      await h2.stage(h2.ctx, generated(["AC-1"]));
+      expect(half.calls).toHaveLength(2);
+      expect(half.snapshot[1]!["playwright.config.js"]).toContain(`"timeout": ${testTimeoutFor(30_000)}`);
+    });
+
+    it("a run that allows destructive actions never runs its test a second time (an order placed twice)", async () => {
+      const spawn = fakeSpawn(writesResults(failing));
+      const h = harness({ spawn, allowDestructiveActions: true });
+      const rerun = await h.stage(h.ctx, generated(["AC-1"]));
+      expect(spawn.calls).toHaveLength(1);
+      expect(rerun.perCriterion).toEqual({ "AC-1": "ASSERTION_FAILED" });
+    });
+
+    it("a passing rerun, or too little time left, runs once", async () => {
+      const passed = fakeSpawn(writesResults(passing, 0));
+      await harness({ spawn: passed }).stage(harness({ spawn: passed }).ctx, generated(["AC-1"]));
+      expect(passed.calls).toHaveLength(1);
+      const now = new Date("2026-09-26T10:00:00.000Z");
+      const short = fakeSpawn(writesResults(failing));
+      // 16 s before the deadline: a 12 s rerun budget, under the 15 s a second attempt needs.
+      const h = harness({ spawn: short, now, deadlineAt: new Date(now.getTime() + 16_000) });
+      await h.stage(h.ctx, generated(["AC-1"]));
+      expect(short.calls).toHaveLength(1);
+    });
   });
 
   it("the run signal (cancel / deadline) throws its reason once the child is stopped; proxy closed, workspace removed", async () => {

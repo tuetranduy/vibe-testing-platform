@@ -65,6 +65,15 @@ export const TestEventSchema = z.discriminatedUnion("type", [
       blockedCriteria: z.array(z.object({ criterionId: CriterionIdSchema, reason: BlockReasonSchema })),
     }),
   ),
+  // Exploration planned the rest of a scenario again after one of its steps failed (2026-11-19).
+  ev(
+    "plan.revised",
+    z.object({
+      scenarioId: z.string().regex(/^SC-[1-5]$/),
+      afterStepId: z.string(),
+      stepCount: z.number().int().min(0),
+    }),
+  ),
   ev(
     "step.recorded",
     z.object({

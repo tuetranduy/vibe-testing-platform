@@ -24,8 +24,8 @@ const ENV: RunLlmEnv = { LLM_PROVIDER: "fake", LLM_MODEL: "claude-sonnet-5" };
 const OPUS_HIGH: LlmChoice = { provider: "anthropic", model: "claude-opus-5-5", reasoning: "high" };
 const GEMINI_LITE_LOW: LlmChoice = { provider: "gemini", model: "gemini-3.5-flash-lite", reasoning: "low" };
 
-const factory = (env: RunLlmEnv = ENV, transport?: FakeTransport) =>
-  createRunLlmFactory({ db: h.tdb.db, secretsKey: SECRETS_KEY, env, logger: silentLogger, ...(transport ? { transport } : {}) });
+const factory = (env: RunLlmEnv = ENV, transport?: FakeTransport, logger = silentLogger) =>
+  createRunLlmFactory({ db: h.tdb.db, secretsKey: SECRETS_KEY, env, logger, ...(transport ? { transport } : {}) });
 const saveKey = (provider: LlmKeyProvider, apiKey: string, secretsKey = SECRETS_KEY) =>
   new ProviderKeyRepository(h.tdb.db).set(TEST_TENANT_ID, provider, encryptProviderKey(apiKey, { tenantId: TEST_TENANT_ID, provider }, secretsKey));
 const ping = (llm: LlmClient, runId: string) =>
@@ -152,5 +152,50 @@ describe("a run whose model client can't be built", () => {
     expect([after.lifecycle, after.errorCategory, after.errorMessage]).toEqual(["ERRORED", "MODEL_PROVIDER", message]);
     expect((await eventsOf(h, run.id)).find((e) => e.type === "run.errored")?.payload).toEqual({ category: "MODEL_PROVIDER", message });
     expect(transport.requests).toEqual([]);
+  });
+});
+
+describe("a fallback model (LLM_FALLBACK_MODEL, 2026-11-19)", () => {
+  /** Gemini refuses the key; DeepSeek answers. Records which host each request went to. */
+  function stubBoth() {
+    const hosts: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      const host = new URL(url).host;
+      hosts.push(host);
+      if (host.includes("googleapis")) return new Response(JSON.stringify({ error: { message: "no credit" } }), { status: 402, headers: { "content-type": "application/json" } });
+      const reply = { choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 5 } };
+      return new Response(JSON.stringify(reply), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    return hosts;
+  }
+
+  it("the run's model gives up: the fallback answers, recorded under its own provider and model", async () => {
+    const hosts = stubBoth();
+    const run = await seedRun(h, { llm: GEMINI_LITE_LOW });
+    const env: RunLlmEnv = { ...ENV, GEMINI_API_KEY: "gm-env", DEEPSEEK_API_KEY: "ds-env", LLM_FALLBACK_MODEL: "deepseek-flash" };
+    await ping((await factory(env).forRun(run)).llm!, run.id);
+    expect(hosts.map((x) => (x.includes("googleapis") ? "gemini" : "deepseek"))).toEqual(["gemini", "deepseek"]);
+    expect((await new LlmCallRepository(h.tdb.db).listByRun(run.id)).map((c) => [c.provider, c.model, c.status])).toEqual([
+      ["gemini", "gemini-3.5-flash-lite", "PROVIDER_ERROR"],
+      ["deepseek", "deepseek-flash", "SUCCESS"],
+    ]);
+  });
+
+  it("skips a fallback without a key: the run keeps its own model, with a warning", async () => {
+    stubBoth();
+    const run = await seedRun(h, { llm: GEMINI_LITE_LOW });
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warn: (_o: object, msg?: string) => void warnings.push(msg ?? "") };
+    const { llm } = await factory({ ...ENV, GEMINI_API_KEY: "gm-env", LLM_FALLBACK_MODEL: "deepseek-flash" }, undefined, logger).forRun(run);
+    await expect(ping(llm!, run.id)).rejects.toBeInstanceOf(ModelProviderError);
+    expect(warnings).toContain("fallback model has no key; runs keep their own model");
+  });
+
+  it("no fallback when it is the run's own model, nor with the test transport", async () => {
+    const hosts = stubBoth();
+    const run = await seedRun(h, { llm: GEMINI_LITE_LOW });
+    const same = await factory({ ...ENV, GEMINI_API_KEY: "gm-env", LLM_FALLBACK_MODEL: "gemini-3.5-flash-lite" }).forRun(run);
+    await expect(ping(same.llm!, run.id)).rejects.toBeInstanceOf(ModelProviderError);
+    expect(hosts.every((x) => x.includes("googleapis"))).toBe(true);
   });
 });

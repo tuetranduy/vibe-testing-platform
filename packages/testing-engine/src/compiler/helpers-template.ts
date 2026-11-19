@@ -215,10 +215,10 @@ export async function readNumberOrZero(locator: Locator, waitMs = READ_TIMEOUT_M
 `;
 
 /**
- * The current template: ACTION_HELPERS_V2_SOURCE and `refreshEmails` (KI-077). Tests saved with ACTION_HELPERS_V2_SOURCE,
- * ACTION_HELPERS_V1_SOURCE or PRE_ACTION_HELPERS_SOURCE stay accepted.
+ * The template of KI-077: ACTION_HELPERS_V2_SOURCE and `refreshEmails` for made-up emails only. Tests saved with it stay
+ * accepted (and run with HELPERS_SOURCE).
  */
-export const HELPERS_SOURCE = `${ACTION_HELPERS_V2_SOURCE}
+export const ACTION_HELPERS_V3_SOURCE = `${ACTION_HELPERS_V2_SOURCE}
 /**
  * Gives every email address the platform made up (qa.<token>@example.com) a new token, the same one wherever that
  * address appears in the run data (KI-077). The account exploration created with it exists now, so each execution of
@@ -235,6 +235,44 @@ export function refreshEmails(data: unknown): void {
       fresh.set(email, next);
       return next;
     });
+  const visit = (node: unknown): void => {
+    if (typeof node !== "object" || node === null) return;
+    const record = node as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      const value = record[key];
+      if (typeof value === "string") record[key] = swap(value);
+      else visit(value);
+    }
+  };
+  visit(data);
+}
+`;
+
+/**
+ * The current template: ACTION_HELPERS_V2_SOURCE and `refreshEmails` for made-up emails and usernames (KI-077). Tests
+ * saved with ACTION_HELPERS_V3_SOURCE, ACTION_HELPERS_V2_SOURCE, ACTION_HELPERS_V1_SOURCE or PRE_ACTION_HELPERS_SOURCE stay
+ * accepted.
+ */
+export const HELPERS_SOURCE = `${ACTION_HELPERS_V2_SOURCE}
+/**
+ * Gives every email address (qa.<token>@example.com) and username (qa_<token>) the platform made up a new token, the
+ * same one wherever that value appears in the run data (KI-077). The account exploration created with it exists now, so
+ * each execution of the test signs up with values nobody has used. Called once, before any test: a later scenario that
+ * logs in uses the values an earlier one signed up with, as in exploration.
+ */
+export function refreshEmails(data: unknown): void {
+  const fresh = new Map<string, string>();
+  const token = () => Array.from({ length: 6 }, () => "0123456789abcdefghijklmnopqrstuvwxyz"[Math.floor(Math.random() * 36)]).join("");
+  const renew = (made: string, next: () => string) => {
+    let value = fresh.get(made);
+    while (value === undefined || value === made) value = next();
+    fresh.set(made, value);
+    return value;
+  };
+  const swap = (s: string) =>
+    s
+      .replace(/qa\\.[0-9a-z]{6}@example\\.com/g, (email) => renew(email, () => "qa." + token() + "@example.com"))
+      .replace(/\\bqa_[0-9a-z]{6}\\b/g, (username) => renew(username, () => "qa_" + token()));
   const visit = (node: unknown): void => {
     if (typeof node !== "object" || node === null) return;
     const record = node as Record<string, unknown>;

@@ -11,6 +11,7 @@ export const STATUS_REASON_TEXT: Record<StatusReason, string> = {
   OFF_DOMAIN_NAVIGATION: "Checking it would have meant leaving the allowed website",
   LOGIN_FAILED: "Logging in failed with the credentials provided",
   PRECONDITION_NOT_MET: "An earlier step it depends on could not be completed",
+  SIGN_IN_REQUIRED: "The site asked to sign in for an action this check needs; add credentials to test it",
   // INCONCLUSIVE
   STEP_LIMIT_REACHED: "The run reached its step limit before this could be checked",
   EXPLORATION_BUDGET_EXHAUSTED: "Exploring the site ran out of time before this could be checked",
@@ -21,4 +22,6 @@ export const STATUS_REASON_TEXT: Record<StatusReason, string> = {
   AMBIGUOUS_CRITERION: "The criterion was too ambiguous to check reliably",
   RERUN_NOT_REACHED: "The saved test stopped before it reached this check",
   NOT_IN_GENERATED_TEST: "The saved test has no check for this criterion, so a rerun cannot confirm it",
+  SITE_ERROR: "The site showed a server error page where this was checked",
+  RERUN_FLAKY: "The generated test passed on one rerun and failed on another",
 };

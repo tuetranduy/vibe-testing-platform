@@ -183,12 +183,15 @@ describe("CriteriaReview", () => {
     expect(within(cards[1]!).getByRole("button", { name: "Edit check AC-2" })).toHaveFocus();
   });
 
-  it("an AI-judged criterion has no check editor, only Remove", async () => {
+  it("an AI-judged criterion's editor takes the user's own words only (2026-11-19)", async () => {
+    const user = userEvent.setup();
     routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()) });
     render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
     const cards = await screen.findAllByRole("article");
-    expect(within(cards[2]!).queryByRole("button", { name: /edit check/i })).not.toBeInTheDocument();
-    expect(within(cards[2]!).getByText(/judged by ai only — it can only be removed/i)).toBeInTheDocument();
+    await user.click(within(cards[2]!).getByRole("button", { name: "Edit check AC-3" }));
+    expect(within(cards[2]!).getByRole("textbox", { name: "Describe the check in your own words" })).toBeInTheDocument();
+    expect(within(cards[2]!).queryByRole("button", { name: /save check/i })).not.toBeInTheDocument();
+    await user.click(within(cards[2]!).getByRole("button", { name: "Close" }));
     expect(within(cards[2]!).getByRole("button", { name: "Remove AC-3" })).toBeInTheDocument();
   });
 
@@ -497,5 +500,94 @@ describe("CriteriaReview: what the platform understood, added and assumed (2026-
     await screen.findAllByRole("article");
     expect(screen.getByText("What I understood")).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Added by the platform" })).not.toBeInTheDocument();
+  });
+});
+
+describe("CriteriaReview: a check rewritten from the user's own words (2026-11-19)", () => {
+  const REVISE = "/api/v1/test-runs/run_1/criteria/AC-1/revise";
+  const ACCEPT = "/api/v1/test-runs/run_1/criteria/proposals/revise-criterion__run_1__1/accept";
+  const proposed = () => {
+    const r = requirementFixture();
+    const criteria = r.criteria.map((c) =>
+      c.id === "AC-1"
+        ? { ...c, statement: "The cart count goes up by exactly 2", expectedOutcome: { kind: "numeric_delta" as const, before: { key: "cartCount", checkpoint: "before_add" }, after: { key: "cartCount", checkpoint: "after_add" }, delta: 2 } }
+        : c,
+    );
+    return { proposalId: "revise-criterion__run_1__1", runId: "run_1", criterionId: "AC-1", basedOnRevision: r.revision, criteria, facts: r.facts };
+  };
+
+  it("shows the AI's proposal for the user's words, and Use this check saves it", async () => {
+    const user = userEvent.setup();
+    const fetch = routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`POST ${REVISE}`]: () => json(200, proposed()),
+      [`POST ${ACCEPT}`]: () => json(200, { ...requirementFixture(), revision: 2, criteria: proposed().criteria }),
+    });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    await user.click(within(cards[0]!).getByRole("button", { name: "Edit check AC-1" }));
+    await user.type(within(cards[0]!).getByRole("textbox", { name: "Describe the check in your own words" }), "the count goes up by 2");
+    await user.click(within(cards[0]!).getByRole("button", { name: "Rewrite with AI" }));
+
+    const proposal = await within(cards[0]!).findByRole("group", { name: "Proposed check" });
+    expect(proposal).toHaveTextContent("The cart count goes up by exactly 2");
+    expect(proposal).toHaveTextContent("is exactly 2 more than");
+    const sent = fetch.mock.calls.find(([url]) => String(url) === REVISE)!;
+    expect(JSON.parse(String(sent[1]!.body))).toEqual({ instruction: "the count goes up by 2" });
+
+    await user.click(within(proposal).getByRole("button", { name: "Use this check" }));
+    expect(await within(cards[0]!).findByText("The cart count goes up by exactly 2", { selector: ".criterion-statement" })).toBeInTheDocument();
+    expect(within(cards[0]!).queryByRole("group", { name: "Proposed check" })).not.toBeInTheDocument();
+    expect(fetch.mock.calls.some(([url, init]) => String(url) === ACCEPT && init?.method === "POST")).toBe(true);
+  });
+
+  it("Discard drops the proposal and saves nothing; an error is shown where the words were typed", async () => {
+    const user = userEvent.setup();
+    let answer = json(200, proposed());
+    const fetch = routeFetch({
+      [`GET ${CRITERIA}`]: () => json(200, requirementFixture()),
+      [`POST ${REVISE}`]: () => answer,
+    });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    await user.click(within(cards[0]!).getByRole("button", { name: "Edit check AC-1" }));
+    const words = within(cards[0]!).getByRole("textbox", { name: "Describe the check in your own words" });
+    await user.type(words, "the count goes up by 2");
+    await user.click(within(cards[0]!).getByRole("button", { name: "Rewrite with AI" }));
+    const proposal = await within(cards[0]!).findByRole("group", { name: "Proposed check" });
+    await user.click(within(proposal).getByRole("button", { name: "Discard" }));
+    expect(within(cards[0]!).queryByRole("group", { name: "Proposed check" })).not.toBeInTheDocument();
+    expect(fetch.mock.calls.every(([url]) => !String(url).includes("/accept"))).toBe(true);
+
+    answer = json(422, { code: "REVISE_INVALID", message: "The AI could not turn that into a valid check; try other words" });
+    await user.click(within(cards[0]!).getByRole("button", { name: "Rewrite with AI" }));
+    expect(await within(cards[0]!).findByRole("alert")).toHaveTextContent("The AI could not turn that into a valid check; try other words");
+  });
+
+  it("shows what the proposed check needs, and marks a need it adds (review finding)", async () => {
+    const user = userEvent.setup();
+    const signedIn = { kind: "authenticated" as const, description: "The user is signed in" };
+    const withLogin = proposed();
+    withLogin.criteria = withLogin.criteria.map((c) => (c.id === "AC-1" ? { ...c, preconditions: [signedIn] } : c));
+    routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()), [`POST ${REVISE}`]: () => json(200, withLogin) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    await user.click(within(cards[0]!).getByRole("button", { name: "Edit check AC-1" }));
+    await user.type(within(cards[0]!).getByRole("textbox", { name: "Describe the check in your own words" }), "only for signed-in users");
+    await user.click(within(cards[0]!).getByRole("button", { name: "Rewrite with AI" }));
+    const proposal = await within(cards[0]!).findByRole("group", { name: "Proposed check" });
+    expect(within(proposal).getByRole("list", { name: "What it needs" })).toHaveTextContent("The user is signed in (new)");
+  });
+
+  it("asks for at least 3 characters before sending anything", async () => {
+    const user = userEvent.setup();
+    const fetch = routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()) });
+    render(<CriteriaReview runId="run_1" onConfirmed={() => {}} />);
+    const cards = await screen.findAllByRole("article");
+    await user.click(within(cards[0]!).getByRole("button", { name: "Edit check AC-1" }));
+    await user.type(within(cards[0]!).getByRole("textbox", { name: "Describe the check in your own words" }), "ab");
+    await user.click(within(cards[0]!).getByRole("button", { name: "Rewrite with AI" }));
+    expect(within(cards[0]!).getByText("Describe the check in 3 to 500 characters.")).toBeInTheDocument();
+    expect(fetch.mock.calls.some(([url]) => String(url).endsWith("/revise"))).toBe(false);
   });
 });

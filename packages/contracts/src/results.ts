@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CriterionIdSchema, FactRefSchema } from "./common";
 import { ExplorationStepSchema, ObservedFactSchema } from "./exploration";
+import { TestPlanSchema } from "./plan";
 import { BlockReasonSchema, CriterionStatusSchema, InconclusiveReasonSchema } from "./run";
 
 /** AI_JUDGMENT (2026-10-07): an unclear (`semantic`) criterion judged by a model from what the exploration saw. */
@@ -22,7 +23,8 @@ export const ProvisionalResultSchema = z.object({
 });
 export type ProvisionalResult = z.infer<typeof ProvisionalResultSchema>;
 
-export const RerunOutcomeSchema = z.enum(["PASSED", "ASSERTION_FAILED", "NOT_REACHED", "UNAVAILABLE"]);
+/** `FLAKY`: the generated test ran twice, and its assertion passed on one run and failed on the other (2026-11-19). */
+export const RerunOutcomeSchema = z.enum(["PASSED", "ASSERTION_FAILED", "NOT_REACHED", "UNAVAILABLE", "FLAKY"]);
 export type RerunOutcome = z.infer<typeof RerunOutcomeSchema>;
 
 export const CriterionResultSchema = ProvisionalResultSchema.extend({
@@ -71,6 +73,11 @@ export const ExplorationOutcomeSchema = z.object({
   scenarioStops: z.record(z.string(), ExplorationStopReasonSchema).optional(),
   /** The exploration's own recordings — video and scrubbed trace (V1.3) — as artifact ids; run-wide evidence. */
   artifactIds: z.array(z.string()).optional(),
+  /**
+   * The plan as exploration ran it, when a failed step's scenario was planned again from the page it was on
+   * (2026-11-19): verification, the generated test and the report read this one. Absent: the plan ran as made.
+   */
+  revisedPlan: TestPlanSchema.optional(),
 });
 export type ExplorationOutcome = z.infer<typeof ExplorationOutcomeSchema>;
 

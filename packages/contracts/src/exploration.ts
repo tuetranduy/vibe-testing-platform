@@ -86,6 +86,10 @@ export const ExplorationStepSchema = z.object({
    * scrolling, hovering and double clicking are not replayed as ordinary clicks. Absent: a click.
    */
   actMethod: z.enum(["click", "press_enter", "scroll_into_view", "hover", "double_click"]).optional(),
+  /** An `act` step whose click opened the site's sign-in prompt (a password field appeared, or a login page opened; KI-073). */
+  signInPrompt: z.boolean().optional(),
+  /** A `checkpoint` step taken on a server error page: the page's error heading (KI-074). */
+  siteError: z.string().max(200).optional(),
   /** A `judge` step's judgment (2026-10-07); absent on every other step, and on a judge step that failed. */
   judgment: CriterionJudgmentSchema.optional(),
 });

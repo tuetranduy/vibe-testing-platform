@@ -30,6 +30,11 @@ const LlmFields = z.object({
   GEMINI_THINKING_LEVEL: emptyAsUnset(z.enum(["minimal", "low", "medium", "high"])),
   DEEPSEEK_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
+  /**
+   * A model of any real provider to send a run's requests to once its own model gives up (2026-11-19, LlmClient
+   * `fallback`); unset: none. Used only when its provider has a key (saved in Settings or here).
+   */
+  LLM_FALLBACK_MODEL: emptyAsUnset(z.string().min(1)),
 });
 type LlmFields = z.output<typeof LlmFields>;
 
@@ -45,6 +50,12 @@ const MODEL_PROVIDER_KEYS = ["ANTHROPIC_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_AP
 /** Model ids of each real provider: another's (e.g. a leftover LLM_MODEL) would fail at the first call. */
 const MODEL_PREFIXES = { anthropic: "claude-", gemini: "gemini-", deepseek: "deepseek-" } as const;
 
+/** The real provider a model id belongs to, by its prefix; null for an id of no known provider. */
+export function providerOfModel(model: string): keyof typeof MODEL_PREFIXES | null {
+  const found = Object.entries(MODEL_PREFIXES).find(([, prefix]) => model.startsWith(prefix));
+  return found ? (found[0] as keyof typeof MODEL_PREFIXES) : null;
+}
+
 /**
  * Provider keys are optional (Settings may hold them), but a key that is set must be usable as an HTTP
  * header value (the runtime's error for an invalid one quotes it, so it is checked here, where the message
@@ -57,6 +68,9 @@ function checkLlmSettings(env: LlmFields, ctx: z.core.$RefinementCtx<LlmFields>)
     if (key && !/^[\x21-\x7e]+$/.test(key.trim())) {
       ctx.addIssue({ code: "custom", path: [keyVar], message: "must be one line of printable ASCII without spaces" });
     }
+  }
+  if (env.LLM_FALLBACK_MODEL && !providerOfModel(env.LLM_FALLBACK_MODEL)) {
+    ctx.addIssue({ code: "custom", path: ["LLM_FALLBACK_MODEL"], message: `${env.LLM_FALLBACK_MODEL} is not a model of a supported provider (claude-…, gemini-…, deepseek-…)` });
   }
   if (env.LLM_PROVIDER === "openai") {
     if (!env.OPENAI_API_KEY) ctx.addIssue({ code: "custom", path: ["OPENAI_API_KEY"], message: "is required when LLM_PROVIDER=openai" });

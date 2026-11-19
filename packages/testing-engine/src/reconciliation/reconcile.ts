@@ -34,6 +34,7 @@ const refKey = (ref: FactRef) => `${ref.key}@${ref.checkpoint}`;
  * | FAIL          | PASSED                                          | INCONCLUSIVE  | —                | DISCOVERY_RERUN_DISAGREE |
  * | PASS / FAIL   | NOT_REACHED / UNAVAILABLE, all DOM_VERIFIED     | provisional   | EXPLORATION_ONLY | —                        |
  * | PASS / FAIL   | NOT_REACHED / UNAVAILABLE, else                 | INCONCLUSIVE  | —                | UNVERIFIED_EVIDENCE      |
+ * | PASS / FAIL   | FLAKY (passed once, failed once; 2026-11-19)    | INCONCLUSIVE  | —                | RERUN_FLAKY              |
  * | PASS / FAIL, `aiJudged` | any (never compiled, so NOT_REACHED)  | provisional   | AI_JUDGMENT      | —                        |
  *
  * `aiJudged` (2026-10-07): an unclear (`semantic`) criterion judged by a model from what the exploration saw. No
@@ -75,6 +76,7 @@ function decide(p: ProvisionalResult, rerun: RerunOutcome, facts: readonly Obser
   if (p.status === "BLOCKED" || p.status === "INCONCLUSIVE") return { status: p.status, reason: p.reason, verdictSource: null };
   if (p.aiJudged) return { status: p.status, reason: null, verdictSource: "AI_JUDGMENT" };
 
+  if (rerun === "FLAKY") return { status: "INCONCLUSIVE", reason: "RERUN_FLAKY", verdictSource: null };
   const confirms = p.status === "PASS" ? "PASSED" : "ASSERTION_FAILED";
   const contradicts = p.status === "PASS" ? "ASSERTION_FAILED" : "PASSED";
   if (rerun === confirms) return { status: p.status, reason: null, verdictSource: "PLAYWRIGHT_RERUN" };

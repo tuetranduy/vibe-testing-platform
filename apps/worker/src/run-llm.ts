@@ -1,4 +1,4 @@
-import { resolveEnvLlmChoice, type Env } from "@platform/config";
+import { providerOfModel, resolveEnvLlmChoice, type Env } from "@platform/config";
 import { ModelProviderError, type LlmChoice, type LlmKeyProvider } from "@platform/contracts";
 import { LlmCallRepository, ProviderKeyRepository, type Database, type TestRun } from "@platform/db";
 import { LlmClient, PROVIDER_LABELS, createTransport, type LlmTransport } from "@platform/llm";
@@ -24,7 +24,7 @@ export interface RunLlmFactory {
 }
 
 /** The LLM_* environment: the choice for runs that recorded none, and the server's provider keys. */
-export type RunLlmEnv = Pick<Env, "LLM_PROVIDER" | "LLM_MODEL"> & Partial<Pick<Env, "LLM_REASONING" | "GEMINI_THINKING_LEVEL" | "ANTHROPIC_API_KEY" | "GEMINI_API_KEY" | "DEEPSEEK_API_KEY">>;
+export type RunLlmEnv = Pick<Env, "LLM_PROVIDER" | "LLM_MODEL"> & Partial<Pick<Env, "LLM_REASONING" | "GEMINI_THINKING_LEVEL" | "ANTHROPIC_API_KEY" | "GEMINI_API_KEY" | "DEEPSEEK_API_KEY" | "LLM_FALLBACK_MODEL">>;
 
 export interface RunLlmFactoryDeps {
   db: Database;
@@ -67,15 +67,33 @@ export function createRunLlmFactory(deps: RunLlmFactoryDeps): RunLlmFactory {
     throw new ModelProviderError(`No API key for ${label}: add one in Settings`);
   }
 
+  /**
+   * LLM_FALLBACK_MODEL's transport (2026-11-19), when it is another model than the run's and its provider has a key;
+   * otherwise none, with a warning when only the key is missing (the run keeps its own model).
+   */
+  async function fallbackFor(tenantId: string, model: string) {
+    const fallbackModel = deps.env.LLM_FALLBACK_MODEL;
+    const provider = fallbackModel ? providerOfModel(fallbackModel) : null;
+    if (!fallbackModel || !provider || fallbackModel === model) return undefined;
+    try {
+      return { transport: createTransport({ provider, apiKey: await keyFor(tenantId, provider) }), model: fallbackModel };
+    } catch (err) {
+      deps.logger.warn({ err, tenantId, provider, model: fallbackModel }, "fallback model has no key; runs keep their own model");
+      return undefined;
+    }
+  }
+
   return {
     choiceOf: (run) => run.request.llm ?? environment,
     async forRun(run) {
       const choice = run.request.llm ?? environment;
       if (choice.provider === "fake") return { choice, llm: null };
       const apiKey = await keyFor(run.tenantId, choice.provider);
+      const fallback = deps.transport ? undefined : await fallbackFor(run.tenantId, choice.model);
       const llm = new LlmClient({
         transport: deps.transport ?? createTransport({ provider: choice.provider, apiKey }),
         model: choice.model,
+        ...(fallback ? { fallback } : {}),
         reasoning: choice.reasoning,
         logger: deps.logger,
         recordCall: async (call) => {

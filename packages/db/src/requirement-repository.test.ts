@@ -1,6 +1,6 @@
 import type { NormalizedRequirement } from "@platform/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RequirementFrozenError, RequirementStateError } from "./errors";
+import { RequirementFrozenError, StaleRevisionError, RequirementStateError } from "./errors";
 import { RequirementRepository } from "./requirement-repository";
 import { toRunSummary, RunRepository } from "./run-repository";
 import { storedRequest } from "./test-helpers";
@@ -59,6 +59,18 @@ describe("RequirementRepository", () => {
     const r2 = await reqs.createRevision(run.id, requirement("Edited statement"));
     expect(r2.revision).toBe(2);
     expect((await reqs.getLatest(run.id)).criteria[0]!.statement).toBe("Edited statement");
+  });
+
+  it("an edit based on an older revision is refused under the run's lock: two at once save one (review finding)", async () => {
+    const run = await runIn("AWAITING_CONFIRMATION");
+    await reqs.createRevision(run.id, requirement());
+    const results = await Promise.allSettled([
+      reqs.createRevision(run.id, requirement("First edit"), { expectedRevision: 1 }),
+      reqs.createRevision(run.id, requirement("Second edit"), { expectedRevision: 1 }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect((results.find((r) => r.status === "rejected") as PromiseRejectedResult).reason).toBeInstanceOf(StaleRevisionError);
+    expect((await reqs.getLatest(run.id)).revision).toBe(2);
   });
 
   it("freezes criteria at confirmation", async () => {

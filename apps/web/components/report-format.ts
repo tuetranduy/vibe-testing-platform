@@ -68,6 +68,7 @@ export const RERUN_OUTCOME_TEXT: Record<RerunOutcome, string> = {
   ASSERTION_FAILED: "the rerun's assertion failed",
   NOT_REACHED: "the rerun stopped before reaching it",
   UNAVAILABLE: "it was not rerun",
+  FLAKY: "it passed on one rerun and failed on another",
 };
 
 /** "Exploration found it passing, but the rerun's assertion failed." (DISCOVERY_RERUN_DISAGREE) */

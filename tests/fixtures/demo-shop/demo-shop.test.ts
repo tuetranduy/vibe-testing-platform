@@ -116,6 +116,49 @@ test.describe("flags", () => {
     await expect(page.getByRole("list", { name: "Cart items list" })).toContainText("iPhone 17 Pro");
   });
 
+  test("bug=wrong_total: the cart total is $1.00 more than its lines (2026-11-19)", async ({ page }) => {
+    await page.goto("/?bug=wrong_total");
+    await addToCart(page, "/products/5");
+    await page.goto("/cart");
+    await expect(page.getByRole("list", { name: "Cart items list" })).toContainText("$29.00");
+    await expect(page.getByTestId("cart-total")).toHaveText("Total: $30.00");
+  });
+
+  test("bug=search_ignores_query: every product is listed whatever was searched (2026-11-19)", async ({ page }) => {
+    await page.goto("/products?q=zzz-no-such-product&bug=search_ignores_query");
+    await expect(page.getByRole("heading", { name: "Results for “zzz-no-such-product”" })).toBeVisible();
+    await expect(page.getByTestId("product-result")).toHaveCount(5);
+  });
+
+  test("bug=login_no_error: a refused login shows the form again without an error (2026-11-19)", async ({ page }) => {
+    await page.goto("/?bug=login_no_error");
+    await logIn(page, "qa@demo.test", "wrong-password");
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Log in" })).toBeVisible();
+  });
+
+  test("bug=add_to_cart_noop: 'Added to cart' is shown but the cart stays empty (2026-11-19)", async ({ page }) => {
+    await page.goto("/?bug=add_to_cart_noop");
+    await addToCart(page, "/products/1");
+    await expect(cartBadge(page)).toHaveText("Cart (0)");
+    await page.goto("/cart");
+    await expect(page.getByText("Your cart is empty")).toBeVisible();
+  });
+
+  test("bug=price_mismatch: the product page asks $10.00 more than the list (2026-11-19)", async ({ page }) => {
+    await page.goto("/products?bug=price_mismatch");
+    await expect(page.getByTestId("product-result").filter({ hasText: "Pixel 11" })).toContainText("$899.00");
+    await page.goto("/products/2");
+    await expect(page.getByTestId("product-price")).toHaveText("$909.00");
+  });
+
+  test("bug=product_500: a product page is a server error page (2026-11-19)", async ({ page }) => {
+    const res = await page.goto("/products/3?bug=product_500");
+    expect(res?.status()).toBe(500);
+    await expect(page.getByRole("heading", { level: 1, name: "500 Internal Server Error" })).toBeVisible();
+  });
+
   test("flags persist in a cookie across navigation and fresh sessions", async ({ page, context }) => {
     await page.goto("/products/2?bug=empty_cart");
     const flags = (await context.cookies()).find((c) => c.name === "flags");
@@ -270,5 +313,26 @@ test.describe("survey fixtures", () => {
     } finally {
       await shop.close();
     }
+  });
+});
+
+test.describe("wishlist (2026-11-19: a sign-in wall)", () => {
+  test("a guest's Add to wishlist opens a sign-in dialog and adds nothing", async ({ page }) => {
+    await page.goto("/products/1");
+    await page.getByRole("button", { name: "Add to wishlist" }).click();
+    const dialog = page.getByRole("dialog", { name: "Sign in to your account" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Password")).toBeVisible();
+    await page.goto("/wishlist");
+    await expect(page).toHaveURL(/\/login$/);
+  });
+
+  test("signed in, Add to wishlist adds the product and the wishlist lists it", async ({ page }) => {
+    await logIn(page);
+    await page.goto("/products/2");
+    await page.getByRole("button", { name: "Add to wishlist" }).click();
+    await expect(page.getByText("Added to wishlist")).toBeVisible();
+    await page.goto("/wishlist");
+    await expect(page.getByRole("list", { name: "Wishlist items" })).toContainText("Pixel 11");
   });
 });

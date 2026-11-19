@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadEnv, loadLiveLlmEnv } from "./env";
+import { loadEnv, loadLiveLlmEnv, providerOfModel } from "./env";
 
 const validEnv: Record<string, string | undefined> = {
   NODE_ENV: "development",
@@ -189,6 +189,14 @@ describe("loadEnv", () => {
     expect(message).not.toContain("secret-value");
     expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "gemini", GEMINI_API_KEY: "gm-test", ANTHROPIC_API_KEY: "sk ant" })).toThrow(/ANTHROPIC_API_KEY/);
     expect(() => loadEnv({ ...validEnv, LLM_PROVIDER: "fake", DEEPSEEK_API_KEY: "sk ds" })).toThrow(/DEEPSEEK_API_KEY/);
+  });
+
+  it("LLM_FALLBACK_MODEL is optional (empty means unset), and its provider is read from its id (2026-11-19)", () => {
+    expect(loadEnv(validEnv).LLM_FALLBACK_MODEL).toBeUndefined();
+    expect(loadEnv({ ...validEnv, LLM_FALLBACK_MODEL: "" }).LLM_FALLBACK_MODEL).toBeUndefined();
+    expect(loadEnv({ ...validEnv, LLM_FALLBACK_MODEL: "deepseek-flash" }).LLM_FALLBACK_MODEL).toBe("deepseek-flash");
+    expect(() => loadEnv({ ...validEnv, LLM_FALLBACK_MODEL: "gpt-9" })).toThrow(/LLM_FALLBACK_MODEL/);
+    expect([providerOfModel("gemini-3.5-flash"), providerOfModel("claude-opus-5-5"), providerOfModel("deepseek-v4-pro"), providerOfModel("gpt-9")]).toEqual(["gemini", "anthropic", "deepseek", null]);
   });
 
   it("LLM_REASONING is optional (empty means unset) and must be a reasoning level", () => {

@@ -3,7 +3,7 @@
 import { ADDED_BY_PLATFORM, describeExpectedOutcome, isInferred, type NormalizedRequirement, type SiteAnalysis } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { ApiRequestError, cancelRun, confirmCriteria, getCriteria, getSiteAnalysis, updateCriteria, type ConfirmResult } from "../lib/api";
+import { ApiRequestError, acceptProposal, cancelRun, confirmCriteria, getCriteria, getSiteAnalysis, reviseCriterion, updateCriteria, type ConfirmResult } from "../lib/api";
 import { CriterionCard } from "./CriterionCard";
 import { Icon } from "./Icon";
 import { LiveSiteSummary } from "./SiteAnalysisPanel";
@@ -87,6 +87,20 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
     }
   }
 
+  /** Saves a check the AI rewrote from the user's words (2026-11-19); null, or the error to show. */
+  async function acceptRewrite(proposalId: string): Promise<string | null> {
+    setSaving(true);
+    setError(null);
+    try {
+      setRequirement(await acceptProposal(runId, proposalId));
+      return null;
+    } catch (err) {
+      return messageOf(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   /** Cancels this run and opens the new-test form pre-filled from it (spec 2026-09-26-criteria-check-edit). */
   async function startOver() {
     setStartingOver("working");
@@ -164,6 +178,13 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
       onCriticalChange={(critical) => save(criteria.map((x) => (x.id === c.id ? { ...x, critical } : x)))}
       canMakeNonCritical={criteria.filter((x) => x.critical).length > 1}
       onEditingChange={(open) => editingChange(c.id, open)}
+      onRevise={(instruction) =>
+        reviseCriterion(runId, c.id, instruction).then(
+          (proposal) => ({ proposal }),
+          (err: unknown) => ({ error: messageOf(err) }),
+        )
+      }
+      onAccept={acceptRewrite}
     />
   );
 

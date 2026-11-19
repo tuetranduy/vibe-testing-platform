@@ -36,3 +36,23 @@ export function passedOnAssumedChecks(report: { verdict: RunVerdict | null; requ
   const deciding = report.requirement.criteria.filter((c) => c.critical);
   return deciding.length > 0 && deciding.every(isInferred);
 }
+
+export const PASSED_ON_SHALLOW = "Passed (one broad check only)";
+
+/**
+ * A PASSED verdict for a vague or site-wide requirement that rests on at most one critical criterion (2026-11-19, FD-11:
+ * "Test this website" became "the website loads", which passed while testing nothing): said so, so the run does not
+ * read as a tested site.
+ */
+export function passedOnShallowCheck(report: { verdict: RunVerdict | null; requirement: Pick<Understood, "criteria" | "intent"> | null }): boolean {
+  if (report.verdict !== "PASSED" || !report.requirement?.intent) return false;
+  const { clarity } = report.requirement.intent;
+  return (clarity === "vague" || clarity === "site_wide") && report.requirement.criteria.filter((c) => c.critical).length <= 1;
+}
+
+/** How a PASSED verdict is qualified, when it is: on assumed checks (first), or on one broad check; null otherwise. */
+export function qualifiedPassLabel(report: { verdict: RunVerdict | null; requirement: Pick<Understood, "criteria" | "intent"> | null }): string | null {
+  if (passedOnAssumedChecks(report)) return PASSED_ON_ASSUMED;
+  if (passedOnShallowCheck(report)) return PASSED_ON_SHALLOW;
+  return null;
+}

@@ -20,6 +20,8 @@ x-app-env: &app-env
   LLM_MODEL: ${LLM_MODEL:-}
   # Empty: the model's own reasoning level.
   LLM_REASONING: ${LLM_REASONING:-}
+  # Empty: no fallback. A model of any provider with a key, used once a run's own model gives up.
+  LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
   GEMINI_THINKING_LEVEL: ${GEMINI_THINKING_LEVEL:-}

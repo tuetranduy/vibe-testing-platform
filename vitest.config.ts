@@ -39,6 +39,12 @@ export default defineConfig({
         },
       },
       {
+        test: {
+          name: "evals",
+          include: ["evals/**/*.test.ts"],
+        },
+      },
+      {
         plugins: [tsxTransform()],
         test: {
           name: "e2e",

@@ -4,8 +4,10 @@ import {
   JOB_RERUN_RUN,
   JOB_RETENTION,
   RETENTION_QUEUE,
+  REVISIONS_QUEUE,
   RUNS_QUEUE,
   startReaper,
+  type ReviseJobData,
   type RunJobData,
 } from "@platform/event-bus";
 import { Queue, Worker, type ConnectionOptions, type Job } from "bullmq";
@@ -13,6 +15,7 @@ import type { WorkerDeps } from "./deps";
 import { analyzeRunJob } from "./jobs/analyze-run";
 import { executeRunJob } from "./jobs/execute-run";
 import { rerunRunJob } from "./jobs/rerun-run";
+import { reviseCriterionJob } from "./jobs/revise-criterion";
 import { pruneExplorationCache, retentionJob } from "./jobs/retention";
 
 export interface RunningWorkers {
@@ -39,6 +42,13 @@ export async function startWorkers(
     },
     { connection: opts.connection, concurrency: opts.concurrency, maxStalledCount: 0, lockDuration: 30_000 },
   );
+
+  // Rewriting a check from the user's words (2026-11-19): a queue of its own, so it never waits behind a test run.
+  const revisions = new Worker<ReviseJobData>(REVISIONS_QUEUE, async (job: Job<ReviseJobData>) => reviseCriterionJob(deps, job.data), {
+    connection: opts.connection,
+    concurrency: 4,
+    maxStalledCount: 0,
+  });
 
   // The reaper runs in the API too (@platform/event-bus): one of them per tick, and still one when no worker is up.
   const reaper = await startReaper(deps, { connection: opts.connection, ...(opts.reapEveryMs ? { everyMs: opts.reapEveryMs } : {}) });
@@ -69,7 +79,7 @@ export async function startWorkers(
     );
   }
 
-  for (const w of [runs, ...(retention ? [retention] : [])]) {
+  for (const w of [runs, revisions, ...(retention ? [retention] : [])]) {
     w.on("failed", (job, err) => deps.logger.error({ job: job?.name, runId: job?.data?.runId, err }, "job failed"));
     w.on("error", (err) => deps.logger.error({ err }, "worker error"));
   }
@@ -77,6 +87,7 @@ export async function startWorkers(
   return {
     async close() {
       await runs.close();
+      await revisions.close();
       await reaper.close();
       await retention?.close();
       await retentionQueue.close();

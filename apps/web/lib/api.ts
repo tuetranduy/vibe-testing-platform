@@ -6,6 +6,8 @@ import {
   SiteAnalysisSchema,
   type SiteAnalysis,
   NormalizedRequirementSchema,
+  CriterionProposalSchema,
+  type CriterionProposalResponse,
   SessionViewSchema,
   SessionListResponseSchema,
   RevokeSessionsResponseSchema,
@@ -179,6 +181,14 @@ export const getCriteria = (runId: string): Promise<NormalizedRequirement> =>
 /** Saves a new criteria revision; the API takes the full requirement. */
 export const updateCriteria = (runId: string, requirement: NormalizedRequirement): Promise<NormalizedRequirement> =>
   request(NormalizedRequirementSchema, `${runPath(runId)}/criteria`, { method: "PUT", body: requirement });
+
+/** Asks the AI to rewrite a check from the user's words (2026-11-19); nothing is saved until the proposal is accepted. */
+export const reviseCriterion = (runId: string, criterionId: string, instruction: string): Promise<CriterionProposalResponse> =>
+  request(CriterionProposalSchema, `${runPath(runId)}/criteria/${encodeURIComponent(criterionId)}/revise`, { method: "POST", body: { instruction } });
+
+/** Saves a rewrite proposal as the next criteria revision. */
+export const acceptProposal = (runId: string, proposalId: string): Promise<NormalizedRequirement> =>
+  request(NormalizedRequirementSchema, `${runPath(runId)}/criteria/proposals/${encodeURIComponent(proposalId)}/accept`, { method: "POST" });
 
 /** A blank-requirement run's suggested tests (409 while it is still exploring, 404 for a run with a requirement). */
 export const getSuggestions = (runId: string): Promise<SuggestionSetResponse> =>

@@ -5,6 +5,7 @@ import {
   NotFoundError,
   RequirementFrozenError,
   RequirementStateError,
+  StaleRevisionError,
   StaleTransitionError,
 } from "@platform/db";
 import type { FastifyError, FastifyInstance } from "fastify";
@@ -48,7 +49,7 @@ export function registerErrorHandler(app: FastifyInstance): void {
     } else if (err instanceof IdempotencyConflictError) {
       status = 409;
       body = { code: "IDEMPOTENCY_CONFLICT", message: err.message };
-    } else if (err instanceof RequirementFrozenError || err instanceof RequirementStateError || err instanceof StaleTransitionError) {
+    } else if (err instanceof RequirementFrozenError || err instanceof RequirementStateError || err instanceof StaleTransitionError || err instanceof StaleRevisionError) {
       status = 409;
       body = { code: "CONFLICT", message: err.message };
     } else if ("statusCode" in err && typeof err.statusCode === "number" && err.statusCode < 500) {

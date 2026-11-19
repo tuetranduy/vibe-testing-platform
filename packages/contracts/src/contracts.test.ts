@@ -4,9 +4,16 @@ import {
   CriterionResultSchema,
   destructiveActionsAllowed,
   ElementRefSchema,
+  ExplorationOutcomeSchema,
+  ExplorationStepSchema,
+  RerunOutcomeSchema,
+  STATUS_REASON_TEXT,
   ADDED_BY_PLATFORM,
   NormalizedRequirementSchema,
   PASSED_ON_ASSUMED,
+  PASSED_ON_SHALLOW,
+  qualifiedPassLabel,
+  passedOnShallowCheck,
   assumptionsOf,
   passedOnAssumedChecks,
   isInferred,
@@ -415,7 +422,7 @@ describe("TestEventSchema", () => {
   });
 
   it("lists every type and knows the terminal ones", () => {
-    expect(TEST_EVENT_TYPES).toHaveLength(22);
+    expect(TEST_EVENT_TYPES).toHaveLength(23);
     expect(isTerminalEvent({ type: "run.completed" })).toBe(true);
     expect(isTerminalEvent({ type: "stage.completed" })).toBe(false);
   });
@@ -646,5 +653,76 @@ describe("assumptionsOf / passedOnAssumedChecks (2026-11-11)", () => {
     expect(passedOnAssumedChecks({ verdict: "PASSED", requirement: null })).toBe(false);
     expect(passedOnAssumedChecks({ verdict: null, requirement: onlyInferred })).toBe(false);
     expect([ADDED_BY_PLATFORM, PASSED_ON_ASSUMED]).toEqual(["Added by the platform", "Passed (on assumed checks)"]);
+  });
+
+  it("a pass of a vague or site-wide requirement on one broad check only is shallow (FD-11, 2026-11-19)", () => {
+    const siteWide = { clarity: "site_wide" as const, goal: "The site works", feature: null, notes: [] };
+    const loads = { criteria: [criterion("AC-1")], intent: siteWide };
+    expect(passedOnShallowCheck({ verdict: "PASSED", requirement: loads })).toBe(true);
+    expect(passedOnShallowCheck({ verdict: "PASSED", requirement: { ...loads, intent: { ...siteWide, clarity: "vague" as const } } })).toBe(true);
+    expect(passedOnShallowCheck({ verdict: "PASSED", requirement: { ...loads, intent: { ...siteWide, clarity: "specific" as const } } })).toBe(false);
+    expect(passedOnShallowCheck({ verdict: "PASSED", requirement: { ...loads, criteria: [criterion("AC-1"), criterion("AC-2")] } })).toBe(false);
+    expect(passedOnShallowCheck({ verdict: "PASSED", requirement: { criteria: [criterion("AC-1")] } })).toBe(false);
+    expect(passedOnShallowCheck({ verdict: "FAILED", requirement: loads })).toBe(false);
+    expect(PASSED_ON_SHALLOW).toBe("Passed (one broad check only)");
+  });
+
+  it("the qualified pass label: assumed checks first, then a shallow pass, else none", () => {
+    const siteWide = { clarity: "site_wide" as const, goal: "The site works", feature: null, notes: [] };
+    expect(qualifiedPassLabel({ verdict: "PASSED", requirement: { criteria: [inferred("AC-1")], intent: siteWide } })).toBe(PASSED_ON_ASSUMED);
+    expect(qualifiedPassLabel({ verdict: "PASSED", requirement: { criteria: [criterion("AC-1")], intent: siteWide } })).toBe(PASSED_ON_SHALLOW);
+    expect(qualifiedPassLabel({ verdict: "PASSED", requirement: { criteria: [criterion("AC-1")] } })).toBeNull();
+  });
+});
+
+describe("sign-in walls, site errors, replans and flaky reruns (2026-11-19)", () => {
+  const step = {
+    id: "st_1",
+    runId: "run_1",
+    index: 0,
+    plannedStepId: "PS-2",
+    kind: "act",
+    instruction: "Click the 'Add to wishlist' button",
+    element: null,
+    inputRef: null,
+    onGoldenPath: true,
+    urlBefore: "https://x.com/p/1",
+    urlAfter: "https://x.com/p/1",
+    outcome: "SUCCESS",
+    blockReason: null,
+    error: null,
+    startedAt: "2026-11-19T10:00:00.000Z",
+    durationMs: 10,
+    artifactIds: [],
+    llm: null,
+  };
+
+  it("an act step can say it opened a sign-in prompt, a checkpoint that it was taken on an error page", () => {
+    expect(ExplorationStepSchema.parse({ ...step, signInPrompt: true }).signInPrompt).toBe(true);
+    expect(ExplorationStepSchema.parse({ ...step, kind: "checkpoint", siteError: "500 Internal Server Error" }).siteError).toBe("500 Internal Server Error");
+    expect(ExplorationStepSchema.safeParse({ ...step, siteError: "x".repeat(201) }).success).toBe(false);
+  });
+
+  it("an exploration outcome may carry the plan as exploration revised it", () => {
+    const revisedPlan = { runId: "run_1", requirementRevision: 1, scenarios: [scenario], blockedCriteria: [], stopConditions: [] };
+    expect(ExplorationOutcomeSchema.parse({ steps: [], facts: [], stopReason: "COMPLETED", revisedPlan }).revisedPlan).toEqual(TestPlanSchema.parse(revisedPlan));
+    expect(ExplorationOutcomeSchema.parse({ steps: [], facts: [], stopReason: "COMPLETED" }).revisedPlan).toBeUndefined();
+  });
+
+  it("plan.revised names the scenario, the failed step and the new step count", () => {
+    const r = TestEventSchema.safeParse({
+      ...envelope,
+      stage: "EXPLORING",
+      type: "plan.revised",
+      payload: { scenarioId: "SC-1", afterStepId: "PS-3", stepCount: 4 },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("a rerun can be flaky, and the new reasons read in plain language", () => {
+    expect(RerunOutcomeSchema.options).toContain("FLAKY");
+    expect(STATUS_REASON_TEXT.SIGN_IN_REQUIRED).toBe("The site asked to sign in for an action this check needs; add credentials to test it");
+    expect(STATUS_REASON_TEXT.SITE_ERROR).toBe("The site showed a server error page where this was checked");
+    expect(STATUS_REASON_TEXT.RERUN_FLAKY).toBe("The generated test passed on one rerun and failed on another");
   });
 });

@@ -235,6 +235,16 @@ describe("renderReportMarkdown: what the platform understood and assumed (2026-1
     expect(renderReportMarkdown(understood({ verdict: "FAILED" }, { critical1: false }))).toContain("- **Result:** Failed\n");
   });
 
+  it("says a pass of a site-wide requirement rests on one broad check (2026-11-19)", () => {
+    const base = report();
+    const [ac1] = base.requirement!.criteria;
+    const md = renderReportMarkdown(report({
+      verdict: "PASSED",
+      requirement: { ...base.requirement!, intent: { clarity: "site_wide", goal: "The website works", feature: null, notes: [] }, criteria: [{ ...ac1!, critical: true }] },
+    }));
+    expect(md).toContain("- **Result:** Passed (one broad check only)");
+  });
+
   it("has no Assumptions section and no goal line for a report without them", () => {
     const md = renderReportMarkdown(report());
     expect(md).not.toContain("## Assumptions");

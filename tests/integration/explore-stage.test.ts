@@ -269,7 +269,8 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
       const act = outcome.steps[5]!;
       expect(act.element!.candidates[act.element!.chosenIndex]).toEqual({ strategy: "role", role: "button", name: "Add to cart", exact: true });
       expect(act.llm).toBeNull(); // deterministic replay of the observed element
-      expect(outcome.steps[4]!.llm).toMatchObject({ model: MODEL, cacheHit: null });
+      // The step names its control: the one "Add to cart" button is found by role and name, with no model call (2026-11-19).
+      expect(outcome.steps[4]).toMatchObject({ instruction: "By name: Click the Add to cart button", llm: null });
       expect(outcome.steps[0]).toMatchObject({ urlAfter: target });
 
       // Cart count before/after, read from the DOM with the recorded locator.

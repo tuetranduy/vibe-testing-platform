@@ -48,6 +48,18 @@ describe("createInputGenerator", () => {
     expect(sent).toContain("First name *");
   });
 
+  it("a username is the platform's too (qa_<token>), new each run, so a sign-up is never refused as taken (KI-077)", async () => {
+    const { llm, transport } = setup();
+    const gen = createInputGenerator(llm);
+    const a = await gen.generate(request({ key: "username", field: field({ label: "Username" }) }));
+    expect(a).toEqual({ value: expect.stringMatching(/^qa_[0-9a-z]{6}$/), llm: null });
+    expect(transport.requests).toHaveLength(0);
+    expect((await gen.generate(request({ key: "user_name", runId: "run_2", field: field({ label: "User name" }) }))).value).not.toBe(a.value);
+    expect((await gen.generate(request({ key: "login", field: field({ placeholder: "Choose a nickname" }) }))).value).toMatch(/^qa_[0-9a-z]{6}$/);
+    // A secret is never a username, nor a field that asks for the first name.
+    expect((await createInputGenerator(null).generate(request({ key: "first_name", field: field({ label: "First name" }) }))).value).not.toMatch(/^qa_/);
+  });
+
   it("an email is never the model's (it repeats one address, KI-063): unique to the run and the key, with no model call", async () => {
     const { llm, transport } = setup();
     const gen = createInputGenerator(llm);

@@ -1,6 +1,6 @@
 "use client";
 
-import { PASSED_ON_ASSUMED, assumptionsOf, isInferred, passedOnAssumedChecks, type TestReport, type TestRunSummary } from "@platform/contracts";
+import { assumptionsOf, isInferred, qualifiedPassLabel, type TestReport, type TestRunSummary } from "@platform/contracts";
 import { useEffect, useRef, useState } from "react";
 import { getReport, getRun } from "../lib/api";
 import { AssumptionItems } from "./Assumptions";
@@ -77,7 +77,7 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
             <dt>Result</dt>
             <dd>
               <strong>
-                {report.verdict ? (passedOnAssumedChecks(report) ? PASSED_ON_ASSUMED : VERDICT_LABEL[report.verdict]) : report.partial ? "Partial report (no verdict)" : "No verdict"}
+                {report.verdict ? (qualifiedPassLabel(report) ?? VERDICT_LABEL[report.verdict]) : report.partial ? "Partial report (no verdict)" : "No verdict"}
               </strong>
             </dd>
           </div>

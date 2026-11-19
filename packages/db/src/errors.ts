@@ -47,6 +47,14 @@ export class RequirementStateError extends Error {
   }
 }
 
+/** An edit based on a revision that is no longer the latest (another edit was saved first). */
+export class StaleRevisionError extends Error {
+  constructor(public readonly runId: string, public readonly expected: number, public readonly latest: number) {
+    super(`The criteria changed meanwhile (revision ${latest}, the edit was based on ${expected})`);
+    this.name = "StaleRevisionError";
+  }
+}
+
 export class IdempotencyConflictError extends Error {
   constructor(public readonly existingRunId: string) {
     super("Idempotency-Key was already used with a different request body");

@@ -1,9 +1,8 @@
 import {
-  PASSED_ON_ASSUMED,
   STATUS_REASON_TEXT,
   assumptionsOf,
   isInferred,
-  passedOnAssumedChecks,
+  qualifiedPassLabel,
   type CriterionChange,
   type CriterionResult,
   type RunVerdict,
@@ -91,7 +90,7 @@ export function renderReportMarkdown(report: TestReport, compared: MarkdownCompa
   push("# Test report", "");
   push(`- **Website:** ${escapeMarkdown(report.targetUrl)}`);
   push(`- **Run:** ${escapeMarkdown(report.runId)}${report.rerunOf ? ` (rerun of ${escapeMarkdown(report.rerunOf)})` : ""}`);
-  const verdict = report.verdict ? (passedOnAssumedChecks(report) ? PASSED_ON_ASSUMED : VERDICT[report.verdict]) : null;
+  const verdict = report.verdict ? (qualifiedPassLabel(report) ?? VERDICT[report.verdict]) : null;
   push(`- **Result:** ${verdict ?? `${escapeMarkdown(report.lifecycle)} (no verdict)`}`);
   push(
     `- **Started:** ${when(report.startedAt)} · **Finished:** ${when(report.finishedAt)} · **Duration:** ${duration(report.durationMs)}`,
