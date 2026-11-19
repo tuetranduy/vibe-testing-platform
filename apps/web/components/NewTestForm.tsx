@@ -160,7 +160,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
           </div>
           <div className="field-pair">
             <div className="field"><label htmlFor="maxRunSeconds">Time limit (seconds)</label><input id="maxRunSeconds" type="number" min={60} max={1800} value={maxRunSeconds} onChange={(e) => setMaxRunSeconds(e.target.value)} {...invalid("maxRunSeconds")} />{errorFor("maxRunSeconds")}</div>
-            <div className="field"><label htmlFor="maxExplorationSteps">Step limit</label><input id="maxExplorationSteps" type="number" min={1} max={100} value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} {...invalid("maxExplorationSteps")} />{errorFor("maxExplorationSteps")}</div>
+            <div className="field"><label htmlFor="maxExplorationSteps">Step limit</label><input id="maxExplorationSteps" type="number" min={1} max={100} value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} {...invalid("maxExplorationSteps")} /><p className="hint">Steps in the test plan.</p>{errorFor("maxExplorationSteps")}</div>
           </div>
           <label className="choice"><input type="checkbox" checked={rerun} onChange={(e) => setRerun(e.target.checked)} />Verify results by rerunning the saved test</label>
           <label className="choice"><input type="checkbox" checked={autoConfirm} onChange={(e) => setAutoConfirm(e.target.checked)} />Start immediately after planning (skip review)</label>
