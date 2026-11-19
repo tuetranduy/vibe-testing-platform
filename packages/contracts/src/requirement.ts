@@ -221,3 +221,17 @@ export const NormalizedRequirementSchema = z
     });
   });
 export type NormalizedRequirement = z.infer<typeof NormalizedRequirementSchema>;
+
+/**
+ * A check rewritten from the user's own words during review (2026-11-19): the next revision's criteria and facts, the
+ * revision it rewrote, and the id that accepts it (POST …/criteria/proposals/:proposalId/accept).
+ */
+export const CriterionProposalSchema = z.object({
+  proposalId: z.string().min(1).max(200),
+  runId: z.string(),
+  criterionId: z.string(),
+  basedOnRevision: z.number().int().min(1),
+  criteria: z.array(AcceptanceCriterionSchema),
+  facts: z.array(FactRequestSchema),
+});
+export type CriterionProposalResponse = z.infer<typeof CriterionProposalSchema>;

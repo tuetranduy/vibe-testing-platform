@@ -5,8 +5,9 @@ import {
   type NormalizedRequirement,
   type SiteAnalysis,
 } from "@platform/contracts";
-import { EventRepository, RequirementRepository, RunRepository, SecretRepository, SiteAnalysisRepository } from "@platform/db";
-import { createRunEventPublisher, type RunEventPublisher } from "@platform/event-bus";
+import { EventRepository, RequirementRepository, RunRepository, SecretRepository, SiteAnalysisRepository, StaleRevisionError } from "@platform/db";
+import { RevisionFailedError, RevisionTimeoutError, createRunEventPublisher, type CriterionProposal, type RunEventPublisher } from "@platform/event-bus";
+import { z } from "zod";
 import { redactByKey } from "@platform/security";
 import type { RunScope } from "@platform/db";
 import type { ApiDeps } from "../deps";
@@ -15,6 +16,18 @@ import { applyCriteriaEdit } from "./criteria-edit";
 import { NO_VERDICT, observeStage } from "../metrics";
 
 const ENQUEUE_FAILED = "Queue unavailable after confirmation";
+/** How long a rewrite may take before the API answers 504 (the worker gives up a little earlier). */
+const REVISE_WAIT_MS = 60_000;
+const ReviseRequestSchema = z.object({ instruction: z.string().trim().min(3).max(500) });
+/** The worker's refusals, as answers (RevisionFailedError codes). */
+const REVISE_ERRORS: Record<string, [number, string]> = {
+  REVISE_NEEDS_MODEL: [422, "Rewriting a check needs an AI model; this run uses the fake engine"],
+  REVISE_INVALID: [422, "The AI could not turn that into a valid check; try other words"],
+  PROPOSAL_STALE: [409, "The criteria changed meanwhile; try again"],
+  NOT_AWAITING_CONFIRMATION: [409, "Criteria can only change while the run awaits confirmation"],
+  UNKNOWN_CRITERION: [404, "No such criterion"],
+  REVISE_TIMEOUT: [504, "The AI took too long to rewrite the check; try again"],
+};
 
 export interface ConfirmResult {
   revision: number;
@@ -101,14 +114,19 @@ export class CriteriaService {
       throw new HttpError(400, edit.code, message, edit.issues);
     }
 
-    const updated = await this.requirements.createRevision(runId, {
-      originalText: req.originalText,
-      title: latest.title,
-      // What the analysis understood is its record, kept across edits; the body's copy is ignored.
-      ...(latest.intent ? { intent: latest.intent } : {}),
-      criteria: edit.criteria,
-      facts: edit.facts,
-    });
+    const updated = await this.requirements.createRevision(
+      runId,
+      {
+        originalText: req.originalText,
+        title: latest.title,
+        // What the analysis understood is its record, kept across edits; the body's copy is ignored.
+        ...(latest.intent ? { intent: latest.intent } : {}),
+        criteria: edit.criteria,
+        facts: edit.facts,
+      },
+      // The edit was checked against `latest`: saved only if no other edit came first (review finding).
+      { expectedRevision: latest.revision },
+    );
 
     await this.publisher().publish({
       runId,
@@ -119,6 +137,78 @@ export class CriteriaService {
     });
 
     return updated;
+  }
+
+  /**
+   * Rewrites one criterion from the user's words (2026-11-19): the worker's model proposes it (revisions queue), and
+   * nothing is saved until the proposal is accepted. Only while the run awaits confirmation.
+   */
+  async revise(scope: RunScope, runId: string, criterionId: string, body: unknown): Promise<CriterionProposal> {
+    const parsed = ReviseRequestSchema.safeParse(body ?? {});
+    if (!parsed.success) throw new HttpError(400, "VALIDATION_FAILED", "Describe the check in 3 to 500 characters", zodIssues(parsed.error));
+    const { run, latest } = await this.awaiting(scope, runId);
+    if (!latest.criteria.some((c) => c.id === criterionId)) throw new HttpError(404, "NOT_FOUND", `The run has no criterion ${criterionId}`);
+    const revisions = this.deps.revisions;
+    if (!revisions) throw new HttpError(503, "REVISE_UNAVAILABLE", "Rewriting checks is not available on this server");
+    try {
+      return await revisions.request({ runId: run.id, criterionId, instruction: parsed.data.instruction, basedOnRevision: latest.revision }, REVISE_WAIT_MS);
+    } catch (err) {
+      if (err instanceof RevisionTimeoutError) throw new HttpError(504, "REVISE_TIMEOUT", "The AI took too long to rewrite the check; try again");
+      if (err instanceof RevisionFailedError) {
+        const known = REVISE_ERRORS[err.code];
+        if (known) throw new HttpError(known[0], err.code === "NOT_AWAITING_CONFIRMATION" ? "CONFLICT" : err.code === "UNKNOWN_CRITERION" ? "NOT_FOUND" : err.code, known[1]);
+        throw new HttpError(502, "REVISE_FAILED", "The AI model could not be reached; try again");
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Saves a rewrite proposal (revise) as the next revision. The proposal is read back from the revisions queue by its
+   * id, never taken from the request: only what the worker proposed is saved, and only onto the revision it rewrote.
+   */
+  async accept(scope: RunScope, runId: string, proposalId: string): Promise<NormalizedRequirement> {
+    const { run, latest } = await this.awaiting(scope, runId);
+    const proposal = await this.deps.revisions?.proposal(proposalId);
+    if (!proposal || proposal.runId !== run.id) throw new HttpError(404, "NOT_FOUND", "No such proposal for this run (it may have expired)");
+    if (proposal.basedOnRevision !== latest.revision) throw new HttpError(409, "PROPOSAL_STALE", "The criteria changed since this rewrite was proposed");
+    const parsed = NormalizedRequirementSchema.safeParse({ ...latest, criteria: proposal.criteria, facts: proposal.facts });
+    if (!parsed.success) throw new HttpError(409, "PROPOSAL_STALE", "The proposal no longer fits the criteria");
+    let updated: NormalizedRequirement;
+    try {
+      updated = await this.requirements.createRevision(
+        runId,
+        {
+          originalText: latest.originalText,
+          title: latest.title,
+          ...(latest.intent ? { intent: latest.intent } : {}),
+          criteria: parsed.data.criteria,
+          facts: parsed.data.facts,
+        },
+        { expectedRevision: proposal.basedOnRevision },
+      );
+    } catch (err) {
+      if (err instanceof StaleRevisionError) throw new HttpError(409, "PROPOSAL_STALE", "The criteria changed since this rewrite was proposed");
+      throw err;
+    }
+    await this.publisher().publish({
+      runId,
+      stage: run.lifecycle,
+      type: "criteria.updated",
+      message: `Criteria revision ${updated.revision} saved`,
+      payload: { revision: updated.revision },
+    });
+    return updated;
+  }
+
+  /** The run and its latest revision, while it awaits confirmation (else 409). */
+  private async awaiting(scope: RunScope, runId: string) {
+    const run = await this.runs.getRequired(scope, runId);
+    const latest = await this.requirements.findLatest(runId);
+    if (run.lifecycle !== "AWAITING_CONFIRMATION" || !latest) {
+      throw new HttpError(409, "CONFLICT", `Run is ${run.lifecycle}; criteria can only change while it awaits confirmation`);
+    }
+    return { run, latest };
   }
 
   /**

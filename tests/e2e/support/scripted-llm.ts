@@ -1,5 +1,5 @@
 import type { LlmTransport, LlmTransportRequest, LlmTransportResponse } from "@platform/llm";
-import { DIAGNOSTICS_SYSTEM_PROMPT, INPUT_SYSTEM_PROMPT, PLANNER_SYSTEM_PROMPT, REQUIREMENT_SYSTEM_PROMPT, SURVEY_SYSTEM_PROMPT, SITE_EXPLORATION_SYSTEM_PROMPT } from "@platform/testing-engine";
+import { DIAGNOSTICS_SYSTEM_PROMPT, INPUT_SYSTEM_PROMPT, PLANNER_SYSTEM_PROMPT, REPLANNER_SYSTEM_PROMPT, REQUIREMENT_SYSTEM_PROMPT, REVISE_SYSTEM_PROMPT, SURVEY_SYSTEM_PROMPT, SITE_EXPLORATION_SYSTEM_PROMPT, WAY_THERE_SYSTEM_PROMPT } from "@platform/testing-engine";
 import { DEMO_SHOP_SUGGESTIONS, type Scenario } from "./scenarios";
 
 const textOf = (req: LlmTransportRequest) =>
@@ -10,7 +10,8 @@ const textOf = (req: LlmTransportRequest) =>
  * from the scenario whose requirement text the prompt contains. Diagnostics add nothing. A call it
  * cannot place fails loudly (the run errors with the provider's category), never silently passes.
  * The survey's call (`test_suggestions`) gets DEMO_SHOP_SUGGESTIONS; a value nobody provided (`generate_input`,
- * 2026-10-07) is SCRIPTED_INPUT.
+ * 2026-10-07) is SCRIPTED_INPUT. The way-there choice and the replanner (2026-11-19) find nothing: the scripted plans
+ * fail where their specs mean them to.
  */
 export const SCRIPTED_INPUT = "Scripted-Input-1!";
 
@@ -27,6 +28,12 @@ export class ScenarioTransport implements LlmTransport {
     } else if (req.system === SITE_EXPLORATION_SYSTEM_PROMPT) {
       // Interactive discovery is covered by its real-browser unit tests; preserve each scenario's initial state.
       json = { observation: "Nothing more to explore.", missing: "", candidate: -1, source: "generated", key: "" };
+    } else if (req.system === WAY_THERE_SYSTEM_PROMPT) {
+      json = { index: -1 };
+    } else if (req.system === REPLANNER_SYSTEM_PROMPT) {
+      throw new Error("scripted model: no replan");
+    } else if (req.system === REVISE_SYSTEM_PROMPT) {
+      throw new Error("scripted model: no E2E case rewrites a check");
     } else if (req.system === INPUT_SYSTEM_PROMPT) {
       json = { value: SCRIPTED_INPUT };
     } else if (req.system === SURVEY_SYSTEM_PROMPT) {

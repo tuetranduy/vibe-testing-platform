@@ -1,7 +1,7 @@
 import { NormalizedRequirementSchema, type NormalizedRequirement } from "@platform/contracts";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Executor } from "./client";
-import { NotFoundError, RequirementFrozenError, RequirementStateError } from "./errors";
+import { NotFoundError, RequirementFrozenError, StaleRevisionError, RequirementStateError } from "./errors";
 import { newId } from "./ids";
 import { requirementRevisions, testRuns } from "./schema";
 
@@ -23,12 +23,15 @@ export class RequirementRepository {
 
   /**
    * Appends revision n+1. Rejected once any revision is confirmed (RequirementFrozenError), outside
-   * ANALYZING_REQUIREMENT / AWAITING_CONFIRMATION, or if originalText differs from revision 1.
+   * ANALYZING_REQUIREMENT / AWAITING_CONFIRMATION, or if originalText differs from revision 1. With
+   * `expectedRevision`, also when the latest is another one (StaleRevisionError): checked under the run's row lock, so
+   * of two edits based on the same revision only the first is saved.
    */
   async createRevision(
     runId: string,
     requirement: Omit<NormalizedRequirement, "runId" | "revision" | "confirmedAt"> &
       Partial<Pick<NormalizedRequirement, "runId" | "revision" | "confirmedAt">>,
+    opts: { expectedRevision?: number } = {},
   ): Promise<NormalizedRequirement> {
     return this.db.transaction(async (tx) => {
       const [run] = await tx
@@ -45,6 +48,9 @@ export class RequirementRepository {
         .orderBy(desc(requirementRevisions.revision))
         .limit(1);
       if (latest?.confirmedAt) throw new RequirementFrozenError(runId);
+      if (opts.expectedRevision !== undefined && (latest?.revision ?? 0) !== opts.expectedRevision) {
+        throw new StaleRevisionError(runId, opts.expectedRevision, latest?.revision ?? 0);
+      }
       if (!(EDITABLE_LIFECYCLES as readonly string[]).includes(run.lifecycle)) {
         throw new RequirementStateError(`Criteria cannot change while the run is ${run.lifecycle}`);
       }

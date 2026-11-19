@@ -3388,11 +3388,16 @@ a.running-card:hover {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-.check-editor {
+.check-editor,
+.check-rewrite {
   padding: 16px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   background: var(--surface);
+}
+.check-rewrite textarea {
+  width: 100%;
+  resize: vertical;
 }
 .criterion-source {
   color: var(--text-muted);

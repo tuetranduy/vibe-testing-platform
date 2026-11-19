@@ -1,6 +1,6 @@
 import { createLogger, loadEnvOrExit, redisTlsOptions, resolveEnvLlmChoice } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
-import { DEFAULT_REAPER_CONFIG, RunEventHub, createRunQueue, createScheduleSync, startReaper } from "@platform/event-bus";
+import { DEFAULT_REAPER_CONFIG, RunEventHub, createRevisionQueue, createRunQueue, createScheduleSync, startReaper } from "@platform/event-bus";
 import { defaultResolver } from "@platform/security";
 import { createArtifactStorage } from "@platform/storage";
 import { Redis } from "ioredis";
@@ -45,6 +45,7 @@ if (env.BOOTSTRAP_ADMIN_EMAIL && env.BOOTSTRAP_ADMIN_PASSWORD) {
 const subscriber = new Redis(env.REDIS_URL, { ...tls, maxRetriesPerRequest: null });
 const queueConnection = new Redis(env.REDIS_URL, { ...tls, maxRetriesPerRequest: null });
 const queue = createRunQueue(queueConnection);
+const revisions = createRevisionQueue(queueConnection);
 const schedules = createScheduleSync(queueConnection);
 
 const storage = createArtifactStorage(env);
@@ -80,6 +81,7 @@ const deps: ApiDeps = {
   redis,
   hub: new RunEventHub(subscriber),
   queue,
+  revisions,
   storage,
   cancelSignal: createCancelSignal(redis),
   resolve: defaultResolver,
@@ -115,6 +117,7 @@ const shutdown = async () => {
   await schedules.close();
   await reaper.close();
   await queue.close();
+  await revisions.close();
   redis.disconnect();
   subscriber.disconnect();
   queueConnection.disconnect();

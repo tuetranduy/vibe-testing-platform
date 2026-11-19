@@ -1,6 +1,6 @@
 import type { LlmChoice, LlmKeyProvider } from "@platform/contracts";
 import type { Database } from "@platform/db";
-import type { RunEventHub, RunQueue, ScheduleSync } from "@platform/event-bus";
+import type { RunEventHub, RunQueue, ScheduleSync, RevisionQueue } from "@platform/event-bus";
 import type { Resolver } from "@platform/security";
 import type { ArtifactStorage } from "@platform/storage";
 import type { Redis } from "ioredis";
@@ -46,6 +46,8 @@ export interface ApiDeps {
   redis: Pick<Redis, "publish">;
   hub: RunEventHub;
   queue: RunQueue;
+  /** Rewrites a check from the user's words on the worker (2026-11-19); unset: 503 REVISE_UNAVAILABLE. */
+  revisions?: RevisionQueue;
   storage: ArtifactStorage;
   cancelSignal: CancelSignal;
   resolve: Resolver;

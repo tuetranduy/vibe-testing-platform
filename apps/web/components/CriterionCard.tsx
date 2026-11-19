@@ -1,8 +1,9 @@
 "use client";
 
-import { describeExpectedOutcome, isInferred, type AcceptanceCriterion, type ExpectedOutcome, type FactRequest, type SiteCheck } from "@platform/contracts";
+import { describeExpectedOutcome, isInferred, type AcceptanceCriterion, type CriterionProposalResponse, type ExpectedOutcome, type FactRequest, type SiteCheck } from "@platform/contracts";
 import { useEffect, useRef, useState } from "react";
 import { CheckEditor } from "./CheckEditor";
+import { CheckRewrite } from "./CheckRewrite";
 import { Icon } from "./Icon";
 
 interface Props {
@@ -25,6 +26,12 @@ interface Props {
   onEditingChange?: (editing: boolean) => void;
   /** What the live site showed for this criterion (V1.3); absent: no pages were read. */
   siteCheck?: SiteCheck | undefined;
+  /**
+   * Rewrites the check from the user's words (2026-11-19): the proposal, or the error to show; `onAccept` saves it.
+   * Absent: no free text, and an AI-judged check cannot be edited.
+   */
+  onRevise?: (instruction: string) => Promise<{ proposal: CriterionProposalResponse } | { error: string }>;
+  onAccept?: (proposalId: string) => Promise<string | null>;
 }
 
 const SITE_CHECK: Record<SiteCheck["status"], { label: string; className: string; icon: "check" | "warning" | "info" }> = {
@@ -58,6 +65,8 @@ export function CriterionCard({
   canMakeNonCritical = true,
   onEditingChange,
   siteCheck,
+  onRevise,
+  onAccept,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [weightError, setWeightError] = useState<string | null>(null);
@@ -161,6 +170,15 @@ export function CriterionCard({
           />
         )}
 
+        {editing && onRevise && onAccept && <CheckRewrite criterionId={c.id} currentPreconditions={c.preconditions} busy={busy} onRevise={onRevise} onAccept={onAccept} />}
+        {editing && aiJudged && (
+          <div className="actions">
+            <button type="button" className="button button-quiet" onClick={() => setEditing(false)}>
+              Close
+            </button>
+          </div>
+        )}
+
         <p className="criterion-source">
           From your requirement: <q>{c.sourceText}</q>
         </p>
@@ -226,7 +244,7 @@ export function CriterionCard({
               screenshot): <strong>Pass</strong> or <strong>Fail</strong> by its judgment, or <strong>Inconclusive</strong> when the page
               cannot decide it.
             </p>
-            <p>Judged by AI only — it can only be removed.</p>
+            <p>{onRevise ? "To check an exact value instead, use Edit check and describe it in your own words." : "Judged by AI only — it can only be removed."}</p>
           </div>
         )}
 
@@ -257,7 +275,7 @@ export function CriterionCard({
 
         {!editing && !removing && (
           <div className="actions">
-            {!aiJudged && (
+            {(!aiJudged || onRevise) && (
               <button
                 ref={editButton}
                 type="button"
