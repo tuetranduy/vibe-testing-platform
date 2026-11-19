@@ -422,7 +422,7 @@ describe("runExploration (fake explorer)", () => {
     expect(session.closed).toBe(true);
   });
 
-  it("maxExplorationSteps = 3, objective never met → stops after 3 steps with STEP_LIMIT_REACHED", async () => {
+  it("maxExplorationSteps = 3 → the 4th planned step never starts: STEP_LIMIT_REACHED", async () => {
     const { ctx } = fakeCtx({ options: { maxExplorationSteps: 3 } });
     const session = new FakeSession();
     const mem = memoryStore();
@@ -436,10 +436,36 @@ describe("runExploration (fake explorer)", () => {
     const outcome = await runExploration(ctx, { plan, requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder().recorder });
 
     expect(outcome.stopReason).toBe("STEP_LIMIT_REACHED");
-    expect(outcome.steps).toHaveLength(3);
-    expect(mem.steps).toHaveLength(3);
-    expect(session.ops()).toEqual(["navigate", "screenshot", "observe", "screenshot", "actOn", "screenshot", "close"]); // nothing ran that couldn't be recorded
+    expect(summary(outcome.steps)).toEqual([
+      [0, "navigate", "PS-1", "SUCCESS", true],
+      [1, "observe", "PS-2", "SUCCESS", false],
+      [2, "act", "PS-2", "SUCCESS", true],
+      [3, "observe", "PS-3", "SUCCESS", false],
+      [4, "act", "PS-3", "SUCCESS", true],
+    ]);
+    expect(mem.steps).toEqual(outcome.steps);
+    expect(session.ops().filter((op) => op === "extract")).toEqual([]); // the checkpoint never started
     expect(outcome.facts).toEqual([]);
+  });
+
+  it("the limit counts planned steps: a step's lookups, retries and checkpoint reads do not use it up", async () => {
+    // 3 planned steps record 8: the click's observe, failed act and retry, the checkpoint's extract and observe.
+    const { ctx } = fakeCtx({ options: { maxExplorationSteps: 3 } });
+    const session = new FakeSession({
+      actOn: (_el, n) => (n === 0 ? { success: false, message: "element detached" } : {}),
+      extract: () => ({ cartCount: 1 }),
+    });
+    const plan = planOf(
+      step("navigate", "Open the target URL"),
+      step("click", "Click Add to cart"),
+      step("capture_checkpoint", "Capture the cart badge after adding", { checkpoint: "after_add" }),
+    );
+
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(outcome.steps).toHaveLength(8);
+    expect(outcome.facts.map((f) => [f.key, f.checkpoint])).toContainEqual(["cartCount", "after_add"]);
   });
 
   it("exploration budget exhausted mid-operation → returns EXPLORATION_BUDGET_EXHAUSTED (does not throw), session closed", async () => {
@@ -1709,18 +1735,25 @@ describe("runExploration (fake explorer)", () => {
     expect(outcome.steps.some((s) => s.plannedStepId === "PS-3")).toBe(false);
   });
 
-  it("a search stopped by the step limit mid-execution persists its held steps off the golden path", async () => {
-    const { ctx } = fakeCtx({ options: { maxExplorationSteps: 4 } });
-    const session = new FakeSession();
+  it("a search stopped by the budget mid-execution persists its held steps off the golden path", async () => {
+    const { ctx, budget } = fakeCtx();
+    const session = new FakeSession({
+      observe: (_i, n) => {
+        if (n === 1) {
+          budget.abort(new DOMException("The operation timed out.", "TimeoutError"));
+          throw budget.signal.reason;
+        }
+        return [{ selector: "xpath=/html[1]/body[1]/input[1]", description: "search box", method: "fill", arguments: [] }];
+      },
+    });
     const mem = memoryStore();
     const plan = planOf(step("navigate", "Open"), step("search", "Search for the product", { inputRef: { source: "literal", key: "iPhone 17 Pro" } }));
     const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: mem.store, recorder: fakeRecorder().recorder });
-    expect(outcome.stopReason).toBe("STEP_LIMIT_REACHED");
+    expect(outcome.stopReason).toBe("EXPLORATION_BUDGET_EXHAUSTED");
     expect(summary(outcome.steps)).toEqual([
       [0, "navigate", "PS-1", "SUCCESS", true],
       [1, "observe", "PS-2", "SUCCESS", false],
       [2, "fill", "PS-2", "SUCCESS", false], // its submit never ran
-      [3, "observe", "PS-2", "SUCCESS", false],
     ]);
     expect(mem.steps).toEqual(outcome.steps);
     expect(session.ops()).not.toContain("actOn");
@@ -2434,11 +2467,20 @@ describe("several scenarios (V1.1 F9)", () => {
 
   it("the step limit ends exploration: later scenarios are not explored", async () => {
     const session = new FakeSession();
-    const { outcome, resets } = run(twoScenarioPlan([step("navigate", "Open the target URL"), step("click", "A"), step("click", "B")], [step("navigate", "Open the target URL")]), session, { max: 3 });
+    const { outcome, resets } = run(twoScenarioPlan([step("navigate", "Open the target URL"), step("click", "A"), step("click", "B")], [step("navigate", "Open the target URL")]), session, { max: 2 });
     const result = await outcome;
     expect(result).toMatchObject({ stopReason: "STEP_LIMIT_REACHED", scenarioStops: { "SC-1": "STEP_LIMIT_REACHED", "SC-2": "STEP_LIMIT_REACHED" } });
     expect(resets).toEqual([]);
     expect(result.steps.every((s) => s.scenarioId === "SC-1")).toBe(true);
+    expect(result.steps.some((s) => s.plannedStepId === "PS-3")).toBe(false);
+  });
+
+  it("the step limit counts the planned steps of every scenario together", async () => {
+    const session = new FakeSession();
+    const { outcome } = run(twoScenarioPlan([step("navigate", "Open the target URL"), step("click", "A")], [step("navigate", "Open the target URL"), step("click", "B")]), session, { max: 3 });
+    const result = await outcome;
+    expect(result).toMatchObject({ stopReason: "STEP_LIMIT_REACHED", scenarioStops: { "SC-1": "COMPLETED", "SC-2": "STEP_LIMIT_REACHED" } });
+    expect(result.steps.some((s) => s.plannedStepId === "PS-4")).toBe(false);
   });
 
   it("a session that cannot be cleared is the browser's failure, never a guess", async () => {

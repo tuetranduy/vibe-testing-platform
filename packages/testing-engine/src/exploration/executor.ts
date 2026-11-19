@@ -136,8 +136,9 @@ import { captureNamedFact } from "./named-facts";
  * checkpoints would describe a flow that did not happen) and the missing facts end INCONCLUSIVE.
  *
  * Stops: BLOCKED_BY_POLICY (missing secret / test data, destructive action, blocked navigation;
- * the blocked step is recorded and never executed), STEP_LIMIT_REACHED (`maxExplorationSteps`
- * recorded steps; no operation starts that could not be recorded), EXPLORATION_BUDGET_EXHAUSTED
+ * the blocked step is recorded and never executed), STEP_LIMIT_REACHED (`maxExplorationSteps` planned
+ * steps, of every scenario together; the steps a planned step records do not count, and a planned step past
+ * the limit never starts), EXPLORATION_BUDGET_EXHAUSTED
  * (the budget signal; returned, not thrown). Cancel / hard deadline throw the abort reason. Model,
  * contract and storage errors are infrastructure errors and propagate. The session is always closed.
  *
@@ -603,6 +604,8 @@ class ExplorationRun {
   /** Screenshots are never secret-bearing: a run's secrets are no longer redacted (2026-10-07). */
   private readonly sensitivity: ArtifactSensitivity = "STANDARD";
   private readonly max: number;
+  /** Planned steps started, of every scenario: what `max` limits. */
+  private plannedCount = 0;
   private readonly visibleFacts: Set<string>;
   private readonly inputs: InputGenerator;
   /** Values generated for this run, by `source:key`: made once, reused by every later fill of the key. */
@@ -708,11 +711,13 @@ class ExplorationRun {
     let replans = 0;
 
     await this.ctx.boundary();
+    if (opensTarget) this.startPlanned();
     await this.withRetry(() => this.navigate(targetUrl, opensTarget ? first : null));
     if (opensTarget) await this.judgeCriteria(first, judgeAfter.get(first.id) ?? []);
     for (let i = opensTarget ? 1 : 0; i < planned.length; i++) {
       const step = planned[i]!;
       await this.ctx.boundary();
+      this.startPlanned();
       // A model-backed wait may outlast a toast. Capture the next checkpoint's notifications as
       // soon as its preceding action succeeds, provided no other action intervenes.
       const next = step.kind !== "wait_for" && step.kind !== "capture_checkpoint"
@@ -2048,11 +2053,16 @@ class ExplorationRun {
     };
   }
 
-  /** Before any operation that records a step: cancel, budget, step limit. */
+  /** Before any operation that records a step: cancel, budget. */
   private async reserve(): Promise<void> {
     if (this.ctx.signal.aborted) throw this.ctx.signal.reason;
     if (this.input.budget.aborted) throw new Stop("EXPLORATION_BUDGET_EXHAUSTED");
-    if (this.recordedCount() >= this.max) throw new Stop("STEP_LIMIT_REACHED");
+  }
+
+  /** Before a planned step: the step limit. */
+  private startPlanned(): void {
+    if (this.plannedCount >= this.max) throw new Stop("STEP_LIMIT_REACHED");
+    this.plannedCount++;
   }
 
   /** Lets policy blocks be handled by the caller; everything else that isn't a step failure propagates. */

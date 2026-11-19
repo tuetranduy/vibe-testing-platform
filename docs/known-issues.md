@@ -735,7 +735,7 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   prompt carries), not against a model: how often it calls a page relevant, and how strict it reads vague words, is
   unmeasured. The judge sees the screen (viewport) and the page's text, not content further down the page as an
   image; a model without image input (`deepseek-v4-pro`) judges from the text alone. Each judgment is one more recorded
-  step: it counts toward `maxExplorationSteps`.
+  step (it no longer counts toward `maxExplorationSteps`, KI-079).
 - **To close:** an eval suite of pages with a known answer (relevant / holds / does not hold / irrelevant), run on
   each provider, scores recorded in `evals/BASELINE.md`.
 - **Resolved (2026-11-05, working tree):** `pnpm eval judge` (`evals/judge/`): 12 pages with a known answer
@@ -1167,3 +1167,17 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   model picks the right control or a useful replan is not measured.
 - **To close:** add `evals/way-there` and `evals/replanner` suites from the frontends-demo failures (FD-04, FD-09: the
   closed side menu), run `pnpm benchmark --repeat 3` on the compose stack, and record both in `evals/BASELINE.md`.
+
+## KI-079 — The step limit counted every recorded step, so a long checkout could never finish
+- **Severity:** High (a flow of more than about 18 planned steps ended INCONCLUSIVE at the default limit, every time).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`reserve`, `startPlanned`).
+- **What:** `run_0mwn9ke8j4829c2027eef90cc` (demowebshop.tricentis.com, add a book to the cart and check out): the plan
+  had 29 steps, but `maxExplorationSteps` (40) counted recorded steps. A click or fill records an observe and an act,
+  a checkpoint an extract, an observe and itself, so the plan needed about 59. All 40 recorded steps succeeded and
+  exploration stopped while filling in the billing address; AC-3 (checkout) was INCONCLUSIVE (STEP_LIMIT_REACHED).
+  The form calls the setting "Step limit", which reads as steps of the plan.
+- **Resolved (2026-11-19, working tree):** the limit counts planned steps, of every scenario together; a planned step
+  past it never starts. Its lookups, retries, checkpoint reads and the judge's judgments do not count. The form says
+  the limit is of steps in the test plan. Steps a replan adds (KI-078) count like the plan's own. Recorded steps stay
+  bounded per planned step (one retry each), and the exploration budget and the run's deadline still end a long
+  exploration.

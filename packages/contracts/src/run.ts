@@ -110,6 +110,7 @@ export type Environment = z.infer<typeof EnvironmentSchema>;
 
 export const RunOptionsSchema = z
   .object({
+    /** Planned steps exploration may start, of every scenario together (not the steps each one records). */
     maxExplorationSteps: z.number().int().min(1).max(100).default(40),
     maxRunSeconds: z.number().int().min(60).max(1800).default(300),
     generatePlaywright: z.boolean().default(true),
