@@ -24,6 +24,12 @@ export interface LlmClientOptions {
   logger?: { warn(obj: object, msg?: string): void };
   maxTokens?: number;
   retry?: Partial<RetryPolicy>;
+  /**
+   * Another model to send a request to when the primary gives up on it (2026-11-19): its retries ran out on a 429 /
+   * 5xx / network error, or it refused the key or the credit (401 / 402 / 403). Every later request goes to the
+   * fallback too. A bad request (other 4xx), an invalid answer and a cancellation never switch.
+   */
+  fallback?: { transport: LlmTransport; model: string };
   now?: () => number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
@@ -91,11 +97,14 @@ export class LlmClient {
   private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   /** Models already reported as unpriced (the requested one, and any fallback that served a call). */
   private readonly unpriced = new Set<string>();
+  /** Where requests go: the primary, or the fallback once the primary gave up. */
+  private active: { transport: LlmTransport; model: string };
 
   constructor(private readonly opts: LlmClientOptions) {
     this.retry = { ...DEFAULT_RETRY, ...opts.retry };
     this.now = opts.now ?? Date.now;
     this.sleep = opts.sleep ?? defaultSleep;
+    this.active = { transport: opts.transport, model: opts.model };
     this.warnIfUnpriced(opts.model);
   }
 
@@ -108,12 +117,13 @@ export class LlmClient {
     );
   }
 
+  /** The model requests go to: the requested one, or the fallback once the client switched. */
   get model(): string {
-    return this.opts.model;
+    return this.active.model;
   }
 
   get provider(): string {
-    return this.opts.transport.provider;
+    return this.active.transport.provider;
   }
 
   /** The level every call sends unless it names its own. */
@@ -154,7 +164,7 @@ export class LlmClient {
       const { response, latencyMs, answeredAt } = await this.request(input, messages, jsonSchema);
       // Priced and recorded by the requested model (providers may echo a resolved snapshot id), or by the
       // model that served it after a refusal fallback, at the price in force when it answered.
-      const servedBy = response.fallbackModel ?? this.opts.model;
+      const servedBy = response.fallbackModel ?? this.active.model;
       if (response.fallbackModel) this.warnIfUnpriced(response.fallbackModel);
       const cost = estimateCostUsd(servedBy, response.usage.inputTokens, response.usage.outputTokens, new Date(answeredAt)) ?? 0;
       usage.inputTokens += response.usage.inputTokens;
@@ -195,10 +205,11 @@ export class LlmClient {
     for (let attempt = 0; ; attempt++) {
       if (signal.aborted) throw abortError(signal);
       const started = this.now();
+      const { transport, model } = this.active;
       try {
         const response = await raceAbort(
-          this.opts.transport.complete({
-            model: this.opts.model,
+          transport.complete({
+            model,
             system: redacted.system,
             messages: redacted.messages,
             jsonSchema,
@@ -210,21 +221,31 @@ export class LlmClient {
           signal,
         );
         const answeredAt = this.now();
-        return { response, latencyMs: answeredAt - started, answeredAt };
+        // Served by the fallback: priced and recorded under its model.
+        const served = this.active.model === this.opts.model ? response : { ...response, fallbackModel: response.fallbackModel ?? this.active.model };
+        return { response: served, latencyMs: answeredAt - started, answeredAt };
       } catch (err) {
         const latencyMs = this.now() - started;
         if (signal.aborted) {
-          await this.record(input, failedCall(this.opts.model, latencyMs, "CANCELLED"));
+          await this.record(input, failedCall(model, latencyMs, "CANCELLED"));
           throw abortError(signal);
         }
-        await this.record(input, failedCall(this.opts.model, latencyMs, "PROVIDER_ERROR"));
+        await this.record(input, failedCall(model, latencyMs, "PROVIDER_ERROR"));
         const transportErr = err instanceof LlmTransportError ? err : null;
         if (!transportErr?.retryable || attempt >= this.retry.maxRetries) {
+          if (this.switchToFallback(transportErr)) {
+            attempt = -1;
+            continue;
+          }
           throw new ModelProviderError(`Model provider request failed: ${messageOf(err)}`, { cause: err });
         }
         const delay = backoffMs(this.retry, attempt, transportErr.retryAfterMs);
         const deadline = input.deadlineAt?.getTime();
         if (deadline !== undefined && this.now() + delay >= deadline) {
+          if (this.switchToFallback(transportErr)) {
+            attempt = -1;
+            continue;
+          }
           throw new ModelProviderError(`Model provider request failed and a retry would pass the run deadline: ${messageOf(err)}`, {
             cause: err,
           });
@@ -237,6 +258,20 @@ export class LlmClient {
         }
       }
     }
+  }
+
+  /** Switches to the fallback after the primary gave up with this error; false when it may not (see `fallback`). */
+  private switchToFallback(err: LlmTransportError | null): boolean {
+    const fallback = this.opts.fallback;
+    if (!fallback || this.active === fallback || !err) return false;
+    if (!err.retryable && ![401, 402, 403].includes(err.status ?? 0)) return false;
+    this.active = fallback;
+    this.warnIfUnpriced(fallback.model);
+    (this.opts.logger ?? consoleLogger).warn(
+      { model: this.opts.model, fallback: fallback.model, status: err.status },
+      "LLM model gave up on a request; this run's later calls use the fallback model",
+    );
+    return true;
   }
 
   private async record(

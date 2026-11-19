@@ -4,7 +4,8 @@ import { normalizeHost } from "@platform/security";
 import { collectEvidence, type EvidenceStore } from "../evidence/collector";
 import type { EngineStages, StageContext } from "../orchestrator/stages";
 import { redactedCause } from "../shared/log-cause";
-import { runGeneratedTest, type RerunLogger, type RunGeneratedTestResult, type SpawnRunner } from "./runner";
+import { combineAttempts, rerunStatusOf } from "./attempts";
+import { runGeneratedTest, type RerunLogger, type SpawnRunner } from "./runner";
 import { removeWorkspace, type WorkspaceConfig } from "./workspace";
 
 /** The rerun's own egress proxy (Ruling R31), started by the worker for RUNNING_PLAYWRIGHT. */
@@ -56,6 +57,11 @@ export function rerunTimeoutMs(ctx: Pick<StageContext, "budgets" | "deadlineAt" 
   return Math.max(0, Math.min(ctx.budgets.rerunMs, remaining - reserve));
 }
 
+/** Runs of the generated test at most (2026-11-19): a failed one runs once more, to tell a flaky test from a failing one. */
+export const MAX_RERUN_ATTEMPTS = 2;
+/** A second attempt starts only with at least this much of the rerun budget left. */
+export const MIN_RETRY_MS = 15_000;
+
 const once = (fn: () => Promise<void>) => {
   let done: Promise<void> | undefined;
   return () => (done ??= fn());
@@ -64,7 +70,9 @@ const once = (fn: () => Promise<void>) => {
 /**
  * The real RUNNING_PLAYWRIGHT stage (Task 17): proxy → sandboxed rerun (runner.ts) → scrubbed
  * evidence (evidence/collector.ts) → workspace removed → RerunResult with the evidence's artifact
- * ids (Ruling R27). It does not publish `playwright.completed`: `runExecution` does (Ruling R34).
+ * ids (Ruling R27). A FAILED rerun runs once more when MIN_RETRY_MS of the budget is left (2026-11-19): outcomes are
+ * combined per criterion (combineAttempts: a pass and a failure is FLAKY), every attempt's evidence is kept and the
+ * durations are summed. Never for a run that asks for destructive actions (repeating one could pay or delete twice). It does not publish `playwright.completed`: `runExecution` does (Ruling R34).
  *
  * Ruling R41: a rerun that fails on its own is ERRORED and the run goes on to its report; only the
  * run signal (cancel / hard deadline) throws its reason, once the child is killed. Infrastructure
@@ -96,39 +104,62 @@ export function createRunTestStage(deps: RunTestStageDeps): EngineStages["runTes
     const closeProxy = once(() => proxy.close());
     ctx.addCleanup(closeProxy);
 
-    const running = runGeneratedTest(
-      {
-        runId: ctx.runId,
-        test,
-        secrets,
-        proxyUrl: proxy.url,
-        timeoutMs: rerunTimeoutMs(ctx),
-        signal: ctx.signal,
-        record: { video: videoRecordingOn(ctx.request), trace: traceRecordingOn(ctx.request) },
-        allowedHosts: rerunAllowedHosts(ctx.request),
-      },
-      deps,
-    );
+    let running: ReturnType<typeof runGeneratedTest> | null = null;
     // The child is gone once `running` settles (aborts kill it); only then is the workspace deleted.
     const cleanUp = once(async () => {
-      await running.catch(() => {});
+      await running?.catch(() => {});
       await removeWorkspace(deps.workspace, ctx.runId);
     });
     ctx.addCleanup(cleanUp);
-
-    try {
-      const out: RunGeneratedTestResult = await running;
-      await closeProxy();
+    const startedAt = ctx.now().getTime();
+    // What is left of the stage's budget: every attempt shares one rerun budget (review finding).
+    const timeLeft = () => Math.min(rerunTimeoutMs(ctx), ctx.budgets.rerunMs - (ctx.now().getTime() - startedAt));
+    const attempt = async (timeoutMs: number) => {
+      running = runGeneratedTest(
+        {
+          runId: ctx.runId,
+          test,
+          secrets,
+          proxyUrl: proxy.url,
+          timeoutMs,
+          signal: ctx.signal,
+          record: { video: videoRecordingOn(ctx.request), trace: traceRecordingOn(ctx.request) },
+          allowedHosts: rerunAllowedHosts(ctx.request),
+        },
+        deps,
+      );
+      const out = await running;
       if (ctx.signal.aborted) throw ctx.signal.reason;
       const artifactIds = await collectEvidence(ctx, out.artifacts, { store: deps.evidence(ctx) });
       // The collector stops at the run signal; the stage then throws its reason (never a partial result).
       if (ctx.signal.aborted) throw ctx.signal.reason;
+      // The next attempt prepares its own workspace.
+      await removeWorkspace(deps.workspace, ctx.runId);
+      return { out, artifactIds };
+    };
+
+    try {
+      const first = await attempt(rerunTimeoutMs(ctx));
+      let { status, perCriterion, durationMs, errorText } = first.out;
+      const artifactIds = [...first.artifactIds];
+      // A run that asks for destructive actions never runs its test twice: an order would be placed twice.
+      const attempts = ctx.request.options.allowDestructiveActions ? 1 : MAX_RERUN_ATTEMPTS;
+      for (let n = 1; n < attempts && status === "FAILED" && timeLeft() >= MIN_RETRY_MS; n++) {
+        const next = await attempt(timeLeft());
+        perCriterion = combineAttempts(perCriterion, next.out.perCriterion);
+        status = rerunStatusOf(perCriterion, next.out.status);
+        durationMs += next.out.durationMs;
+        // A criterion's error text is the first attempt's that has one.
+        errorText = { ...next.out.errorText, ...errorText };
+        artifactIds.push(...next.artifactIds);
+      }
+      await closeProxy();
       return RerunResultSchema.parse({
-        status: out.status,
-        perCriterion: out.perCriterion,
-        durationMs: out.durationMs,
+        status,
+        perCriterion,
+        durationMs,
         // Error text can quote page content or a filled value: the run's redactor applies (by key).
-        errorText: ctx.redact(out.errorText),
+        errorText: ctx.redact(errorText),
         artifactIds,
       });
     } finally {

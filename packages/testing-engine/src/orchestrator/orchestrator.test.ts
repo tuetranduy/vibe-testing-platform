@@ -10,6 +10,7 @@ import {
   type SiteAnalysisDraft,
   type StoredTestRunRequest,
   type SuggestionSet,
+  type TestPlan,
 } from "@platform/contracts";
 import { describe, expect, it } from "vitest";
 import { createFakeStages, fakeSuggestionSet } from "./fake-stages";
@@ -323,6 +324,36 @@ describe("V1.3: the live-site analysis, suggested test data and blocked evidence
     stages.plan = async (ctx, requirement, site) => (seen.push(site), plan(ctx, requirement, site));
     await runExecution(context(request("A user can register with an email address.")), p.ports, stages);
     expect(seen).toEqual([[login]]);
+  });
+
+  it("a plan exploration revised is saved, then verified, compiled and reported (2026-11-19)", async () => {
+    const p = ports("PLANNING");
+    p.ports.getConfirmedRequirement = async () => ({
+      ...(await createFakeStages().analyze(context(request("A user can register with an email address.")))),
+      runId: "run_1",
+      revision: 1,
+      confirmedAt: "2026-09-30T10:00:00.000Z",
+    });
+    const saved: TestPlan[] = [];
+    p.ports.savePlan = async (plan) => void saved.push(plan);
+    const stages = createFakeStages();
+    let revised: TestPlan | null = null;
+    const explore = stages.explore;
+    stages.explore = async (ctx, plan, requirement) => {
+      const outcome = await explore(ctx, plan, requirement);
+      const scenario = plan.scenarios[0]!;
+      revised = { ...plan, scenarios: [{ ...scenario, steps: [...scenario.steps, { id: "PS-90", kind: "navigate", description: "Open https://shop.example.com/x", criterionIds: [], destructive: false }] }] };
+      return { ...outcome, revisedPlan: revised };
+    };
+    const seen: TestPlan[] = [];
+    const verify = stages.verify;
+    stages.verify = (ctx, requirement, plan, exploration) => (seen.push(plan), verify(ctx, requirement, plan, exploration));
+    const report = stages.report;
+    stages.report = async (ctx, input) => (seen.push(input.plan), report(ctx, input));
+    await runExecution(context(request("A user can register with an email address.")), p.ports, stages);
+    expect(saved).toHaveLength(2);
+    expect(saved[1]).toBe(revised);
+    expect(seen).toEqual([revised, revised]);
   });
 
   it("without a site analysis the planner gets no pages", async () => {

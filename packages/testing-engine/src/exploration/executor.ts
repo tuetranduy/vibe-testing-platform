@@ -4,7 +4,9 @@ import {
   CancelledError,
   EngineError,
   ExplorationStepSchema,
+  MAX_PLAN_STEPS,
   ObservedFactSchema,
+  TestPlanSchema,
   keyWords,
   scenarioOfCriterion,
   type ArtifactSensitivity,
@@ -52,6 +54,7 @@ import {
   elementAction,
   fieldValue,
   fillElement,
+  exactNamedControl,
   hittableAlternative,
   isHittable,
   reachableNamedControl,
@@ -61,6 +64,11 @@ import {
   type RequiredField,
 } from "./recorder";
 import { captureEarlyNotificationFact, notificationTexts } from "./early-facts";
+import { CANDIDATES, CandidateSchema } from "../survey/interactive";
+import { createWayThere, wayThereCandidates, type WayThere } from "./way-there";
+import { SIGN_IN_STATE_SCRIPT, openedSignIn, type SignInState } from "./sign-in-prompt";
+import { SITE_ERROR_SCRIPT, siteErrorOf, type PageHeadline } from "./site-error";
+import { MAX_REPLANS, createReplanner, type Replanner } from "./replanner";
 import { captureNamedFact } from "./named-facts";
 
 /**
@@ -197,6 +205,8 @@ export interface RecorderPort {
   hittableAlternative?(page: Page, ref: ElementRef): Promise<string | null>;
   /** The first reachable element of these roles whose accessible name contains the name (reachableNamedControl, KI-072). */
   namedControl?(page: Page, name: string, roles: readonly string[]): Promise<string | null>;
+  /** The one reachable element of these roles whose accessible name is exactly the name (exactNamedControl, 2026-11-19). */
+  exactControl?(page: Page, name: string, roles: readonly string[]): Promise<string | null>;
 }
 
 export const playwrightRecorder: RecorderPort = {
@@ -225,6 +235,7 @@ export const playwrightRecorder: RecorderPort = {
   hittable: (page, selector) => isHittable(page, selector),
   hittableAlternative: (page, ref) => hittableAlternative(page, ref),
   namedControl: (page, name, roles) => reachableNamedControl(page, name, roles),
+  exactControl: (page, name, roles) => exactNamedControl(page, name, roles),
 };
 
 export interface ExplorationInput {
@@ -246,6 +257,16 @@ export interface ExplorationDeps {
    * Null: nothing is judged (they stay inconclusive).
    */
   judge?: CriterionJudge | null;
+  /**
+   * Picks the way to a step's control from the page's numbered controls (2026-11-19); default `createWayThere(ctx.llm)`.
+   * Null: the explorer is asked in free text instead.
+   */
+  wayThere?: WayThere | null;
+  /**
+   * Plans the rest of a scenario again when one of its steps still fails (2026-11-19); default `createReplanner(ctx.llm)`.
+   * Null: a failed step ends its scenario.
+   */
+  replanner?: Replanner | null;
   /** Delay between `wait_for` polls. */
   pollIntervalMs?: number;
   /** How long a click's own requests may hold the next step (KI-049); default ACTION_REQUESTS_TIMEOUT_MS. */
@@ -322,6 +343,8 @@ const VISIBLE_TEXT_SCRIPT = String.raw`(() => String((document.body && document.
 const SAFE_OTHER_METHODS = new Set(["click", "doubleClick", "hover", "scrollIntoView"]);
 /** Term matching regardless of what the run allows: what the step and the element are, not what may run. */
 const DENY_DESTRUCTIVE: ActionPolicy = { allowDestructive: false };
+/** A step performed with a pointer method other than a click (see `act`): never looked up by name alone. */
+const POINTER_STEP = /^\s*(?:scroll|hover|double[ -]?click)\b/i;
 /** Roles of a field a value is typed into: a click on one submits nothing, Enter in it may (R1). */
 const TEXT_FIELD_ROLES = new Set(["textbox", "searchbox", "combobox"]);
 
@@ -360,6 +383,10 @@ interface StepDraft {
   actMethod?: ExplorationStep["actMethod"];
   /** A `judge` step's judgment (2026-10-07). */
   judgment?: CriterionJudgment;
+  /** An `act` whose click opened a sign-in prompt (KI-073). */
+  signInPrompt?: boolean;
+  /** A `checkpoint` taken on a server error page: its error heading (KI-074). */
+  siteError?: string;
 }
 
 /** What the generator is told about a field the recorder cannot describe. */
@@ -456,7 +483,7 @@ const NOT_A_NAME = /^(?:the|a|an|this|that|its|their|first|second|third|last|nex
  * The control a click step names (KI-072), with the roles it can have: a quoted name, with the control word after it
  * when there is one ("Click 'Add to cart'", "Click the 'Grills' link"), else an unquoted name before a control word
  * ("Click the Add to wishlist button for the product"). Null when the step names no control: "Open the cart",
- * "Submit the login form".
+ * "Submit the login form", or quotes only where it happens: "Click Add to cart on the 'Pixel 11' page".
  */
 export function namedControl(description: string): { name: string; roles: readonly string[] } | null {
   const roleAfter = (rest: string) => {
@@ -464,7 +491,8 @@ export function namedControl(description: string): { name: string; roles: readon
     return word && CONTROL_WORDS.has(word) ? (CONTROL_ROLES[word] ?? ANY_CONTROL) : ANY_CONTROL;
   };
   const quoted = /(?:^|[\s(])['"‘“]([^'"‘’“”]{2,80})['"’”]/u.exec(description);
-  if (quoted) return { name: quoted[1]!.trim(), roles: roleAfter(description.slice(quoted.index + quoted[0].length)) };
+  // A quoted name the step only acts near ("Click Add to cart on the 'Pixel 11' page") names no control (review finding).
+  if (quoted && clicksQuoted(description, quoted[1]!.trim())) return { name: quoted[1]!.trim(), roles: roleAfter(description.slice(quoted.index + quoted[0].length)) };
   const plain = /\b(?:click|press|tap|hit|select|choose|use)\s+(?:on\s+)?(?:the\s+|a\s+|an\s+)?((?:[\p{L}\p{N}&+-]+\s+){0,5}?[\p{L}\p{N}&+-]+)\s+(button|link|tab|icon|checkbox|toggle)\b/iu.exec(description);
   if (!plain) return null;
   // Unquoted, only a label as the page writes it (capitalized, or a number): "the red button" names no control.
@@ -484,6 +512,18 @@ export function quotedNames(description: string): string[] {
     if (name !== "") names.push(name);
   }
   return names;
+}
+
+/**
+ * Whether the step acts on the quoted name itself: right after its verb ("Click 'New User'") or before a control word
+ * ("the 'Grills' link"), not as the place it happens ("on the 'Pixel 11' page").
+ */
+function clicksQuoted(description: string, name: string): boolean {
+  const quoted = `['"‘“]${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}['"’”]`;
+  return (
+    new RegExp(`\\b(?:click|press|tap|hit|select|choose|open|use)\\s+(?:on\\s+)?(?:the\\s+|a\\s+|an\\s+)?${quoted}`, "iu").test(description) ||
+    new RegExp(`${quoted}\\s+(?:button|link|tab|icon|menu|option|checkbox|toggle|control)\\b`, "iu").test(description)
+  );
 }
 
 /** Words that make the name before them the control a step clicks ("the New User button"). */
@@ -570,6 +610,10 @@ class ExplorationRun {
   /** Values typed since the last click or navigation (2026-10-07). */
   private typed: Typed[] = [];
   private readonly judge: CriterionJudge | null;
+  private readonly wayThere: WayThere | null;
+  private readonly replanner: Replanner | null;
+  /** Each replanned scenario's steps as exploration ran them (2026-11-19). */
+  private readonly revised = new Map<string, PlannedStep[]>();
   private readonly earlyCheckpoints = new Map<string, { stepId: string; facts: Map<string, ObservedFact>; artifacts: string[] | null }>();
 
   constructor(
@@ -582,6 +626,8 @@ class ExplorationRun {
     this.recorder = deps.recorder ?? playwrightRecorder;
     this.inputs = deps.inputs ?? createInputGenerator(ctx.llm);
     this.judge = deps.judge !== undefined ? deps.judge : createCriterionJudge(ctx.llm);
+    this.wayThere = deps.wayThere !== undefined ? deps.wayThere : createWayThere(ctx.llm);
+    this.replanner = deps.replanner !== undefined ? deps.replanner : createReplanner(ctx.llm);
     this.policy = actionPolicyFor(request);
     this.max = request.options.maxExplorationSteps;
     this.multiScenario = input.plan.scenarios.length > 1;
@@ -634,7 +680,16 @@ class ExplorationRun {
       }
     }
     const stopReason = scenarios.map((s) => stops[s.id]!).find((r) => r !== "COMPLETED") ?? "COMPLETED";
-    return { steps: [...this.steps], facts: [...this.facts], stopReason, ...(this.multiScenario ? { scenarioStops: stops } : {}) };
+    const revisedPlan = this.revised.size > 0
+      ? TestPlanSchema.parse({ ...this.input.plan, scenarios: scenarios.map((s) => ({ ...s, steps: this.revised.get(s.id) ?? s.steps })) })
+      : undefined;
+    return {
+      steps: [...this.steps],
+      facts: [...this.facts],
+      stopReason,
+      ...(this.multiScenario ? { scenarioStops: stops } : {}),
+      ...(revisedPlan ? { revisedPlan } : {}),
+    };
   }
 
   /**
@@ -644,16 +699,19 @@ class ExplorationRun {
    */
   private async exploreScenario(scenario: TestScenario): Promise<void> {
     this.earlyCheckpoints.clear();
-    const planned = scenario.steps;
+    // The scenario's steps; a replan replaces those after a failed one (2026-11-19).
+    const planned = [...scenario.steps];
     const targetUrl = this.ctx.request.targetUrl;
     const first = planned[0];
     const opensTarget = first?.kind === "navigate" && opensTargetPage(first.description, targetUrl);
-    const judgeAfter = this.judgeSchedule(scenario);
+    let judgeAfter = this.judgeSchedule(scenario);
+    let replans = 0;
 
     await this.ctx.boundary();
     await this.withRetry(() => this.navigate(targetUrl, opensTarget ? first : null));
     if (opensTarget) await this.judgeCriteria(first, judgeAfter.get(first.id) ?? []);
-    for (const step of planned.slice(opensTarget ? 1 : 0)) {
+    for (let i = opensTarget ? 1 : 0; i < planned.length; i++) {
+      const step = planned[i]!;
       await this.ctx.boundary();
       // A model-backed wait may outlast a toast. Capture the next checkpoint's notifications as
       // soon as its preceding action succeeds, provided no other action intervenes.
@@ -662,7 +720,18 @@ class ExplorationRun {
         : undefined;
       // What the page shows before the action, so a notification it brings up can be told apart (KI-059).
       const before = next?.kind === "capture_checkpoint" ? await this.notificationBaseline() : null;
-      await this.executePlanned(step);
+      try {
+        await this.executePlanned(step);
+      } catch (err) {
+        if (!(err instanceof Stop) || err.reason !== "COMPLETED" || replans >= MAX_REPLANS) throw err;
+        const steps = await this.replan(scenario, planned, i);
+        if (!steps) throw err;
+        replans++;
+        planned.splice(i + 1, planned.length, ...steps);
+        this.revised.set(scenario.id, [...planned]);
+        judgeAfter = this.judgeSchedule({ ...scenario, steps: planned });
+        continue;
+      }
       if (next?.kind === "capture_checkpoint") {
         const early = await this.readEarlyCheckpoint(next, newStepId(), before);
         if (early.facts.size > 0) this.earlyCheckpoints.set(next.id, early);
@@ -670,6 +739,50 @@ class ExplorationRun {
       await this.judgeCriteria(step, judgeAfter.get(step.id) ?? []);
     }
     await this.judgeCriteria(null, judgeAfter.get(null) ?? []);
+  }
+
+  /**
+   * The rest of the scenario planned again after `planned[at]` failed (2026-11-19), from the page the browser is on; null
+   * when there is no replanner, the step must not be repeated another way (a destructive step that may have run), or
+   * the replanner has no usable answer. Publishes `plan.revised` when there is one.
+   */
+  private async replan(scenario: TestScenario, planned: PlannedStep[], at: number): Promise<PlannedStep[] | null> {
+    const failed = planned[at]!;
+    if (!this.replanner || isDestructiveStep(failed) || this.input.budget.aborted || this.pageClosed()) return null;
+    const ids = [...this.input.plan.scenarios.flatMap((s) => s.steps), ...[...this.revised.values()].flat(), ...planned].map((s) => Number(/^PS-(\d+)$/.exec(s.id)?.[1] ?? 0));
+    const firstId = Math.max(0, ...ids) + 1;
+    const others = this.input.plan.scenarios.filter((s) => s.id !== scenario.id).reduce((n, s) => n + (this.revised.get(s.id) ?? s.steps).length, 0);
+    const room = Math.min(50 - (at + 1), MAX_PLAN_STEPS - others - (at + 1), 999 - firstId + 1);
+    if (room <= 0) return null;
+    const steps = await this.replanner.replan(
+      {
+        requirement: this.input.requirement,
+        scenario,
+        done: planned.slice(0, at),
+        failed,
+        remaining: planned.slice(at + 1),
+        url: this.url(),
+        inventory: await this.readInventory(),
+        testDataKeys: Object.keys(this.ctx.request.testData),
+        secretNames: this.ctx.secrets.names,
+        firstId,
+        targetUrl: this.ctx.request.targetUrl,
+        policy: this.policy,
+      },
+      { runId: this.ctx.runId, signal: this.input.budget, deadlineAt: this.ctx.deadlineAt, redact: this.ctx.redact },
+    ).catch((err: unknown) => {
+      this.rethrowIfFatal(err);
+      return null;
+    });
+    if (!steps || steps.length === 0 || steps.length > room) return null;
+    // Never a destructive step: the scenario may already have done it (an order placed before the receipt lookup failed).
+    if (steps.some((s) => isDestructiveStep(s))) return null;
+    await this.ctx.publish({
+      type: "plan.revised",
+      message: `Step ${failed.id} failed: the rest of the scenario was planned again (${steps.length} steps)`,
+      payload: { scenarioId: scenario.id, afterStepId: failed.id, stepCount: steps.length },
+    });
+    return steps;
   }
 
   /**
@@ -868,7 +981,12 @@ class ExplorationRun {
    * nothing, so the attempt fails instead of recording a search that never ran.
    */
   private async act(step: PlannedStep, observeInstruction = step.description, searchField?: string): Promise<Attempt> {
-    let located = await this.locate(step, observeInstruction);
+    // A step that names its control ("Click the 'New User' button"): the one element with exactly that role and name, found
+    // without a model call (2026-11-19). Not for pointer methods, nor for a search's submit (its own lookup below).
+    const direct = searchField === undefined && observeInstruction === step.description && !POINTER_STEP.test(step.description)
+      ? await this.byExactName(step)
+      : null;
+    let located = direct ?? (await this.locate(step, observeInstruction));
     const pointer = step.kind === 'other'
       ? /^\s*scroll\b/i.test(step.description) ? 'scroll_into_view'
         : /^\s*hover\b/i.test(step.description) ? 'hover'
@@ -908,8 +1026,10 @@ class ExplorationRun {
     // Nothing to click on this page (e.g. a product link after the login opened the account page, KI-001): ask once
     // for the way there, follow it (policy-checked) and look again. Not for a search's submit control.
     if (!located && searchField === undefined && observeInstruction === step.description) {
-      const instruction = `Find the link or button that leads to where you can: ${step.description}`;
-      const way = await this.locate(step, instruction);
+      // The way there as a number from the page's controls (2026-11-19); when that cannot be asked, in free text.
+      const chosen = await this.chooseWayThere(step);
+      const instruction = chosen ? chosen.instruction : `Find the link or button that leads to where you can: ${step.description}`;
+      const way = chosen === undefined ? await this.locate(step, instruction) : chosen?.located ?? null;
       if (!way) return this.linkByName(step);
       const followed = await this.click(step, instruction, way);
       if (followed !== "ok") return followed;
@@ -981,6 +1101,8 @@ class ExplorationRun {
       ...(how === "press_enter" ? { actMethod: "press_enter" as const } : {}),
     };
     let result;
+    // Whether the click opens a sign-in prompt the step did not ask for (KI-073): read before and after it.
+    const signInBefore = step.kind === "login" ? null : await this.signInState();
     const requests = this.watchRequests();
     try {
       try {
@@ -1008,8 +1130,40 @@ class ExplorationRun {
       // failed, so a destructive step is not repeated on the strength of that report alone.
       return this.policy.allowDestructive && isDestructiveStep(step) ? "final" : "failed";
     }
-    await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true, llm: result.llm });
+    const signInAfter = signInBefore ? await this.signInState() : null;
+    const signInPrompt = signInBefore && signInAfter && openedSignIn(signInBefore, signInAfter, step.description) ? { signInPrompt: true } : {};
+    await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true, llm: result.llm, ...signInPrompt });
     return "ok";
+  }
+
+  /**
+   * The server error page the browser is on (siteErrorOf), when it still is one after the network goes quiet; null when
+   * it is not, it recovered, or the page cannot be read (KI-074).
+   */
+  private async siteError(): Promise<string | null> {
+    const read = async (): Promise<string | null> => {
+      try {
+        const page = (await this.page.evaluate(SITE_ERROR_SCRIPT)) as Partial<PageHeadline> | null;
+        if (!page || typeof page.title !== "string" || !Array.isArray(page.headings) || typeof page.text !== "string") return null;
+        return siteErrorOf({ title: page.title, headings: page.headings.filter((h): h is string => typeof h === "string"), text: page.text });
+      } catch {
+        return null;
+      }
+    };
+    if ((await read()) === null) return null;
+    await this.page.waitForLoadState("networkidle", { timeout: NETWORK_QUIET_TIMEOUT_MS }).catch(() => {});
+    return read();
+  }
+
+  /** What the page shows of a sign-in prompt now (KI-073); null when it cannot be read. */
+  private async signInState(): Promise<SignInState | null> {
+    let s: Partial<SignInState> | null;
+    try {
+      s = (await this.page.evaluate(SIGN_IN_STATE_SCRIPT)) as Partial<SignInState> | null;
+    } catch {
+      return null;
+    }
+    return s && typeof s.url === "string" && typeof s.passwordFields === "number" ? { url: s.url, passwordFields: s.passwordFields } : null;
   }
 
   /** `field`, when given, receives the selector of the element filled. */
@@ -1307,6 +1461,8 @@ class ExplorationRun {
 
   private async checkpoint(step: PlannedStep): Promise<Attempt> {
     await this.reserve();
+    // The site's own server error page (KI-074): looked at once more after the network is quiet, then marked.
+    const siteError = await this.siteError();
     const checkpoint = step.checkpoint!;
     const requests = this.input.requirement.facts.filter((f) => f.checkpoint === checkpoint);
     const prepared = this.earlyCheckpoints.get(step.id);
@@ -1402,6 +1558,7 @@ class ExplorationRun {
       onGoldenPath: true,
       startedAt,
       artifactIds,
+      ...(siteError ? { siteError } : {}),
     });
     for (const fact of captured) await this.saveFact(fact);
     this.earlyCheckpoints.delete(step.id);
@@ -1698,6 +1855,81 @@ class ExplorationRun {
     return this.navigate(urls[0]!, step);
   }
 
+  /**
+   * The way to a step's control, chosen by number from the page's clickable controls (wayThereCandidates) and recorded as
+   * an `observe` with the model's usage. Null: the model chose none (or nothing is listed). Undefined: it could not be
+   * asked (no chooser, or the controls could not be read), so the explorer's free-text lookup runs. Model errors propagate,
+   * as the judge's do.
+   */
+  private async chooseWayThere(step: PlannedStep): Promise<{ located: Located; instruction: string } | null | undefined> {
+    if (!this.wayThere) return undefined;
+    let raw: unknown;
+    try {
+      raw = await this.page.evaluate(CANDIDATES);
+    } catch {
+      return undefined;
+    }
+    const parsed = z.array(CandidateSchema).max(100).safeParse(raw);
+    if (!parsed.success) return undefined;
+    const candidates = wayThereCandidates(parsed.data, this.ctx);
+    if (candidates.length === 0) return null;
+    await this.reserve();
+    const instruction = `By index: the way to: ${step.description}`;
+    const base = { plannedStepId: step.id, kind: "observe" as const, instruction, urlBefore: this.url(), startedAt: this.ctx.now() };
+    let choice;
+    try {
+      choice = await this.wayThere.choose({
+        goal: this.redactString(step.description),
+        url: this.url(),
+        candidates: candidates.map((c, index) => ({ index, label: this.redactString(c.label) })),
+        runId: this.ctx.runId,
+        signal: this.input.budget,
+        deadlineAt: this.ctx.deadlineAt,
+        redact: this.ctx.redact,
+      });
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
+      return undefined;
+    }
+    const picked = choice.index === null ? undefined : candidates[choice.index];
+    if (!picked) {
+      await this.record({ ...base, outcome: "FAILED", error: "No control on this page leads there", llm: choice.llm });
+      return null;
+    }
+    try {
+      const [ref, info] = await Promise.all([this.recorder.record(this.page, picked.selector), this.recorder.describe(this.page, picked.selector)]);
+      await this.record({ ...base, element: ref, outcome: "SUCCESS", llm: choice.llm });
+      return { located: { element: { selector: picked.selector, description: picked.label, method: "click", arguments: [] }, ref, info }, instruction };
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      await this.record({ ...base, outcome: "FAILED", error: firstLine(err), llm: choice.llm });
+      return undefined;
+    }
+  }
+
+  /**
+   * The step's named control when exactly one reachable element has that role and exact name (exactNamedControl), recorded
+   * as an `observe` with no model usage; null otherwise (the explorer is asked then).
+   */
+  private async byExactName(step: PlannedStep): Promise<Located | null> {
+    const named = namedControl(step.description);
+    if (!named || !this.recorder.exactControl) return null;
+    const startedAt = this.ctx.now();
+    const urlBefore = this.url();
+    try {
+      const selector = await this.recorder.exactControl(this.page, named.name, named.roles);
+      if (!selector) return null;
+      const [ref, info] = await Promise.all([this.recorder.record(this.page, selector), this.recorder.describe(this.page, selector)]);
+      await this.reserve();
+      await this.record({ plannedStepId: step.id, kind: "observe", instruction: `By name: ${step.description}`, element: ref, urlBefore, outcome: "SUCCESS", startedAt, llm: null });
+      return { element: { selector, description: named.name, method: "click", arguments: [] }, ref, info };
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      return null;
+    }
+  }
+
   /** The reachable control of the role and name the step names (namedControl), or null (KI-072). */
   private async byName(step: PlannedStep): Promise<Located | null> {
     const recorder = this.recorder;
@@ -1937,6 +2169,8 @@ class ExplorationRun {
       ...(draft.fillMethod !== undefined ? { fillMethod: draft.fillMethod } : {}),
       ...(draft.actMethod !== undefined ? { actMethod: draft.actMethod } : {}),
       ...(draft.judgment !== undefined ? { judgment: draft.judgment } : {}),
+      ...(draft.signInPrompt ? { signInPrompt: true } : {}),
+      ...(draft.siteError !== undefined ? { siteError: draft.siteError.slice(0, 200) } : {}),
     }) as ExplorationStep;
     return ExplorationStepSchema.parse({
       ...redacted,

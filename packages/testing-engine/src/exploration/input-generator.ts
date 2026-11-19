@@ -60,6 +60,8 @@ export function createInputGenerator(llm: LlmClient | null): InputGenerator {
       // An email is the platform's, unique to the run and the key (KI-063): a model gives the same made-up address every
       // run, and a new account registered with it once is rejected as taken by every later run.
       if (req.source === "testData" && isEmailField(req)) return { value: uniqueEmail(req), llm: null };
+      // So is a username (KI-077): qa_<token>, new each run, which the generated test renews on every execution.
+      if (req.source === "testData" && isUsernameField(req)) return { value: uniqueUsername(req), llm: null };
       if (llm) {
         try {
           const { data, usage } = await llm.generateStructured({
@@ -101,6 +103,18 @@ function isEmailField(req: InputRequest): boolean {
   if (req.field.options.length > 0) return false;
   if (req.field.type === "email" || req.field.autocomplete === "email") return true;
   return [req.key, req.field.label, req.field.name, req.field.placeholder].some((t) => t !== null && isEmailKey(t));
+}
+
+/** A text field that takes a username: by its key, or its label / name / placeholder (never an email field). */
+function isUsernameField(req: InputRequest): boolean {
+  if (req.field.options.length > 0 || req.field.type === "password") return false;
+  return [req.key, req.field.label, req.field.name, req.field.placeholder].some((t) => t !== null && USERNAME.test(t.replace(/_/g, " ")));
+}
+const USERNAME = /\b(?:user\s*-?\s*name|login\s*name|nick\s*name|nickname|screen\s*name|handle)\b/i;
+
+/** qa_<token>, the token from the run and the key, cut to the field's limits. */
+function uniqueUsername(req: InputRequest): string {
+  return fitToField(String(generateTestDataValue("username", { seed: `${req.runId}:${req.key}` })), req.field);
 }
 
 /** qa.<token>@example.com, the token from the run and the key: the same within a run (sign up, then log in), new in the next. */

@@ -93,12 +93,13 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-069 | High | Verification | A criterion about a rejected login (wrong password → error) is reported BLOCKED / LOGIN_FAILED | Resolved in working tree (2026-11-06) |
 | KI-070 | High | LLM quality | An inferred criterion checks an exact text the requirement never wrote ("Wishlist is empty"), so a working page FAILS | Resolved in working tree (2026-11-06) |
 | KI-072 | High | Exploration | "Click the Add to wishlist button" resolves to the header's wishlist link; nothing is added and the check FAILS | Resolved in working tree (2026-11-06) |
-| KI-073 | Medium | Exploration | A click that opens a sign-in prompt (a guest's "Add to wishlist") is not recognised: the criterion ends INCONCLUSIVE, not "needs a login" | Open |
+| KI-073 | Medium | Exploration | A click that opens a sign-in prompt (a guest's "Add to wishlist") is not recognised: the criterion ends INCONCLUSIVE, not "needs a login" | Resolved in working tree (2026-11-19): BLOCKED / SIGN_IN_REQUIRED |
 | KI-071 | Medium | Verification | Facts read on a search results page stay MODEL_EXTRACTED or have the wrong type, so the criteria end UNVERIFIED_EVIDENCE | Resolved in working tree (2026-11-06) |
-| KI-074 | Medium | Target site | frontends-demo sometimes serves its own Error 500 in the sandbox ("[PATCH] …/store-api/context: <no response> Failed to fetch") | Open: not yet known whether site-side or egress-proxy-side |
-| KI-076 | Medium | LLM quality | The intent prompts (requirement compiler, planner) changed on 2026-11-11 and have not been scored on any model | Open (needs a paid model key) |
+| KI-074 | Medium | Target site | frontends-demo sometimes serves its own Error 500 in the sandbox ("[PATCH] …/store-api/context: <no response> Failed to fetch") | Reported in working tree (2026-11-19): INCONCLUSIVE / SITE_ERROR; the cause is still not known |
+| KI-076 | Medium | LLM quality | The intent prompts (requirement compiler, planner) changed on 2026-11-11 and have not been scored on any model | Partly (2026-11-19): deepseek-flash 37/40 and 17/18; other models need paid keys |
 | KI-075 | High | Requirement analysis | "Verify signup functionality" stops at the sign-in dialog: the site read never opens Sign up, so the criteria guess the sign-up form | Resolved in working tree (2026-11-07) |
-| KI-077 | High | Generated test | The rerun signs up again with the email exploration just registered, so a passing registration ends INCONCLUSIVE | Resolved in working tree (2026-11-19) |
+| KI-077 | High | Generated test | The rerun signs up again with the email exploration just registered, so a passing registration ends INCONCLUSIVE | Resolved in working tree (2026-11-19); made-up usernames too |
+| KI-078 | Medium | LLM quality | The way-there and replanner prompts (2026-11-19) have no eval suite; the quality benchmark has no recorded baseline | Open |
 
 KI-056–KI-057: [Travel Luggage Set run investigation](reviews/run_0mw3gsjgke3a1923c465bb1e1.md), with the recorded
 timeline, reproduction, changes and rollout limits.
@@ -1065,6 +1066,15 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
 - **Open:** after a click, detect a sign-in prompt that appeared (a dialog with a password field and a sign-in button).
   Report the criteria that depend on that step as BLOCKED / PRECONDITION_NOT_MET ("the site asks to sign in for this
   action"), so the user knows to add credentials.
+- **Resolved (2026-11-19, working tree):** the executor reads the page's visible password fields and URL before and after
+  every click that is not a `login` step (`exploration/sign-in-prompt.ts`). A password field that appeared, or a newly
+  opened login path (`/login`, `/account/login`, `/signin`, `/auth`), marks the `act` step `signInPrompt`, unless the step
+  itself asks for sign-in, registration or the account. Verifier rule 3b: a FAIL or INCONCLUSIVE criterion with no
+  `authenticated` precondition whose checkpoint comes after such a click, on a step that serves that criterion (or names
+  none), is BLOCKED / SIGN_IN_REQUIRED ("The site asked to
+  sign in for an action this check needs; add credentials to test it"); a PASS is never changed. A new reason rather
+  than PRECONDITION_NOT_MET, whose text ("an earlier step … could not be completed") says something else. The demo shop's
+  product pages now have this wall ("Add to wishlist", benchmark case DS-07). Not yet seen in a live run.
 
 ## KI-074 — The target site sometimes serves its own Error 500 in the sandbox
 - **Severity:** Medium (a run on a working site ends INCONCLUSIVE, or is judged on an error page).
@@ -1076,6 +1086,13 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
 - **Open:** check whether the store API's PATCH fails through the egress proxy (CONNECT tunnel, timeouts) or on the
   site. Either way, a checkpoint whose page is an error page (an HTTP 5xx document, or "500" / "something went wrong"
   as the main heading) should be reported as such: retried once, or marked INCONCLUSIVE with a "site error" reason.
+- **Reported (2026-11-19, working tree):** at each checkpoint the executor reads the title, the first h1/h2s and the start
+  of the page text (`exploration/site-error.ts`). The whole page must say so: the title, a 5xx status as the main heading,
+  or a server-error phrase as the main heading or first line of a page under 300 characters (an error panel inside a
+  working page does not count). It is read once more after the network goes quiet; still an error page, the `checkpoint` step gets
+  `siteError`. Verifier rule 6b: a FAIL or INCONCLUSIVE criterion read at that checkpoint is INCONCLUSIVE / SITE_ERROR. The
+  page is not reloaded: a reload could resubmit a POST. **Trade-off:** a page that is always a 500 (a real defect) is
+  reported INCONCLUSIVE / SITE_ERROR too, not FAIL (benchmark case DE-01). The cause on frontends-demo is still open.
 
 ## KI-075 — The site read before confirmation stops at the sign-in dialog
 - **Severity:** High (the criteria are proposed without seeing the flow the requirement is about).
@@ -1113,6 +1130,10 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   not measured. Cases 36–40 were written for it and load; none has been run.
 - **To close:** `pnpm eval requirement-compiler` and `pnpm eval planner` on every offered model (as KI-026), record the
   rows in `evals/BASELINE.md`, and re-run the 12-case `evals/e2e-unclear` corpus to compare with the 2026-11-06 table.
+- **2026-11-19:** scored on deepseek-flash: the compiler 37/40 (three of the new "with pages" cases: "Test the search"
+  got one criterion instead of 2–6, and two vague requirements got a text check on wording the requirement never wrote,
+  which the deterministic rewrite turned into `visible`), the planner 17/18 (search-results, as before). Still open for
+  the Claude and Gemini models, and for the end-to-end corpus (now `pnpm benchmark`, KI-078).
 
 ## KI-077 — The rerun signs up again with the email exploration just registered
 - **Severity:** High (every new-account flow ends INCONCLUSIVE; the downloaded test fails every time it is run).
@@ -1132,3 +1153,17 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
 - **Not handled:** tests saved before this fix have no `refreshEmails` call, so rerunning them still repeats the old
   address. Other one-time values (a username, a phone number a site requires to be unique) are still replayed as they
   were. Not yet validated by a live run.
+- **Usernames (2026-11-19, working tree):** a username field (by its key, label, name or placeholder: user name, login
+  name, nickname, handle) gets the platform's `qa_<token>`, new each run and with no model call, and `refreshEmails` gives
+  each made-up username a new token on every execution, like the emails. The previous helper source is kept as
+  `ACTION_HELPERS_V3_SOURCE` (accepted). Phone numbers are still replayed as they were.
+
+## KI-078 — The way-there and replanner prompts have no eval suite; the benchmark has no baseline
+- **Severity:** Medium (the prompts decide which control is clicked and how a scenario continues).
+- **Where:** `packages/testing-engine/src/exploration/way-there.ts`, `exploration/replanner.ts`; `evals/benchmark/`.
+- **What:** 2026-11-19 added a numbered "way there" choice and bounded replanning after a failed step, both checked by
+  deterministic code (an unlisted index chooses nothing; a replan must capture the same checkpoints and contain no step
+  the action policy denies), and a quality benchmark (`pnpm benchmark`). Unit tests cover the code paths; how often a
+  model picks the right control or a useful replan is not measured.
+- **To close:** add `evals/way-there` and `evals/replanner` suites from the frontends-demo failures (FD-04, FD-09: the
+  closed side menu), run `pnpm benchmark --repeat 3` on the compose stack, and record both in `evals/BASELINE.md`.

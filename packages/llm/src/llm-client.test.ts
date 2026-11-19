@@ -439,3 +439,66 @@ describe("createTransport", () => {
     }
   });
 });
+
+describe("a fallback model on provider errors (2026-11-19)", () => {
+  const withFallback = () => {
+    const fallback = new FakeTransport();
+    const s = setup({ fallback: { transport: fallback, model: "gemini-3.5-flash" } });
+    return { ...s, fallback };
+  };
+  const unavailable = () => ({ error: new LlmTransportError("unavailable", { status: 503, retryable: true }) });
+
+  it("the primary gives up: the fallback answers, and the call is recorded under its model", async () => {
+    const { client, transport, fallback, calls } = withFallback();
+    transport.enqueue(unavailable(), unavailable(), unavailable());
+    fallback.enqueue({ json: { answer: "ok", count: 1 } });
+    const res = await client.generateStructured({ ...base(), schema: Answer });
+    expect(res.data).toEqual({ answer: "ok", count: 1 });
+    expect(transport.requests).toHaveLength(3);
+    expect(fallback.requests.map((r) => r.model)).toEqual(["gemini-3.5-flash"]);
+    expect(calls.map((c) => [c.model, c.status])).toEqual([
+      ["claude-sonnet-5", "PROVIDER_ERROR"],
+      ["claude-sonnet-5", "PROVIDER_ERROR"],
+      ["claude-sonnet-5", "PROVIDER_ERROR"],
+      ["gemini-3.5-flash", "SUCCESS"],
+    ]);
+  });
+
+  it("once switched, later calls go straight to the fallback", async () => {
+    const { client, transport, fallback } = withFallback();
+    transport.enqueue({ error: new LlmTransportError("no credit", { status: 402, retryable: false }) });
+    fallback.enqueue({ json: { answer: "a", count: 1 } }, { json: { answer: "b", count: 2 } });
+    await client.generateStructured({ ...base(), schema: Answer });
+    const second = await client.generateStructured({ ...base(), schema: Answer });
+    expect(second.data.answer).toBe("b");
+    expect(transport.requests).toHaveLength(1);
+    expect(client.model).toBe("gemini-3.5-flash");
+  });
+
+  it("a bad request, an invalid answer or a cancelled call never switches", async () => {
+    const bad = withFallback();
+    bad.transport.enqueue({ error: new LlmTransportError("bad request", { status: 400, retryable: false }) });
+    await expect(bad.client.generateStructured({ ...base(), schema: Answer })).rejects.toBeInstanceOf(ModelProviderError);
+    expect(bad.fallback.requests).toHaveLength(0);
+
+    const invalid = withFallback();
+    invalid.transport.enqueue({ json: { answer: "" } }, { json: { answer: "" } });
+    await expect(invalid.client.generateStructured({ ...base(), schema: Answer })).rejects.toBeInstanceOf(ContractError);
+    expect(invalid.fallback.requests).toHaveLength(0);
+
+    const cancelled = withFallback();
+    const controller = new AbortController();
+    cancelled.transport.enqueue("hang");
+    const pending = cancelled.client.generateStructured({ ...base(controller.signal), schema: Answer });
+    controller.abort(new CancelledError());
+    await expect(pending).rejects.toBeInstanceOf(CancelledError);
+    expect(cancelled.fallback.requests).toHaveLength(0);
+  });
+
+  it("the fallback failing too is the provider's error", async () => {
+    const { client, transport, fallback } = withFallback();
+    transport.enqueue({ error: new LlmTransportError("no credit", { status: 402, retryable: false }) });
+    fallback.enqueue({ error: new LlmTransportError("bad key", { status: 401, retryable: false }) });
+    await expect(client.generateStructured({ ...base(), schema: Answer })).rejects.toBeInstanceOf(ModelProviderError);
+  });
+});

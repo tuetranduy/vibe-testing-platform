@@ -808,3 +808,69 @@ describe("verifyStage with several scenarios (V1.1 F9)", () => {
     ]);
   });
 });
+
+describe("a click opened a sign-in prompt (KI-073)", () => {
+  const rule = { kind: "numeric_compare", left: after, operator: "gt", right: before } as const;
+  /** The cart exploration with its PS-3 (or PS-5) click marked as having opened a sign-in prompt. */
+  const prompted = (plannedStepId = "PS-3") => cartExploration().steps.map((s) => (s.plannedStepId === plannedStepId && s.kind === "act" ? { ...s, signInPrompt: true } : s));
+  const withSteps = (steps: ExplorationStep[], values: Partial<Record<RefName, FactValue>>, extra: RunOptions = {}) => {
+    const byCheckpoint: Record<string, string> = { before_add: steps[1]!.id, after_add: steps[3]!.id, cart_page: steps[5]!.id };
+    const facts = Object.entries(values).map(([name, value]) => fact(REFS[name as RefName], value as FactValue, byCheckpoint[REFS[name as RefName].checkpoint]!));
+    return run(rule, { steps, facts, ...extra });
+  };
+
+  it("a check that does not pass after it is BLOCKED / SIGN_IN_REQUIRED", () => {
+    const r = withSteps(prompted(), { before: 0, after: 0 });
+    expect(statusOf(r)).toEqual(["BLOCKED", "SIGN_IN_REQUIRED"]);
+    expect(r.actual).toBe("Step PS-3 opened a sign-in prompt: the site asks to sign in for this action");
+  });
+
+  it("so is a check whose facts were never read after it", () => {
+    expect(statusOf(withSteps(prompted(), { before: 0 }))).toEqual(["BLOCKED", "SIGN_IN_REQUIRED"]);
+  });
+
+  it("a check that passes anyway stays PASS", () => {
+    expect(statusOf(withSteps(prompted(), { before: 0, after: 1 }))).toEqual(["PASS", null]);
+  });
+
+  it("a prompt after the check's checkpoints changes nothing", () => {
+    expect(statusOf(withSteps(prompted("PS-5"), { before: 0, after: 0 }))).toEqual(["FAIL", null]);
+  });
+
+  it("a prompt on a step that serves another criterion does not block this one (review finding)", () => {
+    const plan = planOf(cartPlan.scenarios[0]!.steps.map((s) => (s.id === "PS-3" ? { ...s, criterionIds: ["AC-9"] } : s)));
+    expect(statusOf(withSteps(prompted(), { before: 0, after: 0 }, { plan }))).toEqual(["FAIL", null]);
+    const own = planOf(cartPlan.scenarios[0]!.steps.map((s) => (s.id === "PS-3" ? { ...s, criterionIds: ["AC-1"] } : s)));
+    expect(statusOf(withSteps(prompted(), { before: 0, after: 0 }, { plan: own }))).toEqual(["BLOCKED", "SIGN_IN_REQUIRED"]);
+  });
+
+  it("a criterion that needs a signed-in user keeps its own result", () => {
+    const plan = planOf([planned("PS-0", "login"), ...cartPlan.scenarios[0]!.steps]);
+    const authenticated = { preconditions: [{ kind: "authenticated" as const, description: "Signed in" }] };
+    expect(statusOf(withSteps(prompted(), { before: 0, after: 0 }, { plan, criterion: authenticated }))).toEqual(["FAIL", null]);
+  });
+});
+
+describe("a checkpoint taken on the site's server error page (KI-074)", () => {
+  const rule = { kind: "numeric_compare", left: after, operator: "gt", right: before } as const;
+  const onError = () => cartExploration().steps.map((s) => (s.plannedStepId === "PS-4" ? { ...s, siteError: "500 Internal Server Error" } : s));
+  const withSteps = (steps: ExplorationStep[], values: Partial<Record<RefName, FactValue>>) => {
+    const byCheckpoint: Record<string, string> = { before_add: steps[1]!.id, after_add: steps[3]!.id, cart_page: steps[5]!.id };
+    const facts = Object.entries(values).map(([name, value]) => fact(REFS[name as RefName], value as FactValue, byCheckpoint[REFS[name as RefName].checkpoint]!));
+    return run(rule, { steps, facts });
+  };
+
+  it("a check that does not pass there is INCONCLUSIVE / SITE_ERROR", () => {
+    const r = withSteps(onError(), { before: 0, after: 0 });
+    expect(statusOf(r)).toEqual(["INCONCLUSIVE", "SITE_ERROR"]);
+    expect(r.actual).toBe("The site showed an error page (500 Internal Server Error)");
+    expect(statusOf(withSteps(onError(), { before: 0 }))).toEqual(["INCONCLUSIVE", "SITE_ERROR"]);
+  });
+
+  it("a check that passes there, or reads no fact there, keeps its result", () => {
+    expect(statusOf(withSteps(onError(), { before: 0, after: 1 }))).toEqual(["PASS", null]);
+    const other = { kind: "visible", fact: title, expected: true } as const;
+    const steps = onError();
+    expect(statusOf(run(other, { steps, facts: [fact(title, false, steps[5]!.id)] }))).toEqual(["FAIL", null]);
+  });
+});

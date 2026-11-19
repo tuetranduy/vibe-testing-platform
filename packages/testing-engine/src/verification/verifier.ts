@@ -43,6 +43,10 @@ import { describeExpected, evaluateRule, factLabel } from "./rules";
  *                                                                   (TARGET_BLOCKED_BY_POLICY when it has none);
  *     - stopped early (STEP_LIMIT_REACHED / EXPLORATION_BUDGET_EXHAUSTED) → INCONCLUSIVE, that stop reason;
  *     - otherwise, incl. COMPLETED after a trailing FAILED step (R25) → INCONCLUSIVE / FACT_NOT_OBSERVED.
+ *  3b. (after 4–6) A FAIL or INCONCLUSIVE result, no `authenticated` precondition, and a golden `act` before one of
+ *     the criterion's checkpoints opened a sign-in prompt (KI-073)  → BLOCKED / SIGN_IN_REQUIRED.
+ *  6b. (after 3b) A FAIL or INCONCLUSIVE result whose checkpoint was taken on the site's server error page (KI-074)
+ *     → INCONCLUSIVE / SITE_ERROR.
  *  6. Evaluate the rule                                           → PASS / FAIL. In a numeric_delta or a comparison
  *                                                                   of explicitly named counters, a counter
  *                                                                   read from the page showing no number counts as 0
@@ -68,6 +72,18 @@ export interface VerifyCriterionInput {
 const refKey = (ref: FactRef) => `${ref.key}@${ref.checkpoint}`;
 
 export function verifyCriterion(input: VerifyCriterionInput): ProvisionalResult {
+  const result = decide(input);
+  if (result.status !== "FAIL" && result.status !== "INCONCLUSIVE") return result;
+  // 3b. A click on the way opened the site's sign-in prompt (KI-073): the check needs a signed-in user.
+  const prompt = input.criterion.preconditions.some((p) => p.kind === "authenticated") ? null : signInPromptBefore(input.criterion.id, result.factRefs, input.plan, input.steps);
+  if (prompt) return { ...result, status: "BLOCKED", reason: "SIGN_IN_REQUIRED", actual: `Step ${prompt} opened a sign-in prompt: the site asks to sign in for this action` };
+  // 6b. One of its checkpoints was taken on the site's server error page (KI-074).
+  const siteError = siteErrorAt(result.factRefs, input.plan, input.steps, input.facts);
+  if (siteError) return { ...result, status: "INCONCLUSIVE", reason: "SITE_ERROR", actual: clip(`The site showed an error page (${siteError})`) };
+  return result;
+}
+
+function decide(input: VerifyCriterionInput): ProvisionalResult {
   const { criterion, plan } = input;
   const outcome = criterion.expectedOutcome;
   const refs = factRefsOf(outcome).map(({ ref }) => ({ key: ref.key, checkpoint: ref.checkpoint }));
@@ -141,6 +157,35 @@ export function verifyCriterion(input: VerifyCriterionInput): ProvisionalResult 
  */
 function showsNoNumber(fact: ObservedFact): boolean {
   return fact.value === null && fact.provenance === "DOM_VERIFIED" && fact.read?.mode === "number";
+}
+
+/**
+ * The planned step whose golden click opened a sign-in prompt (KI-073) before one of these checkpoints in its scenario's
+ * plan (any, for a criterion that reads no fact), or null. Only a step that serves this criterion, or names none.
+ */
+function signInPromptBefore(criterionId: string, refs: readonly FactRef[], plan: TestPlan, steps: readonly ExplorationStep[]): string | null {
+  for (const scenario of plan.scenarios) {
+    const position = new Map(scenario.steps.map((s, i) => [s.id, i]));
+    // A step that serves other criteria only ("Add to wishlist" for the wishlist check) does not block this one.
+    const serves = new Map(scenario.steps.map((s) => [s.id, s.criterionIds.length === 0 || s.criterionIds.includes(criterionId)]));
+    const checkpoints = scenario.steps.flatMap((s, i) => (s.kind === "capture_checkpoint" && refs.some((r) => r.checkpoint === s.checkpoint) ? [i] : []));
+    if (refs.length > 0 && checkpoints.length === 0) continue;
+    const last = refs.length > 0 ? Math.max(...checkpoints) : scenario.steps.length;
+    const prompted = steps.find(
+      (s) => s.kind === "act" && s.signInPrompt && s.onGoldenPath && s.plannedStepId !== null && serves.get(s.plannedStepId) === true && (position.get(s.plannedStepId) ?? Infinity) < last,
+    );
+    if (prompted) return prompted.plannedStepId;
+  }
+  return null;
+}
+
+/** The error heading of a checkpoint step these facts were (or were to be) captured at, taken on an error page (KI-074). */
+function siteErrorAt(refs: readonly FactRef[], plan: TestPlan, steps: readonly ExplorationStep[], facts: readonly ObservedFact[]): string | null {
+  const checkpoints = new Set(refs.map((r) => r.checkpoint));
+  const captureIds = new Set(plan.scenarios.flatMap((s) => s.steps).filter((s) => s.kind === "capture_checkpoint" && checkpoints.has(s.checkpoint ?? "")).map((s) => s.id));
+  const factSteps = new Set(facts.filter((f) => refs.some((r) => r.key === f.key && r.checkpoint === f.checkpoint)).map((f) => f.stepId));
+  const at = steps.find((s) => s.kind === "checkpoint" && s.siteError && (factSteps.has(s.id) || (s.plannedStepId !== null && captureIds.has(s.plannedStepId))));
+  return at?.siteError ?? null;
 }
 
 const stepName = (step: ExplorationStep) => step.plannedStepId ?? `step ${step.index}`;

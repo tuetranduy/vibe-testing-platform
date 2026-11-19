@@ -229,6 +229,18 @@ describe("RunReport", () => {
       expect(await screen.findByRole("heading", { name: /verdict: passed \(on assumed checks\)/i })).toBeInTheDocument();
     });
 
+    it("says a pass of a site-wide requirement rests on one broad check (2026-11-19)", async () => {
+      const report = reportFixture();
+      const [first] = report.requirement!.criteria;
+      reportFetch(() => json(200, {
+        ...report,
+        verdict: "PASSED",
+        requirement: { ...report.requirement!, intent: { clarity: "site_wide" as const, goal: "The website works", feature: null, notes: [] }, criteria: [{ ...first!, critical: true }] },
+      }));
+      renderReport();
+      expect(await screen.findByRole("heading", { name: /verdict: passed \(one broad check only\)/i })).toBeInTheDocument();
+    });
+
     it("never softens a failure, and a pass on the user's own checks reads as a plain pass", async () => {
       reportFetch(() => json(200, understood("FAILED", true)));
       const { unmount } = renderReport();

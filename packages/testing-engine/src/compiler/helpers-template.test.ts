@@ -282,6 +282,17 @@ describe("refreshEmails (KI-077)", () => {
     expect(data.list).toEqual([fresh, "other"]);
   });
 
+  it("gives a made-up username (qa_<token>) a new token too, the same wherever it appears (KI-077)", () => {
+    const data = { inputs: { input1: "qa_abc123", input2: "qa_team" }, list: ["qa_abc123"], text: "Hello qa_abc123!" };
+    helpers.refreshEmails(data);
+    const fresh = data.inputs.input1;
+    expect(fresh).toMatch(/^qa_[0-9a-z]{6}$/);
+    expect(fresh).not.toBe("qa_abc123");
+    expect(data.list).toEqual([fresh]);
+    expect(data.text).toBe(`Hello ${fresh}!`);
+    expect(data.inputs.input2).toBe("qa_team");
+  });
+
   it("leaves every other value as it is: an email the user entered, other text, numbers", () => {
     const data = runData();
     helpers.refreshEmails(data);

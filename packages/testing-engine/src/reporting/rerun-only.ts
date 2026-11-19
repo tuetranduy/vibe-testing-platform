@@ -19,6 +19,7 @@ import { clip } from "../verification/normalize";
  * |-----------------------------------|----------------------------|---------------|------------------|------------------------|
  * | compiled                          | PASSED                     | PASS          | PLAYWRIGHT_RERUN | —                      |
  * | compiled                          | ASSERTION_FAILED           | FAIL          | PLAYWRIGHT_RERUN | —                      |
+ * | compiled                          | FLAKY (2026-11-19)         | INCONCLUSIVE  | —                | RERUN_FLAKY            |
  * | compiled                          | NOT_REACHED / UNAVAILABLE  | INCONCLUSIVE  | —                | RERUN_NOT_REACHED      |
  * | not in the generated test         | any                        | INCONCLUSIVE  | —                | NOT_IN_GENERATED_TEST  |
  *
@@ -40,6 +41,9 @@ export function rerunOnlyResults(requirement: NormalizedRequirement, test: Gener
       status = "PASS";
     } else if (outcome === "ASSERTION_FAILED") {
       status = "FAIL";
+    } else if (outcome === "FLAKY") {
+      status = "INCONCLUSIVE";
+      reason = "RERUN_FLAKY";
     } else {
       status = "INCONCLUSIVE";
       reason = "RERUN_NOT_REACHED";

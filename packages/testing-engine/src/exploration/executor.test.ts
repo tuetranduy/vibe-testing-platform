@@ -32,6 +32,11 @@ import type { FieldFacts, InputGenerator, InputRequest } from "./input-generator
 import type { CriterionJudge, JudgeRequest } from "./judge";
 import { factFromReadings, type FactCaptureInput } from "./fact-reader";
 import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
+import { CANDIDATES } from "../survey/interactive";
+import { SIGN_IN_STATE_SCRIPT } from "./sign-in-prompt";
+import { SITE_ERROR_SCRIPT } from "./site-error";
+import type { ReplanInput, Replanner } from "./replanner";
+import type { WayThere, WayThereRequest } from "./way-there";
 
 // ---------------------------------------------------------------------------------------------
 // Fakes
@@ -1395,6 +1400,247 @@ describe("runExploration (fake explorer)", () => {
       "Click the Add to wishlist button on the product detail page",
     ]);
     expect(outcome.steps.filter((s) => s.plannedStepId === "PS-2" && s.kind === "observe" && s.outcome === "FAILED").length).toBeGreaterThan(1);
+  });
+
+  it("a step that names its control: the one element with exactly that role and name is clicked without asking the model (2026-11-19)", async () => {
+    const { ctx } = fakeCtx();
+    const button = "xpath=/html[1]/body[1]/main[1]/button[2]";
+    const session = new FakeSession();
+    const { recorder } = fakeRecorder({ describe: () => ({ role: "button", name: "New User", text: "New User" }) });
+    const asked: [string, readonly string[]][] = [];
+    recorder.exactControl = async (_page, name, roles) => {
+      asked.push([name, roles]);
+      return button;
+    };
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the 'New User' button"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+
+    expect(asked).toEqual([["New User", ["button"]]]);
+    expect(session.calls.filter((c) => c.op === "observe")).toEqual([]);
+    expect((session.calls.find((c) => c.op === "actOn")!.arg as ObservedElement).selector).toBe(button);
+    const lookup = outcome.steps.find((s) => s.plannedStepId === "PS-2" && s.kind === "observe")!;
+    expect([lookup.instruction, lookup.outcome, lookup.llm, lookup.onGoldenPath]).toEqual(["By name: Click the 'New User' button", "SUCCESS", null, false]);
+    const act = outcome.steps.find((s) => s.kind === "act")!;
+    expect([act.outcome, act.onGoldenPath]).toEqual(["SUCCESS", true]);
+  });
+
+  it("a quoted name that is only where the step happens ('on the Pixel 11 page') is not looked up as the control (review finding)", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const { recorder } = fakeRecorder();
+    let asked = 0;
+    recorder.exactControl = async () => {
+      asked++;
+      return "xpath=/html[1]/body[1]/a[1]";
+    };
+    const plan = planOf(step("navigate", "Open"), step("click", "Click Add to cart on the 'Pixel 11' page"));
+    await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(asked).toBe(0);
+    expect(session.calls.filter((c) => c.op === "observe").map((c) => c.arg)).toEqual(["Click Add to cart on the 'Pixel 11' page"]);
+  });
+
+  it("no single element with that exact role and name: the model is asked as before (2026-11-19)", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const { recorder } = fakeRecorder();
+    recorder.exactControl = async () => null;
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the 'Add to cart' button"));
+    await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(session.calls.filter((c) => c.op === "observe").map((c) => c.arg)).toEqual(["Click the 'Add to cart' button"]);
+  });
+
+  it("a step that names no control, or a search's submit: no direct lookup (2026-11-19)", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({ observe: (_i, n) => [{ selector: `xpath=/html[1]/body[1]/el[${n + 1}]`, description: "x", method: "click", arguments: [] }] });
+    const { recorder } = fakeRecorder({ describe: searchRoles });
+    let asked = 0;
+    recorder.exactControl = async () => {
+      asked++;
+      return "xpath=/never";
+    };
+    const plan = planOf(step("navigate", "Open"), step("click", "Open the cart"), step("search", "Search for 'Pixel'", { inputRef: { source: "literal", key: "Pixel" } }));
+    await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(asked).toBe(0);
+  });
+
+  it("the step's control is not on the page: the model picks a way there by number, which is clicked, then the control is looked for again (2026-11-19)", async () => {
+    const { ctx } = fakeCtx();
+    const menu = "xpath=/html[1]/body[1]/button[1]";
+    const grills = { selector: "xpath=/html[1]/body[1]/nav[1]/a[2]", description: "Grills", method: "click", arguments: [] };
+    // Nothing for the step until the side menu is open.
+    let open = false;
+    const session = new FakeSession({ observe: () => (open ? [grills] : []), actOn: (el) => {
+      if (el.selector === menu) open = true;
+      return {};
+    } });
+    Object.assign(session.page, {
+      evaluate: async (script: unknown) =>
+        script === CANDIDATES
+          ? [
+              { selector: menu, label: "Show side menu", kind: "click", type: "button", href: "", submit: false, form: "" },
+              { selector: "xpath=/html[1]/body[1]/input[1]", label: "Search", kind: "fill", type: "search", href: "", submit: false, form: "" },
+              { selector: "xpath=/html[1]/body[1]/a[9]", label: "Log out", kind: "click", type: "", href: "", submit: false, form: "" },
+            ]
+          : [],
+    });
+    const { recorder } = fakeRecorder({ describe: (sel) => (sel === menu ? { role: "button", name: "Show side menu", text: null } : { role: "link", name: "Grills", text: "Grills" }) });
+    const asked: WayThereRequest[] = [];
+    const wayThere: WayThere = {
+      async choose(req) {
+        asked.push(req);
+        return { index: 0, llm: USAGE };
+      },
+    };
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the Grills category"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder, wayThere });
+
+    expect(asked.map((r) => [r.goal, r.candidates])).toEqual([["Click the Grills category", [{ index: 0, label: "Show side menu" }]]]);
+    expect(session.calls.filter((c) => c.op === "actOn").map((c) => (c.arg as ObservedElement).selector)).toEqual([menu, grills.selector]);
+    // No free-text "Find the link or button that leads to where you can" lookup.
+    expect(session.calls.filter((c) => c.op === "observe").map((c) => c.arg)).toEqual(["Click the Grills category", "Click the Grills category"]);
+    const way = outcome.steps.find((s) => s.kind === "observe" && s.instruction.startsWith("By index:"))!;
+    expect([way.instruction, way.outcome, way.llm]).toEqual(["By index: the way to: Click the Grills category", "SUCCESS", USAGE]);
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(outcome.steps.filter((s) => s.kind === "act").map((s) => [s.outcome, s.onGoldenPath])).toEqual([["SUCCESS", true], ["SUCCESS", true]]);
+  });
+
+  it("the model sees no way there (-1): the step fails without a free-text lookup (2026-11-19)", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({ observe: () => [] });
+    Object.assign(session.page, {
+      evaluate: async (script: unknown) => (script === CANDIDATES ? [{ selector: "xpath=/a", label: "Cart", kind: "click", type: "", href: "", submit: false, form: "" }] : []),
+    });
+    const wayThere: WayThere = { choose: async () => ({ index: null, llm: USAGE }) };
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the Grills category"));
+    await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, wayThere });
+    expect(session.calls.filter((c) => c.op === "actOn")).toEqual([]);
+    expect(session.calls.filter((c) => c.op === "observe").every((c) => !String(c.arg).startsWith("Find the link or button that leads"))).toBe(true);
+  });
+
+  it("a click that brings up a password field is marked as having opened a sign-in prompt; a login step never is (KI-073)", async () => {
+    const run = async (kind: PlannedStep["kind"], description: string) => {
+      const { ctx } = fakeCtx({ secrets: { password: SECRET } });
+      let clicked = false;
+      const session = new FakeSession({ actOn: () => ((clicked = true), {}) });
+      Object.assign(session.page, {
+        evaluate: async (script: unknown) => (script === SIGN_IN_STATE_SCRIPT ? { url: session.url, passwordFields: clicked ? 1 : 0 } : []),
+      });
+      const plan = planOf(step("navigate", "Open"), step(kind, description));
+      const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+      return outcome.steps.find((s) => s.kind === "act")!.signInPrompt;
+    };
+    expect(await run("click", "Click the 'Add to wishlist' button")).toBe(true);
+    expect(await run("login", "Submit the login form")).toBeUndefined();
+    expect(await run("click", "Click Sign in")).toBeUndefined();
+  });
+
+  it("a page whose sign-in state cannot be read: no mark (KI-073)", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    Object.assign(session.page, { evaluate: async () => { throw new Error("detached"); } });
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the 'Add to wishlist' button"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+    expect(outcome.steps.find((s) => s.kind === "act")!.signInPrompt).toBeUndefined();
+  });
+
+  it("a checkpoint on a server error page that stays one is marked with the error; one that recovers is not (KI-074)", async () => {
+    const run = async (reads: { title: string; headings: string[]; text: string }[]) => {
+      const { ctx } = fakeCtx();
+      const session = new FakeSession({ extract: () => ({ cartCount: 1 }) });
+      let n = 0;
+      Object.assign(session.page, { evaluate: async (script: unknown) => (script === SITE_ERROR_SCRIPT ? reads[Math.min(n++, reads.length - 1)] : []) });
+      const plan = planOf(step("navigate", "Open"), step("capture_checkpoint", "Capture", { checkpoint: "after_add" }));
+      const outcome = await runExploration(ctx, { plan, requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder });
+      return { checkpoint: outcome.steps.find((s) => s.kind === "checkpoint")!, waits: session.loadStates.length, reads: n };
+    };
+    const error = { title: "Shop", headings: ["500 Internal Server Error"], text: "500 Internal Server Error" };
+    const fine = { title: "Shop", headings: ["Fred - 3 Burner Gas Grill"], text: "A grill" };
+    const stays = await run([error, error]);
+    expect(stays.checkpoint.siteError).toBe("500 Internal Server Error");
+    expect(stays.reads).toBe(2);
+    const recovers = await run([error, fine]);
+    expect(recovers.checkpoint.siteError).toBeUndefined();
+    const never = await run([fine]);
+    expect([never.checkpoint.siteError, never.reads]).toEqual([undefined, 1]);
+  });
+
+  describe("a step that still fails is planned again from the page the browser is on (2026-11-19)", () => {
+    const grills = "Click the 'Grills' link";
+    /** A session where the Grills link is never found. */
+    const lost = () => {
+      const session = new FakeSession({ observe: (instruction) => (instruction.includes("Grills") ? [] : [{ selector: "xpath=/html[1]/body[1]/a[1]", description: "x", method: "click", arguments: [] }]), extract: () => ({ cartCount: 1 }) });
+      Object.assign(session.page, { evaluate: async () => [] });
+      return session;
+    };
+    const plan = () => planOf(step("navigate", "Open"), step("click", grills), step("capture_checkpoint", "Capture", { checkpoint: "after_add", criterionIds: ["AC-1"] }));
+    const replanner = (answers: (PlannedStep[] | null)[]) => {
+      const asked: ReplanInput[] = [];
+      const r: Replanner = {
+        async replan(input) {
+          asked.push(input);
+          return answers.shift() ?? null;
+        },
+      };
+      return { r, asked };
+    };
+
+    it("the new steps run; the outcome carries the revised plan and one plan.revised event is published", async () => {
+      const { ctx, events } = fakeCtx();
+      const session = lost();
+      const { r, asked } = replanner([[
+        { id: "PS-4", kind: "navigate", description: "Open https://shop.test/grills", criterionIds: [], destructive: false },
+        { id: "PS-5", kind: "capture_checkpoint", description: "Capture", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false },
+      ]]);
+      const outcome = await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r });
+
+      expect(asked).toHaveLength(1);
+      expect([asked[0]!.failed.id, asked[0]!.done.map((s) => s.id), asked[0]!.remaining.map((s) => s.id), asked[0]!.firstId]).toEqual(["PS-2", ["PS-1"], ["PS-3"], 4]);
+      expect(session.calls.filter((c) => c.op === "navigate").map((c) => c.arg)).toContain("https://shop.test/grills");
+      expect(outcome.facts.map((f) => [f.key, f.checkpoint])).toContainEqual(["cartCount", "after_add"]);
+      expect(outcome.revisedPlan?.scenarios[0]!.steps.map((s) => s.id)).toEqual(["PS-1", "PS-2", "PS-4", "PS-5"]);
+      expect(events.filter((e) => e.type === "plan.revised").map((e) => e.payload)).toEqual([{ scenarioId: "SC-1", afterStepId: "PS-2", stepCount: 2 }]);
+    });
+
+    it("no usable replan: the scenario stops as before, and the plan is not revised", async () => {
+      const { ctx } = fakeCtx();
+      const { r } = replanner([null]);
+      const outcome = await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r });
+      expect(outcome.facts).toEqual([]);
+      expect(outcome.revisedPlan).toBeUndefined();
+    });
+
+    it("at most two replans a scenario", async () => {
+      const { ctx } = fakeCtx();
+      const again = (n: number): PlannedStep[] => [
+        { id: `PS-${n}`, kind: "click", description: grills, criterionIds: [], destructive: false },
+        { id: `PS-${n + 1}`, kind: "capture_checkpoint", description: "Capture", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false },
+      ];
+      const { r, asked } = replanner([again(4), again(6), again(8)]);
+      const outcome = await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r });
+      expect(asked.map((a) => a.failed.id)).toEqual(["PS-2", "PS-4"]);
+      expect(outcome.revisedPlan?.scenarios[0]!.steps.map((s) => s.id)).toEqual(["PS-1", "PS-2", "PS-4", "PS-6", "PS-7"]);
+    });
+
+    it("a replan with a destructive step is never used, even when the run allows destructive actions (review finding)", async () => {
+      const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+      const { r } = replanner([[
+        { id: "PS-4", kind: "click", description: "Click 'Place order'", criterionIds: [], destructive: true },
+        { id: "PS-5", kind: "capture_checkpoint", description: "Capture", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false },
+      ]]);
+      const session = lost();
+      const outcome = await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r });
+      expect(outcome.revisedPlan).toBeUndefined();
+      expect(session.calls.filter((c) => c.op === "actOn")).toEqual([]);
+    });
+
+    it("a step blocked by policy is never planned again", async () => {
+      const { ctx } = fakeCtx();
+      const { r, asked } = replanner([[]]);
+      const session = new FakeSession({ navigate: (url) => { if (url.includes("blocked")) throw new NavigationBlockedError("blocked", "TARGET_BLOCKED_BY_POLICY" as never); } });
+      const blocked = planOf(step("navigate", "Open"), step("navigate", "Open https://shop.test/blocked"), step("capture_checkpoint", "Capture", { checkpoint: "after_add" }));
+      await runExploration(ctx, { plan: blocked, requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r });
+      expect(asked).toEqual([]);
+    });
   });
 
   it("namedControl: the control a click step names, and its roles", () => {

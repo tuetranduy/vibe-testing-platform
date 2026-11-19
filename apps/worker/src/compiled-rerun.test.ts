@@ -279,6 +279,7 @@ async function rerun(test: GeneratedTest) {
     signal: new AbortController().signal,
     deadlineAt: null,
     budgets: { explorationMs: 60_000, rerunMs: 60_000 },
+    now: () => new Date(),
     secrets: { names: ["password"], get: (name: string) => (name === "password" ? VALID_PASSWORD : undefined) },
     redact: createRunRedactor(),
     publish: async (e: EventDraft) => void events.push(e),
@@ -364,11 +365,12 @@ describe("compiled demo-shop flow, rerun by Playwright (real runner, egress prox
     expect(Object.keys(result.errorText)).toEqual(["AC-3"]);
     expect(result.errorText["AC-3"]).toContain("[AC-3] The cart lists iPhone 17 Pro");
 
-    // Evidence: trace, screenshot and video, all STANDARD (secrets are no longer redacted).
-    expect(artifacts.map((a) => a.type).sort()).toEqual(["SCREENSHOT", "TRACE", "VIDEO"]);
+    // Evidence: trace, screenshot and video, all STANDARD (secrets are no longer redacted), of each attempt: a failed
+    // rerun runs once more (2026-11-19), and failed the same way.
+    expect(artifacts.map((a) => a.type).sort()).toEqual(["SCREENSHOT", "SCREENSHOT", "TRACE", "TRACE", "VIDEO", "VIDEO"]);
     expect(new Set(artifacts.map((a) => a.sensitivity))).toEqual(new Set(["STANDARD"]));
     expect([...result.artifactIds].sort()).toEqual(artifacts.map((a) => a.id).sort());
-    expect(events.filter((e) => e.type === "artifact.created")).toHaveLength(3);
+    expect(events.filter((e) => e.type === "artifact.created")).toHaveLength(6);
 
     // The stored trace recorded the password fill, value included.
     const trace = artifacts.find((a) => a.type === "TRACE")!;

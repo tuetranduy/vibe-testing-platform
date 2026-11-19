@@ -1,0 +1,221 @@
+{
+  "note": "Quality benchmark corpus (2026-11-19, evals/benchmark/README.md). {demoShop} is the demo shop as the worker reaches it (BENCH_DEMO_SHOP_URL, default http://demo-shop:4000). DB-* run against a seeded defect and must FAIL; DE-01's product page is a server error page, which the platform reports INCONCLUSIVE / SITE_ERROR (KI-074). FD-S1 reproduces the frontends-demo search defect (docs/testing/shopware-complex-cases.md). FD-12 creates an account.",
+  "cases": [
+    {
+      "id": "DS-01",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/",
+      "requirement": "Search for Pixel and verify the search results list Pixel 11.",
+      "expect": "PASSED"
+    },
+    {
+      "id": "DS-02",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/",
+      "requirement": "Add the iPhone 17 Pro to the cart, open the cart and verify it lists iPhone 17 Pro.",
+      "expect": "PASSED"
+    },
+    {
+      "id": "DS-03",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/",
+      "requirement": "Add the USB-C Charger to the cart, open the cart and verify the cart total is $29.00.",
+      "expect": "PASSED"
+    },
+    {
+      "id": "DS-04",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/",
+      "requirement": "Logging in with a wrong password should show an error message.",
+      "expect": "PASSED"
+    },
+    {
+      "id": "DS-05",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/",
+      "requirement": "The Pixel 11 product page shows the same price as the product list: $899.00.",
+      "expect": "PASSED"
+    },
+    {
+      "id": "DS-06",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/",
+      "requirement": "Open the Galaxy S27 product page and verify it shows the product name and its price.",
+      "expect": "PASSED"
+    },
+    {
+      "id": "DS-07",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/",
+      "requirement": "Make sure adding a product to the wishlist works.",
+      "expect": "BLOCKED"
+    },
+    {
+      "id": "DS-08",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/",
+      "requirement": "Test the search",
+      "expect": "ANY"
+    },
+    {
+      "id": "DB-01",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/?bug=empty_cart",
+      "requirement": "Add the iPhone 17 Pro to the cart, open the cart and verify it lists iPhone 17 Pro.",
+      "expect": "FAILED",
+      "bug": "empty_cart"
+    },
+    {
+      "id": "DB-02",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/?bug=wrong_total",
+      "requirement": "Add the USB-C Charger to the cart, open the cart and verify the cart total is $29.00.",
+      "expect": "FAILED",
+      "bug": "wrong_total"
+    },
+    {
+      "id": "DB-03",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/?bug=search_ignores_query",
+      "requirement": "Search for Pixel and verify every product in the search results has Pixel in its name.",
+      "expect": "FAILED",
+      "bug": "search_ignores_query"
+    },
+    {
+      "id": "DB-04",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/?bug=login_no_error",
+      "requirement": "Logging in with a wrong password should show an error message.",
+      "expect": "FAILED",
+      "bug": "login_no_error"
+    },
+    {
+      "id": "DB-05",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/?bug=add_to_cart_noop",
+      "requirement": "Add the Pixel 11 to the cart; the cart badge count goes up by one.",
+      "expect": "FAILED",
+      "bug": "add_to_cart_noop"
+    },
+    {
+      "id": "DB-06",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/?bug=price_mismatch",
+      "requirement": "The Pixel 11 product page shows the same price as the product list: $899.00.",
+      "expect": "FAILED",
+      "bug": "price_mismatch"
+    },
+    {
+      "id": "DE-01",
+      "site": "demo-shop",
+      "targetUrl": "{demoShop}/?bug=product_500",
+      "requirement": "Open the Galaxy S27 product page and verify it shows the product name and its price.",
+      "expect": "INCONCLUSIVE"
+    },
+    {
+      "id": "FD-01",
+      "site": "frontends-demo",
+      "targetUrl": "https://frontends-demo.vercel.app/",
+      "requirement": "Open the Summer BBQ > Grills page, add \"Fred - 3 Burner Gas Grill\" to the cart, then open the cart and verify it lists Fred - 3 Burner Gas Grill.",
+      "expect": "ANY"
+    },
+    {
+      "id": "FD-02",
+      "site": "frontends-demo",
+      "targetUrl": "https://frontends-demo.vercel.app/",
+      "requirement": "Search for \"pepper\" and verify every product in the search results has pepper in its name.",
+      "expect": "ANY"
+    },
+    {
+      "id": "FD-03",
+      "site": "frontends-demo",
+      "targetUrl": "https://frontends-demo.vercel.app/",
+      "requirement": "Test the search",
+      "expect": "ANY"
+    },
+    {
+      "id": "FD-04",
+      "site": "frontends-demo",
+      "targetUrl": "https://frontends-demo.vercel.app/",
+      "requirement": "Check that adding a product to the cart works",
+      "expect": "ANY"
+    },
+    {
+      "id": "FD-05",
+      "site": "frontends-demo",
+      "targetUrl": "https://frontends-demo.vercel.app/",
+      "requirement": "Make sure the wishlist works",
+      "expect": "ANY"
+    },
+    {
+      "id": "FD-06",
+      "site": "frontends-demo",
+      "targetUrl": "https://frontends-demo.vercel.app/",
+      "requirement": "Signing in with a wrong password should show an error",
+      "expect": "ANY"
+    },
+    {
+      "id": "FD-07",
+      "site": "frontends-demo",
+      "targetUrl": "https://frontends-demo.vercel.app/",
+      "requirement": "The product page should look good and show the price",
+      "expect": "ANY"
+    },
+    {
+      "id": "FD-08",
+      "site": "frontends-demo",
+      "targetUrl": "https://frontends-demo.vercel.app/",
+      "requirement": "Choosing a different variant on a product works properly",
+      "expect": "ANY"
+    },
+    {
+      "id": "FD-09",
+      "site": "frontends-demo",
+      "targetUrl": "https://frontends-demo.vercel.app/",
+      "requirement": "find a grill and put it in the basket, basket should have it",
+      "expect": "ANY"
+    },
+    {
+      "id": "FD-10",
+      "site": "frontends-demo",
+      "targetUrl": "https://frontends-demo.vercel.app/",
+      "requirement": "serch for salt and chek the results r relevant",
+      "expect": "ANY"
+    },
+    {
+      "id": "FD-11",
+      "site": "frontends-demo",
+      "targetUrl": "https://frontends-demo.vercel.app/",
+      "requirement": "Test this website",
+      "expect": "ANY"
+    },
+    {
+      "id": "FD-12",
+      "site": "frontends-demo",
+      "targetUrl": "https://frontends-demo.vercel.app/",
+      "requirement": "Make sure a new customer can sign up",
+      "expect": "ANY"
+    },
+    {
+      "id": "FD-S1",
+      "site": "frontends-demo",
+      "targetUrl": "https://frontends-demo.vercel.app/",
+      "requirement": "Search for \"codex-no-product-20261119\" and verify the search finds no products.",
+      "expect": "FAILED"
+    },
+    {
+      "id": "DW-01",
+      "site": "demowebshop",
+      "targetUrl": "https://demowebshop.tricentis.com/",
+      "requirement": "Search for \"laptop\" and verify the search results list 14.1-inch Laptop.",
+      "expect": "PASSED"
+    },
+    {
+      "id": "DW-02",
+      "site": "demowebshop",
+      "targetUrl": "https://demowebshop.tricentis.com/",
+      "requirement": "Add the 14.1-inch Laptop to the cart, open the shopping cart and verify it lists 14.1-inch Laptop.",
+      "expect": "PASSED"
+    }
+  ]
+}

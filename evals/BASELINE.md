@@ -56,6 +56,7 @@ commit of `packages/testing-engine/src/requirement/prompts.ts`, and any failing 
 | 2026-11-05 | deepseek-flash (thinking high), rule "a named item is checked as its text", with cases 32–33 (KI-061) | this change | 33/33 (100%) | 125,085 / 26,938 | $0.03 | — (161 s). Before the rule, cases 32 and 33 passed 6/6 and 8/8: the live compile that read a named product back from the page did not reproduce |
 | 2026-11-06 | deepseek-flash, rule "never invent wording" + deterministic rewrite of an unstated text to `visible` (KI-070), with cases 34–35 | a0b6cf8 + this change | 35/35 (100%) | 144,695 / 29,468 | $0.08 | — (177 s). Cases 34–35 score `noInventedText` (a rewrite counts as a failure): none rewritten |
 | 2026-11-05 | deepseek-v4-pro (`LLM_REASONING=minimal`), the same | this change | 31/33 (93.9%) | 143,554 / 13,716 | $0.12 | spanish-newsletter (`visible`, not `text_matches`), selected-product-with-pages (`semantic`, 3 ambiguous); both failed this way before. Cases 32–33 pass |
+| 2026-11-19 | deepseek-flash (thinking high), KI-076: the intent prompts, cases 36–40 | 3461abb | 37/40 (92.5%) | 204,725 / 41,584 | $0.11 | test-the-search-with-pages (1 criterion, expected 2–6), test-this-website-with-pages and look-good-show-price-with-pages (one criterion checked a text the requirement never wrote, rewritten to `visible`) — 248 s. The no-pages variants pass: the failures are with live-site pages |
 
 The second row's prompt change fixes a `test_data` precondition invented for a value written in the
 requirement (seen in the Milestone B demo: "Search for iPhone 17 Pro…" got a `test_data` precondition
@@ -63,7 +64,7 @@ requirement (seen in the Milestone B demo: "Search for iPhone 17 Pro…" got a `
 it, `onlyProvidedInputRefs: true`) failed 1 of 20 samples before the change and 0 of 60 after.
 **Re-run the full suite and replace that row.**
 
-**2026-11-11 — prompt changed, not re-scored (KI-076).** The requirement-compiler prompt now asks for the user's
+**2026-11-11 — prompt changed; scored 2026-11-19 on deepseek-flash only (KI-076, rows above).** The requirement-compiler prompt now asks for the user's
 intent and may add grounded `origin: "inferred"` criteria (spec
 `docs/superpowers/specs/2026-11-11-intent-understanding-design.md`), with cases 36–40 and the `inferred`,
 `minStructured` and `mustRecordAssumption` expectations. Every case defaults to no inferred criteria; cases 34 and
@@ -117,6 +118,7 @@ Record the `Total:` line with the commit of `packages/testing-engine/src/planner
 | 2026-11-05 | deepseek-flash (thinking high), full suite | ba3b4a1 | 18/18 (100%) | 40,247 / 21,834 | $0.02 | — (122 s) |
 | 2026-11-06 | deepseek-flash, R3 rule "open a page read with a navigate step to its URL; name only controls on the current page" (two runs) | a0b6cf8 + this change | 17/18, 17/18 | 44,441 / 30,155; 44,441 / 29,394 | $0.05 each | search-results in both (no pages in the case, so the new rule does not apply): split into 2 scenarios; once also fill + click instead of a `search` step. Both modes are recorded above for this case |
 | 2026-11-05 | deepseek-v4-pro (`LLM_REASONING=minimal`), full suite | ba3b4a1 | 17/18 (94.4%) | 39,743 / 9,363 | $0.04 | search-results (2 scenarios). Case 18 passes. At thinking high, 6 of 10 case-18 runs hit the 180 s case budget (all 4 that answered passed) |
+| 2026-11-19 | deepseek-flash (thinking high), KI-076: the planner told the goal and the feature | 3461abb | 17/18 (94.4%) | 45,774 / 26,219 | $0.05 | search-results (fill + submit instead of a `search` step, as before) — 152 s |
 
 **2026-11-11 — prompt changed, not re-scored (KI-076).** The planner is now told what the user wants to know and the
 feature under test, and each criterion's origin; one sentence was added to its system prompt. The cases are unchanged
@@ -205,3 +207,18 @@ page's injected instruction asks for). No screenshot is sent: the score is the j
 without image input. The 12 cases: two each of holds / does not hold for search results and error messages, a complete
 product page, a friendly and a German confirmation, an unlabelled form, a speed criterion (cannot tell), a 404 and a
 login wall (not relevant), and a 503 page with an injected instruction (not relevant).
+
+## Quality benchmark
+
+**Status: no baseline recorded yet (KI-078).** End-to-end runs through the API, scored on decided criteria, seeded bugs
+caught, false passes and fails, shallow passes, rerun confirmation and cost (`evals/benchmark/README.md`).
+
+```bash
+pnpm stack:up                       # with a real LLM_PROVIDER and key
+pnpm benchmark --repeat 3           # or ./scripts/quality-benchmark.sh
+```
+
+Copy the headline table of `summary.md` here with the date, the model and the commit.
+
+| Date | Model | Commit | Runs | Decided | Bugs caught | False passes | False fails | Expected verdict | Cost |
+|------|-------|--------|------|---------|-------------|--------------|-------------|------------------|------|

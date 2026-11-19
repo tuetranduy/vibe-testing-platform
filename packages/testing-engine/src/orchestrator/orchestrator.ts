@@ -194,7 +194,8 @@ export async function runExecution(ctx: StageContext, ports: RunPorts, stages: E
 
   // PLANNING: with the pages the analysis read, so the plan takes the way to each control (KI-048).
   await started(ports, "PLANNING");
-  const plan = await guard(ctx, stages.plan(ctx, requirement, analysis?.pageContents ?? []));
+  // `let`: exploration may plan the rest of a scenario again after a failed step (2026-11-19).
+  let plan = await guard(ctx, stages.plan(ctx, requirement, analysis?.pageContents ?? []));
   await ports.savePlan(plan);
   const stepCount = plan.scenarios.reduce((n, s) => n + s.steps.length, 0);
   const scenarios = plan.scenarios.length;
@@ -231,6 +232,11 @@ export async function runExecution(ctx: StageContext, ports: RunPorts, stages: E
     await ports.transition("EXPLORING");
     await started(ports, "EXPLORING");
     exploration = await guard(ctx, stages.explore(ctx, plan, requirement));
+    // A plan exploration revised is the plan that ran: saved, and what verification, the test and the report read.
+    if (exploration.revisedPlan) {
+      plan = exploration.revisedPlan;
+      await ports.savePlan(plan);
+    }
     await completed(ports, "EXPLORING");
     await ctx.boundary();
 

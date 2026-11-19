@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LOCATOR_STRATEGY_ORDER } from "../shared/locator-policy";
 import { captureCheckpoint, captureFact, modeForValueType, readFact } from "./fact-reader";
 import { captureNamedFact, namedFactSubject } from "./named-facts";
-import { checkElement, describeElement, describeField, elementAction, fieldValue, fillElement, hittableAlternative, isHittable, reachableNamedControl, recordElement, requiredEmptyFields, selectElementOption } from "./recorder";
+import { checkElement, describeElement, describeField, elementAction, fieldValue, fillElement, exactNamedControl, hittableAlternative, isHittable, reachableNamedControl, recordElement, requiredEmptyFields, selectElementOption } from "./recorder";
 
 /**
  * Real Chromium (Playwright's build, launched headless without a proxy) on a static fixture
@@ -593,5 +593,24 @@ describe("reachableNamedControl (KI-072: the named button, not the header link)"
   it("no element of that role and name: null", async () => {
     await page.setContent(PAGE);
     expect(await reachableNamedControl(page, "Add to cart", ["button", "link"])).toBeNull();
+  });
+});
+
+describe("exactNamedControl (2026-11-19: a named control without a model call)", () => {
+  it("the one element whose name is exactly the step's: 'Login', not 'Login with Google'", async () => {
+    await page.setContent(`<main><button>Login with Google</button><button>Login</button></main>`);
+    expect(await exactNamedControl(page, "Login", ["button"])).toBe("xpath=/html[1]/body[1]/main[1]/button[2]");
+  });
+
+  it("two elements with that name, or none: null (the explorer decides)", async () => {
+    await page.setContent(`<main><button>Add to cart</button><button>Add to cart</button><a href="/c">Cart</a></main>`);
+    expect(await exactNamedControl(page, "Add to cart", ["button"])).toBeNull();
+    expect(await exactNamedControl(page, "Checkout", ["button", "link"])).toBeNull();
+  });
+
+  it("the same name on a button and a link: ambiguous, null", async () => {
+    await page.setContent(`<main><button>Sign in</button><a href="/login">Sign in</a></main>`);
+    expect(await exactNamedControl(page, "Sign in", ["button", "link"])).toBeNull();
+    expect(await exactNamedControl(page, "Sign in", ["link"])).toBe("xpath=/html[1]/body[1]/main[1]/a[1]");
   });
 });

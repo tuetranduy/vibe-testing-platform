@@ -292,6 +292,26 @@ export async function reachableNamedControl(page: Page, name: string, roles: rea
   return null;
 }
 
+/**
+ * The one reachable element, of any of these roles, whose accessible name is exactly `name` (2026-11-19): looked up before
+ * the explorer is asked, so a step that names its control ("Click the 'New User' button") needs no model call. Its XPath
+ * selector, or null when no element or more than one matches, or the one that does cannot be clicked.
+ */
+export async function exactNamedControl(page: Page, name: string, roles: readonly string[]): Promise<string | null> {
+  const found: string[] = [];
+  for (const role of roles) {
+    const locator = page.getByRole(role as Parameters<Page["getByRole"]>[0], { name, exact: true });
+    const n = await countOf(locator);
+    if (n > 1) return null;
+    if (n === 1) {
+      const selector = await firstHittable(locator);
+      if (!selector) return null;
+      found.push(selector);
+    }
+  }
+  return found.length === 1 ? found[0]! : null;
+}
+
 async function countOf(locator: Locator): Promise<number> {
   try {
     return await locator.count();
