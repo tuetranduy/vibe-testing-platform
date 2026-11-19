@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ElementRef, FactValue } from "@platform/contracts";
+import { generateTestDataValue, type ElementRef, type FactValue } from "@platform/contracts";
 import { chromium, type Browser, type Locator, type Page } from "playwright-core";
 import ts from "typescript";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -33,6 +33,7 @@ interface Helpers {
   readCount(locator: Locator, waitMs?: number): Promise<number | null>;
   readTextList(locator: Locator, waitMs?: number): Promise<string[] | null>;
   readItemTexts(locator: Locator, itemSelector: string, waitMs?: number): Promise<string[] | null>;
+  refreshEmails(data: unknown): void;
 }
 
 let helpers: Helpers;
@@ -256,5 +257,46 @@ describe("helpers.ts DOM reads match the fact reader", () => {
     } finally {
       await actionPage.close();
     }
+  });
+});
+
+describe("refreshEmails (KI-077)", () => {
+  const made = String(generateTestDataValue("email", { seed: "run_1:new_email" }));
+  const runData = () => ({
+    targetUrl: "https://shop.example.com/",
+    inputs: { input1: made, input2: "jane.doe@company.test", input3: "Test" },
+    locators: { loc1: { text: `Welcome, ${made}` }, loc2: { name: made } },
+    criteria: { "AC-1": { statement: "The account page shows the new email", count: 3 } },
+    list: [made, "other"],
+  });
+
+  it("gives a made-up email (the platform's qa.<token>@example.com) a new token, the same wherever that address appears", () => {
+    expect(made).toMatch(/^qa\.[0-9a-z]{6}@example\.com$/);
+    const data = runData();
+    helpers.refreshEmails(data);
+    const fresh = data.inputs.input1;
+    expect(fresh).toMatch(/^qa\.[0-9a-z]{6}@example\.com$/);
+    expect(fresh).not.toBe(made);
+    expect(fresh).toHaveLength(made.length);
+    expect(data.locators).toEqual({ loc1: { text: `Welcome, ${fresh}` }, loc2: { name: fresh } });
+    expect(data.list).toEqual([fresh, "other"]);
+  });
+
+  it("leaves every other value as it is: an email the user entered, other text, numbers", () => {
+    const data = runData();
+    helpers.refreshEmails(data);
+    const { inputs, criteria, targetUrl } = runData();
+    expect(data.inputs.input2).toBe(inputs.input2);
+    expect(data.inputs.input3).toBe(inputs.input3);
+    expect(data.criteria).toEqual(criteria);
+    expect(data.targetUrl).toBe(targetUrl);
+  });
+
+  it("each execution of the test gets a new address", () => {
+    const first = runData();
+    const second = runData();
+    helpers.refreshEmails(first);
+    helpers.refreshEmails(second);
+    expect(first.inputs.input1).not.toBe(second.inputs.input1);
   });
 });

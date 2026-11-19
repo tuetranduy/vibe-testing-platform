@@ -665,6 +665,22 @@ describe("compilePlaywrightTest: injection safety", () => {
     expect(out.source).not.toContain(value);
   });
 
+  it("a made-up email (qa.<token>@example.com) gets a new token each time the test runs: refreshEmails(data) before any test (KI-077)", () => {
+    const steps = shopFlow({ fill: { element: byRole("textbox", "Email"), inputRef: { source: "testData", key: "new_email" } } });
+    const out = compile({ steps, testData: { new_email: "qa.0gf82n@example.com" } });
+    expect(out.source).toMatch(/^import \{[^}]*\brefreshEmails\b[^}]*\} from "\.\/helpers";$/m);
+    expect(out.source).toMatch(/^refreshEmails\(data\);$/m);
+    expect(out.source.indexOf("refreshEmails(data);")).toBeLessThan(out.source.indexOf("test("));
+    expect(dataOf(out.dataJson).inputs.input1).toBe("qa.0gf82n@example.com");
+    expect(checkGeneratedSource(out.source)).toEqual([]);
+  });
+
+  it("an email the user entered (not one the platform made up) is typed as it is, every time (KI-077)", () => {
+    const steps = shopFlow({ fill: { element: byRole("textbox", "Email"), inputRef: { source: "testData", key: "email" } } });
+    const out = compile({ steps, testData: { email: "jane.doe@company.test" } });
+    expect(out.source).not.toContain("refreshEmails");
+  });
+
   it("a secret fill the run has no secret for → the flow is not replayable", () => {
     const steps = shopFlow({ fill: { inputRef: { source: "secret", key: "password" } } });
     const out = compile({ steps, secretNames: [] });
@@ -776,12 +792,15 @@ describe("generated workspace", () => {
       criterion("AC-9", { kind: "collection_contains", collection: { key: "miniCart", checkpoint: "after_add" }, item: { key: "message", checkpoint: "after_add" }, match: "equals" }),
       criterion("AC-10", { kind: "numeric_compare", left: after, operator: "neq", right: 7 }),
       criterion("AC-11", { kind: "visible", fact: { key: "toast", checkpoint: "after_add" }, expected: false }),
+      // A made-up email in the run data: the test refreshes it before running (KI-077).
+      criterion("AC-12", { kind: "text_matches", fact: { key: "message", checkpoint: "after_add" }, match: { mode: "contains", value: "qa.abc123@example.com", caseSensitive: false } }),
     ];
     // AC-4 and AC-9 read the mini cart's rows through a sub-element.
     const facts = shopFacts().map((f) => (f.key === "miniCart" ? { ...f, read: { ...f.read!, itemSelector: "span.name" } } : f));
     const out = compile({ steps, secretNames: ["password"], requirement: requirementOf(criteria), facts });
-    expect(out.compiledCriteria).toHaveLength(10);
+    expect(out.compiledCriteria).toHaveLength(11);
     expect(out.source).toContain("readItemTexts(");
+    expect(out.source).toContain("refreshEmails(data);");
     expect(checkGeneratedSource(out.source)).toEqual([]);
 
     const dir = mkdtempSync(path.join(os.tmpdir(), "generated-test-tsc-"));

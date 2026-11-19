@@ -43,6 +43,12 @@ const has = (words: string, ...terms: string[]) => terms.some((t) => new RegExp(
 export const isEmailKey = (key: string): boolean => has(keyWords(key), "email", "e ?mail", "mail");
 
 /**
+ * An email address this generator made up (`qa.<token>@example.com`). A generated Playwright test gives each one a new
+ * token every time it runs (KI-077): the account the run created with it exists from then on.
+ */
+export const MADE_UP_EMAIL = /qa\.[0-9a-z]{6}@example\.com/;
+
+/**
  * A synthetic value for `key`, or null for a credential-like key. `hint` (e.g. the criterion's description of
  * the value) is read too, after the key. `seed` fixes the random part (default: the key alone).
  */

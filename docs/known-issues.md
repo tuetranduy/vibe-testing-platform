@@ -98,6 +98,7 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-074 | Medium | Target site | frontends-demo sometimes serves its own Error 500 in the sandbox ("[PATCH] …/store-api/context: <no response> Failed to fetch") | Open: not yet known whether site-side or egress-proxy-side |
 | KI-076 | Medium | LLM quality | The intent prompts (requirement compiler, planner) changed on 2026-11-11 and have not been scored on any model | Open (needs a paid model key) |
 | KI-075 | High | Requirement analysis | "Verify signup functionality" stops at the sign-in dialog: the site read never opens Sign up, so the criteria guess the sign-up form | Resolved in working tree (2026-11-07) |
+| KI-077 | High | Generated test | The rerun signs up again with the email exploration just registered, so a passing registration ends INCONCLUSIVE | Resolved in working tree (2026-11-19) |
 
 KI-056–KI-057: [Travel Luggage Set run investigation](reviews/run_0mw3gsjgke3a1923c465bb1e1.md), with the recorded
 timeline, reproduction, changes and rollout limits.
@@ -1112,3 +1113,22 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   not measured. Cases 36–40 were written for it and load; none has been run.
 - **To close:** `pnpm eval requirement-compiler` and `pnpm eval planner` on every offered model (as KI-026), record the
   rows in `evals/BASELINE.md`, and re-run the 12-case `evals/e2e-unclear` corpus to compare with the 2026-11-06 table.
+
+## KI-077 — The rerun signs up again with the email exploration just registered
+- **Severity:** High (every new-account flow ends INCONCLUSIVE; the downloaded test fails every time it is run).
+- **Where:** `packages/testing-engine/src/compiler/test-compiler.ts` (`assemble`), `helpers-template.ts`
+  (`refreshEmails`), `MADE_UP_EMAIL` in `packages/contracts/src/test-data-generator.ts`.
+- **What:** `run_0mwn32bbgbadfd12769e74419` (demowebshop.tricentis.com, "Register a new account successfully"):
+  exploration registered `qa.0gf82n@example.com` and saw "Your registration completed"; the generated test typed the
+  same address from run-data.json, the site answered "The specified email already exists", so AC-1 was
+  PASS / ASSERTION_FAILED → INCONCLUSIVE (DISCOVERY_RERUN_DISAGREE). KI-063 makes the address new for each run, but
+  the rerun is part of the same run, after the account exists.
+- **Resolved (2026-11-19, working tree):** when run-data.json holds an address the platform made up
+  (`qa.<token>@example.com`), the generated test calls `refreshEmails(data)` before any test: each such address gets a
+  new token, the same wherever it appears (inputs, locator text, criteria), so a later scenario that logs in uses the
+  address an earlier one signed up with. Each execution (the rerun, or the downloaded test run again) gets new ones.
+  An email the user entered is typed as it is. Checked under Playwright's own loader (the JSON import is mutable, one
+  address per execution). Previous helper template kept as `ACTION_HELPERS_V2_SOURCE` so saved tests stay accepted.
+- **Not handled:** tests saved before this fix have no `refreshEmails` call, so rerunning them still repeats the old
+  address. Other one-time values (a username, a phone number a site requires to be unique) are still replayed as they
+  were. Not yet validated by a live run.
