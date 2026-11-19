@@ -12,7 +12,7 @@ metrics and alerts, logs, retention, and the release checks.
 | `worker` × N | PostgreSQL, Redis, S3, the model providers (Anthropic, Gemini, DeepSeek), `runner`; runs each run's sandboxed exploration Chromium as a child process | 9464: `/metrics` (`WORKER_METRICS_PORT`, `0` disables it) |
 | `runner` | the workers only (internal `runner` network) | 3100: the runner service (`RUNNER_TOKEN`); runs each Playwright rerun from the `runs` volume |
 | PostgreSQL | — | runs, events, criteria, results, artifacts metadata, encrypted run secrets, and the model settings: default model and the provider API keys saved in Settings (encrypted, long-lived) |
-| Redis | — | BullMQ queues `runs`, `maintenance` (reaper) and `retention`; pub/sub for live events and cancel signals |
+| Redis (Valkey) | — | BullMQ queues `runs`, `maintenance` (reaper) and `retention`; pub/sub for live events and cancel signals; sign-in and API-token rate limits. Production: on the worker server (`docker-compose.prod.yml`), 6379 on the compose network only, 6380 with TLS for the API |
 | S3-compatible storage | — | screenshots, traces, videos (compose uses rclone's S3 server; any S3 store works) |
 
 The demo shop (`tests/fixtures/demo-shop`) is a development and test target only.
@@ -146,7 +146,7 @@ of its own (the default outside compose). Production refuses the compose file's 
 
 Enforce the same boundary in the network (defense in depth — it catches anything that bypasses the proxy):
 
-- **Allow** the worker to reach: its PostgreSQL, Redis and S3 endpoints; the model providers its tests use
+- **Allow** the worker to reach: its PostgreSQL, Redis (the `valkey` container on the compose network) and S3 endpoints; the model providers its tests use
   (`api.anthropic.com:443` for Claude models, `generativelanguage.googleapis.com:443` for Gemini models, `api.deepseek.com:443` for
   DeepSeek models — each test picks its model in Settings or the new-test form, so allow every provider in use); DNS; and
   public internet on TCP 80/443 for targets.
@@ -156,7 +156,8 @@ Enforce the same boundary in the network (defense in depth — it catches anythi
 - **Deny**: cloud metadata (`169.254.169.254/32`, `fd00:ec2::254/128`), RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`,
   `192.168.0.0/16`), CGNAT (`100.64.0.0/10`), link-local and ULA ranges (`169.254.0.0/16`, `fe80::/10`, `fc00::/7`),
   and every other internal service, including databases other than the worker's own.
-- The API needs no internet egress (target URLs are validated with DNS only).
+- The API needs egress only to its PostgreSQL, Redis (the worker server's TLS port 6380) and S3 (target URLs are
+  validated with DNS only).
 - `TARGET_PRIVATE_ALLOWLIST` (testing private hosts) is refused when `NODE_ENV=production`.
 - Chromium keeps its own sandbox on (exploration's browser and the rerun's). It needs Linux user namespaces, which
   Docker's default seccomp profile denies, so run the worker with `infra/seccomp/worker.json` (compose does): Docker's

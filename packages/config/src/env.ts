@@ -85,6 +85,11 @@ const EnvSchema = z
     NODE_ENV: z.enum(["development", "test", "production"]),
     DATABASE_URL: z.string().min(1),
     REDIS_URL: z.string().min(1),
+    /**
+     * The CA that signed a self-hosted Redis's TLS certificate (rediss:// with a self-signed certificate): PEM, or
+     * the PEM base64-encoded on one line. Unset: the system CAs (a managed Redis) or no TLS (redis://).
+     */
+    REDIS_TLS_CA: emptyAsUnset(z.string()),
     ARTIFACT_STORAGE_TYPE: z.enum(["local", "s3"]),
     ARTIFACT_BUCKET: z.string().min(1),
     ARTIFACT_LOCAL_DIR: z.string().default("./.artifacts"),

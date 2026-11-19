@@ -1,4 +1,4 @@
-import { createLogger, createRunLogRegistry, loadEnvOrExit, resolveEnvLlmChoice } from "@platform/config";
+import { createLogger, createRunLogRegistry, loadEnvOrExit, redisTlsOptions, resolveEnvLlmChoice } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
 import { DEFAULT_REAPER_CONFIG, createRunQueue } from "@platform/event-bus";
 import type { LlmTransport } from "@platform/llm";
@@ -39,9 +39,10 @@ export async function bootWorker(opts: BootOptions = {}): Promise<void> {
   if (process.env.RUN_MIGRATIONS_ON_START !== "false") await runMigrations(handle.db);
   await ensureTenant(handle.db, env.DEFAULT_TENANT_ID);
 
-  const connection = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
-  const publisher = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 3 });
-  const cancelWatcher = new CancelWatcher(new Redis(env.REDIS_URL, { maxRetriesPerRequest: null }));
+  const tls = redisTlsOptions(env);
+  const connection = new Redis(env.REDIS_URL, { ...tls, maxRetriesPerRequest: null });
+  const publisher = new Redis(env.REDIS_URL, { ...tls, maxRetriesPerRequest: 3 });
+  const cancelWatcher = new CancelWatcher(new Redis(env.REDIS_URL, { ...tls, maxRetriesPerRequest: null }));
   const queue = createRunQueue(connection);
 
   // Exploration screenshots (the real engine); the API signs read URLs for the same store.

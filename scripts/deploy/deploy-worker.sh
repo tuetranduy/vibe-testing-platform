@@ -6,13 +6,17 @@ umask 077
 key=$(mktemp)
 hosts=$(mktemp)
 envfile=$(mktemp)
-trap 'rm -f "$key" "$hosts" "$envfile"' EXIT
+valkey=$(mktemp -d)
+trap 'rm -rf "$key" "$hosts" "$envfile" "$valkey"' EXIT
 printf '%s\n' "$SSH_KEY" >"$key"
 printf '%s\n' "$KNOWN_HOSTS" >"$hosts"
 
 ssh_opts=(-i "$key" -o UserKnownHostsFile="$hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes)
 target="deploy@$HOST"
 image="$WORKER_IMAGE_NAME:$SHA"
+for name in REDIS_API_PASSWORD REDIS_WORKER_PASSWORD REDIS_TLS_CERT REDIS_TLS_KEY; do
+  [ -n "${!name:-}" ] || { echo "$name is not set: run scripts/deploy/set-github-secrets.sh" >&2; exit 1; }
+done
 
 {
   cat <<EOF
@@ -29,13 +33,29 @@ S3_FORCE_PATH_STYLE=true
 WORKER_CONCURRENCY=1
 LOG_LEVEL=info
 WORKER_IMAGE=$image
+# Valkey on this server, over the compose network (docker-compose.prod.yml). The API's REDIS_URL is the TLS port.
+REDIS_URL=redis://worker:$REDIS_WORKER_PASSWORD@valkey:6379
 EOF
-  for name in DATABASE_URL REDIS_URL S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY API_TOKEN SECRETS_ENCRYPTION_KEY \
+  for name in DATABASE_URL S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY API_TOKEN SECRETS_ENCRYPTION_KEY \
     RUNNER_TOKEN LLM_PROVIDER LLM_MODEL ANTHROPIC_API_KEY GEMINI_API_KEY DEEPSEEK_API_KEY; do
     if [ -n "${!name:-}" ]; then printf '%s=%s\n' "$name" "${!name}"; fi
   done
 } >"$envfile"
 
+# Valkey's users: passwords as SHA-256 only, the default user off, and no command that reconfigures the server or
+# wipes or lists every key (INFO stays: BullMQ reads the server version from it).
+sha() { printf '%s' "$1" | sha256sum | cut -d' ' -f1; }
+rules='~* &* +@all -@dangerous +info'
+{
+  echo "user default off"
+  echo "user api on #$(sha "$REDIS_API_PASSWORD") $rules"
+  echo "user worker on #$(sha "$REDIS_WORKER_PASSWORD") $rules"
+} >"$valkey/users.acl"
+printf '%s' "$REDIS_TLS_CERT" | base64 -d >"$valkey/server.crt"
+printf '%s' "$REDIS_TLS_KEY" | base64 -d >"$valkey/server.key"
+
+ssh "${ssh_opts[@]}" "$target" 'install -d -m 700 /opt/vibe-testing/valkey'
+scp "${ssh_opts[@]}" "$valkey/users.acl" "$valkey/server.crt" "$valkey/server.key" "$target:/opt/vibe-testing/valkey/"
 scp "${ssh_opts[@]}" infra/compose/docker-compose.prod.yml "$target:/opt/vibe-testing/docker-compose.yml"
 scp "${ssh_opts[@]}" infra/seccomp/worker.json "$target:/opt/vibe-testing/worker.json"
 scp "${ssh_opts[@]}" "$envfile" "$target:/opt/vibe-testing/.env"

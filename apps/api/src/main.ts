@@ -1,4 +1,4 @@
-import { createLogger, loadEnvOrExit, resolveEnvLlmChoice } from "@platform/config";
+import { createLogger, loadEnvOrExit, redisTlsOptions, resolveEnvLlmChoice } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
 import { DEFAULT_REAPER_CONFIG, RunEventHub, createRunQueue, createScheduleSync, startReaper } from "@platform/event-bus";
 import { defaultResolver } from "@platform/security";
@@ -31,7 +31,8 @@ const handle = createDb(env.DATABASE_URL);
 if (process.env.RUN_MIGRATIONS_ON_START !== "false") await runMigrations(handle.db);
 await ensureTenant(handle.db, env.DEFAULT_TENANT_ID);
 
-const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 3 });
+const tls = redisTlsOptions(env);
+const redis = new Redis(env.REDIS_URL, { ...tls, maxRetriesPerRequest: 3 });
 
 if (env.BOOTSTRAP_ADMIN_EMAIL && env.BOOTSTRAP_ADMIN_PASSWORD) {
   const created = await new UserService({ db: handle.db, config: { auth: { sessionTtlHours: env.SESSION_TTL_HOURS } } }).bootstrapAdmin(
@@ -41,8 +42,8 @@ if (env.BOOTSTRAP_ADMIN_EMAIL && env.BOOTSTRAP_ADMIN_PASSWORD) {
   );
   if (created) log.info({ tenantId: env.DEFAULT_TENANT_ID }, "bootstrap administrator created");
 }
-const subscriber = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
-const queueConnection = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
+const subscriber = new Redis(env.REDIS_URL, { ...tls, maxRetriesPerRequest: null });
+const queueConnection = new Redis(env.REDIS_URL, { ...tls, maxRetriesPerRequest: null });
 const queue = createRunQueue(queueConnection);
 const schedules = createScheduleSync(queueConnection);
 

@@ -17,6 +17,7 @@ interface Env {
   ARTIFACT_BUCKET: string;
   DATABASE_URL: string;
   REDIS_URL: string;
+  REDIS_TLS_CA?: string;
   S3_ACCESS_KEY_ID: string;
   S3_SECRET_ACCESS_KEY: string;
   API_TOKEN: string;
@@ -55,6 +56,7 @@ export class ApiContainer extends Container<Env> {
       LLM_MODEL: env.LLM_MODEL,
       DATABASE_URL: env.DATABASE_URL,
       REDIS_URL: env.REDIS_URL,
+      REDIS_TLS_CA: env.REDIS_TLS_CA,
       S3_ACCESS_KEY_ID: env.S3_ACCESS_KEY_ID,
       S3_SECRET_ACCESS_KEY: env.S3_SECRET_ACCESS_KEY,
       API_TOKEN: env.API_TOKEN,

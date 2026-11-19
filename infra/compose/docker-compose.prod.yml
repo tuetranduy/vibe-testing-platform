@@ -1,5 +1,5 @@
-# The worker server: the worker and its isolated Playwright runner. Everything else is managed (Supabase, Redis,
-# R2, Cloudflare). .github/workflows/deploy.yml copies this file to /opt/vibe-testing and writes the .env beside it.
+# The worker server: the worker, its isolated Playwright runner and Valkey (Redis). Everything else is managed
+# (Supabase, R2, Cloudflare). .github/workflows/deploy.yml copies this file to /opt/vibe-testing and writes the .env beside it.
 # Both services use the one worker image; the runner only overrides the command.
 name: vibe-testing
 
@@ -20,6 +20,7 @@ services:
     mem_limit: 2g
     depends_on:
       runner: { condition: service_healthy }
+      valkey: { condition: service_healthy }
     restart: unless-stopped
 
   # No gateway on its network: it reaches the workers only, never the database, Redis, storage or the internet.
@@ -42,8 +43,55 @@ services:
     mem_limit: 1g
     restart: unless-stopped
 
+  # The queues, pub/sub and rate-limit counters. The worker uses the plain port over this project's network; the API
+  # (a Cloudflare Container) comes in over the internet on the TLS port, with its own ACL user. The files under
+  # ./valkey (ACL with hashed passwords, certificate and key) are written by scripts/deploy/deploy-worker.sh.
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    # As root only to copy the deploy user's 0600 files where the server's user can read them; the image's
+    # entrypoint then drops to that user.
+    entrypoint: ["sh", "-c", "install -d -o valkey -g valkey -m 700 /run/valkey && install -o valkey -g valkey -m 600 /secrets/users.acl /secrets/server.crt /secrets/server.key /run/valkey/ && exec docker-entrypoint.sh \"$$@\"", "--"]
+    command:
+      - valkey-server
+      - --port
+      - "6379"
+      - --tls-port
+      - "6380"
+      - --tls-cert-file
+      - /run/valkey/server.crt
+      - --tls-key-file
+      - /run/valkey/server.key
+      - --tls-auth-clients
+      - "no"
+      - --tls-protocols
+      - TLSv1.2 TLSv1.3
+      - --aclfile
+      - /run/valkey/users.acl
+      - --appendonly
+      - "yes"
+      - --save
+      - ""
+      # BullMQ needs every key kept: an evicted job or lock is a lost run.
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - noeviction
+    ports: ["6380:6380"]
+    volumes:
+      - ./valkey:/secrets:ro
+      - valkey-data:/data
+    healthcheck:
+      # The default user is off, so an answer of NOAUTH also means the server is up.
+      test: ["CMD-SHELL", "valkey-cli ping 2>&1 | grep -qE 'PONG|NOAUTH'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 384m
+    restart: unless-stopped
+
 volumes:
   runs:
+  valkey-data:
 
 networks:
   runner:

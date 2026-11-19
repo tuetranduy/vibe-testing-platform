@@ -67,7 +67,10 @@ jobs:
           HOST: ${{ secrets.DEPLOY_HOST }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          REDIS_URL: ${{ secrets.REDIS_URL }}
+          REDIS_API_PASSWORD: ${{ secrets.REDIS_API_PASSWORD }}
+          REDIS_WORKER_PASSWORD: ${{ secrets.REDIS_WORKER_PASSWORD }}
+          REDIS_TLS_CERT: ${{ secrets.REDIS_TLS_CERT }}
+          REDIS_TLS_KEY: ${{ secrets.REDIS_TLS_KEY }}
           S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
           S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
           API_TOKEN: ${{ secrets.API_TOKEN }}
@@ -104,7 +107,7 @@ jobs:
           umask 077
           node -e '
             const s = JSON.parse(process.env.SECRETS_JSON);
-            const names = ["DATABASE_URL","REDIS_URL","S3_ACCESS_KEY_ID","S3_SECRET_ACCESS_KEY","API_TOKEN","SECRETS_ENCRYPTION_KEY","BOOTSTRAP_ADMIN_EMAIL","BOOTSTRAP_ADMIN_PASSWORD","ANTHROPIC_API_KEY","GEMINI_API_KEY","DEEPSEEK_API_KEY"];
+            const names = ["DATABASE_URL","REDIS_URL","REDIS_TLS_CA","S3_ACCESS_KEY_ID","S3_SECRET_ACCESS_KEY","API_TOKEN","SECRETS_ENCRYPTION_KEY","BOOTSTRAP_ADMIN_EMAIL","BOOTSTRAP_ADMIN_PASSWORD","ANTHROPIC_API_KEY","GEMINI_API_KEY","DEEPSEEK_API_KEY"];
             const out = Object.fromEntries(names.filter((n) => s[n]).map((n) => [n, s[n]]));
             require("fs").writeFileSync("/tmp/worker-secrets.json", JSON.stringify(out));
           '
