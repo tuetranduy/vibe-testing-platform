@@ -13,6 +13,7 @@ import {
   type StatusReason,
   type TestPlan,
 } from "@platform/contracts";
+import { getsPastSignIn } from "../shared/sign-in-steps";
 import { clip } from "./normalize";
 import { describeExpected, evaluateRule, factLabel } from "./rules";
 
@@ -44,7 +45,8 @@ import { describeExpected, evaluateRule, factLabel } from "./rules";
  *     - stopped early (STEP_LIMIT_REACHED / EXPLORATION_BUDGET_EXHAUSTED) → INCONCLUSIVE, that stop reason;
  *     - otherwise, incl. COMPLETED after a trailing FAILED step (R25) → INCONCLUSIVE / FACT_NOT_OBSERVED.
  *  3b. (after 4–6) A FAIL or INCONCLUSIVE result, no `authenticated` precondition, and a golden `act` before one of
- *     the criterion's checkpoints opened a sign-in prompt (KI-073)  → BLOCKED / SIGN_IN_REQUIRED.
+ *     the criterion's checkpoints opened a sign-in prompt (KI-073) that no later golden step got past (signed in,
+ *     signed up or continued as a guest, KI-080)                   → BLOCKED / SIGN_IN_REQUIRED.
  *  6b. (after 3b) A FAIL or INCONCLUSIVE result whose checkpoint was taken on the site's server error page (KI-074)
  *     → INCONCLUSIVE / SITE_ERROR.
  *  6. Evaluate the rule                                           → PASS / FAIL. In a numeric_delta or a comparison
@@ -161,7 +163,8 @@ function showsNoNumber(fact: ObservedFact): boolean {
 
 /**
  * The planned step whose golden click opened a sign-in prompt (KI-073) before one of these checkpoints in its scenario's
- * plan (any, for a criterion that reads no fact), or null. Only a step that serves this criterion, or names none.
+ * plan (any, for a criterion that reads no fact), or null. Only a step that serves this criterion, or names none, and
+ * only a prompt no later golden step of its scenario got past (KI-080).
  */
 function signInPromptBefore(criterionId: string, refs: readonly FactRef[], plan: TestPlan, steps: readonly ExplorationStep[]): string | null {
   for (const scenario of plan.scenarios) {
@@ -171,8 +174,10 @@ function signInPromptBefore(criterionId: string, refs: readonly FactRef[], plan:
     const checkpoints = scenario.steps.flatMap((s, i) => (s.kind === "capture_checkpoint" && refs.some((r) => r.checkpoint === s.checkpoint) ? [i] : []));
     if (refs.length > 0 && checkpoints.length === 0) continue;
     const last = refs.length > 0 ? Math.max(...checkpoints) : scenario.steps.length;
+    const gotPast = (prompt: ExplorationStep) =>
+      steps.some((s) => s.index > prompt.index && s.scenarioId === prompt.scenarioId && s.onGoldenPath && s.outcome === "SUCCESS" && getsPastSignIn(s.instruction));
     const prompted = steps.find(
-      (s) => s.kind === "act" && s.signInPrompt && s.onGoldenPath && s.plannedStepId !== null && serves.get(s.plannedStepId) === true && (position.get(s.plannedStepId) ?? Infinity) < last,
+      (s) => s.kind === "act" && s.signInPrompt && s.onGoldenPath && s.plannedStepId !== null && serves.get(s.plannedStepId) === true && (position.get(s.plannedStepId) ?? Infinity) < last && !gotPast(s),
     );
     if (prompted) return prompted.plannedStepId;
   }

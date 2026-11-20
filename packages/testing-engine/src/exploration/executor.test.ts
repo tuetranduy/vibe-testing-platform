@@ -1669,6 +1669,76 @@ describe("runExploration (fake explorer)", () => {
     });
   });
 
+  describe("a click that opens a sign-in prompt the plan does not get past (KI-080)", () => {
+    // Unquoted controls: the fake page names no element, so a named one would be looked for elsewhere (KI-072).
+    const wishlist = "Click the wishlist button on the product page";
+    /** The first click brings up a password field; the next one takes it away. */
+    const prompting = () => {
+      let open = false;
+      const session = new FakeSession({
+        observe: () => [{ selector: "xpath=/html[1]/body[1]/button[1]", description: "button", method: "click", arguments: [] }],
+        actOn: (_el, n) => ((open = n === 0), {}),
+        extract: () => ({ cartCount: 1 }),
+      });
+      Object.assign(session.page, { evaluate: async (script: unknown) => (script === SIGN_IN_STATE_SCRIPT ? { url: session.url, passwordFields: open ? 1 : 0 } : []) });
+      return session;
+    };
+    const capture = (id: string): PlannedStep => ({ id, kind: "capture_checkpoint", description: "Capture", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false });
+    const click = (id: string, description: string, destructive = false): PlannedStep => ({ id, kind: "click", description, criterionIds: [], destructive });
+    const replanner = (answers: (PlannedStep[] | null)[]) => {
+      const asked: ReplanInput[] = [];
+      const r: Replanner = {
+        async replan(input) {
+          asked.push(input);
+          return answers.shift() ?? null;
+        },
+      };
+      return { r, asked };
+    };
+    const explore = (plan: TestPlan, r: Replanner, options: CtxOptions["options"] = {}) => {
+      const { ctx } = fakeCtx({ options });
+      const session = prompting();
+      const outcome = runExploration(ctx, { plan, requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r });
+      return { outcome, session };
+    };
+
+    it("the rest is planned again to get past it, the step is done again and the scenario goes on", async () => {
+      const { r, asked } = replanner([[click("PS-4", "Click the continue as guest button"), click("PS-5", wishlist), capture("PS-6")]]);
+      const { outcome: running } = explore(planOf(step("navigate", "Open"), step("click", wishlist), step("capture_checkpoint", "Capture", { checkpoint: "after_add", criterionIds: ["AC-1"] })), r);
+      const outcome = await running;
+
+      expect(asked.map((a) => [a.signIn, a.failed.id, a.remaining.map((s) => s.id)])).toEqual([[true, "PS-2", ["PS-3"]]]);
+      expect(outcome.stopReason).toBe("COMPLETED");
+      expect(outcome.steps.filter((s) => s.kind === "act" && s.onGoldenPath).map((s) => s.plannedStepId)).toEqual(["PS-2", "PS-4", "PS-5"]);
+      expect(outcome.facts.map((f) => [f.key, f.checkpoint])).toContainEqual(["cartCount", "after_add"]);
+      expect(outcome.revisedPlan?.scenarios[0]!.steps.map((s) => s.id)).toEqual(["PS-1", "PS-2", "PS-4", "PS-5", "PS-6"]);
+    });
+
+    it("a plan whose next step gets past it (checkout as guest) is followed as it is", async () => {
+      const { r, asked } = replanner([]);
+      const { outcome } = explore(planOf(step("navigate", "Open"), step("click", "Click the checkout button"), step("click", "Click the checkout as guest button"), step("capture_checkpoint", "Capture", { checkpoint: "after_add", criterionIds: ["AC-1"] })), r, { allowDestructiveActions: true });
+      expect((await outcome).stopReason).toBe("COMPLETED");
+      expect(asked).toEqual([]);
+    });
+
+    it("the replan may do the prompted destructive step again, or one planned after it, but no other destructive step", async () => {
+      const plan = () => planOf(step("navigate", "Open"), step("click", "Click the checkout button"), step("click", "Click the confirm order button", { destructive: true }), step("capture_checkpoint", "Capture", { checkpoint: "after_add", criterionIds: ["AC-1"] }));
+      const again = replanner([[click("PS-5", "Click the continue as guest button"), click("PS-6", "Click the checkout button", true), click("PS-7", "Click the confirm order button", true), capture("PS-8")]]);
+      expect((await explore(plan(), again.r, { allowDestructiveActions: true }).outcome).revisedPlan?.scenarios[0]!.steps.map((s) => s.id)).toEqual(["PS-1", "PS-2", "PS-5", "PS-6", "PS-7", "PS-8"]);
+      const other = replanner([[click("PS-5", "Click the continue as guest button"), click("PS-6", "Click the delete my account button", true), capture("PS-7")]]);
+      expect((await explore(plan(), other.r, { allowDestructiveActions: true }).outcome).revisedPlan).toBeUndefined();
+    });
+
+    it("no usable replan: the plan goes on as it was", async () => {
+      const { r } = replanner([null]);
+      const { outcome } = explore(planOf(step("navigate", "Open"), step("click", wishlist), step("capture_checkpoint", "Capture", { checkpoint: "after_add", criterionIds: ["AC-1"] })), r);
+      const done = await outcome;
+      expect(done.stopReason).toBe("COMPLETED");
+      expect(done.revisedPlan).toBeUndefined();
+      expect(done.steps.some((s) => s.kind === "checkpoint" && s.plannedStepId === "PS-3")).toBe(true);
+    });
+  });
+
   it("namedControl: the control a click step names, and its roles", () => {
     expect(namedControl("Click the Add to wishlist button for the product")).toEqual({ name: "Add to wishlist", roles: ["button"] });
     expect(namedControl("Click 'Add to cart'")).toEqual({ name: "Add to cart", roles: ["button", "link"] });

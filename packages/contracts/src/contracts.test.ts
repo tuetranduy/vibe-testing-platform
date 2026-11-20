@@ -721,7 +721,7 @@ describe("sign-in walls, site errors, replans and flaky reruns (2026-11-19)", ()
 
   it("a rerun can be flaky, and the new reasons read in plain language", () => {
     expect(RerunOutcomeSchema.options).toContain("FLAKY");
-    expect(STATUS_REASON_TEXT.SIGN_IN_REQUIRED).toBe("The site asked to sign in for an action this check needs; add credentials to test it");
+    expect(STATUS_REASON_TEXT.SIGN_IN_REQUIRED).toBe("The site asked to sign in for an action this check needs, and the test could not get past it as a guest or with a new account; add credentials to test it");
     expect(STATUS_REASON_TEXT.SITE_ERROR).toBe("The site showed a server error page where this was checked");
     expect(STATUS_REASON_TEXT.RERUN_FLAKY).toBe("The generated test passed on one rerun and failed on another");
   });

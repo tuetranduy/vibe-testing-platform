@@ -116,6 +116,13 @@ describe("validateReplan", () => {
     expect(validateReplan(fill({ source: "testData", key: "email" }), base)).toMatchObject({ ok: true });
   });
 
+  it("past a sign-in prompt the site opened: one login, with any of the run's secrets (KI-080)", () => {
+    const steps = [out("fill", "Type the password into the sign-in form", { inputRef: { source: "secret", key: "password" } }), out("login", "Submit the sign-in form"), ...good];
+    expect(validateReplan({ steps }, input({ signIn: true, secretNames: ["password"] }))).toMatchObject({ ok: true });
+    expect(validateReplan({ steps }, input({ secretNames: ["password"] }))).toMatchObject({ ok: false });
+    expect(validateReplan({ steps: [out("login", "Submit"), out("login", "Submit again"), ...good] }, input({ signIn: true }))).toMatchObject({ ok: false });
+  });
+
   it("rejects a criterion id the scenario does not own", () => {
     expect(validateReplan({ steps: [out("click", "Click 'Add to cart'", { criterionIds: ["AC-9"] }), ...good.slice(1)] }, input())).toMatchObject({ ok: false });
   });
@@ -135,6 +142,18 @@ describe("createReplanner", () => {
     expect(sent).toContain("Click the 'Grills' link");
     expect(sent).toContain("Show side menu");
     expect(sent).toContain("https://shop.test/");
+  });
+
+  it("a step that opened a sign-in prompt: the message says so and how to get past it (KI-080)", async () => {
+    const { llm, transport } = setup({ json: { steps: good } }, { json: { steps: good } });
+    await createReplanner(llm)!.replan(input({ signIn: true }), call);
+    await createReplanner(llm)!.replan(input(), call);
+    const [signIn, failed] = transport.requests.map((r) => String(r.messages[0]!.content));
+    expect(signIn).toContain("The step that opened a sign-in prompt (JSON):");
+    expect(signIn).toContain("continue as a guest");
+    expect(signIn).toContain("create a new account");
+    expect(failed).toContain("The step that failed (JSON):");
+    expect(failed).not.toContain("create a new account");
   });
 
   it("a step the action policy denies, or an answer still invalid after the correction: no replan", async () => {
