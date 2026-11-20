@@ -1181,3 +1181,27 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   the limit is of steps in the test plan. Steps a replan adds (KI-078) count like the plan's own. Recorded steps stay
   bounded per planned step (one retry each), and the exploration budget and the run's deadline still end a long
   exploration.
+
+## KI-080 — A sign-in prompt blocked a check the run had got past; the platform never tried to get past one
+- **Severity:** High (a guest checkout, and any flow behind a sign-in wall, ended BLOCKED instead of being tested).
+- **Where:** `packages/testing-engine/src/verification/verifier.ts` (rule 3b), `exploration/executor.ts`
+  (`exploreScenario`, `replan`), `exploration/replanner.ts` (`signIn`), `shared/sign-in-steps.ts`.
+- **What:** `run_0mwnhktz8b0a5a51632f0136a` (demowebshop.tricentis.com, add a book to the cart and check out): "Click
+  Checkout" opened `/login/checkoutasguest`, a login page with a "Checkout as Guest" button. KI-073 marked the click
+  `signInPrompt`. The plan's next step clicked "Checkout as Guest" and exploration went on through the billing form,
+  then hit the step limit (the local worker predates KI-079). Rule 3b still made AC-3 (checkout) BLOCKED /
+  SIGN_IN_REQUIRED: it only asked whether a prompt had opened, not whether the run got past it. And when a plan does
+  not get past a prompt (the wishlist of KI-073), the platform stopped trying there and asked the user for credentials.
+- **Resolved (2026-11-19, working tree):** the platform decides and goes on. Rule 3b blocks only when no later golden
+  step of the scenario got past the prompt (one that signs in, signs up or continues as a guest). When a click opens a
+  prompt and the next planned step does not get past it, the rest of the scenario is planned again from the page
+  (the replanner, `signIn`): continue as a guest when offered, else sign in with the run's credentials, else create a new
+  account with test data keys whose values the platform makes up; then do the step again and go on. A sign-in replan
+  may type any of the run's secrets into the prompt and add one login step, and may do the prompted step or a
+  destructive step planned after it (nothing was done yet); no other destructive step. It counts as one of the
+  scenario's MAX_REPLANS. With no usable replan the plan goes on as it was, and rule 3b reports SIGN_IN_REQUIRED, now
+  saying that the test could not get past the prompt.
+- **Not handled:** a criterion with an `authenticated` precondition on a run with no credentials is still planned as a
+  login with made-up values, which the site rejects (LOGIN_FAILED). Planning a sign-up there instead is a planner
+  prompt change that needs `pnpm eval planner` re-run. The replanner's sign-in instructions are not scored (KI-078).
+  Not yet validated by a live run.

@@ -1,8 +1,11 @@
+import { ASKS_FOR_SIGN_IN } from "../shared/sign-in-steps";
+
 /**
  * A click that opened the site's sign-in prompt (KI-073): a guest's "Add to wishlist" opens a "Sign in to your account"
- * dialog, or sends the browser to a login page. The step's `act` is marked `signInPrompt`, and a criterion that does not
- * pass after it is reported BLOCKED / SIGN_IN_REQUIRED (verifier rule 3b): the user knows to add credentials, instead
- * of reading an empty wishlist as INCONCLUSIVE or as a failure.
+ * dialog, or sends the browser to a login page. The step's `act` is marked `signInPrompt`. When the plan does not get
+ * past it, exploration does (KI-080): as a guest, with the run's credentials, or with a new account. A criterion that
+ * does not pass after a prompt nothing got past is reported BLOCKED / SIGN_IN_REQUIRED (verifier rule 3b), instead of
+ * reading an empty wishlist as INCONCLUSIVE or as a failure.
  */
 
 /** What the page shows that tells a sign-in prompt apart. */
@@ -24,9 +27,6 @@ export const SIGN_IN_STATE_SCRIPT = String.raw`(() => ({
 
 /** A login page's path: a whole segment, e.g. /login, /account/login, /signin, /auth. */
 const LOGIN_PATH = /(?:^|\/)(?:log-?in|sign-?in|auth|authenticate)(?:\/|$)/i;
-/** A step that asks for sign-in, registration or the account itself: the prompt it opens is what it wants. */
-const ASKS_FOR_SIGN_IN = /\b(?:log\s*-?\s*in|sign\s*-?\s*in|login|signin|sign\s*-?\s*up|register|registration|create\s+(?:an?\s+)?account|my\s+account|account|password|credentials?)\b/i;
-
 const pathOf = (url: string): string => {
   try {
     return new URL(url).pathname;

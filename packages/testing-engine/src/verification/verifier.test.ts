@@ -833,6 +833,24 @@ describe("a click opened a sign-in prompt (KI-073)", () => {
     expect(statusOf(withSteps(prompted(), { before: 0, after: 1 }))).toEqual(["PASS", null]);
   });
 
+  /** The prompted exploration with one more act after PS-3's, before the after_add checkpoint. */
+  const pastPrompt = (extra: Partial<ExplorationStep>) => {
+    const steps = prompted();
+    const all = [...steps.slice(0, 3), step(3, "PS-31", "act", extra), ...steps.slice(3)].map((s, i) => ({ ...s, index: i }));
+    return run(rule, { steps: all, facts: [fact(REFS.before, 0, all[1]!.id), fact(REFS.after, 0, all[4]!.id)] });
+  };
+
+  it.each(["Click the 'Checkout as Guest' button", "Click the 'Register' button", "Submit the login form"])(
+    "a prompt the run got past (%s) does not block: the check keeps its own result",
+    (instruction) => {
+      expect(statusOf(pastPrompt({ instruction }))).toEqual(["FAIL", null]);
+    },
+  );
+
+  it("a step that failed to get past it still leaves the check BLOCKED", () => {
+    expect(statusOf(pastPrompt({ instruction: "Click the 'Checkout as Guest' button", outcome: "FAILED" }))).toEqual(["BLOCKED", "SIGN_IN_REQUIRED"]);
+  });
+
   it("a prompt after the check's checkpoints changes nothing", () => {
     expect(statusOf(withSteps(prompted("PS-5"), { before: 0, after: 0 }))).toEqual(["FAIL", null]);
   });

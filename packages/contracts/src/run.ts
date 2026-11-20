@@ -56,7 +56,7 @@ export const BlockReasonSchema = z.enum([
   "OFF_DOMAIN_NAVIGATION",
   "LOGIN_FAILED",
   "PRECONDITION_NOT_MET",
-  // A click opened the site's sign-in prompt and the check did not pass without it (KI-073).
+  // A click opened the site's sign-in prompt, nothing got past it, and the check did not pass without it (KI-073, KI-080).
   "SIGN_IN_REQUIRED",
 ]);
 export type BlockReason = z.infer<typeof BlockReasonSchema>;

@@ -43,6 +43,7 @@ import { actionPolicyFor, isDestructiveStep } from "../shared/action-policy";
 import { captureFact, factFromReadings, modeForValueType, urlFact, type FactCaptureInput, type FactReadMode } from "./fact-reader";
 import { isAllowedPageHost } from "../survey/links";
 import { factValuesEqual } from "../shared/fact-values";
+import { getsPastSignIn } from "../shared/sign-in-steps";
 import { observeCacheKey, type CacheWhere, type ObserveCache } from "./observe-cache";
 import { INVENTORY_SCRIPT, parseRawInventory, toPageInventory, type PageInventory } from "../survey/inventory";
 import { createInputGenerator, type FieldFacts, type InputGenerator } from "./input-generator";
@@ -132,8 +133,10 @@ import { captureNamedFact } from "./named-facts";
  *
  * Golden path: `onGoldenPath = true` only for the successful execution of a planned step (the
  * `navigate` / `act` / `fill` / `checkpoint` step); observes, extracts, retries and failed attempts
- * are false. A planned step gets at most one retry; if it still fails, exploration stops (later
- * checkpoints would describe a flow that did not happen) and the missing facts end INCONCLUSIVE.
+ * are false. A planned step gets at most one retry; if it still fails, the rest of its scenario is planned again from
+ * the page (`replan`, at most MAX_REPLANS a scenario), else exploration stops (later checkpoints would describe a flow
+ * that did not happen) and the missing facts end INCONCLUSIVE. A click that opens a sign-in prompt the next step does
+ * not get past is planned again the same way, to get past it and do the step again (KI-080).
  *
  * Stops: BLOCKED_BY_POLICY (missing secret / test data, destructive action, blocked navigation;
  * the blocked step is recorded and never executed), STEP_LIMIT_REACHED (`maxExplorationSteps` planned
@@ -725,17 +728,29 @@ class ExplorationRun {
         : undefined;
       // What the page shows before the action, so a notification it brings up can be told apart (KI-059).
       const before = next?.kind === "capture_checkpoint" ? await this.notificationBaseline() : null;
+      const revise = (steps: PlannedStep[]) => {
+        replans++;
+        planned.splice(i + 1, planned.length, ...steps);
+        this.revised.set(scenario.id, [...planned]);
+        judgeAfter = this.judgeSchedule({ ...scenario, steps: planned });
+      };
       try {
         await this.executePlanned(step);
       } catch (err) {
         if (!(err instanceof Stop) || err.reason !== "COMPLETED" || replans >= MAX_REPLANS) throw err;
         const steps = await this.replan(scenario, planned, i);
         if (!steps) throw err;
-        replans++;
-        planned.splice(i + 1, planned.length, ...steps);
-        this.revised.set(scenario.id, [...planned]);
-        judgeAfter = this.judgeSchedule({ ...scenario, steps: planned });
+        revise(steps);
         continue;
+      }
+      // Its click opened a sign-in prompt the next step does not get past: the way past it, then the step again (KI-080).
+      const after = planned[i + 1];
+      if (replans < MAX_REPLANS && this.promptedSignIn(step) && !(after && getsPastSignIn(after.description))) {
+        const steps = await this.replan(scenario, planned, i, true);
+        if (steps) {
+          revise(steps);
+          continue;
+        }
       }
       if (next?.kind === "capture_checkpoint") {
         const early = await this.readEarlyCheckpoint(next, newStepId(), before);
@@ -746,14 +761,20 @@ class ExplorationRun {
     await this.judgeCriteria(null, judgeAfter.get(null) ?? []);
   }
 
+  /** Whether the step's click opened a sign-in prompt (KI-073). */
+  private promptedSignIn(step: PlannedStep): boolean {
+    return this.steps.some((s) => s.plannedStepId === step.id && s.kind === "act" && s.onGoldenPath && s.signInPrompt === true);
+  }
+
   /**
-   * The rest of the scenario planned again after `planned[at]` failed (2026-11-19), from the page the browser is on; null
-   * when there is no replanner, the step must not be repeated another way (a destructive step that may have run), or
-   * the replanner has no usable answer. Publishes `plan.revised` when there is one.
+   * The rest of the scenario planned again after `planned[at]` failed (2026-11-19), or opened a sign-in prompt
+   * (`signIn`, KI-080), from the page the browser is on; null when there is no replanner, the failed step must not be
+   * repeated another way (a destructive step that may have run), or the replanner has no usable answer. Publishes
+   * `plan.revised` when there is one.
    */
-  private async replan(scenario: TestScenario, planned: PlannedStep[], at: number): Promise<PlannedStep[] | null> {
+  private async replan(scenario: TestScenario, planned: PlannedStep[], at: number, signIn = false): Promise<PlannedStep[] | null> {
     const failed = planned[at]!;
-    if (!this.replanner || isDestructiveStep(failed) || this.input.budget.aborted || this.pageClosed()) return null;
+    if (!this.replanner || (!signIn && isDestructiveStep(failed)) || this.input.budget.aborted || this.pageClosed()) return null;
     const ids = [...this.input.plan.scenarios.flatMap((s) => s.steps), ...[...this.revised.values()].flat(), ...planned].map((s) => Number(/^PS-(\d+)$/.exec(s.id)?.[1] ?? 0));
     const firstId = Math.max(0, ...ids) + 1;
     const others = this.input.plan.scenarios.filter((s) => s.id !== scenario.id).reduce((n, s) => n + (this.revised.get(s.id) ?? s.steps).length, 0);
@@ -765,6 +786,7 @@ class ExplorationRun {
         scenario,
         done: planned.slice(0, at),
         failed,
+        ...(signIn ? { signIn: true } : {}),
         remaining: planned.slice(at + 1),
         url: this.url(),
         inventory: await this.readInventory(),
@@ -781,10 +803,12 @@ class ExplorationRun {
     });
     if (!steps || steps.length === 0 || steps.length > room) return null;
     // Never a destructive step: the scenario may already have done it (an order placed before the receipt lookup failed).
-    if (steps.some((s) => isDestructiveStep(s))) return null;
+    // Past a sign-in prompt nothing was done yet: the prompted step, or one planned after it, may run as planned (KI-080).
+    const asPlanned = new Set([failed, ...planned.slice(at + 1)].map((s) => s.description.trim().toLowerCase()));
+    if (steps.some((s) => isDestructiveStep(s) && !(signIn && asPlanned.has(s.description.trim().toLowerCase())))) return null;
     await this.ctx.publish({
       type: "plan.revised",
-      message: `Step ${failed.id} failed: the rest of the scenario was planned again (${steps.length} steps)`,
+      message: `Step ${failed.id} ${signIn ? "opened a sign-in prompt" : "failed"}: the rest of the scenario was planned again (${steps.length} steps)`,
       payload: { scenarioId: scenario.id, afterStepId: failed.id, stepCount: steps.length },
     });
     return steps;
