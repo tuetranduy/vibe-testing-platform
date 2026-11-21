@@ -578,6 +578,17 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /** Errors that end the run as ERRORED (or CANCELLED) instead of failing one step. */
+/** Words that name no action of their own: "Click the Confirm order button" is the action "confirm order". */
+const FILLER_WORDS = new Set(["click", "press", "tap", "select", "the", "a", "an", "on", "in", "of", "to", "for", "at", "button", "link", "page"]);
+
+/** Whether two step descriptions name the same action, however reworded: half their action words shared (KI-084). */
+function sameAction(a: string, b: string): boolean {
+  const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9]+/g)?.filter((w) => !FILLER_WORDS.has(w)) ?? []);
+  const [x, y] = [words(a), words(b)];
+  const shared = [...x].filter((w) => y.has(w)).length;
+  return shared > 0 && shared * 2 >= Math.max(x.size, y.size);
+}
+
 function isFatal(err: unknown): boolean {
   if (err instanceof CancelledError) return true;
   if (err instanceof EngineError) return !(err instanceof BrowserProviderError);
@@ -924,10 +935,13 @@ class ExplorationRun {
       return null;
     });
     if (!steps || steps.length === 0 || steps.length > room) return null;
-    // Never a destructive step: the scenario may already have done it (an order placed before the receipt lookup failed).
-    // Past a sign-in prompt nothing was done yet: the prompted step, or one planned after it, may run as planned (KI-080).
-    const asPlanned = new Set([failed, ...planned.slice(at + 1)].map((s) => s.description.trim().toLowerCase()));
-    if (steps.some((s) => isDestructiveStep(s) && !(signIn && asPlanned.has(s.description.trim().toLowerCase())))) return null;
+    // No destructive step once one may have run (an order placed before the receipt lookup failed). Before that, the
+    // plan's own destructive steps were still ahead: a checkout that failed on its way to "Confirm order" is planned
+    // again with its confirm, which the replanner rewords (KI-084). Past a sign-in prompt nothing was done yet: the
+    // prompted step, or one planned after it, may run as planned (KI-080).
+    const ranDestructive = planned.slice(0, signIn ? at : at + 1).some(isDestructiveStep);
+    const ahead = signIn ? [failed, ...planned.slice(at + 1)] : planned.slice(at + 1).filter(isDestructiveStep);
+    if (steps.some((s) => isDestructiveStep(s) && (ranDestructive || !ahead.some((p) => sameAction(p.description, s.description))))) return null;
     await this.ctx.publish({
       type: "plan.revised",
       message: `Step ${failed.id} ${guidance ? "received the user’s instruction" : signIn ? "opened a sign-in prompt" : observation ? "went off track" : "failed"}: the rest of the scenario was planned again (${steps.length} steps)`,

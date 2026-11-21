@@ -1257,3 +1257,18 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   deployed services. Unit/integration tests cover the deterministic paths, not whether the model chooses the right controls.
 - **To close:** rerun the checkout, answer the question with the terms-checkbox instruction, reload and answer from
   a second tab, cancel while waiting, and inspect the resulting screenshots and report on desktop and mobile.
+
+## KI-084 — A checkout that failed before "Confirm order" was never planned again, by the platform or from the user's answer
+- **Severity:** High (every recovery of a checkout, automatic or guided by the user, was thrown away).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`replan`).
+- **What:** live run `run_0mwpulchs3930868ddc9e597b` (demowebshop, Books → cart → checkout, DeepSeek Flash) got past the
+  terms checkbox (KI-082) and the billing form, but the plan had no step for the "Shipping Address" section; "Select
+  'Check / Money Order'" then failed. The replanner answered (16,076 tokens in), but its steps ended with the plan's
+  own "Click the Confirm order button" (destructive), and a replan with any destructive step was discarded, so the run
+  asked the user (KI-083). An answer would have been discarded the same way: guided replans go through the same check.
+- **Resolved (2026-11-21, working tree):** a replan may do a destructive step only while nothing destructive of the
+  scenario may have run, and only one that names the same action as a destructive step still ahead in the plan (half
+  its action words shared, so "Click 'Confirm' on the order review" is "Click the Confirm order button"); never a new
+  one ("delete my account"). Past a sign-in prompt the prompted step or any step after it still qualifies (KI-080).
+- **Not handled:** in the same run the step review called "Click Continue in the shipping method section" on track
+  while the page still showed the Shipping Address section (KI-082's false on-track rate has no baseline yet).
