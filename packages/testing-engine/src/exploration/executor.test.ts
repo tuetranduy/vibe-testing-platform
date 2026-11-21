@@ -1766,6 +1766,41 @@ describe("runExploration (fake explorer)", () => {
       expect(session.calls.filter((c) => c.op === "actOn")).toEqual([]);
     });
 
+    it("a destructive step the plan still had ahead may be planned again: nothing destructive ran yet (KI-084)", async () => {
+      const { ctx, events } = fakeCtx({ options: { allowDestructiveActions: true } });
+      const confirm = { id: "PS-5", kind: "click" as const, description: "Click the Confirm order button", criterionIds: [], destructive: true };
+      const checkout = planOf(
+        step("navigate", "Open"),
+        step("click", grills),
+        { ...confirm, id: "PS-3" },
+        step("capture_checkpoint", "Capture", { checkpoint: "after_add", criterionIds: ["AC-1"] }),
+      );
+      const { r } = replanner([[
+        { id: "PS-5", kind: "navigate", description: "Open https://shop.test/grills", criterionIds: [], destructive: false },
+        { ...confirm, id: "PS-6", description: "Click 'Confirm' on the order review" },
+        { id: "PS-7", kind: "capture_checkpoint", description: "Capture", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false },
+      ]]);
+      const outcome = await runExploration(ctx, { plan: checkout, requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r });
+      expect(outcome.revisedPlan?.scenarios[0]!.steps.map((s) => s.id)).toEqual(["PS-1", "PS-2", "PS-5", "PS-6", "PS-7"]);
+      expect(events.filter((e) => e.type === "plan.revised")).toHaveLength(1);
+    });
+
+    it("once a destructive step may have run, a replan never does one again (KI-084)", async () => {
+      const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+      const placed = planOf(
+        step("navigate", "Open"),
+        step("click", "Click the Confirm order button", { destructive: true }),
+        step("click", grills),
+        step("capture_checkpoint", "Capture", { checkpoint: "after_add", criterionIds: ["AC-1"] }),
+      );
+      const { r } = replanner([[
+        { id: "PS-5", kind: "click", description: "Click the Confirm order button", criterionIds: [], destructive: true },
+        { id: "PS-6", kind: "capture_checkpoint", description: "Capture", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false },
+      ]]);
+      const outcome = await runExploration(ctx, { plan: placed, requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r });
+      expect(outcome.revisedPlan).toBeUndefined();
+    });
+
     it("a step blocked by policy is never planned again", async () => {
       const { ctx } = fakeCtx();
       const { r, asked } = replanner([[]]);
