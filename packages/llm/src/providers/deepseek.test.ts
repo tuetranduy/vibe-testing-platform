@@ -168,6 +168,12 @@ describe("DeepSeekTransport", () => {
     expect(res.text).toBe('{"name":"x');
   });
 
+  it("finish_reason length with no answer is not retried: thinking used the whole budget, the same request would again (KI-081)", async () => {
+    const err = await failure(new DeepSeekTransport({ apiKey: "sk-ds-test", fetch: fakeFetch(() => json(200, okResponse(null, { finish_reason: "length" }))).fn }));
+    expect(err).toMatchObject({ retryable: false });
+    expect((err as Error).message).toMatch(/output budget/i);
+  });
+
   it("content_filter is a non-retryable error; insufficient_system_resource a retryable one", async () => {
     for (const [reason, retryable] of [
       ["content_filter", false],

@@ -207,8 +207,9 @@ export function createReplanner(llm: LlmClient | null): Replanner | null {
           runId: call.runId,
           signal: call.signal,
           deadlineAt: call.deadlineAt ?? null,
+          // The client's default budget: a reasoning model's thinking counts against it, and 4,000 tokens ran out
+          // before the steps were written (KI-081).
           redact: call.redact,
-          maxTokens: 4_000,
         }));
       } catch (err) {
         if (call.signal.aborted || err instanceof CancelledError) throw err;

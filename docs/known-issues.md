@@ -1205,3 +1205,21 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   login with made-up values, which the site rejects (LOGIN_FAILED). Planning a sign-up there instead is a planner
   prompt change that needs `pnpm eval planner` re-run. The replanner's sign-in instructions are not scored (KI-078).
   Not yet validated by a live run.
+
+## KI-081 — The replanner's answer never fit its output budget on a reasoning model, so a stuck checkout stayed stuck
+- **Severity:** High (every replan on DeepSeek with thinking on failed; the scenario stopped at the first failed step).
+- **Where:** `packages/testing-engine/src/exploration/replanner.ts` (`maxTokens`), `packages/llm/src/providers/deepseek.ts`
+  (`toResponse`).
+- **What:** `run_0mwps9akjcc59828240d1b625` (demowebshop.tricentis.com, add a book to the cart and check out, DeepSeek
+  Flash, reasoning "default" = thinking on): "Click Checkout" did not leave `/cart`; the site opened a "Terms of
+  service" dialog ("Please accept the terms of service before the next step") because the plan never ticked "I agree
+  with the terms of service". The next step ("Checkout as Guest") failed twice, and the replanner was called: three
+  requests of about 25 s each, all `PROVIDER_ERROR`, with no usage recorded. The replanner asked for at most 4,000
+  output tokens, and DeepSeek counts thinking against `max_tokens`: the thinking used it all and the answer was empty
+  (`finish_reason: length`). An empty answer was retried as an overloaded server's, so the same request ran out the
+  same way twice more; the replan returned nothing and AC-3 ended INCONCLUSIVE.
+- **Resolved (2026-11-21, working tree):** the replanner uses the client's default output budget (16,000 tokens). An
+  empty answer cut off by `length` is not retried: the error says the budget went on reasoning. Not yet validated by a
+  live run.
+- **Not handled:** the replanner sees the page's inventory only (no screenshot, HTML or network log), so whether it
+  reads the terms dialog and ticks the box is not shown; see the page-context work that follows.

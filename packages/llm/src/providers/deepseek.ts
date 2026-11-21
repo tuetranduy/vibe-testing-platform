@@ -171,6 +171,10 @@ function toResponse(data: ChatCompletionResponse, requestedModel: string): LlmTr
   // JSON Output "may occasionally return empty content" (DeepSeek's documentation): the same request is retried,
   // as for an overloaded server, rather than corrected; a correction round once got a second empty answer (KI-001).
   const text = choice.message?.content ?? "";
+  // Thinking used the whole output budget: the same request would again (KI-081).
+  if (text.trim() === "" && reason === "length") {
+    throw new LlmTransportError("The model used its whole output budget on reasoning and returned no answer (length)", { retryable: false });
+  }
   if (text.trim() === "") throw new LlmTransportError(`The model returned an empty answer (${reason ?? "no finish reason"})`, { retryable: true });
   const u = data.usage ?? {};
   return {
