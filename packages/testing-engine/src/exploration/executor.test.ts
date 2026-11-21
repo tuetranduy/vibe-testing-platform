@@ -1,3 +1,6 @@
+import { FakeTransport, LlmClient } from "@platform/llm";
+import { createStepReviewer } from "./step-review";
+import { createReplanner } from "./replanner";
 import {
   BrowserProviderError,
   CancelledError,
@@ -317,6 +320,39 @@ const summary = (steps: ExplorationStep[]) =>
 // ---------------------------------------------------------------------------------------------
 
 describe("runExploration (fake explorer)", () => {
+  it("reviews a successful Checkout on /cart, replans from the terms dialog, and executes the repaired path (KI-082)", async () => {
+    const { ctx, events } = fakeCtx({ targetUrl: "https://shop.test/cart" });
+    let modal = false;
+    const actions: string[] = [];
+    const session = new FakeSession({
+      observe: (instruction) => [{ selector: instruction, description: instruction, method: "click", arguments: [] }],
+      actOn: (el) => {
+        actions.push(el.selector);
+        if (el.selector === "Click Checkout" && actions.length === 1) modal = true;
+        if (el.selector === "Close dialog") modal = false;
+        return {};
+      },
+    });
+    Object.assign(session.page, { frames: () => [{ evaluate: async () => ({ title: "Cart", html: modal ? '<div role="dialog">Terms of service: Please accept the terms of service before the next step</div>' : '<input type="checkbox" id="agree">', dialogs: modal ? ["Terms of service: Please accept the terms of service before the next step"] : [] }) }] });
+    const onTrack = { verdict: "on_track", observation: "Ready", reason: "The next step applies" };
+    const reviewTransport = new FakeTransport().enqueue({ json: onTrack }, { json: { verdict: "off_track", observation: "Terms of service: Please accept the terms of service before the next step", reason: "Checkout was refused" } }, ...Array.from({ length: 4 }, () => ({ json: onTrack })));
+    const replanTransport = new FakeTransport().enqueue({ json: { steps: ["Close dialog", "Tick agree", "Click Checkout", "Checkout as Guest"].map((description) => ({ kind: "click", description, criterionIds: [], destructive: false, inputRef: null, checkpoint: null })) } });
+    const plan = planOf(step("navigate", "Open the target URL"), step("click", "Click Checkout"), step("click", "Checkout as Guest"));
+    const saved = memoryStore();
+    const out = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.signal }, {
+      store: saved.store, recorder: fakeRecorder({ describe: () => ({ role: "button", name: null, text: null }) }).recorder,
+      stepReviewer: createStepReviewer(new LlmClient({ transport: reviewTransport, model: "deepseek-flash" })),
+      replanner: createReplanner(new LlmClient({ transport: replanTransport, model: "deepseek-flash" })),
+    });
+    expect(out.stopReason).toBe("COMPLETED");
+    expect(actions).toEqual(["Click Checkout", "Close dialog", "Tick agree", "Click Checkout", "Checkout as Guest"]);
+    expect(JSON.stringify(replanTransport.requests[0]?.messages)).toContain("Please accept the terms of service before the next step");
+    expect(saved.steps.find((s) => s.plannedStepId === "PS-2" && s.kind === "act")?.review?.verdict).toBe("off_track");
+    expect(events.filter((e) => e.type === "step.reviewed")).toHaveLength(1);
+    expect(events.some((e) => e.type === "plan.revised")).toBe(true);
+    expect(session.listeners.get("dialog")?.size).toBe(0);
+  });
+
   it.each(['navigate', 'other'] as const)('reload via %s retains the current query instead of opening a bare path', async kind => {
     const current = 'https://shop.test/search?search=nonexistent';
     const { ctx } = fakeCtx({ targetUrl: current });

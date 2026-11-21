@@ -1,3 +1,4 @@
+import { pageContextParts, type PageContext } from "./page-context";
 import type { ExplorationStep } from "@platform/contracts";
 import type { LlmClient } from "@platform/llm";
 import { z } from "zod";
@@ -22,6 +23,7 @@ export function wayThereCandidates(raw: readonly Candidate[], ctx: Pick<StageCon
 /** What the model is shown; labels are untrusted page content, already redacted. */
 export interface WayThereRequest {
   /** The planned step whose control was not found. */
+  page?: PageContext;
   goal: string;
   url: string;
   candidates: { index: number; label: string }[];
@@ -69,7 +71,7 @@ export function createWayThere(llm: LlmClient | null): WayThere | null {
         schema: OutputSchema,
         schemaName: "way_there",
         system: WAY_THERE_SYSTEM_PROMPT,
-        messages: [{ role: "user", content: buildWayTherePrompt(req) }],
+        messages: [{ role: "user", content: req.page ? [{ type: "text", text: buildWayTherePrompt(req) }, ...pageContextParts(req.page)] : buildWayTherePrompt(req) }],
         // An unlisted number is corrected once; still unlisted, it is taken as none.
         check: (out, { corrected }) => (out.index === -1 || listed.has(out.index) || corrected ? [] : [`"index" must be -1 or one of the listed numbers`]),
         stage: "EXPLORING",
