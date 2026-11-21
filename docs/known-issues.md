@@ -1222,7 +1222,7 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   empty answer cut off by `length` is not retried: the error says the budget went on reasoning. Not yet validated by a
   live run.
 - **Not handled:** the replanner sees the page's inventory only (no screenshot, HTML or network log), so whether it
-  reads the terms dialog and ticks the box is not shown; see the page-context work that follows.
+  reads the terms dialog and ticks the box is not shown; KI-082 gives it the page, KI-083 asks the user when it cannot.
 
 
 ## KI-082 — Page context and step review have not been validated live
@@ -1243,3 +1243,17 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   replanner and way-there prompts across the offered models (KI-078). Latency and false off-track rates have no live
   baseline. Inaccessible frames and captures that time out contribute partial evidence; an image that cannot be
   converted or exceeds its size cap is omitted. Stagehand's own internal model calls still use Stagehand's context.
+
+## KI-083 — Asking for help during exploration has not been validated live
+- **Severity:** Medium (the recovery path depends on a person and the run's model).
+- **Where:** exploration executor, worker Redis assistance port and paused clocks, assistance API, run-page panel.
+- **Implemented (2026-11-21):** a retried failed step with no usable automatic replan asks for help with a fresh
+  screenshot, at most three times per run. Instructions go through the existing replanner validation and action
+  policy; stop/timeout keep the existing scenario-stop behavior. Redis coordinates pending requests and retained
+  answers; the event history rebuilds a question after reload and closes it when another tab answers. Stage clocks
+  pause, and the persisted deadline reserves the bounded wait so the reaper does not expire a healthy worker.
+- **Not validated live:** the demowebshop terms-of-service dialog from `run_0mwps9akjcc59828240d1b625`, a real
+  model following a user's instruction, a ten-minute browser wait, mobile rendering and multi-tab behavior against
+  deployed services. Unit/integration tests cover the deterministic paths, not whether the model chooses the right controls.
+- **To close:** rerun the checkout, answer the question with the terms-checkbox instruction, reload and answer from
+  a second tab, cancel while waiting, and inspect the resulting screenshots and report on desktop and mobile.

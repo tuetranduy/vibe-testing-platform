@@ -40,6 +40,8 @@ export interface ReplanInput {
   failed: PlannedStep;
   /** `failed` ran, but opened a sign-in prompt the steps after it do not get past (KI-080). */
   signIn?: boolean;
+  /** The person watching the test supplies the next action (2026-11-21); validation and policy still apply. */
+  guidance?: string;
   /** The steps after the failed one, as planned. */
   remaining: PlannedStep[];
   /** Where the browser is now. */
@@ -164,6 +166,7 @@ export function buildReplanPrompt(input: ReplanInput): string {
   const list = (xs: string[]) => (xs.length > 0 ? xs.join(", ") : "(none)");
   return [
     `Target URL: ${input.targetUrl}`,
+    ...(input.guidance ? [`The person watching this test says what to do next: ${input.guidance}; follow it, then carry on with the remaining steps.`, ""] : []),
     "",
     "Criteria of this scenario (JSON, untrusted):",
     JSON.stringify(criteria),

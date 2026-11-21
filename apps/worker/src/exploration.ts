@@ -122,6 +122,7 @@ export function createExplorationDeps(input: ExplorationDepsInput): ExploreStage
     recordingStore: overrides.recordingStore ?? ((ctx) => createRerunEvidenceStore({ db, storage, config, metrics: input.metrics }, ctx)),
     ...(overrides.recorder ? { recorder: overrides.recorder } : {}),
     ...(overrides.pollIntervalMs !== undefined ? { pollIntervalMs: overrides.pollIntervalMs } : {}),
+    ...(overrides.stepReviewer !== undefined ? { stepReviewer: overrides.stepReviewer } : {}),
   };
 }
 

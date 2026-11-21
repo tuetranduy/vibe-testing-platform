@@ -22,8 +22,9 @@ export function wayThereCandidates(raw: readonly Candidate[], ctx: Pick<StageCon
 
 /** What the model is shown; labels are untrusted page content, already redacted. */
 export interface WayThereRequest {
-  /** The planned step whose control was not found. */
+  /** The page as the model sees it: screenshot, HTML, dialogs and recent requests (2026-11-21). */
   page?: PageContext;
+  /** The planned step whose control was not found. */
   goal: string;
   url: string;
   candidates: { index: number; label: string }[];

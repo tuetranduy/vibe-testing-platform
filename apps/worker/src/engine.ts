@@ -1,3 +1,5 @@
+import type { Redis } from "ioredis";
+import { createAssistancePort, assistanceTimeoutMs } from "./assistance";
 import os from "node:os";
 import path from "node:path";
 import type { Env } from "@platform/config";
@@ -53,6 +55,7 @@ export interface Engines {
 }
 
 export interface EngineDeps {
+  redis?: Redis;
   db: Database;
   logger: WorkerLogger;
   fake?: FakeEngineOptions;
@@ -89,6 +92,7 @@ export function createEngines(config: EngineConfig, deps: EngineDeps): Engines {
     config: { privateAllowlist, ...retention },
     ...(deps.exploration ? { overrides: deps.exploration } : {}),
   });
+  if (deps.redis) exploration.assistance = (ctx) => createAssistancePort(deps.redis!, ctx.runId, assistanceTimeoutMs());
   const workspace = rerunWorkspaceConfig(config);
   const runTest = createRunTestDeps({
     db: deps.db,

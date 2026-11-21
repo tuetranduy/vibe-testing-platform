@@ -418,6 +418,11 @@ export class RunRepository {
       .where(and(eq(testRuns.id, runId), inArray(testRuns.lifecycle, [...ACTIVE_LIFECYCLES])));
   }
 
+  /** Persist the assistance clock extension without changing lifecycle or execution start (2026-11-21). */
+  async setDeadline(runId: string, deadlineAt: Date): Promise<void> {
+    await this.db.update(testRuns).set({ deadlineAt, updatedAt: new Date() }).where(eq(testRuns.id, runId));
+  }
+
   /** Records the hard deadline and start time when execution begins (the clock starts at PLANNING). */
   async markExecutionStarted(runId: string, at: { deadlineAt: Date; startedAt: Date }): Promise<void> {
     await this.db

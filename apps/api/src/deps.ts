@@ -44,6 +44,7 @@ export interface ApiDeps {
   db: Database;
   /** Publishing connection (events + cancel signals). */
   redis: Pick<Redis, "publish">;
+  assistanceRedis?: Pick<Redis, "get" | "eval">;
   hub: RunEventHub;
   queue: RunQueue;
   /** Rewrites a check from the user's words on the worker (2026-11-19); unset: 503 REVISE_UNAVAILABLE. */

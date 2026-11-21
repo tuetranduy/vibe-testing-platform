@@ -30,6 +30,9 @@ export interface ExploreStageDeps {
   /** Persistence for this run's steps, facts and screenshots. */
   store(ctx: StageContext): ExplorationStore;
   recorder?: RecorderPort;
+  assistance?(ctx: StageContext): import("./assistance").AssistancePort | null;
+  /** Reviews each successful action against the page (2026-11-21); absent: the run's model, null: no review. */
+  stepReviewer?: import("./step-review").StepReviewer | null;
   pollIntervalMs?: number;
   /** The tenant's exploration cache (V1.1 F8), used unless the run sets `useExplorationCache: false`. */
   cache?(ctx: StageContext): ObserveCache;
@@ -87,6 +90,8 @@ export function createExploreStage(deps: ExploreStageDeps): EngineStages["explor
       starting = null;
       const outcome = (explored = await runExploration(ctx, { plan, requirement, session, budget }, {
         store: deps.store(ctx),
+        assistance: deps.assistance?.(ctx),
+        ...(deps.stepReviewer !== undefined ? { stepReviewer: deps.stepReviewer } : {}),
         ...(deps.recorder ? { recorder: deps.recorder } : {}),
         ...(deps.pollIntervalMs !== undefined ? { pollIntervalMs: deps.pollIntervalMs } : {}),
         ...(deps.cache && explorationCacheOn(ctx.request) ? { cache: deps.cache(ctx) } : {}),
