@@ -846,7 +846,7 @@ class ExplorationRun {
   private async askForHelp(scenario: TestScenario, planned: PlannedStep[], at: number): Promise<PlannedStep[] | null> {
     const port = this.deps.assistance;
     const failed = planned[at]!;
-    if (!port || isDestructiveStep(failed) || this.pageClosed() || this.plannedCount >= this.max) return null;
+    if (!port || this.mayHaveRun(failed) || this.pageClosed() || this.plannedCount >= this.max) return null;
     let previous = false;
     while (this.assistanceCount < MAX_ASSISTANCE_REQUESTS) {
       await this.reserve();
@@ -886,6 +886,14 @@ class ExplorationRun {
     return null;
   }
 
+  /**
+   * Whether a destructive step may have run: something was clicked or typed for it (KI-085). One that failed only to find
+   * its control (every attempt an `observe`) never ran, so it may be planned again or asked about like any other step.
+   */
+  private mayHaveRun(step: PlannedStep): boolean {
+    return isDestructiveStep(step) && this.steps.some((s) => s.plannedStepId === step.id && s.kind !== "observe");
+  }
+
   /** Whether the step's click opened a sign-in prompt (KI-073). */
   private promptedSignIn(step: PlannedStep): boolean {
     return this.steps.some((s) => s.plannedStepId === step.id && s.kind === "act" && s.onGoldenPath && s.signInPrompt === true);
@@ -905,7 +913,7 @@ class ExplorationRun {
     { observation, page, guidance }: { observation?: string; page?: PageContext; guidance?: string } = {},
   ): Promise<PlannedStep[] | null> {
     const failed = planned[at]!;
-    if (!this.replanner || (!signIn && isDestructiveStep(failed)) || this.input.budget.aborted || this.pageClosed()) return null;
+    if (!this.replanner || (!signIn && this.mayHaveRun(failed)) || this.input.budget.aborted || this.pageClosed()) return null;
     const ids = [...this.input.plan.scenarios.flatMap((s) => s.steps), ...[...this.revised.values()].flat(), ...planned].map((s) => Number(/^PS-(\d+)$/.exec(s.id)?.[1] ?? 0));
     const firstId = Math.max(0, ...ids) + 1;
     const others = this.input.plan.scenarios.filter((s) => s.id !== scenario.id).reduce((n, s) => n + (this.revised.get(s.id) ?? s.steps).length, 0);
@@ -939,8 +947,8 @@ class ExplorationRun {
     // plan's own destructive steps were still ahead: a checkout that failed on its way to "Confirm order" is planned
     // again with its confirm, which the replanner rewords (KI-084). Past a sign-in prompt nothing was done yet: the
     // prompted step, or one planned after it, may run as planned (KI-080).
-    const ranDestructive = planned.slice(0, signIn ? at : at + 1).some(isDestructiveStep);
-    const ahead = signIn ? [failed, ...planned.slice(at + 1)] : planned.slice(at + 1).filter(isDestructiveStep);
+    const ranDestructive = planned.slice(0, at).some(isDestructiveStep) || (!signIn && this.mayHaveRun(failed));
+    const ahead = signIn ? [failed, ...planned.slice(at + 1)] : [failed, ...planned.slice(at + 1)].filter(isDestructiveStep);
     if (steps.some((s) => isDestructiveStep(s) && (ranDestructive || !ahead.some((p) => sameAction(p.description, s.description))))) return null;
     await this.ctx.publish({
       type: "plan.revised",

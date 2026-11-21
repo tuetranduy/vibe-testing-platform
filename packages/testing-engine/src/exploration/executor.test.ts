@@ -1801,6 +1801,53 @@ describe("runExploration (fake explorer)", () => {
       expect(outcome.revisedPlan).toBeUndefined();
     });
 
+    describe("a destructive step that failed before anything was clicked never ran (KI-085)", () => {
+      const confirm = "Click the Confirm order button";
+      const checkout = () => planOf(step("navigate", "Open"), step("click", confirm, { destructive: true }), step("capture_checkpoint", "Capture", { checkpoint: "after_add", criterionIds: ["AC-1"] }));
+      const element = { selector: "xpath=/html[1]/body[1]/a[1]", description: "x", method: "click", arguments: [] };
+      /** The Confirm button is not on the page (one Continue was missed); everything else is. */
+      const noConfirm = (actOn?: FakeSessionScript["actOn"]) => {
+        const session = new FakeSession({ observe: (i) => (i.includes("Confirm") ? [] : [element]), extract: () => ({ cartCount: 1 }), ...(actOn ? { actOn } : {}) });
+        Object.assign(session.page, { evaluate: async () => [] });
+        return session;
+      };
+      const continueThenCapture: PlannedStep[] = [
+        { id: "PS-4", kind: "click", description: "Click Continue on the payment information step", criterionIds: [], destructive: false },
+        { id: "PS-5", kind: "capture_checkpoint", description: "Capture", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false },
+      ];
+
+      it("is planned again", async () => {
+        const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+        const { r, asked } = replanner([continueThenCapture]);
+        const outcome = await runExploration(ctx, { plan: checkout(), requirement: requirementWith([cartFact]), session: noConfirm(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r });
+        expect(asked.map((a) => a.failed.id)).toEqual(["PS-2"]);
+        expect(outcome.revisedPlan?.scenarios[0]!.steps.map((s) => s.id)).toEqual(["PS-1", "PS-2", "PS-4", "PS-5"]);
+      });
+
+      it("and the user is asked when no replan helps", async () => {
+        const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+        let asked = 0;
+        await runExploration(ctx, { plan: checkout(), requirement: requirementWith([cartFact]), session: noConfirm(), budget: ctx.budgetSignal(1) }, {
+          store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: null,
+          assistance: { async ask() { asked++; return { kind: "stop" }; } },
+        });
+        expect(asked).toBe(1);
+      });
+
+      it("one whose click was dispatched may have run: never planned again, never asked about", async () => {
+        const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+        const { r, asked } = replanner([continueThenCapture]);
+        let questions = 0;
+        const session = new FakeSession({ observe: () => [element], actOn: () => ({ success: false, message: "timed out" }) });
+        Object.assign(session.page, { evaluate: async () => [] });
+        await runExploration(ctx, { plan: checkout(), requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, {
+          store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r,
+          assistance: { async ask() { questions++; return { kind: "stop" }; } },
+        });
+        expect([asked.length, questions]).toEqual([0, 0]);
+      });
+    });
+
     it("a step blocked by policy is never planned again", async () => {
       const { ctx } = fakeCtx();
       const { r, asked } = replanner([[]]);
