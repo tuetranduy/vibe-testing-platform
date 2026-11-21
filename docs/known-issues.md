@@ -1272,3 +1272,18 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   one ("delete my account"). Past a sign-in prompt the prompted step or any step after it still qualifies (KI-080).
 - **Not handled:** in the same run the step review called "Click Continue in the shipping method section" on track
   while the page still showed the Shipping Address section (KI-082's false on-track rate has no baseline yet).
+
+## KI-085 — A destructive step that never found its button was treated as done: no replan, no question
+- **Severity:** High (a checkout that missed one "Continue" ended INCONCLUSIVE without trying to recover or asking).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`mayHaveRun`, `replan`, `askForHelp`).
+- **What:** live run `run_0mwpvcm7xfbb2b85b018f49f9` (demowebshop, Books → cart → checkout, DeepSeek Flash): the plan again
+  had no step for the "Shipping Address" section, so each "Continue" landed one section behind and the page stopped
+  at "Payment information". "Click the Confirm button" (destructive) found nothing on four tries (observes only;
+  nothing was clicked). A failed destructive step was never planned again and never asked about, as if it might have
+  placed the order, so exploration stopped and AC-3 ended INCONCLUSIVE / FACT_NOT_OBSERVED.
+- **Resolved (2026-11-21, working tree):** a destructive step may have run only when something was clicked or typed
+  for it (a recorded step other than `observe`). One that only failed to find its control is planned again (its
+  confirm may be in the new steps, KI-084) and, failing that, asked about. A dispatched destructive click is still
+  never repeated, replanned or asked about.
+- **Not handled:** the planner's missing "Shipping Address" step and the step review's "on track" after each misplaced
+  "Continue" (KI-082).
