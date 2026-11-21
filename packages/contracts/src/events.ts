@@ -27,6 +27,14 @@ const ev = <T extends string, P extends z.ZodType>(type: T, payload: P) =>
 const StagePayload = z.object({ stage: RunLifecycleSchema });
 
 export const TestEventSchema = z.discriminatedUnion("type", [
+  // A durable event rebuilds the open question on reload (2026-11-21); signed image URLs are fetched separately.
+  ev("assistance.requested", z.object({
+    requestId: z.string(), scenarioId: z.string(), stepId: z.string(), question: z.string(),
+    url: z.string(), screenshotArtifactId: z.string(), expiresAt: IsoDateTime,
+  })),
+  ev("assistance.answered", z.object({
+    requestId: z.string(), answer: z.enum(["instruction", "stop", "timeout"]), instruction: z.string().optional(),
+  })),
   ev("run.created", z.object({ targetHost: z.string() })),
   // The survey (a blank requirement). Host + path only: a query string can carry personal data.
   ev(

@@ -71,6 +71,7 @@ import { SIGN_IN_STATE_SCRIPT, openedSignIn, type SignInState } from "./sign-in-
 import { SITE_ERROR_SCRIPT, siteErrorOf, type PageHeadline } from "./site-error";
 import { MAX_REPLANS, createReplanner, type Replanner } from "./replanner";
 import { captureNamedFact } from "./named-facts";
+import { DEFAULT_ASSISTANCE_TIMEOUT_MS, MAX_ASSISTANCE_REQUESTS, type AssistancePort } from "./assistance";
 
 /**
  * Exploration executor (Task 14): runs the confirmed plan's scenarios (V1.1 F9: in order, each from a clean
@@ -253,6 +254,7 @@ export interface ExplorationInput {
 
 export interface ExplorationDeps {
   store: ExplorationStore;
+  assistance?: AssistancePort | null;
   recorder?: RecorderPort;
   /** Makes the values nobody provided (2026-10-07); default `createInputGenerator(ctx.llm)`. */
   inputs?: InputGenerator;
@@ -609,6 +611,7 @@ class ExplorationRun {
   private readonly max: number;
   /** Planned steps started, of every scenario: what `max` limits. */
   private plannedCount = 0;
+  private assistanceCount = 0;
   private readonly visibleFacts: Set<string>;
   private readonly inputs: InputGenerator;
   /** Values generated for this run, by `source:key`: made once, reused by every later fill of the key. */
@@ -728,8 +731,8 @@ class ExplorationRun {
         : undefined;
       // What the page shows before the action, so a notification it brings up can be told apart (KI-059).
       const before = next?.kind === "capture_checkpoint" ? await this.notificationBaseline() : null;
-      const revise = (steps: PlannedStep[]) => {
-        replans++;
+      const revise = (steps: PlannedStep[], guided = false) => {
+        if (!guided) replans++;
         planned.splice(i + 1, planned.length, ...steps);
         this.revised.set(scenario.id, [...planned]);
         judgeAfter = this.judgeSchedule({ ...scenario, steps: planned });
@@ -737,10 +740,11 @@ class ExplorationRun {
       try {
         await this.executePlanned(step);
       } catch (err) {
-        if (!(err instanceof Stop) || err.reason !== "COMPLETED" || replans >= MAX_REPLANS) throw err;
-        const steps = await this.replan(scenario, planned, i);
+        if (!(err instanceof Stop) || err.reason !== "COMPLETED") throw err;
+        const automatic = replans < MAX_REPLANS ? await this.replan(scenario, planned, i) : null;
+        const steps = automatic ?? await this.askForHelp(scenario, planned, i);
         if (!steps) throw err;
-        revise(steps);
+        revise(steps, automatic === null);
         continue;
       }
       // Its click opened a sign-in prompt the next step does not get past: the way past it, then the step again (KI-080).
@@ -761,6 +765,53 @@ class ExplorationRun {
     await this.judgeCriteria(null, judgeAfter.get(null) ?? []);
   }
 
+  /**
+   * Ask only after ordinary recovery failed (2026-11-21). Keep the page open; fresh screenshots use the same artifact
+   * path as step evidence. Both clocks pause, but cancellation remains live. No port preserves scripted behavior.
+   */
+  private async askForHelp(scenario: TestScenario, planned: PlannedStep[], at: number): Promise<PlannedStep[] | null> {
+    const port = this.deps.assistance;
+    const failed = planned[at]!;
+    if (!port || isDestructiveStep(failed) || this.pageClosed() || this.plannedCount >= this.max) return null;
+    let previous = false;
+    while (this.assistanceCount < MAX_ASSISTANCE_REQUESTS) {
+      await this.reserve();
+      if (this.pageClosed()) return null;
+      const [screenshotArtifactId] = await this.screenshot(`assistance-${this.assistanceCount + 1}.png`, "where the test needs help");
+      if (!screenshotArtifactId) return null;
+      this.assistanceCount++;
+      const reason = this.steps.findLast((s) => s.plannedStepId === failed.id && s.error)?.error ?? "The step could not be completed";
+      const question = this.redactString(`${previous ? "The previous instruction could not be turned into usable steps. " : ""}Step ${failed.id}: ${failed.description} failed: ${reason}. What should the test do next?`);
+      const requestId = randomBytes(16).toString("hex");
+      const timeoutMs = port.timeoutMs ?? DEFAULT_ASSISTANCE_TIMEOUT_MS;
+      const expiresAt = new Date(this.ctx.now().getTime() + timeoutMs).toISOString();
+      const resume = await this.ctx.pauseBudgets?.(timeoutMs);
+      // Chromium is local and has no sandbox idle timer. A cheap read also keeps attached remote sessions active.
+      const keepAlive = setInterval(() => { void this.page.evaluate(() => document.readyState).catch(() => {}); }, 15_000);
+      const request = { requestId, scenarioId: scenario.id, failedStep: failed, reason, question, url: this.redactString(this.url()), screenshotArtifactId, expiresAt };
+      let answer;
+      try {
+        await port.prepare?.(request, this.ctx.signal);
+        await this.ctx.publish({ type: "assistance.requested", message: "The test is stuck — tell it what to do next", payload: {
+          requestId, scenarioId: scenario.id, stepId: failed.id, question, url: this.redactString(this.url()), screenshotArtifactId, expiresAt,
+        } });
+        answer = await port.ask(request, this.ctx.signal);
+      } finally {
+        clearInterval(keepAlive);
+        await resume?.();
+      }
+      if (this.ctx.signal.aborted) throw this.ctx.signal.reason;
+      await this.ctx.publish({ type: "assistance.answered", message: answer.kind === "instruction" ? "The user supplied an instruction; planning the next steps" : answer.kind === "stop" ? "The user stopped this scenario" : "The request for help timed out", payload: {
+        requestId, answer: answer.kind, ...(answer.kind === "instruction" ? { instruction: this.redactString(answer.text) } : {}),
+      } });
+      if (answer.kind !== "instruction") return null;
+      const steps = await this.replan(scenario, planned, at, false, this.redactString(answer.text));
+      if (steps) return steps;
+      previous = true;
+    }
+    return null;
+  }
+
   /** Whether the step's click opened a sign-in prompt (KI-073). */
   private promptedSignIn(step: PlannedStep): boolean {
     return this.steps.some((s) => s.plannedStepId === step.id && s.kind === "act" && s.onGoldenPath && s.signInPrompt === true);
@@ -772,7 +823,7 @@ class ExplorationRun {
    * repeated another way (a destructive step that may have run), or the replanner has no usable answer. Publishes
    * `plan.revised` when there is one.
    */
-  private async replan(scenario: TestScenario, planned: PlannedStep[], at: number, signIn = false): Promise<PlannedStep[] | null> {
+  private async replan(scenario: TestScenario, planned: PlannedStep[], at: number, signIn = false, guidance?: string): Promise<PlannedStep[] | null> {
     const failed = planned[at]!;
     if (!this.replanner || (!signIn && isDestructiveStep(failed)) || this.input.budget.aborted || this.pageClosed()) return null;
     const ids = [...this.input.plan.scenarios.flatMap((s) => s.steps), ...[...this.revised.values()].flat(), ...planned].map((s) => Number(/^PS-(\d+)$/.exec(s.id)?.[1] ?? 0));
@@ -787,6 +838,7 @@ class ExplorationRun {
         done: planned.slice(0, at),
         failed,
         ...(signIn ? { signIn: true } : {}),
+        ...(guidance ? { guidance } : {}),
         remaining: planned.slice(at + 1),
         url: this.url(),
         inventory: await this.readInventory(),
@@ -808,7 +860,7 @@ class ExplorationRun {
     if (steps.some((s) => isDestructiveStep(s) && !(signIn && asPlanned.has(s.description.trim().toLowerCase())))) return null;
     await this.ctx.publish({
       type: "plan.revised",
-      message: `Step ${failed.id} ${signIn ? "opened a sign-in prompt" : "failed"}: the rest of the scenario was planned again (${steps.length} steps)`,
+      message: `Step ${failed.id} ${guidance ? "received the user’s instruction" : signIn ? "opened a sign-in prompt" : "failed"}: the rest of the scenario was planned again (${steps.length} steps)`,
       payload: { scenarioId: scenario.id, afterStepId: failed.id, stepCount: steps.length },
     });
     return steps;

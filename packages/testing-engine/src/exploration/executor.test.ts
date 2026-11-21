@@ -1627,6 +1627,77 @@ describe("runExploration (fake explorer)", () => {
       expect(events.filter((e) => e.type === "plan.revised").map((e) => e.payload)).toEqual([{ scenarioId: "SC-1", afterStepId: "PS-2", stepCount: 2 }]);
     });
 
+    it("asks with fresh screenshot evidence, then runs a guided replan", async () => {
+      const { ctx, events } = fakeCtx();
+      const mem = memoryStore();
+      const asked: import("./assistance").AssistanceRequest[] = [];
+      const { r, asked: replans } = replanner([null, [
+        { id: "PS-4", kind: "navigate", description: "Open https://shop.test/grills", criterionIds: [], destructive: false },
+        { id: "PS-5", kind: "capture_checkpoint", description: "Capture", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false },
+      ]]);
+      const outcome = await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, {
+        store: mem.store, recorder: fakeRecorder().recorder, replanner: r,
+        assistance: { async ask(request) { asked.push(request); return { kind: "instruction", text: "Open the grills page", by: "user_1" }; } },
+      });
+      expect(asked).toHaveLength(1);
+      expect(asked[0]!.screenshotArtifactId).toBe(`art_${mem.screenshots.findIndex((x) => x.fileName === "assistance-1.png") + 1}`);
+      expect(asked[0]!.question).toContain("PS-2");
+      expect(replans[1]!.guidance).toBe("Open the grills page");
+      expect(outcome.facts.map((f) => f.key)).toContain("cartCount");
+      expect(events.filter((e) => e.type.startsWith("assistance.")).map((e) => e.type)).toEqual(["assistance.requested", "assistance.answered"]);
+      expect(events.find((e) => e.type === "plan.revised")?.message).toContain("user’s instruction");
+    });
+
+    it.each(["stop", "timeout"] as const)("%s keeps today's stop behavior", async (kind) => {
+      const { ctx, events } = fakeCtx();
+      const outcome = await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, {
+        store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: null, assistance: { async ask() { return { kind }; } },
+      });
+      expect(outcome.facts).toEqual([]);
+      expect(outcome.revisedPlan).toBeUndefined();
+      expect(events.find((e) => e.type === "assistance.answered")?.payload).toMatchObject({ answer: kind });
+    });
+
+    it("asks at most three times when guidance cannot produce a usable replan", async () => {
+      const { ctx } = fakeCtx();
+      const questions: string[] = [];
+      await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, {
+        store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: null,
+        assistance: { async ask(request) { questions.push(request.question); return { kind: "instruction", text: "Try again", by: "u" }; } },
+      });
+      expect(questions).toHaveLength(3);
+      expect(questions[1]).toContain("previous instruction could not be turned into usable steps");
+    });
+
+    it("cancelling during the question aborts immediately and closes the browser", async () => {
+      const { ctx } = fakeCtx();
+      const controller = new AbortController();
+      ctx.signal = controller.signal;
+      const session = lost();
+      await expect(runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, {
+        store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: null,
+        assistance: { async ask(_request, signal) { controller.abort(new CancelledError()); signal.throwIfAborted(); return { kind: "stop" }; } },
+      })).rejects.toBeInstanceOf(CancelledError);
+      expect(session.closed).toBe(true);
+    });
+
+    it("can ask after both automatic replans are used up", async () => {
+      const { ctx } = fakeCtx();
+      const again = (id: number): PlannedStep[] => [
+        { id: `PS-${id}`, kind: "click", description: grills, criterionIds: [], destructive: false },
+        { id: `PS-${id + 1}`, kind: "capture_checkpoint", description: "Capture", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false },
+      ];
+      const { r, asked } = replanner([again(4), again(6), [{ id: "PS-8", kind: "navigate", description: "Open https://shop.test/grills", criterionIds: [], destructive: false }]]);
+      let requests = 0;
+      const outcome = await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, {
+        store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r,
+        assistance: { async ask() { requests++; return { kind: "instruction", text: "Open its URL", by: "u" }; } },
+      });
+      expect(requests).toBe(1);
+      expect(asked.map((x) => x.guidance)).toEqual([undefined, undefined, "Open its URL"]);
+      expect(outcome.revisedPlan?.scenarios[0]!.steps.at(-1)!.id).toBe("PS-8");
+    });
+
     it("no usable replan: the scenario stops as before, and the plan is not revised", async () => {
       const { ctx } = fakeCtx();
       const { r } = replanner([null]);

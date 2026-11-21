@@ -1,3 +1,6 @@
+import { RunRepository } from "@platform/db";
+import { runAssistKey, runAssistAnswerKey, runAssistChannel } from "@platform/event-bus";
+import { runScope, actorId } from "../auth/principal";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { ApiDeps } from "../deps";
@@ -22,6 +25,34 @@ export function parseOr400<T>(schema: z.ZodType<T>, value: unknown): T {
 
 export async function testRunRoutes(app: FastifyInstance, deps: ApiDeps): Promise<void> {
   const service = new TestRunService(deps);
+
+  // Claim + retain + notify atomically: two tabs cannot both answer, and pub/sub reconnects lose no answer (2026-11-21).
+  app.post("/v1/test-runs/:runId/assistance/:requestId", async (req, reply) => {
+    const { runId, requestId } = parseOr400(RunParams.extend({ requestId: z.string().min(1).max(100) }), req.params);
+    const body = parseOr400(z.union([
+      z.object({ instruction: z.string().trim().min(1).max(2000) }).strict(),
+      z.object({ stop: z.literal(true) }).strict(),
+    ]), req.body);
+    const run = await new RunRepository(deps.db).getRequired(runScope(req.principal), runId);
+    const redis = deps.assistanceRedis;
+    const refuse = () => new HttpError(409, "ASSISTANCE_NOT_PENDING", "This question is no longer waiting for an answer");
+    if (!redis || run.lifecycle !== "EXPLORING" || run.cancelRequestedAt) throw refuse();
+    const answer = "instruction" in body ? { kind: "instruction", text: body.instruction, by: actorId(req.principal) ?? "service" } : { kind: "stop" };
+    const accepted = await redis.eval(`
+      local pending = redis.call('GET', KEYS[1])
+      if not pending then return 0 end
+      local request = cjson.decode(pending)
+      if request.requestId ~= ARGV[1] then return 0 end
+      local ttl = redis.call('PTTL', KEYS[1])
+      if ttl <= 0 then return 0 end
+      redis.call('SET', KEYS[2], ARGV[2], 'PX', ttl + 60000)
+      redis.call('DEL', KEYS[1])
+      redis.call('PUBLISH', ARGV[3], ARGV[1])
+      return 1
+    `, 2, runAssistKey(runId), runAssistAnswerKey(runId, requestId), requestId, JSON.stringify(answer), runAssistChannel(runId));
+    if (accepted !== 1) throw refuse();
+    return reply.status(202).send({ accepted: true });
+  });
 
   app.post("/v1/test-runs", async (req, reply) => {
     const key = req.headers["idempotency-key"];

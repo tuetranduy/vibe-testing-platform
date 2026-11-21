@@ -44,6 +44,8 @@ export interface StageContext {
   boundary(): Promise<void>;
   /** A signal that fires after `ms` or when the run signal fires, whichever is first. */
   budgetSignal(ms: number): AbortSignal;
+  /** Pause deadline and stage clocks while waiting for a person, retaining cancellation (2026-11-21). */
+  pauseBudgets?(maxWaitMs: number): Promise<() => Promise<void>>;
   now(): Date;
   /**
    * The run's model client: its recorded provider, model and reasoning level (the worker builds one per run).

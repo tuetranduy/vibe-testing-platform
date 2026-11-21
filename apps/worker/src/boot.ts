@@ -54,6 +54,8 @@ export async function bootWorker(opts: BootOptions = {}): Promise<void> {
   const runLlm = createRunLlmFactory({ db: handle.db, secretsKey: env.secretsKey, env, logger, metrics, ...(transport ? { transport } : {}) });
   // Ruling R7, per run: both engines, built once; a run whose choice is the fake engine runs the fake stages.
   const engines = createEngines(env, {
+    // A scripted transport has no person watching it (CI E2E); preserve its failure behavior (2026-11-21).
+    ...(transport ? {} : { redis: publisher }),
     db: handle.db,
     logger,
     storage,

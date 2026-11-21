@@ -49,6 +49,7 @@ describe("API proxy allow-list", () => {
     ["POST", "/api/v1/test-runs/run_1/criteria/confirm", POST],
     ["POST", "/api/v1/test-runs/run_1/criteria/AC-2/revise", POST],
     ["POST", "/api/v1/test-runs/run_1/criteria/proposals/revise-criterion__run_1__0b6f3a52-6c2e-4a8e-9f6b-2d6c1b1f6a10/accept", POST],
+    ["POST", "/api/v1/test-runs/run_1/assistance/request_1", POST],
     ["POST", "/api/v1/test-runs/run_1/cancel", POST],
     ["GET", "/api/v1/test-runs/run_1/report", GET],
     ["GET", "/api/v1/test-runs/run_1/artifacts/art_1/url?reveal=true", GET],
@@ -338,6 +339,7 @@ describe("API proxy host allow-list (DNS rebinding)", () => {
 
   it.each([
     ["GET", "/api/v1/test-runs/run_1/artifacts/art_1/url?reveal=true", GET],
+    ["POST", "/api/v1/test-runs/run_1/assistance/request_1", POST],
     ["POST", "/api/v1/test-runs/run_1/cancel", POST],
     ["PUT", "/api/v1/test-runs/run_1/criteria", PUT],
   ] as const)("rejects %s %s marked Sec-Fetch-Site: cross-site", async (method, path, handler) => {
