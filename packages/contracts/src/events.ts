@@ -84,6 +84,8 @@ export const TestEventSchema = z.discriminatedUnion("type", [
       blockReason: BlockReasonSchema.nullable(),
     }),
   ),
+  // Only off-track reviews are announced; observations stay on the redacted step (2026-11-21).
+  ev("step.reviewed", z.object({ stepId: z.string(), verdict: z.literal("off_track") })),
   // No value — values can be personal data.
   ev(
     "fact.observed",

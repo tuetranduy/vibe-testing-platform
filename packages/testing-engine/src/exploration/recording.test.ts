@@ -45,7 +45,7 @@ function context(secrets: Record<string, string> = {}, signal = new AbortControl
     boundary: async () => {},
     budgetSignal: () => new AbortController().signal,
     now: () => new Date(),
-    llm: new LlmClient({ transport: new FakeTransport(), model: "claude-sonnet-5", logger: { warn() {} } }),
+    llm: new LlmClient({ transport: new FakeTransport().enqueue({ json: { verdict: "on_track", observation: "The shop opened", reason: "Ready for the next step" } }), model: "claude-sonnet-5", logger: { warn() {} } }),
   } as unknown as StageContext;
   return { ctx, events };
 }

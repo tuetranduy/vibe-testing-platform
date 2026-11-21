@@ -49,6 +49,14 @@ export const CriterionJudgmentSchema = z.object({
 });
 export type CriterionJudgment = z.infer<typeof CriterionJudgmentSchema>;
 
+/** Whether the site accepted the planned action, rather than merely the browser performing it (2026-11-21). */
+export const StepReviewSchema = z.object({
+  verdict: z.enum(["on_track", "off_track"]),
+  observation: z.string().max(1000),
+  reason: z.string().max(1000),
+});
+export type StepReview = z.infer<typeof StepReviewSchema>;
+
 export const ExplorationStepSchema = z.object({
   id: z.string(),
   runId: z.string(),
@@ -92,6 +100,7 @@ export const ExplorationStepSchema = z.object({
   siteError: z.string().max(200).optional(),
   /** A `judge` step's judgment (2026-10-07); absent on every other step, and on a judge step that failed. */
   judgment: CriterionJudgmentSchema.optional(),
+  review: StepReviewSchema.optional(),
 });
 export type ExplorationStep = z.infer<typeof ExplorationStepSchema>;
 

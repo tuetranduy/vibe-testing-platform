@@ -1223,3 +1223,23 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   live run.
 - **Not handled:** the replanner sees the page's inventory only (no screenshot, HTML or network log), so whether it
   reads the terms dialog and ticks the box is not shown; see the page-context work that follows.
+
+
+## KI-082 — Page context and step review have not been validated live
+- **Severity:** Medium (the new review decides whether a successful browser action needs a different plan).
+- **Where:** `packages/testing-engine/src/exploration/page-context.ts`, `step-review.ts`, `executor.ts`, `replanner.ts`, `way-there.ts`.
+- **Implemented (2026-11-21):** each successful planned action is reviewed against the requirement and remaining steps,
+  using visible dialogs, sanitized live DOM from reachable frames (40,000 characters, dialogs first), a viewport JPEG
+  re-encoded from the executor's existing screenshot, and up to 50 recent document/fetch/XHR entries with query strings
+  removed. Native dialog messages are recorded while retaining existing dialog handling (including Playwright's default
+  dismissal). An off-track review uses the existing two-replan limit; an unusable replan leaves the remaining plan in
+  place. Reviews are schema-validated on steps and only off-track reviews publish `step.reviewed`. Waits and checkpoints
+  do not trigger reviews. The replanner and way-there chooser receive page context too. Captures return partial evidence
+  within five seconds, and cancellation and exploration budgets still apply.
+- **Checked:** browser-backed sanitization, visible and hidden modals, reachable frame dialogs, JPEG size, native alerts;
+  bounded and redacted network windows; an executor regression with fake model replies for the KI-081 terms dialog,
+  showing the repaired close-dialog / tick-agree / retry-checkout path and `plan.revised`.
+- **Open:** rerun `run_0mwps9akjcc59828240d1b625`'s checkout on demowebshop with DeepSeek Flash and score the reviewer,
+  replanner and way-there prompts across the offered models (KI-078). Latency and false off-track rates have no live
+  baseline. Inaccessible frames and captures that time out contribute partial evidence; an image that cannot be
+  converted or exceeds its size cap is omitted. Stagehand's own internal model calls still use Stagehand's context.
