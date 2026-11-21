@@ -23,7 +23,7 @@ function harness(opts: { startDelayMs?: number; openError?: unknown; startError?
   const log: string[] = [];
   const logged: { obj: object; msg?: string }[] = [];
   const redact = (v: unknown) => v;
-  const llm = new LlmClient({ transport: new FakeTransport(), model: "claude-sonnet-5", logger: { warn() {} } });
+  const llm = new LlmClient({ transport: new FakeTransport().enqueue({ json: { verdict: "on_track", observation: "The shop opened", reason: "Ready for the next step" } }), model: "claude-sonnet-5", logger: { warn() {} } });
   const ctx = {
     runId: "run_stage",
     request: { targetUrl: "https://shop.test/", environment: "staging", testData: {}, secretNames: [], options: { maxExplorationSteps: 10, allowDestructiveActions: opts.allowDestructiveActions ?? false } },

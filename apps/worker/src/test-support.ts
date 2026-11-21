@@ -307,6 +307,8 @@ export function fakeExploration(opts: { facts?: Record<string, FakeFactValue> } 
       recorder,
       // A browserless page cannot be recorded (V1.3 recordings are covered by sandbox/session-recording.test.ts).
       startRecording: async () => null,
+      // The scripted model answers the stages these tests are about; reviews are covered by the engine's tests.
+      stepReviewer: null,
     },
   };
 }

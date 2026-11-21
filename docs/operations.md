@@ -3,6 +3,24 @@
 How to run the AI Testing Platform V1 in production: topology, network policy, key rotation,
 metrics and alerts, logs, retention, and the release checks.
 
+## Exploration assistance (2026-11-21)
+
+`ASSISTANCE_TIMEOUT_MS` on the worker defaults to `600000` (ten minutes; integer 1–86400000). A real engine
+with Redis asks at most three questions per run after automatic recovery fails. Fake engines and scripted test
+engines without an assistance port retain their existing behavior. The browser stays open and receives a cheap
+read every 15 seconds; the local sandbox has no independent idle timeout. Cancellation keeps its usual live path.
+
+Pending state uses `run-assist-pending:<runId>` with a TTL matching the request; answers use a
+`run-assist-answer:<runId>:<requestId>` key lasting through the request deadline plus one minute and `run-assist:<runId>` notifications. Redis is appropriate for this
+short-lived coordination: a lost worker is still reaped and cannot resume that browser, while the durable
+`assistance.requested` / `assistance.answered` events retain the timeline and restore the page after reload.
+The API atomically claims the open question and retains the answer, so another tab receives 409 and a lost
+notification cannot lose an accepted answer. An expired pending key cannot be answered; the worker closes an unanswered question at its timeout.
+
+The worker pauses all stage timers and its deadline timer while awaiting the user. It reserves the maximum wait
+in the persisted deadline before asking (for the independent reaper), then reclaims unused time and resumes with
+the exact remaining budget. Heartbeats continue, so worker crashes still end as `WORKER_LOST`.
+
 ## Topology
 
 | Service | Talks to | Ports |

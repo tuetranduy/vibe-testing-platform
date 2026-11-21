@@ -79,6 +79,7 @@ const deps: ApiDeps = {
   tokenThrottle: redisTokenThrottle(redis),
   db: handle.db,
   redis,
+  assistanceRedis: redis,
   hub: new RunEventHub(subscriber),
   queue,
   revisions,

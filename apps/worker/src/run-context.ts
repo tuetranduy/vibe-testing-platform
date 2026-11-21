@@ -21,6 +21,7 @@ import {
   type RunPorts,
   type StageContext,
 } from "@platform/testing-engine";
+import { PausableTimer } from "./pausable-timer";
 import type { WorkerDeps } from "./deps";
 import { NO_VERDICT, observeStage } from "./metrics";
 
@@ -81,9 +82,10 @@ export async function createRunContext(
   const abort = (reason: Error) => {
     if (!controller.signal.aborted) controller.abort(reason);
   };
-  const deadlineTimer = setTimeout(
-    () => abort(new DeadlineExceededError()),
+  const timers: PausableTimer[] = [];
+  const deadlineTimer = new PausableTimer(
     Math.max(0, opts.deadlineAt.getTime() - now().getTime()),
+    () => abort(new DeadlineExceededError()),
   );
   const unwatch = await deps.cancelWatcher.watch(run.id, () => abort(new CancelledError()));
   let lastBeat: Promise<void> = Promise.resolve();
@@ -115,7 +117,37 @@ export async function createRunContext(
       if (current?.cancelRequestedAt) abort(new CancelledError());
       if (controller.signal.aborted) throw controller.signal.reason;
     },
-    budgetSignal: (ms) => AbortSignal.any([controller.signal, AbortSignal.timeout(Math.max(0, ms))]),
+    budgetSignal: (ms) => {
+      const budget = new AbortController();
+      timers.push(new PausableTimer(ms, () => budget.abort(new DOMException("Stage budget exhausted", "TimeoutError"))));
+      return AbortSignal.any([controller.signal, budget.signal]);
+    },
+    async pauseBudgets(maxWaitMs) {
+      controller.signal.throwIfAborted();
+      deadlineTimer.pause();
+      for (const timer of timers) timer.pause();
+      const started = now().getTime();
+      const oldDeadline = opts.deadlineAt.getTime();
+      // The reaper reads the DB clock, not our timer. Reserve the bounded wait there up front, then reclaim
+      // unused time on resume. Mutate the shared Date so the browser/model client sees the extension too (2026-11-21).
+      opts.deadlineAt.setTime(oldDeadline + maxWaitMs);
+      try {
+        await runs.setDeadline(run.id, opts.deadlineAt);
+      } catch (err) {
+        opts.deadlineAt.setTime(oldDeadline);
+        deadlineTimer.resume();
+        for (const timer of timers) timer.resume();
+        throw err;
+      }
+      return async () => {
+        opts.deadlineAt.setTime(oldDeadline + Math.max(0, now().getTime() - started));
+        try { await runs.setDeadline(run.id, opts.deadlineAt); }
+        finally {
+          deadlineTimer.resume();
+          for (const timer of timers) timer.resume();
+        }
+      };
+    },
     now,
     llm,
   };
@@ -179,7 +211,8 @@ export async function createRunContext(
       if (disposed) return;
       disposed = true;
       try {
-        clearTimeout(deadlineTimer);
+        deadlineTimer.dispose();
+        for (const timer of timers) timer.dispose();
         clearInterval(heartbeat);
         await lastBeat;
         unwatch();

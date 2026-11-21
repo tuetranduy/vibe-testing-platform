@@ -71,6 +71,9 @@ import { SIGN_IN_STATE_SCRIPT, openedSignIn, type SignInState } from "./sign-in-
 import { SITE_ERROR_SCRIPT, siteErrorOf, type PageHeadline } from "./site-error";
 import { MAX_REPLANS, createReplanner, type Replanner } from "./replanner";
 import { captureNamedFact } from "./named-facts";
+import { createPageContextRecorder, type PageContext } from "./page-context";
+import { createStepReviewer, type StepReviewer } from "./step-review";
+import { DEFAULT_ASSISTANCE_TIMEOUT_MS, MAX_ASSISTANCE_REQUESTS, type AssistancePort } from "./assistance";
 
 /**
  * Exploration executor (Task 14): runs the confirmed plan's scenarios (V1.1 F9: in order, each from a clean
@@ -253,6 +256,7 @@ export interface ExplorationInput {
 
 export interface ExplorationDeps {
   store: ExplorationStore;
+  assistance?: AssistancePort | null;
   recorder?: RecorderPort;
   /** Makes the values nobody provided (2026-10-07); default `createInputGenerator(ctx.llm)`. */
   inputs?: InputGenerator;
@@ -271,6 +275,8 @@ export interface ExplorationDeps {
    * Null: a failed step ends its scenario.
    */
   replanner?: Replanner | null;
+  /** Reviews every successful planned action against the actual page (2026-11-21); null disables model review. */
+  stepReviewer?: StepReviewer | null;
   /** Delay between `wait_for` polls. */
   pollIntervalMs?: number;
   /** How long a click's own requests may hold the next step (KI-049); default ACTION_REQUESTS_TIMEOUT_MS. */
@@ -609,6 +615,7 @@ class ExplorationRun {
   private readonly max: number;
   /** Planned steps started, of every scenario: what `max` limits. */
   private plannedCount = 0;
+  private assistanceCount = 0;
   private readonly visibleFacts: Set<string>;
   private readonly inputs: InputGenerator;
   /** Values generated for this run, by `source:key`: made once, reused by every later fill of the key. */
@@ -618,6 +625,11 @@ class ExplorationRun {
   private readonly judge: CriterionJudge | null;
   private readonly wayThere: WayThere | null;
   private readonly replanner: Replanner | null;
+  private readonly stepReviewer: StepReviewer | null;
+  private readonly pageContext: ReturnType<typeof createPageContextRecorder>;
+  private lastViewport: Buffer | null = null;
+  /** Delay persistence until the action has its review; rows remain immutable once announced (2026-11-21). */
+  private pendingReview: ExplorationStep[] | null = null;
   /** Each replanned scenario's steps as exploration ran them (2026-11-19). */
   private readonly revised = new Map<string, PlannedStep[]>();
   private readonly earlyCheckpoints = new Map<string, { stepId: string; facts: Map<string, ObservedFact>; artifacts: string[] | null }>();
@@ -634,6 +646,8 @@ class ExplorationRun {
     this.judge = deps.judge !== undefined ? deps.judge : createCriterionJudge(ctx.llm);
     this.wayThere = deps.wayThere !== undefined ? deps.wayThere : createWayThere(ctx.llm);
     this.replanner = deps.replanner !== undefined ? deps.replanner : createReplanner(ctx.llm);
+    this.stepReviewer = deps.stepReviewer !== undefined ? deps.stepReviewer : createStepReviewer(ctx.llm);
+    this.pageContext = createPageContextRecorder(this.page, ctx.redact);
     this.policy = actionPolicyFor(request);
     this.max = request.options.maxExplorationSteps;
     this.multiScenario = input.plan.scenarios.length > 1;
@@ -663,6 +677,12 @@ class ExplorationRun {
    * complete (COMPLETED when all did); `scenarioStops` gives each one's, when there are several.
    */
   async execute(): Promise<ExplorationOutcome> {
+    try { return await this.executeScenarios(); } finally {
+      try { await this.flushReview(); } finally { this.pageContext.dispose(); }
+    }
+  }
+
+  private async executeScenarios(): Promise<ExplorationOutcome> {
     const scenarios = this.input.plan.scenarios;
     const stops: Record<string, ExplorationStopReason> = {};
     let exhausted: ExplorationStopReason | null = null;
@@ -715,8 +735,19 @@ class ExplorationRun {
 
     await this.ctx.boundary();
     if (opensTarget) this.startPlanned();
-    await this.withRetry(() => this.navigate(targetUrl, opensTarget ? first : null));
-    if (opensTarget) await this.judgeCriteria(first, judgeAfter.get(first.id) ?? []);
+    if (opensTarget && this.stepReviewer) this.pendingReview = [];
+    try {
+      await this.withRetry(() => this.navigate(targetUrl, opensTarget ? first : null));
+    } catch (err) { await this.flushReview(); throw err; }
+    if (opensTarget) {
+      const review = await this.reviewAction(first, [], planned.slice(1));
+      await this.flushReview();
+      if (review?.verdict === "off_track" && replans < MAX_REPLANS) {
+        const steps = await this.replan(scenario, planned, 0, false, { observation: review.observation, page: review.page });
+        if (steps) { replans++; planned.splice(1, planned.length, ...steps); this.revised.set(scenario.id, [...planned]); judgeAfter = this.judgeSchedule({ ...scenario, steps: planned }); }
+      }
+      await this.judgeCriteria(first, judgeAfter.get(first.id) ?? []);
+    }
     for (let i = opensTarget ? 1 : 0; i < planned.length; i++) {
       const step = planned[i]!;
       await this.ctx.boundary();
@@ -728,20 +759,30 @@ class ExplorationRun {
         : undefined;
       // What the page shows before the action, so a notification it brings up can be told apart (KI-059).
       const before = next?.kind === "capture_checkpoint" ? await this.notificationBaseline() : null;
-      const revise = (steps: PlannedStep[]) => {
-        replans++;
+      const revise = (steps: PlannedStep[], guided = false) => {
+        if (!guided) replans++;
         planned.splice(i + 1, planned.length, ...steps);
         this.revised.set(scenario.id, [...planned]);
         judgeAfter = this.judgeSchedule({ ...scenario, steps: planned });
       };
+      let review: Awaited<ReturnType<ExplorationRun["reviewAction"]>> = null;
       try {
-        await this.executePlanned(step);
+        if (this.stepReviewer && step.kind !== "wait_for" && step.kind !== "capture_checkpoint") this.pendingReview = [];
+        try {
+          await this.executePlanned(step);
+          review = await this.reviewAction(step, planned.slice(0, i), planned.slice(i + 1));
+        } finally { await this.flushReview(); }
       } catch (err) {
-        if (!(err instanceof Stop) || err.reason !== "COMPLETED" || replans >= MAX_REPLANS) throw err;
-        const steps = await this.replan(scenario, planned, i);
+        if (!(err instanceof Stop) || err.reason !== "COMPLETED") throw err;
+        const automatic = replans < MAX_REPLANS ? await this.replan(scenario, planned, i) : null;
+        const steps = automatic ?? await this.askForHelp(scenario, planned, i);
         if (!steps) throw err;
-        revise(steps);
+        revise(steps, automatic === null);
         continue;
+      }
+      if (review?.verdict === "off_track" && replans < MAX_REPLANS) {
+        const steps = await this.replan(scenario, planned, i, false, { observation: review.observation, page: review.page });
+        if (steps) { revise(steps); continue; }
       }
       // Its click opened a sign-in prompt the next step does not get past: the way past it, then the step again (KI-080).
       const after = planned[i + 1];
@@ -761,6 +802,79 @@ class ExplorationRun {
     await this.judgeCriteria(null, judgeAfter.get(null) ?? []);
   }
 
+  /** No checkpoint shortcut: a URL change can still land on an error page, and a fill can reveal validation. */
+  private async reviewAction(step: PlannedStep, done: PlannedStep[], remaining: PlannedStep[]) {
+    if (!this.stepReviewer || step.kind === "wait_for" || step.kind === "capture_checkpoint") return null;
+    await this.reserve();
+    try {
+      const page = await this.pageContext.capture(this.lastViewport, this.input.budget);
+      await this.reserve();
+      const review = await this.stepReviewer.review({
+        requirement: this.input.requirement.originalText, done, step, remaining, page,
+        runId: this.ctx.runId, signal: this.input.budget, deadlineAt: this.ctx.deadlineAt, redact: this.ctx.redact,
+      });
+      await this.reserve();
+      const recorded = this.steps.findLast((s) => s.plannedStepId === step.id && s.onGoldenPath);
+      if (recorded) {
+        recorded.review = ExplorationStepSchema.shape.review.parse(this.ctx.redact(review));
+      }
+      return { ...review, page };
+    } catch (err) { this.rethrowIfFatal(err); return null; }
+  }
+
+  private async flushReview(): Promise<void> {
+    const pending = this.pendingReview;
+    this.pendingReview = null;
+    for (const step of pending ?? []) await this.persistStep(step);
+  }
+
+  /**
+   * Ask only after ordinary recovery failed (2026-11-21). Keep the page open; fresh screenshots use the same artifact
+   * path as step evidence. Both clocks pause, but cancellation remains live. No port preserves scripted behavior.
+   */
+  private async askForHelp(scenario: TestScenario, planned: PlannedStep[], at: number): Promise<PlannedStep[] | null> {
+    const port = this.deps.assistance;
+    const failed = planned[at]!;
+    if (!port || isDestructiveStep(failed) || this.pageClosed() || this.plannedCount >= this.max) return null;
+    let previous = false;
+    while (this.assistanceCount < MAX_ASSISTANCE_REQUESTS) {
+      await this.reserve();
+      if (this.pageClosed()) return null;
+      const [screenshotArtifactId] = await this.screenshot(`assistance-${this.assistanceCount + 1}.png`, "where the test needs help");
+      if (!screenshotArtifactId) return null;
+      this.assistanceCount++;
+      const reason = this.steps.findLast((s) => s.plannedStepId === failed.id && s.error)?.error ?? "The step could not be completed";
+      const question = this.redactString(`${previous ? "The previous instruction could not be turned into usable steps. " : ""}Step ${failed.id}: ${failed.description} failed: ${reason}. What should the test do next?`);
+      const requestId = randomBytes(16).toString("hex");
+      const timeoutMs = port.timeoutMs ?? DEFAULT_ASSISTANCE_TIMEOUT_MS;
+      const expiresAt = new Date(this.ctx.now().getTime() + timeoutMs).toISOString();
+      const resume = await this.ctx.pauseBudgets?.(timeoutMs);
+      // Chromium is local and has no sandbox idle timer. A cheap read also keeps attached remote sessions active.
+      const keepAlive = setInterval(() => { void this.page.evaluate(() => document.readyState).catch(() => {}); }, 15_000);
+      const request = { requestId, scenarioId: scenario.id, failedStep: failed, reason, question, url: this.redactString(this.url()), screenshotArtifactId, expiresAt };
+      let answer;
+      try {
+        await port.prepare?.(request, this.ctx.signal);
+        await this.ctx.publish({ type: "assistance.requested", message: "The test is stuck — tell it what to do next", payload: {
+          requestId, scenarioId: scenario.id, stepId: failed.id, question, url: this.redactString(this.url()), screenshotArtifactId, expiresAt,
+        } });
+        answer = await port.ask(request, this.ctx.signal);
+      } finally {
+        clearInterval(keepAlive);
+        await resume?.();
+      }
+      if (this.ctx.signal.aborted) throw this.ctx.signal.reason;
+      await this.ctx.publish({ type: "assistance.answered", message: answer.kind === "instruction" ? "The user supplied an instruction; planning the next steps" : answer.kind === "stop" ? "The user stopped this scenario" : "The request for help timed out", payload: {
+        requestId, answer: answer.kind, ...(answer.kind === "instruction" ? { instruction: this.redactString(answer.text) } : {}),
+      } });
+      if (answer.kind !== "instruction") return null;
+      const steps = await this.replan(scenario, planned, at, false, { guidance: this.redactString(answer.text) });
+      if (steps) return steps;
+      previous = true;
+    }
+    return null;
+  }
+
   /** Whether the step's click opened a sign-in prompt (KI-073). */
   private promptedSignIn(step: PlannedStep): boolean {
     return this.steps.some((s) => s.plannedStepId === step.id && s.kind === "act" && s.onGoldenPath && s.signInPrompt === true);
@@ -772,7 +886,13 @@ class ExplorationRun {
    * repeated another way (a destructive step that may have run), or the replanner has no usable answer. Publishes
    * `plan.revised` when there is one.
    */
-  private async replan(scenario: TestScenario, planned: PlannedStep[], at: number, signIn = false): Promise<PlannedStep[] | null> {
+  private async replan(
+    scenario: TestScenario,
+    planned: PlannedStep[],
+    at: number,
+    signIn = false,
+    { observation, page, guidance }: { observation?: string; page?: PageContext; guidance?: string } = {},
+  ): Promise<PlannedStep[] | null> {
     const failed = planned[at]!;
     if (!this.replanner || (!signIn && isDestructiveStep(failed)) || this.input.budget.aborted || this.pageClosed()) return null;
     const ids = [...this.input.plan.scenarios.flatMap((s) => s.steps), ...[...this.revised.values()].flat(), ...planned].map((s) => Number(/^PS-(\d+)$/.exec(s.id)?.[1] ?? 0));
@@ -785,8 +905,10 @@ class ExplorationRun {
         requirement: this.input.requirement,
         scenario,
         done: planned.slice(0, at),
-        failed,
+        failed: observation ? { ...failed, description: `${failed.description} — Review: ${observation}` } : failed,
+        page: page ?? await this.pageContext.capture(this.lastViewport, this.input.budget),
         ...(signIn ? { signIn: true } : {}),
+        ...(guidance ? { guidance } : {}),
         remaining: planned.slice(at + 1),
         url: this.url(),
         inventory: await this.readInventory(),
@@ -808,7 +930,7 @@ class ExplorationRun {
     if (steps.some((s) => isDestructiveStep(s) && !(signIn && asPlanned.has(s.description.trim().toLowerCase())))) return null;
     await this.ctx.publish({
       type: "plan.revised",
-      message: `Step ${failed.id} ${signIn ? "opened a sign-in prompt" : "failed"}: the rest of the scenario was planned again (${steps.length} steps)`,
+      message: `Step ${failed.id} ${guidance ? "received the user’s instruction" : signIn ? "opened a sign-in prompt" : observation ? "went off track" : "failed"}: the rest of the scenario was planned again (${steps.length} steps)`,
       payload: { scenarioId: scenario.id, afterStepId: failed.id, stepCount: steps.length },
     });
     return steps;
@@ -1908,6 +2030,7 @@ class ExplorationRun {
     let choice;
     try {
       choice = await this.wayThere.choose({
+        page: await this.pageContext.capture(this.lastViewport, this.input.budget),
         goal: this.redactString(step.description),
         url: this.url(),
         candidates: candidates.map((c, index) => ({ index, label: this.redactString(c.label) })),
@@ -2140,6 +2263,7 @@ class ExplorationRun {
         this.rethrowIfFatal(err);
       }
     }
+    if (!fullPageFirst) this.lastViewport = png;
     if (!png) {
       await this.ctx.publish({
         type: "artifact.omitted",
@@ -2215,12 +2339,21 @@ class ExplorationRun {
 
   /** Persists and publishes a step (once, never updated afterwards). */
   private async commit(step: ExplorationStep): Promise<void> {
-    await this.deps.store.saveStep(step);
     this.steps.push(step);
+    if (this.pendingReview) { this.pendingReview.push(step); return; }
+    await this.persistStep(step);
+  }
+
+  private async persistStep(step: ExplorationStep): Promise<void> {
+    await this.deps.store.saveStep(step);
     await this.ctx.publish({
       type: "step.recorded",
       message: `Step ${step.index + 1}: ${step.kind} ${OUTCOME_LABEL[step.outcome]}`,
       payload: { stepId: step.id, index: step.index, kind: step.kind, outcome: step.outcome, blockReason: step.blockReason },
+    });
+    if (step.review?.verdict === "off_track") await this.ctx.publish({
+      type: "step.reviewed", message: `Step ${step.plannedStepId} went off track: reviewing the remaining plan`,
+      payload: { stepId: step.id, verdict: "off_track" },
     });
   }
 

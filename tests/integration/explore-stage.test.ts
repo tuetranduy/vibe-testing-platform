@@ -312,7 +312,12 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
       // Every model call went through @platform/llm as EXPLORING.
       expect(records.length).toBe(transport.requests.length);
       expect(records.every((r) => r.runId === run.id && r.stage === "EXPLORING" && r.status === "SUCCESS")).toBe(true);
-      expect(new Set(transport.requests.map((r) => r.schemaName))).toEqual(new Set(["Observation", "Extraction", "Metadata"])); // never "Act"
+      expect(new Set(transport.requests.map((r) => r.schemaName))).toEqual(new Set(["Observation", "Extraction", "Metadata", "step_review"])); // never "Act"
+      // Each review saw the real page: its HTML and a screenshot (2026-11-21).
+      const review = transport.requests.find((r) => r.schemaName === "step_review")!;
+      const parts = review.messages[0]!.content as { type: string; text?: string }[];
+      expect(parts.some((p) => p.type === "image")).toBe(true);
+      expect(parts.some((p) => p.type === "text" && /<button/i.test(p.text ?? ""))).toBe(true);
     },
     180_000,
   );

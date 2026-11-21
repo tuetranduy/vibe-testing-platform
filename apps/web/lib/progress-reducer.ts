@@ -117,6 +117,7 @@ export interface StepInfo {
 }
 
 export interface ProgressState {
+  assistance: Extract<TestEvent, { type: "assistance.requested" }>["payload"] | null;
   latestSequence: number;
   stages: Record<StageId, StageState>;
   currentStage: StageId | null;
@@ -146,6 +147,7 @@ export const lifecycleRank = (l: RunLifecycle): number => RunLifecycleSchema.opt
 
 export function initialProgress(): ProgressState {
   return {
+    assistance: null,
     latestSequence: 0,
     stages: Object.fromEntries(ALL_STAGES.map((s) => [s, "pending"])) as Record<StageId, StageState>,
     currentStage: null,
@@ -184,6 +186,8 @@ function percentOf(s: ProgressState): number {
 
 function tone(e: TestEvent): Tone {
   switch (e.type) {
+    case "assistance.requested": return "warning";
+    case "assistance.answered": return "info";
     case "stage.completed":
     case "criteria.confirmed":
     case "test.generated":
@@ -250,6 +254,12 @@ export function progressReducer(state: ProgressState, e: TestEvent): ProgressSta
   };
 
   switch (e.type) {
+    case "assistance.requested":
+      next.assistance = e.payload;
+      break;
+    case "assistance.answered":
+      if (state.assistance?.requestId === e.payload.requestId) next.assistance = null;
+      break;
     case "stage.started": {
       const s = e.payload.stage;
       if (!isStage(s)) break;
@@ -328,6 +338,7 @@ export function progressReducer(state: ProgressState, e: TestEvent): ProgressSta
       break;
   }
 
+  if (next.outcome) next.assistance = null;
   next.stages = stages;
   next.currentStage = currentStage;
   next.percent = percentOf(next);

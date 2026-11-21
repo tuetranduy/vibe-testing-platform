@@ -144,6 +144,12 @@ describe("createReplanner", () => {
     expect(sent).toContain("https://shop.test/");
   });
 
+  it("leaves room for a reasoning model's thinking: the client's default output budget, not 4,000 tokens (KI-081)", async () => {
+    const { llm, transport } = setup({ json: { steps: good } });
+    await createReplanner(llm)!.replan(input(), call);
+    expect(transport.requests[0]!.maxTokens).toBeGreaterThanOrEqual(16_000);
+  });
+
   it("a step that opened a sign-in prompt: the message says so and how to get past it (KI-080)", async () => {
     const { llm, transport } = setup({ json: { steps: good } }, { json: { steps: good } });
     await createReplanner(llm)!.replan(input({ signIn: true }), call);

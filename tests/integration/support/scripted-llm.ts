@@ -69,6 +69,10 @@ export class ScriptedTransport implements LlmTransport {
       case "Metadata":
         json = { progress: "extracted", completed: true };
         break;
+      // The executor's review after each action (2026-11-21): the scripted pages always do what the plan expects.
+      case "step_review":
+        json = { verdict: "on_track", observation: "The page shows what the plan expects", reason: "Scripted" };
+        break;
       default:
         json = { text: "ok" };
     }

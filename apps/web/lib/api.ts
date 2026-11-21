@@ -166,6 +166,9 @@ export const getReport = (runId: string): Promise<TestReport> => request(TestRep
 export const reviewResult = (runId: string, criterionId: string, status: "PASS" | "FAIL"): Promise<TestReport> =>
   request(TestReportSchema, `${runPath(runId)}/results/${seg(criterionId)}/review`, { method: "POST", body: { status } });
 
+export const answerAssistance = (runId: string, requestId: string, body: { instruction: string } | { stop: true }) =>
+  request(z.object({ accepted: z.boolean() }), `${runPath(runId)}/assistance/${seg(requestId)}`, { method: "POST", body });
+
 export const getRun = (runId: string): Promise<TestRunSummary> => request(TestRunSummarySchema, runPath(runId));
 
 /** A manual rerun of a finished run's saved Playwright test (V1.1): a new run, no model call. */

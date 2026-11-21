@@ -1,3 +1,6 @@
+import { FakeTransport, LlmClient } from "@platform/llm";
+import { createStepReviewer } from "./step-review";
+import { createReplanner } from "./replanner";
 import {
   BrowserProviderError,
   CancelledError,
@@ -317,6 +320,39 @@ const summary = (steps: ExplorationStep[]) =>
 // ---------------------------------------------------------------------------------------------
 
 describe("runExploration (fake explorer)", () => {
+  it("reviews a successful Checkout on /cart, replans from the terms dialog, and executes the repaired path (KI-082)", async () => {
+    const { ctx, events } = fakeCtx({ targetUrl: "https://shop.test/cart" });
+    let modal = false;
+    const actions: string[] = [];
+    const session = new FakeSession({
+      observe: (instruction) => [{ selector: instruction, description: instruction, method: "click", arguments: [] }],
+      actOn: (el) => {
+        actions.push(el.selector);
+        if (el.selector === "Click Checkout" && actions.length === 1) modal = true;
+        if (el.selector === "Close dialog") modal = false;
+        return {};
+      },
+    });
+    Object.assign(session.page, { frames: () => [{ evaluate: async () => ({ title: "Cart", html: modal ? '<div role="dialog">Terms of service: Please accept the terms of service before the next step</div>' : '<input type="checkbox" id="agree">', dialogs: modal ? ["Terms of service: Please accept the terms of service before the next step"] : [] }) }] });
+    const onTrack = { verdict: "on_track", observation: "Ready", reason: "The next step applies" };
+    const reviewTransport = new FakeTransport().enqueue({ json: onTrack }, { json: { verdict: "off_track", observation: "Terms of service: Please accept the terms of service before the next step", reason: "Checkout was refused" } }, ...Array.from({ length: 4 }, () => ({ json: onTrack })));
+    const replanTransport = new FakeTransport().enqueue({ json: { steps: ["Close dialog", "Tick agree", "Click Checkout", "Checkout as Guest"].map((description) => ({ kind: "click", description, criterionIds: [], destructive: false, inputRef: null, checkpoint: null })) } });
+    const plan = planOf(step("navigate", "Open the target URL"), step("click", "Click Checkout"), step("click", "Checkout as Guest"));
+    const saved = memoryStore();
+    const out = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.signal }, {
+      store: saved.store, recorder: fakeRecorder({ describe: () => ({ role: "button", name: null, text: null }) }).recorder,
+      stepReviewer: createStepReviewer(new LlmClient({ transport: reviewTransport, model: "deepseek-flash" })),
+      replanner: createReplanner(new LlmClient({ transport: replanTransport, model: "deepseek-flash" })),
+    });
+    expect(out.stopReason).toBe("COMPLETED");
+    expect(actions).toEqual(["Click Checkout", "Close dialog", "Tick agree", "Click Checkout", "Checkout as Guest"]);
+    expect(JSON.stringify(replanTransport.requests[0]?.messages)).toContain("Please accept the terms of service before the next step");
+    expect(saved.steps.find((s) => s.plannedStepId === "PS-2" && s.kind === "act")?.review?.verdict).toBe("off_track");
+    expect(events.filter((e) => e.type === "step.reviewed")).toHaveLength(1);
+    expect(events.some((e) => e.type === "plan.revised")).toBe(true);
+    expect(session.listeners.get("dialog")?.size).toBe(0);
+  });
+
   it.each(['navigate', 'other'] as const)('reload via %s retains the current query instead of opening a bare path', async kind => {
     const current = 'https://shop.test/search?search=nonexistent';
     const { ctx } = fakeCtx({ targetUrl: current });
@@ -1625,6 +1661,77 @@ describe("runExploration (fake explorer)", () => {
       expect(outcome.facts.map((f) => [f.key, f.checkpoint])).toContainEqual(["cartCount", "after_add"]);
       expect(outcome.revisedPlan?.scenarios[0]!.steps.map((s) => s.id)).toEqual(["PS-1", "PS-2", "PS-4", "PS-5"]);
       expect(events.filter((e) => e.type === "plan.revised").map((e) => e.payload)).toEqual([{ scenarioId: "SC-1", afterStepId: "PS-2", stepCount: 2 }]);
+    });
+
+    it("asks with fresh screenshot evidence, then runs a guided replan", async () => {
+      const { ctx, events } = fakeCtx();
+      const mem = memoryStore();
+      const asked: import("./assistance").AssistanceRequest[] = [];
+      const { r, asked: replans } = replanner([null, [
+        { id: "PS-4", kind: "navigate", description: "Open https://shop.test/grills", criterionIds: [], destructive: false },
+        { id: "PS-5", kind: "capture_checkpoint", description: "Capture", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false },
+      ]]);
+      const outcome = await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, {
+        store: mem.store, recorder: fakeRecorder().recorder, replanner: r,
+        assistance: { async ask(request) { asked.push(request); return { kind: "instruction", text: "Open the grills page", by: "user_1" }; } },
+      });
+      expect(asked).toHaveLength(1);
+      expect(asked[0]!.screenshotArtifactId).toBe(`art_${mem.screenshots.findIndex((x) => x.fileName === "assistance-1.png") + 1}`);
+      expect(asked[0]!.question).toContain("PS-2");
+      expect(replans[1]!.guidance).toBe("Open the grills page");
+      expect(outcome.facts.map((f) => f.key)).toContain("cartCount");
+      expect(events.filter((e) => e.type.startsWith("assistance.")).map((e) => e.type)).toEqual(["assistance.requested", "assistance.answered"]);
+      expect(events.find((e) => e.type === "plan.revised")?.message).toContain("user’s instruction");
+    });
+
+    it.each(["stop", "timeout"] as const)("%s keeps today's stop behavior", async (kind) => {
+      const { ctx, events } = fakeCtx();
+      const outcome = await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, {
+        store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: null, assistance: { async ask() { return { kind }; } },
+      });
+      expect(outcome.facts).toEqual([]);
+      expect(outcome.revisedPlan).toBeUndefined();
+      expect(events.find((e) => e.type === "assistance.answered")?.payload).toMatchObject({ answer: kind });
+    });
+
+    it("asks at most three times when guidance cannot produce a usable replan", async () => {
+      const { ctx } = fakeCtx();
+      const questions: string[] = [];
+      await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, {
+        store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: null,
+        assistance: { async ask(request) { questions.push(request.question); return { kind: "instruction", text: "Try again", by: "u" }; } },
+      });
+      expect(questions).toHaveLength(3);
+      expect(questions[1]).toContain("previous instruction could not be turned into usable steps");
+    });
+
+    it("cancelling during the question aborts immediately and closes the browser", async () => {
+      const { ctx } = fakeCtx();
+      const controller = new AbortController();
+      ctx.signal = controller.signal;
+      const session = lost();
+      await expect(runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, {
+        store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: null,
+        assistance: { async ask(_request, signal) { controller.abort(new CancelledError()); signal.throwIfAborted(); return { kind: "stop" }; } },
+      })).rejects.toBeInstanceOf(CancelledError);
+      expect(session.closed).toBe(true);
+    });
+
+    it("can ask after both automatic replans are used up", async () => {
+      const { ctx } = fakeCtx();
+      const again = (id: number): PlannedStep[] => [
+        { id: `PS-${id}`, kind: "click", description: grills, criterionIds: [], destructive: false },
+        { id: `PS-${id + 1}`, kind: "capture_checkpoint", description: "Capture", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false },
+      ];
+      const { r, asked } = replanner([again(4), again(6), [{ id: "PS-8", kind: "navigate", description: "Open https://shop.test/grills", criterionIds: [], destructive: false }]]);
+      let requests = 0;
+      const outcome = await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, {
+        store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r,
+        assistance: { async ask() { requests++; return { kind: "instruction", text: "Open its URL", by: "u" }; } },
+      });
+      expect(requests).toBe(1);
+      expect(asked.map((x) => x.guidance)).toEqual([undefined, undefined, "Open its URL"]);
+      expect(outcome.revisedPlan?.scenarios[0]!.steps.at(-1)!.id).toBe("PS-8");
     });
 
     it("no usable replan: the scenario stops as before, and the plan is not revised", async () => {

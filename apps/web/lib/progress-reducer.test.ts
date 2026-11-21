@@ -269,3 +269,20 @@ describe("a run that explores for test ideas (a blank requirement)", () => {
     expect(stagesFor(initialProgress(), "QUEUED").survey).toBe(false);
   });
 });
+
+
+describe("assistance state (2026-11-21)", () => {
+  const pending = { requestId: "req_1", scenarioId: "SC-1", stepId: "PS-2", question: "Click failed: what next?", url: "https://shop.test/cart", screenshotArtifactId: "art_1", expiresAt: "2026-11-21T10:10:00.000Z" };
+  it("rebuilds an open question on reload and closes only its matching answer", () => {
+    const requested = ev(1, "assistance.requested", pending);
+    const state = reduce([requested]);
+    expect(state.assistance).toEqual(pending);
+    expect(progressReducer(state, requested)).toBe(state);
+    const other = progressReducer(state, ev(2, "assistance.answered", { requestId: "old", answer: "stop" }));
+    expect(other.assistance).toEqual(pending);
+    expect(progressReducer(other, ev(3, "assistance.answered", { requestId: "req_1", answer: "instruction", instruction: "Accept terms" })).assistance).toBeNull();
+  });
+  it("clears questions when the run ends", () => {
+    expect(reduce([ev(1, "assistance.requested", pending), ev(2, "run.cancelled", { reason: "USER_REQUESTED" })]).assistance).toBeNull();
+  });
+});

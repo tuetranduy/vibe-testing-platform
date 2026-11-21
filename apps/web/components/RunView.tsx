@@ -5,6 +5,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ApiRequestError, cancelRun, getRun, type ConfirmResult } from "../lib/api";
 import { initialProgress, lifecycleRank, progressReducer, type ProgressState } from "../lib/progress-reducer";
 import { connectRunEvents, type ConnectionStatus } from "../lib/run-events";
+import { AssistancePanel } from "./AssistancePanel";
 import { CriteriaReview } from "./CriteriaReview";
 import { Disclosure } from "./Disclosure";
 import { Icon, type IconName } from "./Icon";
@@ -302,6 +303,7 @@ export function RunView({ runId }: { runId: string }) {
       </header>
 
       <RunFlow lifecycle={lifecycle} />
+      {!terminal && lifecycle === "EXPLORING" && progress.assistance && <AssistancePanel key={progress.assistance.requestId} runId={runId} request={progress.assistance} />}
 
       {(summary.requirementText || summary.requirementPreview) && (
         <Disclosure title="Input requirements" hint="The full requirement submitted for this test.">
