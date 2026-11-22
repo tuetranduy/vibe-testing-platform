@@ -3,7 +3,7 @@ import { createRunRedactor } from "@platform/security";
 import { describe, expect, it } from "vitest";
 import type { StageContext } from "../orchestrator/stages";
 import type { Candidate } from "../survey/interactive";
-import { createWayThere, wayThereCandidates, type WayThereRequest } from "./way-there";
+import { createWayThere, wayThereCandidates, WAY_THERE_SYSTEM_PROMPT, type WayThereRequest } from "./way-there";
 
 const candidate = (label: string, over: Partial<Candidate> = {}): Candidate => ({
   selector: `xpath=/html[1]/body[1]/a[${label.length}]`,
@@ -61,6 +61,13 @@ describe("wayThereCandidates", () => {
 });
 
 describe("createWayThere", () => {
+  it("explains intermediate forward sections without authorizing final confirmation (KI-088, 2026-11-22)", () => {
+    expect(WAY_THERE_SYSTEM_PROMPT).toContain("visible Continue or Next in the current section");
+    expect(WAY_THERE_SYSTEM_PROMPT).toContain("Prefer forward progress over Back");
+    expect(WAY_THERE_SYSTEM_PROMPT).toContain("never choose final confirmation");
+    expect(WAY_THERE_SYSTEM_PROMPT).toContain("Never choose a control that deletes, pays, sends, signs out or submits a form");
+  });
+
   it("none without a model", () => {
     expect(createWayThere(null)).toBeNull();
   });
