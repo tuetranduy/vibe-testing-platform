@@ -1287,3 +1287,25 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   never repeated, replanned or asked about.
 - **Not handled:** the planner's missing "Shipping Address" step and the step review's "on track" after each misplaced
   "Continue" (KI-082).
+
+
+## KI-087 — Step review mistook hidden checkout sections for the visible page
+- **Severity:** High (misplaced Continue clicks stayed on track, preventing recovery of a missing checkout step).
+- **Where:** `packages/testing-engine/src/exploration/page-context.ts`, `step-review.ts`.
+- **What:** `run_0mwpyg8pwa3071aa32cd18579`, PS-21, reviewed “Continue … default shipping method” as on track in
+  Shipping Method, while its screenshot showed Shipping Address; `run_0mwpvcm7xfbb2b85b018f49f9` repeated this one-step
+  lag. The context cloned the whole DOM, including the one-page checkout's hidden panels and their Continue buttons.
+- **Resolved (2026-11-22):** DOM capture uses computed rendering/visibility, omits hidden/aria-hidden/transparent
+  subtrees and closed details content, and keeps visible descendants of zero-size wrappers. Live values, checked and
+  selected state, disabled controls and focus remain available. Hidden frames are omitted too. Dialogs still lead the
+  40,000-character HTML window. The shared reviewer/replanner/way-there context starts with the visible headings in
+  document order and open/current sections (active/current/expanded markers or the only open panel in an ordered list).
+  Hidden headings are omitted: visible accordion headings already identify the other steps without implying their
+  content is current. The reviewer requires the named section to be current, or the next section after Continue/Next,
+  and reports the actually visible section when off track.
+- **Checked:** browser-backed checkout fixture using `ol#checkout-steps`, `li.tab-section.active` and hidden `div.step`
+  panels, cycling Shipping Address, Shipping Method and Payment Method; only the open panel's text/button survives.
+  Additional browser checks cover computed visibility, opacity inheritance, closed details, hidden frames, visible
+  children, live form state and focus; a prompt regression verifies the summary and section-specific review rule.
+- **Open:** no live model checkout rerun or prompt scoring (KI-078); the fixture reproduces the real checkout structure
+  without a cart session or changes to the shared Docker stack. Stagehand's internal context remains its own (KI-082).
