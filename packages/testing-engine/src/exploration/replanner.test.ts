@@ -136,7 +136,7 @@ describe("createReplanner", () => {
   it("asks once with the page the browser is on, and returns the validated steps", async () => {
     const { llm, transport } = setup({ json: { steps: good } });
     const steps = await createReplanner(llm)!.replan(input(), call);
-    expect(steps?.map((s) => s.id)).toEqual(["PS-6", "PS-7", "PS-8", "PS-9"]);
+    expect(steps.steps?.map((s) => s.id)).toEqual(["PS-6", "PS-7", "PS-8", "PS-9"]);
     const sent = String(transport.requests[0]!.messages[0]!.content);
     expect(transport.requests[0]!.schemaName).toBe("replan");
     expect(sent).toContain("Click the 'Grills' link");
@@ -164,9 +164,19 @@ describe("createReplanner", () => {
 
   it("a step the action policy denies, or an answer still invalid after the correction: no replan", async () => {
     const destructive = setup({ json: { steps: [out("click", "Delete the account"), ...good] } });
-    expect(await createReplanner(destructive.llm)!.replan(input(), call)).toBeNull();
+    expect(await createReplanner(destructive.llm)!.replan(input(), call)).toMatchObject({ steps: null, reason: "action_blocked" });
     const invalid = setup({ json: { steps: good.slice(0, 1) } }, { json: { steps: good.slice(0, 1) } });
-    expect(await createReplanner(invalid.llm)!.replan(input(), call)).toBeNull();
+    expect(await createReplanner(invalid.llm)!.replan(input(), call)).toMatchObject({ steps: null, reason: "validation_failed", issues: [expect.stringContaining("never captured")] });
+  });
+
+  it("reports a failed model call separately from validation", async () => {
+    const { llm } = setup();
+    expect(await createReplanner(llm)!.replan(input(), call)).toEqual({ steps: null, reason: "model_failed" });
+  });
+
+  it("rejects a single denied step even when blocking substitutes a one-step fallback with the same id (KI-086)", async () => {
+    const { llm } = setup({ json: { steps: [out("click", "Delete the account")] } });
+    expect(await createReplanner(llm)!.replan(input({ remaining: [] }), call)).toEqual({ steps: null, reason: "action_blocked" });
   });
 
   it("a cancelled run is not swallowed", async () => {

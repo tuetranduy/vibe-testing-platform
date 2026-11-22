@@ -1287,3 +1287,39 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   never repeated, replanned or asked about.
 - **Not handled:** the planner's missing "Shipping Address" step and the step review's "on track" after each misplaced
   "Continue" (KI-082).
+
+## KI-086 — Unused automatic replans gave no reason
+- **Severity:** Medium (a successful model call followed by a question looked like recovery silently disappeared).
+- **Where:** exploration executor and replanner; contracts events; web progress timeline.
+- **Resolved (2026-11-22):** recovery attempts that cannot revise the plan publish `plan.not_revised` with the scenario,
+  failed planned step and a bounded reason enum. Reasons distinguish no model, a destructive action that may have run,
+  budget/page/plan limits, empty or oversized answers, a destructive action already run or unmatched against the remaining
+  plan, model failure, invalid output (first validation issues retained), and action-policy blocking. Detail is redacted
+  and capped at 500 characters; the existing worker exploration logger receives the same payload at warn. The timeline
+  shows a warning with the step reference; on-track steps publish no rejection.
+- **Also fixed:** when action blocking replaced a denied single-step answer with its fallback navigation, the fallback
+  kept the same id and step count, so the old check accepted it. Compare the returned steps' descriptions and kinds too;
+  a regression covers the single denied step with no pending checkpoints.
+- **Live evidence (read-only Docker queries, 2026-11-22):**
+  - `run_0mwpulchs3930868ddc9e597b`: PS-23 could not select Check / Money Order; the final large model call was
+    SUCCESS (16,076 input / 628 output), no `plan.revised`, assistance timed out. The persisted plan's destructive
+    PS-26 is “Click the Confirm order button on the order review page.”
+  - `run_0mwpvcm7xfbb2b85b018f49f9`: PS-26 could not find Confirm on four observes, with no dispatched action.
+    No corresponding large replan call or assistance event: the pre-KI-085 destructive-step guard explains this run.
+  - `run_0mwpyg8pwa3071aa32cd18579`: PS-22 could not select Cash On Delivery; automatic model call SUCCESS
+    (16,021 / 855), then assistance; guided call SUCCESS (16,100 / 534) produced seven steps and `plan.revised`.
+    Those steps explicitly continue Shipping Address, Shipping Method, Payment Method and Payment Information,
+    then click Confirm and capture the order confirmation. The persisted plan now includes that accepted revision.
+  - All three requests allow destructive actions. All missed Shipping Address in the original flow, leaving each
+    subsequent Continue one section behind; the second run never clicked its destructive action.
+- **Inference, not recovered model output:** SUCCESS is recorded after schema and `validateReplan` succeed, so invalid
+  output is unlikely for the successful automatic calls; action blocking is unlikely with destructive actions allowed.
+  No-replanner, may-have-run and no-room guards run before the call, and neither failed payment-method selection was
+  destructive. A differently worded Confirm action failing KI-084's half-of-action-words match is the leading candidate
+  (for example “Click Confirm” shares only one of “confirm order review”). A post-call budget/page change or oversized
+  answer could also reject it, although a 600–850-token answer is unlikely to exceed the available plan room.
+  Answers/prompts are not stored, so exact retrospective attribution is impossible; the new event makes future decisions
+  explicit without fabricating a replay. The single-step fallback bug above does not explain these multi-step checkouts.
+- **Checked:** executor reason-path tests and logger/redaction assertions; replanner failure/validation/policy tests;
+  contract enum/detail bounds and event count; web warning/reference reducer regression. Model prompt scoring (KI-078)
+  and the original planner/reviewer omission (KI-082) remain separate work.

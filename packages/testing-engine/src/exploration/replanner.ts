@@ -1,6 +1,7 @@
 import { pageContextParts, type PageContext } from "./page-context";
 import {
   CancelledError,
+  ContractError,
   type NormalizedRequirement,
   type PageInventory,
   type PlannedStep,
@@ -63,9 +64,13 @@ export interface ReplanCall {
   redact: (value: unknown) => unknown;
 }
 
+export type ReplanResult =
+  | { steps: PlannedStep[] }
+  | { steps: null; reason: "model_failed" | "validation_failed" | "action_blocked"; issues?: string[] };
+
 export interface Replanner {
-  /** The new steps for the rest of the scenario, or null (no usable replan). Throws only when the run is cancelled. */
-  replan(input: ReplanInput, call: ReplanCall): Promise<PlannedStep[] | null>;
+  /** The new steps, or the reason recovery was rejected (KI-086, 2026-11-22). Throws only when the run is cancelled. */
+  replan(input: ReplanInput, call: ReplanCall): Promise<ReplanResult>;
 }
 
 const OutputSchema = z.object({ steps: z.array(PlannerStepOutputSchema).min(1).max(MAX_REPLAN_STEPS * 2) });
@@ -199,6 +204,7 @@ export function createReplanner(llm: LlmClient | null): Replanner | null {
   return {
     async replan(input, call) {
       let data;
+      let issues: string[] = [];
       try {
         ({ data } = await llm.generateStructured({
           schema: OutputSchema,
@@ -207,7 +213,8 @@ export function createReplanner(llm: LlmClient | null): Replanner | null {
           messages: [{ role: "user", content: input.page ? [{ type: "text", text: buildReplanPrompt(input) }, ...pageContextParts(input.page)] : buildReplanPrompt(input) }],
           check: (out) => {
             const r = validateReplan(out, input);
-            return r.ok ? [] : r.issues;
+            issues = r.ok ? [] : r.issues;
+            return issues;
           },
           stage: "EXPLORING",
           runId: call.runId,
@@ -219,14 +226,19 @@ export function createReplanner(llm: LlmClient | null): Replanner | null {
         }));
       } catch (err) {
         if (call.signal.aborted || err instanceof CancelledError) throw err;
-        return null;
+        // The client corrects invalid output once and then throws; retain the deterministic issues (KI-086, 2026-11-22).
+        return err instanceof ContractError
+          ? { steps: null, reason: "validation_failed", issues: issues.length ? issues : [err.message] }
+          : { steps: null, reason: "model_failed" };
       }
       const validated = validateReplan(data, input);
-      if (!validated.ok) return null;
+      if (!validated.ok) return { steps: null, reason: "validation_failed", issues: validated.issues };
       // A step the action policy denies would be cut off and its criteria blocked: such a replan is not used.
       const blocking = applyBlocking({ criteria: [], steps: validated.steps, targetUrl: input.targetUrl, policy: input.policy, fallbackStepId: `PS-${input.firstId}` });
-      if (blocking.steps.length !== validated.steps.length || blocking.steps[0]!.id !== validated.steps[0]!.id) return null;
-      return blocking.steps;
+      if (blocking.steps.length !== validated.steps.length || blocking.steps.some((s, i) => s.id !== validated.steps[i]!.id || s.description !== validated.steps[i]!.description || s.kind !== validated.steps[i]!.kind)) {
+        return { steps: null, reason: "action_blocked" };
+      }
+      return { steps: blocking.steps };
     },
   };
 }
