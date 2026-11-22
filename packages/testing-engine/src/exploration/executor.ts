@@ -583,12 +583,16 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 /** Words that name no action of their own: "Click the Confirm order button" is the action "confirm order". */
 const FILLER_WORDS = new Set(["click", "press", "tap", "select", "the", "a", "an", "on", "in", "of", "to", "for", "at", "button", "link", "page"]);
 
-/** Whether two step descriptions name the same action, however reworded: half their action words shared (KI-084). */
+/**
+ * Whether two step descriptions name the same action, however reworded: half the shorter one's action words shared
+ * (KI-084). Measured on the shorter, so "Click the Confirm button" is still "Click the Confirm button on the Confirm
+ * order page to place the order" (KI-086, 2026-11-22).
+ */
 function sameAction(a: string, b: string): boolean {
   const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9]+/g)?.filter((w) => !FILLER_WORDS.has(w)) ?? []);
   const [x, y] = [words(a), words(b)];
   const shared = [...x].filter((w) => y.has(w)).length;
-  return shared > 0 && shared * 2 >= Math.max(x.size, y.size);
+  return shared > 0 && shared * 2 >= Math.min(x.size, y.size);
 }
 
 function isFatal(err: unknown): boolean {

@@ -1883,6 +1883,28 @@ describe("runExploration (fake explorer)", () => {
       expect(events.filter((e) => e.type === "plan.revised")).toHaveLength(1);
     });
 
+    it("a shorter rewording of the planned confirm still matches it; an unrelated destructive step never does (KI-084)", async () => {
+      const planned = "Click the Confirm button on the Confirm order page to place the order";
+      const checkout = () => planOf(
+        step("navigate", "Open"),
+        step("click", grills),
+        step("click", planned, { destructive: true }),
+        step("capture_checkpoint", "Capture", { checkpoint: "after_add", criterionIds: ["AC-1"] }),
+      );
+      const replanWith = (description: string): PlannedStep[] => [
+        { id: "PS-5", kind: "navigate", description: "Open https://shop.test/grills", criterionIds: [], destructive: false },
+        { id: "PS-6", kind: "click", description, criterionIds: [], destructive: true },
+        { id: "PS-7", kind: "capture_checkpoint", description: "Capture", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false },
+      ];
+      const run = async (description: string) => {
+        const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+        const { r } = replanner([replanWith(description)]);
+        return (await runExploration(ctx, { plan: checkout(), requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r })).revisedPlan;
+      };
+      expect(await run("Click the Confirm button")).toBeDefined();
+      expect(await run("Click the delete my account button")).toBeUndefined();
+    });
+
     it("once a destructive step may have run, a replan never does one again (KI-084)", async () => {
       const { ctx, events } = fakeCtx({ options: { allowDestructiveActions: true } });
       const placed = planOf(
