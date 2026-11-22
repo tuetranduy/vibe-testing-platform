@@ -1196,14 +1196,17 @@ class ExplorationRun {
     }
     // Not found, but the step names its control ("the Add to wishlist button", KI-072): that role and name on this page.
     if (!located && searchField === undefined) located = await this.byName(step);
-    // Nothing to click on this page (e.g. a product link after the login opened the account page, KI-001): ask once
-    // for the way there, follow it (policy-checked) and look again. Not for a search's submit control.
-    if (!located && searchField === undefined && observeInstruction === step.description) {
+    // An unseen flow may have intermediate sections (KI-088, 2026-11-22): follow at most three policy-checked
+    // ways there, locating the target again after each. Each click is recorded for the compiled golden path.
+    for (let advances = 0; !located && searchField === undefined && observeInstruction === step.description && advances < 3; advances++) {
       // The way there as a number from the page's controls (2026-11-19); when that cannot be asked, in free text.
       const chosen = await this.chooseWayThere(step);
       const instruction = chosen ? chosen.instruction : `Find the link or button that leads to where you can: ${step.description}`;
       const way = chosen === undefined ? await this.locate(step, instruction) : chosen?.located ?? null;
       if (!way) return this.linkByName(step);
+      // Recovery must not inherit permission to commit the goal's destructive action (KI-088, 2026-11-22).
+      const label = way.info.name ?? way.info.text ?? way.element.description;
+      await this.enforcePolicy({ ...step, description: "Follow an intermediate control", destructive: false, kind: "click" }, label, way, "act");
       const followed = await this.click(step, instruction, way);
       if (followed !== "ok") return followed;
       // The way there was the step's own control (the model missed it, then chose it as the way, KI-050): its click

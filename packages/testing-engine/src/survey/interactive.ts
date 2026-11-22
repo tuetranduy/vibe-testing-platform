@@ -53,7 +53,8 @@ export const CANDIDATES = String.raw`(() => {
   }).slice(0, 100).map(el => {
     const type = (el.type || '').toLowerCase();
     const fill = el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !['submit','button'].includes(type));
-    const label = el.getAttribute('aria-label') || (el.labels && Array.from(el.labels).map(l => l.textContent).join(' ')) || el.innerText || el.getAttribute('placeholder') || el.name || '';
+    // Input buttons render their value as the label; never read a fill's value (KI-088, 2026-11-22).
+    const label = el.getAttribute('aria-label') || (el.labels && Array.from(el.labels).map(l => l.textContent).join(' ')) || el.innerText || (!fill && el.tagName === 'INPUT' ? el.value : '') || el.getAttribute('placeholder') || el.name || '';
     return { selector: xpath(el), label: String(label).trim().slice(0,160), kind: fill ? 'fill' : 'click', type,
       href: el.href || '', submit: !fill && type === 'submit',
       form: el.form ? String(el.form.getAttribute('role') || '') + ' ' + String(el.form.getAttribute('action') || '') + ' ' + String(el.form.getAttribute('aria-label') || '') : '' };

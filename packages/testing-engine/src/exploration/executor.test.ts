@@ -1566,6 +1566,59 @@ describe("runExploration (fake explorer)", () => {
     expect(outcome.steps.filter((s) => s.kind === "act").map((s) => [s.outcome, s.onGoldenPath])).toEqual([["SUCCESS", true], ["SUCCESS", true]]);
   });
 
+  it.each([1, 3])("advances through %i intermediate Continue sections to the missing target on the golden path (KI-088)", async (sections) => {
+    const { ctx } = fakeCtx();
+    const next = "xpath=/html[1]/body[1]/input[1]";
+    const target = { selector: "xpath=/html[1]/body[1]/button[1]", description: "Review", method: "click", arguments: [] };
+    let advanced = 0;
+    const session = new FakeSession({ observe: () => advanced >= sections ? [target] : [], actOn: (el) => {
+      if (el.selector === next) advanced++;
+      return {};
+    } });
+    Object.assign(session.page, { evaluate: async (script: unknown) => script === CANDIDATES
+      ? [{ selector: next, label: "Continue", kind: "click", type: "button", href: "", submit: false, form: "" }] : [] });
+    const { recorder } = fakeRecorder({ describe: (sel) => ({ role: "button", name: sel === next ? "Continue" : "Review", text: null }) });
+    const wayThere: WayThere = { choose: async () => ({ index: 0, llm: USAGE }) };
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the Review button"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) },
+      { store: memoryStore().store, recorder, wayThere });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(advanced).toBe(sections);
+    expect(outcome.steps.filter((s) => s.kind === "act").map((s) => [s.element?.candidates[0], s.onGoldenPath]))
+      .toHaveLength(sections + 1);
+    expect(outcome.steps.filter((s) => s.kind === "act").every((s) => s.onGoldenPath)).toBe(true);
+  });
+
+  it("bounds intermediate recovery even when Continue never reaches the target (KI-088)", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({ observe: () => [] });
+    Object.assign(session.page, { evaluate: async (script: unknown) => script === CANDIDATES
+      ? [{ selector: "xpath=/input", label: "Continue", kind: "click", type: "button", href: "", submit: false, form: "" }] : [] });
+    const { recorder } = fakeRecorder({ describe: () => ({ role: "button", name: "Continue", text: null }) });
+    const wayThere: WayThere = { choose: async () => ({ index: 0, llm: USAGE }) };
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the Review button"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) },
+      { store: memoryStore().store, recorder, wayThere });
+    // Three per attempt, with the executor's one existing retry.
+    expect(session.calls.filter((c) => c.op === "actOn")).toHaveLength(6);
+    expect(outcome.steps.filter((s) => s.kind === "observe" && s.instruction.startsWith("By index:"))).toHaveLength(6);
+  });
+
+  it("never lets recovery inherit a destructive goal's permission (KI-088)", async () => {
+    const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+    const session = new FakeSession({ observe: () => [] });
+    Object.assign(session.page, { evaluate: async (script: unknown) => script === CANDIDATES
+      ? [{ selector: "xpath=/button", label: "Continue", kind: "click", type: "button", href: "", submit: false, form: "" }] : [] });
+    // The live element changed after candidates were read.
+    const { recorder } = fakeRecorder({ describe: () => ({ role: "button", name: "Pay now", text: null }) });
+    const wayThere: WayThere = { choose: async () => ({ index: 0, llm: USAGE }) };
+    const plan = planOf(step("navigate", "Open"), step("click", "Click Confirm to place order", { destructive: true }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) },
+      { store: memoryStore().store, recorder, wayThere });
+    expect(session.calls.filter((c) => c.op === "actOn")).toHaveLength(0);
+    expect(outcome.steps.some((s) => s.outcome === "BLOCKED_BY_POLICY")).toBe(true);
+  });
+
   it("the model sees no way there (-1): the step fails without a free-text lookup (2026-11-19)", async () => {
     const { ctx } = fakeCtx();
     const session = new FakeSession({ observe: () => [] });
