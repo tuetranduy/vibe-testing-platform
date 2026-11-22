@@ -421,8 +421,17 @@ describe("TestEventSchema", () => {
     expect(TestEventSchema.safeParse({ ...base, payload: { status: "FAILED", durationMs: 1, perCriterion: { "criterion one": "PASSED" } } }).success).toBe(false);
   });
 
+  it("bounds unused replan diagnostics and rejects unknown reasons", () => {
+    const event = { id: "e1", runId: "run_1", sequence: 1, timestamp: "2026-11-22T00:00:00.000Z",
+      stage: "EXPLORING", type: "plan.not_revised", message: "Replan not used",
+      payload: { scenarioId: "SC-1", afterStepId: "PS-22", reason: "validation_failed", detail: "x".repeat(500) } };
+    expect(TestEventSchema.safeParse(event).success).toBe(true);
+    expect(TestEventSchema.safeParse({ ...event, payload: { ...event.payload, detail: "x".repeat(501) } }).success).toBe(false);
+    expect(TestEventSchema.safeParse({ ...event, payload: { ...event.payload, reason: "other" } }).success).toBe(false);
+  });
+
   it("lists every type and knows the terminal ones", () => {
-    expect(TEST_EVENT_TYPES).toHaveLength(26);
+    expect(TEST_EVENT_TYPES).toHaveLength(27);
     expect(isTerminalEvent({ type: "run.completed" })).toBe(true);
     expect(isTerminalEvent({ type: "stage.completed" })).toBe(false);
   });

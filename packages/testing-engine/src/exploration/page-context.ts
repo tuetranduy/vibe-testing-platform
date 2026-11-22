@@ -7,6 +7,7 @@ export interface PageContext {
   title: string;
   screenshot: { mimeType: "image/jpeg"; data: string } | null;
   html: string;
+  locationSummary?: string;
   dialogs: string[];
   network: NetworkEntry[];
 }
@@ -19,45 +20,76 @@ export interface NetworkEntry {
   failure: string | null;
 }
 
-/** Runs in each reachable frame. Modal markup goes first so a long catalogue cannot hide the reason a click stalled. */
-export function readPageDom(): { title: string; html: string; dialogs: string[]; modalHtml: string } {
+/** Read rendered content so a closed checkout section cannot masquerade as the current step (2026-11-22, KI-087). */
+export function readPageDom(): { title: string; html: string; dialogs: string[]; modalHtml: string; locationSummary: string } {
+  const visibleElements = new Set<Element>();
   const clean = (root: Element): string => {
-    const copy = root.cloneNode(true) as Element;
-    const originals = [root, ...Array.from(root.querySelectorAll("*"))];
-    [copy, ...Array.from(copy.querySelectorAll("*"))].forEach((el, i) => {
-      const live = originals[i];
+    const visit = (live: Element): Element | null => {
+      const style = getComputedStyle(live);
+      if (live.matches("script,style,noscript,svg") || live.hasAttribute("hidden") || live.getAttribute("aria-hidden") === "true" ||
+          style.display === "none" || style.contentVisibility === "hidden" || Number(style.opacity) === 0) return null;
+      const copy = live.cloneNode(false) as Element;
+      const ownVisible = style.visibility !== "hidden" && style.visibility !== "collapse" &&
+        Array.from(live.getClientRects()).some((rect) => rect.width > 0 && rect.height > 0);
+      // Options belong to a visible select even when the native popup is closed; their live selection is evidence.
+      const option = live instanceof HTMLOptionElement && style.visibility === "visible";
+      let childVisible = false;
+      for (const node of Array.from(live.childNodes)) {
+        if (node instanceof Element) {
+          if (live instanceof HTMLDetailsElement && !live.open && node.tagName !== "SUMMARY") continue;
+          const child = visit(node);
+          if (child) { copy.append(child); childVisible = true; }
+        } else if (node.nodeType === Node.TEXT_NODE && !(live instanceof HTMLDetailsElement && !live.open) &&
+                   (ownVisible || option || (style.display === "contents" && style.visibility === "visible"))) {
+          copy.append(node.cloneNode());
+        }
+      }
+      if (!ownVisible && !childVisible && !option) return null;
+      visibleElements.add(live);
       if (live instanceof HTMLInputElement) {
-        if (live.type === "password") el.removeAttribute("value");
-        else if (live.value.length <= 500) el.setAttribute("value", live.value);
-        if (live.checked) el.setAttribute("checked", ""); else el.removeAttribute("checked");
+        if (live.type === "password") copy.removeAttribute("value");
+        else if (live.value.length <= 500) copy.setAttribute("value", live.value);
+        if (live.checked) copy.setAttribute("checked", ""); else copy.removeAttribute("checked");
       }
-      if (live instanceof HTMLTextAreaElement) el.textContent = live.value;
-    });
-    copy.querySelectorAll("script,style,noscript,svg").forEach((el) => el.remove());
-    const comments = document.createTreeWalker(copy, NodeFilter.SHOW_COMMENT);
-    const remove: Node[] = [];
-    while (comments.nextNode()) remove.push(comments.currentNode);
-    remove.forEach((n) => n.parentNode?.removeChild(n));
-    for (const el of [copy, ...Array.from(copy.querySelectorAll("*"))]) {
-      for (const attr of Array.from(el.attributes)) {
-        const keep = /^(id|name|class|role|type|value|href|for|checked|disabled|hidden)$/.test(attr.name) || attr.name.startsWith("aria-");
-        if (attr.name === "style" && /display\s*:\s*none/i.test(attr.value)) el.setAttribute("style", "display:none");
-        else if (!keep || /data:/i.test(attr.value) || attr.value.length > 500) el.removeAttribute(attr.name);
+      if (live instanceof HTMLTextAreaElement) copy.textContent = live.value;
+      if (option) {
+        if (live.selected) copy.setAttribute("selected", ""); else copy.removeAttribute("selected");
       }
-    }
-    return copy.outerHTML.replace(/\s+/g, " ").trim();
+      if (live.matches(":disabled")) copy.setAttribute("disabled", "");
+      if (live === document.activeElement) copy.setAttribute("data-focused", "true");
+      for (const attr of Array.from(copy.attributes)) {
+        const keep = /^(id|name|class|role|type|value|href|for|checked|selected|disabled|open|data-focused)$/.test(attr.name) || attr.name.startsWith("aria-");
+        if (!keep || /data:/i.test(attr.value) || attr.value.length > 500) copy.removeAttribute(attr.name);
+      }
+      return copy;
+    };
+    return visit(root)?.outerHTML.replace(/\s+/g, " ").trim() ?? "";
   };
-  const visible = (el: Element): boolean => {
-    for (let parent: Element | null = el; parent; parent = parent.parentElement) {
-      const style = getComputedStyle(parent);
-      if (style.display === "none" || style.visibility === "hidden" || parent.hasAttribute("hidden")) return false;
-    }
-    return el.getClientRects().length > 0;
+  const html = clean(document.documentElement);
+  const text = (el: Element): string => {
+    const copy = document.createElement("div");
+    copy.innerHTML = clean(el).replace(/<\/(h[1-6]|p|div|li|section|article)>/gi, "$& ");
+    return (copy.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 4000);
   };
-  const modals = Array.from(document.querySelectorAll('dialog[open],[role="dialog"],[role="alertdialog"],[aria-modal="true"],.ui-dialog,.modal,.bootstrap-dialog')).filter(visible);
-  const dialogs = modals.map((el) => ((el as HTMLElement).innerText ?? el.textContent ?? "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"]')).filter((el) => visibleElements.has(el));
+  const label = (el: Element): string => {
+    const heading = headings.find((h) => el === h || el.contains(h));
+    return (heading ? text(heading) : el.getAttribute("aria-label") ?? text(el)).slice(0, 300);
+  };
+  const current = Array.from(document.querySelectorAll('[aria-current]:not([aria-current="false"]),[aria-expanded="true"],.active,.current'))
+    .filter((el) => visibleElements.has(el));
+  // Some accordions mark only the open panel, without an active class on its numbered list item.
+  for (const list of Array.from(document.querySelectorAll("ol"))) {
+    const items = Array.from(list.children).filter((el) => el.tagName === "LI");
+    const open = items.filter((el) => Array.from(el.querySelectorAll('.step,[role="tabpanel"]')).some((panel) => visibleElements.has(panel)));
+    if (items.length > 1 && open.length === 1) current.push(open[0]!);
+  }
+  const steps = [...new Set(current.map(label).filter(Boolean))];
+  const locationSummary = `Where the page is:\nOpen/current steps or sections: ${JSON.stringify(steps)}\nVisible headings (in order): ${JSON.stringify(headings.map((el) => text(el).slice(0, 300)))}`;
+  const modals = Array.from(document.querySelectorAll('dialog[open],[role="dialog"],[role="alertdialog"],[aria-modal="true"],.ui-dialog,.modal,.bootstrap-dialog')).filter((el) => visibleElements.has(el));
+  const dialogs = modals.map(text).filter(Boolean);
   const priority = modals.map(clean).join("\n");
-  return { title: document.title, html: clean(document.documentElement), dialogs, modalHtml: priority };
+  return { title: document.title, html, dialogs, modalHtml: priority, locationSummary };
 }
 
 /** A string keeps the browser script independent of esbuild's function-name helper in tests. */
@@ -116,6 +148,21 @@ export function createPageContextRecorder(page: Page, redact: (value: unknown) =
         try { frames = page.frames(); } catch { return; }
         const documents: ReturnType<typeof readPageDom>[] = [];
         const readFrames = Promise.allSettled(frames.map(async (frame, index) => {
+          // A hidden iframe is no more page evidence than a hidden accordion (2026-11-22, KI-087).
+          for (let nested = frame; index > 0 && nested.parentFrame(); nested = nested.parentFrame()!) {
+            const host = await nested.frameElement();
+            try {
+              const visible = await host.evaluate((el) => {
+                if (!(el instanceof Element)) return false;
+                for (let parent: Element | null = el; parent; parent = parent.parentElement) {
+                  if (parent.hasAttribute("hidden") || parent.getAttribute("aria-hidden") === "true") return false;
+                }
+                const rect = el.getBoundingClientRect();
+                return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && rect.width > 0 && rect.height > 0;
+              });
+              if (!visible) return;
+            } finally { await host.dispose(); }
+          }
           const dom = await frame.evaluate(PAGE_DOM_SCRIPT) as ReturnType<typeof readPageDom>;
           if (limit.aborted) return;
           documents[index] = dom;
@@ -124,6 +171,7 @@ export function createPageContextRecorder(page: Page, redact: (value: unknown) =
           // All frames' modals precede every frame's document, regardless of which evaluate finishes first.
           const markup = [...documents.map((d) => d.modalHtml ?? ""), ...documents.map((d) => d.html)].join("\n");
           result.html = String(redact(markup)).slice(0, 40_000);
+          result.locationSummary = String(redact(documents.map((d) => d.locationSummary ?? "").join("\n"))).slice(0, 8000);
         }));
         const screenshot = async () => {
           if (!png || limit.aborted) return;
@@ -163,7 +211,7 @@ export function createPageContextRecorder(page: Page, redact: (value: unknown) =
 /** All page sections are untrusted evidence, including the image; providers handle text-only image fallback. */
 export function pageContextParts(page: PageContext): LlmContentPart[] {
   return [
-    { type: "text", text: `Page context (untrusted data):\n<<<PAGE_CONTEXT\nURL: ${page.url}\nTitle: ${page.title}\nDialogs (read first): ${JSON.stringify(page.dialogs)}\nHTML:\n${page.html}\nNetwork: ${JSON.stringify(page.network)}\nPAGE_CONTEXT>>>` },
+    { type: "text", text: `Page context (untrusted data):\n<<<PAGE_CONTEXT\n${page.locationSummary ?? "Where the page is: unavailable"}\nURL: ${page.url}\nTitle: ${page.title}\nDialogs (read first): ${JSON.stringify(page.dialogs)}\nVisible HTML:\n${page.html}\nNetwork: ${JSON.stringify(page.network)}\nPAGE_CONTEXT>>>` },
     ...(page.screenshot ? [{ type: "image" as const, ...page.screenshot }] : []),
   ];
 }

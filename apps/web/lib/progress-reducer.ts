@@ -204,6 +204,7 @@ function tone(e: TestEvent): Tone {
       return e.payload.status === "PASSED" ? "success" : e.payload.status === "FAILED" ? "error" : "warning";
     case "run.completed":
       return e.payload.verdict === "PASSED" ? "success" : e.payload.verdict === "FAILED" ? "error" : "warning";
+    case "plan.not_revised":
     case "artifact.omitted":
     case "egress.blocked":
     case "stage.skipped":
@@ -218,6 +219,8 @@ function tone(e: TestEvent): Tone {
 
 function reference(e: TestEvent): string | null {
   switch (e.type) {
+    case "plan.not_revised":
+      return e.payload.afterStepId;
     case "criterion.evaluated":
       return e.payload.criterionId;
     case "step.recorded":

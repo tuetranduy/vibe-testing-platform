@@ -2,7 +2,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { FakeTransport, LlmClient } from "@platform/llm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { StageContext } from "../orchestrator/stages";
-import { canExplore, explorePage } from "./interactive";
+import { CANDIDATES, CandidateSchema, canExplore, explorePage } from "./interactive";
 import { readSite } from "./site-reader";
 
 let browser: Browser;
@@ -33,6 +33,19 @@ const fill = { ...review, candidate: 0, source: "testData", key: "query" };
 const click = { ...review, observation: "The search field holds the query.", candidate: 0, source: "generated", key: "" };
 
 describe("interactive live-site discovery", () => {
+  it("reads input button values without exposing typed input values (KI-088, 2026-11-22)", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`<input type="button" value="Continue"><input type="submit" value="Next">
+        <input type="text" name="address" value="private address"><input type="password" name="password" value="secret">
+        <div style="display:none"><input type="button" value="Hidden Continue"></div>`);
+      const candidates = CandidateSchema.array().parse(await page.evaluate(CANDIDATES));
+      expect(candidates.map((c: { label: string }) => c.label)).toEqual(["Continue", "Next", "address", "password"]);
+      expect(JSON.stringify(candidates)).not.toContain("private address");
+      expect(JSON.stringify(candidates)).not.toContain("secret");
+    } finally { await page.close(); }
+  });
+
   it("fills and clicks real controls and retains resulting inventories, screenshots and scrubbed network context", async () => {
     const page = await site();
     try {

@@ -22,6 +22,13 @@ const upToExploring = [
 ];
 
 describe("progressReducer", () => {
+  it("shows an unused replan as a warning about the failed planned step", () => {
+    const event = ev(5, "plan.not_revised", { scenarioId: "SC-1", afterStepId: "PS-22", reason: "destructive_not_planned" }, { stage: "EXPLORING", message: "Step PS-22: the rest of the scenario was not planned again (destructive_not_planned)" });
+    const state = reduce([...upToExploring, event]);
+    expect(state.timeline.at(-1)).toMatchObject({ tone: "warning", reference: "PS-22", message: event.message });
+    expect(state.plannedSteps).toBeNull();
+  });
+
   it("the test's stage weights add up to 100", () => {
     expect(PROGRESS_STAGES.reduce((sum, s) => sum + STAGE_WEIGHTS[s], 0)).toBe(100);
   });

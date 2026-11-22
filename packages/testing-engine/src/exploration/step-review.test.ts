@@ -27,6 +27,21 @@ describe("createStepReviewer", () => {
     await expect(reviewer(transport).review(input())).resolves.toMatchObject({ verdict: "off_track" });
   });
 
+  it("reviews the visible section summary and requires section-specific Continue progress (2026-11-22, KI-087)", async () => {
+    const transport = new FakeTransport().enqueue({ json: { verdict: "off_track", observation: "Shipping Address is open", reason: "Shipping Method has not been reached" } });
+    const request = input();
+    request.step.description = "Click Continue in the Shipping Method section";
+    request.page.locationSummary = 'Where the page is:\nVisible headings (in order): ["Shipping Address"]\nOpen/current steps or sections: ["Shipping Address"]';
+    await reviewer(transport).review(request);
+    const sent = transport.requests[0]!;
+    const content = sent.messages[0]!.content;
+    expect(Array.isArray(content)).toBe(true);
+    expect(content[1]).toMatchObject({ type: "text", text: expect.stringContaining(request.page.locationSummary) });
+    expect(sent.system).toContain("Judge only from the screenshot and visible page context");
+    expect(sent.system).toContain("or the next section/page for Continue/Next");
+    expect(sent.system).toContain('return "off_track" and name the section actually shown');
+  });
+
   it("a failed review is no review: it never fails the run (the review only advises)", async () => {
     const transport = new FakeTransport().enqueue({ error: new LlmTransportError("The model stopped without an answer (length)", { retryable: false }) });
     await expect(reviewer(transport).review(input())).resolves.toBeNull();

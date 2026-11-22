@@ -100,6 +100,7 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-075 | High | Requirement analysis | "Verify signup functionality" stops at the sign-in dialog: the site read never opens Sign up, so the criteria guess the sign-up form | Resolved in working tree (2026-11-07) |
 | KI-077 | High | Generated test | The rerun signs up again with the email exploration just registered, so a passing registration ends INCONCLUSIVE | Resolved in working tree (2026-11-19); made-up usernames too |
 | KI-078 | Medium | LLM quality | The way-there and replanner prompts (2026-11-19) have no eval suite; the quality benchmark has no recorded baseline | Open |
+| KI-088 | High | Exploration | Plans skipped an unseen checkout section and recovery could not see Continue | Fixed locally; live validation open |
 
 KI-056–KI-057: [Travel Luggage Set run investigation](reviews/run_0mw3gsjgke3a1923c465bb1e1.md), with the recorded
 timeline, reproduction, changes and rollout limits.
@@ -1287,3 +1288,112 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   never repeated, replanned or asked about.
 - **Not handled:** the planner's missing "Shipping Address" step and the step review's "on track" after each misplaced
   "Continue" (KI-082).
+
+## KI-086 — Unused automatic replans gave no reason
+- **Severity:** Medium (a successful model call followed by a question looked like recovery silently disappeared).
+- **Where:** exploration executor and replanner; contracts events; web progress timeline.
+- **Resolved (2026-11-22):** recovery attempts that cannot revise the plan publish `plan.not_revised` with the scenario,
+  failed planned step and a bounded reason enum. Reasons distinguish no model, a destructive action that may have run,
+  budget/page/plan limits, empty or oversized answers, a destructive action already run or unmatched against the remaining
+  plan, model failure, invalid output (first validation issues retained), and action-policy blocking. Detail is redacted
+  and capped at 500 characters; the existing worker exploration logger receives the same payload at warn. The timeline
+  shows a warning with the step reference; on-track steps publish no rejection.
+- **Also fixed:** when action blocking replaced a denied single-step answer with its fallback navigation, the fallback
+  kept the same id and step count, so the old check accepted it. Compare the returned steps' descriptions and kinds too;
+  a regression covers the single denied step with no pending checkpoints.
+- **Live evidence (read-only Docker queries, 2026-11-22):**
+  - `run_0mwpulchs3930868ddc9e597b`: PS-23 could not select Check / Money Order; the final large model call was
+    SUCCESS (16,076 input / 628 output), no `plan.revised`, assistance timed out. The persisted plan's destructive
+    PS-26 is “Click the Confirm order button on the order review page.”
+  - `run_0mwpvcm7xfbb2b85b018f49f9`: PS-26 could not find Confirm on four observes, with no dispatched action.
+    No corresponding large replan call or assistance event: the pre-KI-085 destructive-step guard explains this run.
+  - `run_0mwpyg8pwa3071aa32cd18579`: PS-22 could not select Cash On Delivery; automatic model call SUCCESS
+    (16,021 / 855), then assistance; guided call SUCCESS (16,100 / 534) produced seven steps and `plan.revised`.
+    Those steps explicitly continue Shipping Address, Shipping Method, Payment Method and Payment Information,
+    then click Confirm and capture the order confirmation. The persisted plan now includes that accepted revision.
+  - All three requests allow destructive actions. All missed Shipping Address in the original flow, leaving each
+    subsequent Continue one section behind; the second run never clicked its destructive action.
+- **Inference, not recovered model output:** SUCCESS is recorded after schema and `validateReplan` succeed, so invalid
+  output is unlikely for the successful automatic calls; action blocking is unlikely with destructive actions allowed.
+  No-replanner, may-have-run and no-room guards run before the call, and neither failed payment-method selection was
+  destructive. A differently worded Confirm action failing KI-084's half-of-action-words match is the leading candidate
+  (for example “Click Confirm” shares only one of “confirm order review”). A post-call budget/page change or oversized
+  answer could also reject it, although a 600–850-token answer is unlikely to exceed the available plan room.
+  Answers/prompts are not stored, so exact retrospective attribution is impossible; the new event makes future decisions
+  explicit without fabricating a replay. The single-step fallback bug above does not explain these multi-step checkouts.
+- **Checked:** executor reason-path tests and logger/redaction assertions; replanner failure/validation/policy tests;
+  contract enum/detail bounds and event count; web warning/reference reducer regression. Model prompt scoring (KI-078)
+  and the original planner/reviewer omission (KI-082) remain separate work.
+
+
+## KI-087 — Step review mistook hidden checkout sections for the visible page
+- **Severity:** High (misplaced Continue clicks stayed on track, preventing recovery of a missing checkout step).
+- **Where:** `packages/testing-engine/src/exploration/page-context.ts`, `step-review.ts`.
+- **What:** `run_0mwpyg8pwa3071aa32cd18579`, PS-21, reviewed “Continue … default shipping method” as on track in
+  Shipping Method, while its screenshot showed Shipping Address; `run_0mwpvcm7xfbb2b85b018f49f9` repeated this one-step
+  lag. The context cloned the whole DOM, including the one-page checkout's hidden panels and their Continue buttons.
+- **Resolved (2026-11-22):** DOM capture uses computed rendering/visibility, omits hidden/aria-hidden/transparent
+  subtrees and closed details content, and keeps visible descendants of zero-size wrappers. Live values, checked and
+  selected state, disabled controls and focus remain available. Hidden frames are omitted too. Dialogs still lead the
+  40,000-character HTML window. The shared reviewer/replanner/way-there context starts with the visible headings in
+  document order and open/current sections (active/current/expanded markers or the only open panel in an ordered list).
+  Hidden headings are omitted: visible accordion headings already identify the other steps without implying their
+  content is current. The reviewer requires the named section to be current, or the next section after Continue/Next,
+  and reports the actually visible section when off track.
+- **Checked:** browser-backed checkout fixture using `ol#checkout-steps`, `li.tab-section.active` and hidden `div.step`
+  panels, cycling Shipping Address, Shipping Method and Payment Method; only the open panel's text/button survives.
+  Additional browser checks cover computed visibility, opacity inheritance, closed details, hidden frames, visible
+  children, live form state and focus; a prompt regression verifies the summary and section-specific review rule.
+- **Open:** no live model checkout rerun or prompt scoring (KI-078); the fixture reproduces the real checkout structure
+  without a cart session or changes to the shared Docker stack. Stagehand's internal context remains its own (KI-082).
+
+
+## KI-088 — Plans skipped an unseen checkout section and recovery could not see Continue
+- **Severity:** High (checkout could not reach its confirmation despite visible intermediate sections).
+- **Where:** survey `interactive.ts`, exploration `way-there.ts` and the executor's locate/recovery path.
+- **Evidence (2026-11-22):** all three runs `run_0mwpulchs3930868ddc9e597b`,
+  `run_0mwpvcm7xfbb2b85b018f49f9` and `run_0mwpyg8pwa3071aa32cd18579` read only home,
+  producttag/10/book, cart and books in `page.surveyed`. Their `run_site_analyses.pageContents` include product
+  browsing but no checkout interaction or `/onepagecheckout`. The plans jump from billing Continue to shipping
+  method Continue. The third stored plan includes a later user-guided repair: `plan.revised` sequence 131,
+  after PS-22, adds Shipping Address and Shipping Method; it is not the original 26-step plan (sequence 22).
+- **What the planner saw:** `createPlanStage` passes the read `SitePage[]` to `buildPlannerPrompt`, which serializes
+  their URLs, inventories, interactions (including resulting inventories and screenshot artifact references), and network
+  metadata in `<<<PAGES`. It also supplies the target URL, requirement, confirmed criteria, checkpoints/facts and their
+  order, test-data keys and secret names. No inventory, screenshot pixels or section list is supplied for an unread
+  page. The existing prompt says controls can appear only after actions and never to drop criteria because controls
+  are absent; it gives no explicit uncertainty instruction for unseen sections. Checkout's detailed section sequence
+  was therefore inferred, not observed (exact model reasoning is not persisted).
+- **Why recovery failed:** run 1's way-there records #46/#48 chose none then Back; run 2's #52/#54 chose none;
+  run 3's #43 chose Back (#44 records its click). Exploration trace artifact `art_0mwpvh2mk9638ee2ee79c08a3`
+  contains `input type="button" value="Continue"` with no name or aria-label in the shipping-address,
+  shipping-method and payment-information sections.
+  `CANDIDATES` ignored input values, producing an empty label that `canExplore` rejects. The chooser thus could
+  not select that visible Continue. Its prompt mentioned menus/tabs/links but not intermediate flow sections;
+  the executor followed only one way there before failing.
+- **Fixed locally (2026-11-22):** input buttons use their displayed value as a label (typed field values stay unread).
+  The chooser is told how intermediate Continue/Next controls lead forward. Recovery follows at most three controls
+  per attempt (the existing one retry remains), looking for the target after each, with an independent non-destructive
+  policy check even if the goal is authorized to place an order. Successful intermediate actions retain their element
+  references and golden-path flags, so the compiler emits their clicks.
+- **Choice:** repair the observed inventory/recovery gap rather than invent a site-specific Shipping Address step.
+  A broad “continue through each section until review” description fits the string schema, but a click step executes
+  one located control, not an arbitrary workflow loop; prompting that alone would promise unsupported execution.
+  A planner-only section list also cannot know unseen sites. The planner prompt is unchanged.
+- **Validation:** executor tests cover one/three intermediate sections, bounded failure and a destructive live-element
+  substitution; browser-backed candidate tests cover input buttons, hidden sections and no typed-value leakage;
+  prompt tests retain the destructive-action prohibition and assert forward-section guidance. `pnpm eval planner`
+  loads 18 valid cases but reports no `ANTHROPIC_API_KEY`, so no live score is claimed and no encrypted key was read.
+- **Checks (2026-11-22):** `pnpm typecheck` exits 0; `pnpm --filter @platform/testing-engine test --maxWorkers=2`
+  passes 50 files / 1,023 tests; the already-running `pnpm test:integration --maxWorkers=1` passes 7 files / 36 tests.
+  Earlier concurrent attempts had browser timeouts; final merged integration validation remains with the coordinator.
+- **Open:** rerun the three live checkout cases on the rebuilt worker, and score way-there choices across models
+  (KI-078). Hidden section review accuracy belongs to KI-082; generic submit buttons remain excluded from recovery.
+
+**Live check (2026-11-22), KI-086 to KI-088 together:** `run_0mwrvz4wq523da3a27fd714f9` (demowebshop, Books → cart →
+checkout, DeepSeek Flash, the same requirement as the KI-084/KI-085 runs) PASSED with no question to the user and no
+replan: AC-1, AC-2 and AC-3 confirmed by the Playwright rerun, order placed. The plan again had no step for the
+"Shipping Address" or "Payment information" sections; the way there clicked their visible "Continue" (PS-23, PS-29)
+and went on. Every step review named the section the screenshot showed (22 on track, 0 off track). 73 model calls,
+$0.066, 198 s. Still open: the planner's missing sections (recovered, not planned), and scores for the reviewer,
+replanner and way-there prompts (KI-078).

@@ -26,6 +26,14 @@ const ev = <T extends string, P extends z.ZodType>(type: T, payload: P) =>
 
 const StagePayload = z.object({ stage: RunLifecycleSchema });
 
+/** Bounded recovery diagnostics distinguish policy, validation and execution limits (KI-086, 2026-11-22). */
+export const ReplanReasonSchema = z.enum([
+  "no_replanner", "may_have_run", "budget_aborted", "page_closed", "no_room",
+  "empty_steps", "too_many_steps", "destructive_ran", "destructive_not_planned",
+  "model_failed", "validation_failed", "action_blocked",
+]);
+export type ReplanReason = z.infer<typeof ReplanReasonSchema>;
+
 export const TestEventSchema = z.discriminatedUnion("type", [
   // A durable event rebuilds the open question on reload (2026-11-21); signed image URLs are fetched separately.
   ev("assistance.requested", z.object({
@@ -73,6 +81,12 @@ export const TestEventSchema = z.discriminatedUnion("type", [
       blockedCriteria: z.array(z.object({ criterionId: CriterionIdSchema, reason: BlockReasonSchema })),
     }),
   ),
+  ev("plan.not_revised", z.object({
+    scenarioId: z.string().regex(/^SC-[1-5]$/),
+    afterStepId: z.string(),
+    reason: ReplanReasonSchema,
+    detail: z.string().max(500).optional(),
+  })),
   // Exploration planned the rest of a scenario again after one of its steps failed (2026-11-19).
   ev(
     "plan.revised",

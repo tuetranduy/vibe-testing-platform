@@ -90,6 +90,7 @@ export function createExploreStage(deps: ExploreStageDeps): EngineStages["explor
       starting = null;
       const outcome = (explored = await runExploration(ctx, { plan, requirement, session, budget }, {
         store: deps.store(ctx),
+        ...(deps.logger ? { logger: deps.logger } : {}),
         assistance: deps.assistance?.(ctx),
         ...(deps.stepReviewer !== undefined ? { stepReviewer: deps.stepReviewer } : {}),
         ...(deps.recorder ? { recorder: deps.recorder } : {}),

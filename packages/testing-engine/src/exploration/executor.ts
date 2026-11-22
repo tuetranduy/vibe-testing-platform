@@ -24,6 +24,7 @@ import {
   type NormalizedRequirement,
   type ObservedFact,
   type PlannedStep,
+  type ReplanReason,
   type TestPlan,
   type TestScenario,
 } from "@platform/contracts";
@@ -255,6 +256,7 @@ export interface ExplorationInput {
 }
 
 export interface ExplorationDeps {
+  logger?: { warn?(obj: object, msg?: string): void };
   store: ExplorationStore;
   assistance?: AssistancePort | null;
   recorder?: RecorderPort;
@@ -581,12 +583,16 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 /** Words that name no action of their own: "Click the Confirm order button" is the action "confirm order". */
 const FILLER_WORDS = new Set(["click", "press", "tap", "select", "the", "a", "an", "on", "in", "of", "to", "for", "at", "button", "link", "page"]);
 
-/** Whether two step descriptions name the same action, however reworded: half their action words shared (KI-084). */
+/**
+ * Whether two step descriptions name the same action, however reworded: half the shorter one's action words shared
+ * (KI-084). Measured on the shorter, so "Click the Confirm button" is still "Click the Confirm button on the Confirm
+ * order page to place the order" (KI-086, 2026-11-22).
+ */
 function sameAction(a: string, b: string): boolean {
   const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9]+/g)?.filter((w) => !FILLER_WORDS.has(w)) ?? []);
   const [x, y] = [words(a), words(b)];
   const shared = [...x].filter((w) => y.has(w)).length;
-  return shared > 0 && shared * 2 >= Math.max(x.size, y.size);
+  return shared > 0 && shared * 2 >= Math.min(x.size, y.size);
 }
 
 function isFatal(err: unknown): boolean {
@@ -913,13 +919,35 @@ class ExplorationRun {
     { observation, page, guidance }: { observation?: string; page?: PageContext; guidance?: string } = {},
   ): Promise<PlannedStep[] | null> {
     const failed = planned[at]!;
-    if (!this.replanner || (!signIn && this.mayHaveRun(failed)) || this.input.budget.aborted || this.pageClosed()) return null;
+    // Only recovery attempts enter this method; on-track steps produce no diagnostic (KI-086, 2026-11-22).
+    const rejected = async (reason: ReplanReason, detail?: string): Promise<null> => {
+      let redacted = detail ? this.redactString(detail) : undefined;
+      // These diagnostics enter the public timeline: strip credential values even when model context retains them.
+      for (const name of this.ctx.secrets.names) {
+        const value = this.ctx.secrets.get(name);
+        if (value && redacted) redacted = redacted.split(value).join("[REDACTED]");
+      }
+      const payload = {
+        scenarioId: scenario.id,
+        afterStepId: failed.id,
+        reason,
+        ...(redacted ? { detail: redacted.slice(0, 500) } : {}),
+      };
+      const message = `Step ${failed.id}: the rest of the scenario was not planned again (${reason})`;
+      await this.ctx.publish({ type: "plan.not_revised", message, payload });
+      this.deps.logger?.warn?.({ runId: this.ctx.runId, ...payload }, message);
+      return null;
+    };
+    if (!this.replanner) return rejected("no_replanner");
+    if (!signIn && this.mayHaveRun(failed)) return rejected("may_have_run", failed.description);
+    if (this.input.budget.aborted) return rejected("budget_aborted");
+    if (this.pageClosed()) return rejected("page_closed");
     const ids = [...this.input.plan.scenarios.flatMap((s) => s.steps), ...[...this.revised.values()].flat(), ...planned].map((s) => Number(/^PS-(\d+)$/.exec(s.id)?.[1] ?? 0));
     const firstId = Math.max(0, ...ids) + 1;
     const others = this.input.plan.scenarios.filter((s) => s.id !== scenario.id).reduce((n, s) => n + (this.revised.get(s.id) ?? s.steps).length, 0);
     const room = Math.min(50 - (at + 1), MAX_PLAN_STEPS - others - (at + 1), 999 - firstId + 1);
-    if (room <= 0) return null;
-    const steps = await this.replanner.replan(
+    if (room <= 0) return rejected("no_room");
+    const result = await (async () => this.replanner!.replan(
       {
         requirement: this.input.requirement,
         scenario,
@@ -938,18 +966,30 @@ class ExplorationRun {
         policy: this.policy,
       },
       { runId: this.ctx.runId, signal: this.input.budget, deadlineAt: this.ctx.deadlineAt, redact: this.ctx.redact },
-    ).catch((err: unknown) => {
+    ))().catch(async (err: unknown) => {
+      if (this.ctx.signal.aborted || err instanceof CancelledError) throw err;
+      if (this.input.budget.aborted) {
+        await rejected("budget_aborted");
+        this.rethrowIfFatal(err);
+      }
+      if (this.pageClosed()) return { steps: null, reason: "model_failed", issues: undefined } as const;
       this.rethrowIfFatal(err);
-      return null;
+      return { steps: null, reason: "model_failed", issues: undefined } as const;
     });
-    if (!steps || steps.length === 0 || steps.length > room) return null;
+    if (this.input.budget.aborted) return rejected("budget_aborted");
+    if (this.pageClosed()) return rejected("page_closed");
+    if (!result.steps) return rejected(result.reason, result.issues?.slice(0, 5).join("; "));
+    const steps = result.steps;
+    if (steps.length === 0) return rejected("empty_steps");
+    if (steps.length > room) return rejected("too_many_steps", `Got ${steps.length} steps; room for ${room}`);
     // No destructive step once one may have run (an order placed before the receipt lookup failed). Before that, the
     // plan's own destructive steps were still ahead: a checkout that failed on its way to "Confirm order" is planned
     // again with its confirm, which the replanner rewords (KI-084). Past a sign-in prompt nothing was done yet: the
     // prompted step, or one planned after it, may run as planned (KI-080).
     const ranDestructive = planned.slice(0, at).some(isDestructiveStep) || (!signIn && this.mayHaveRun(failed));
     const ahead = signIn ? [failed, ...planned.slice(at + 1)] : [failed, ...planned.slice(at + 1)].filter(isDestructiveStep);
-    if (steps.some((s) => isDestructiveStep(s) && (ranDestructive || !ahead.some((p) => sameAction(p.description, s.description))))) return null;
+    const denied = steps.find((s) => isDestructiveStep(s) && (ranDestructive || !ahead.some((p) => sameAction(p.description, s.description))));
+    if (denied) return rejected(ranDestructive ? "destructive_ran" : "destructive_not_planned", denied.description);
     await this.ctx.publish({
       type: "plan.revised",
       message: `Step ${failed.id} ${guidance ? "received the user’s instruction" : signIn ? "opened a sign-in prompt" : observation ? "went off track" : "failed"}: the rest of the scenario was planned again (${steps.length} steps)`,
@@ -1196,14 +1236,17 @@ class ExplorationRun {
     }
     // Not found, but the step names its control ("the Add to wishlist button", KI-072): that role and name on this page.
     if (!located && searchField === undefined) located = await this.byName(step);
-    // Nothing to click on this page (e.g. a product link after the login opened the account page, KI-001): ask once
-    // for the way there, follow it (policy-checked) and look again. Not for a search's submit control.
-    if (!located && searchField === undefined && observeInstruction === step.description) {
+    // An unseen flow may have intermediate sections (KI-088, 2026-11-22): follow at most three policy-checked
+    // ways there, locating the target again after each. Each click is recorded for the compiled golden path.
+    for (let advances = 0; !located && searchField === undefined && observeInstruction === step.description && advances < 3; advances++) {
       // The way there as a number from the page's controls (2026-11-19); when that cannot be asked, in free text.
       const chosen = await this.chooseWayThere(step);
       const instruction = chosen ? chosen.instruction : `Find the link or button that leads to where you can: ${step.description}`;
       const way = chosen === undefined ? await this.locate(step, instruction) : chosen?.located ?? null;
       if (!way) return this.linkByName(step);
+      // Recovery must not inherit permission to commit the goal's destructive action (KI-088, 2026-11-22).
+      const label = way.info.name ?? way.info.text ?? way.element.description;
+      await this.enforcePolicy({ ...step, description: "Follow an intermediate control", destructive: false, kind: "click" }, label, way, "act");
       const followed = await this.click(step, instruction, way);
       if (followed !== "ok") return followed;
       // The way there was the step's own control (the model missed it, then chose it as the way, KI-050): its click
