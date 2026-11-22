@@ -1389,3 +1389,11 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   Earlier concurrent attempts had browser timeouts; final merged integration validation remains with the coordinator.
 - **Open:** rerun the three live checkout cases on the rebuilt worker, and score way-there choices across models
   (KI-078). Hidden section review accuracy belongs to KI-082; generic submit buttons remain excluded from recovery.
+
+**Live check (2026-11-22), KI-086 to KI-088 together:** `run_0mwrvz4wq523da3a27fd714f9` (demowebshop, Books → cart →
+checkout, DeepSeek Flash, the same requirement as the KI-084/KI-085 runs) PASSED with no question to the user and no
+replan: AC-1, AC-2 and AC-3 confirmed by the Playwright rerun, order placed. The plan again had no step for the
+"Shipping Address" or "Payment information" sections; the way there clicked their visible "Continue" (PS-23, PS-29)
+and went on. Every step review named the section the screenshot showed (22 on track, 0 off track). 73 model calls,
+$0.066, 198 s. Still open: the planner's missing sections (recovered, not planned), and scores for the reviewer,
+replanner and way-there prompts (KI-078).
