@@ -1640,11 +1640,55 @@ describe("runExploration (fake explorer)", () => {
       const r: Replanner = {
         async replan(input) {
           asked.push(input);
-          return answers.shift() ?? null;
+          const steps = answers.shift() ?? null;
+          return steps ? { steps } : { steps: null, reason: "model_failed" };
         },
       };
       return { r, asked };
     };
+
+    it("does not announce a rejected replan for on-track steps", async () => {
+      const { ctx, events } = fakeCtx();
+      const planned = planOf(step("navigate", "Open"), step("capture_checkpoint", "Capture", { checkpoint: "after_add", criterionIds: ["AC-1"] }));
+      await runExploration(ctx, { plan: planned, requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, {
+        store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: null,
+      });
+      expect(events.filter((e) => e.type === "plan.not_revised")).toEqual([]);
+    });
+
+    it.each(["model_failed", "validation_failed", "action_blocked"] as const)("publishes the replanner's %s reason with bounded redacted issues", async (reason) => {
+      const { ctx, events } = fakeCtx({ secrets: { password: SECRET } });
+      const logged: object[] = [];
+      await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, {
+        store: memoryStore().store, recorder: fakeRecorder().recorder,
+        logger: { warn: (obj) => void logged.push(obj) },
+        replanner: { async replan() { return { steps: null, reason, issues: [SECRET + "x".repeat(600)] }; } },
+      });
+      const event = events.find((e) => e.type === "plan.not_revised")!;
+      expect(event.payload).toMatchObject({ scenarioId: "SC-1", afterStepId: "PS-2", reason });
+      expect(JSON.stringify(event)).not.toContain(SECRET);
+      expect((event.payload as { detail: string }).detail).toHaveLength(500);
+      expect(logged).toHaveLength(1);
+    });
+
+    it.each(["no_replanner", "empty_steps", "too_many_steps", "no_room", "page_closed", "budget_aborted"] as const)("records %s for a recovery attempt", async (reason) => {
+      const { ctx, events } = fakeCtx();
+      const session = lost();
+      const controller = new AbortController();
+      const many = Array.from({ length: 49 }, (_, i): PlannedStep => ({ id: `PS-${i + 4}`, kind: "navigate", description: "Open", criterionIds: [], destructive: false }));
+      const planned = plan();
+      if (reason === "no_room") planned.scenarios[0]!.steps[2]!.id = "PS-999";
+      const r: Replanner = { async replan() {
+        if (reason === "page_closed") Object.assign(session.page, { isClosed: () => true });
+        if (reason === "budget_aborted") controller.abort();
+        return { steps: reason === "too_many_steps" ? many : [] };
+      } };
+      await runExploration(ctx, { plan: planned, requirement: requirementWith([cartFact]), session, budget: controller.signal }, {
+        store: memoryStore().store, recorder: fakeRecorder().recorder,
+        replanner: reason === "no_replanner" ? null : r,
+      });
+      expect(events.filter((e) => e.type === "plan.not_revised").map((e) => e.payload.reason)).toEqual([reason]);
+    });
 
     it("the new steps run; the outcome carries the revised plan and one plan.revised event is published", async () => {
       const { ctx, events } = fakeCtx();
@@ -1755,7 +1799,7 @@ describe("runExploration (fake explorer)", () => {
     });
 
     it("a replan with a destructive step is never used, even when the run allows destructive actions (review finding)", async () => {
-      const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+      const { ctx, events } = fakeCtx({ options: { allowDestructiveActions: true } });
       const { r } = replanner([[
         { id: "PS-4", kind: "click", description: "Click 'Place order'", criterionIds: [], destructive: true },
         { id: "PS-5", kind: "capture_checkpoint", description: "Capture", checkpoint: "after_add", criterionIds: ["AC-1"], destructive: false },
@@ -1764,6 +1808,7 @@ describe("runExploration (fake explorer)", () => {
       const outcome = await runExploration(ctx, { plan: plan(), requirement: requirementWith([cartFact]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r });
       expect(outcome.revisedPlan).toBeUndefined();
       expect(session.calls.filter((c) => c.op === "actOn")).toEqual([]);
+      expect(events.find((e) => e.type === "plan.not_revised")?.payload).toMatchObject({ reason: "destructive_not_planned", detail: expect.any(String) });
     });
 
     it("a destructive step the plan still had ahead may be planned again: nothing destructive ran yet (KI-084)", async () => {
@@ -1786,10 +1831,10 @@ describe("runExploration (fake explorer)", () => {
     });
 
     it("once a destructive step may have run, a replan never does one again (KI-084)", async () => {
-      const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+      const { ctx, events } = fakeCtx({ options: { allowDestructiveActions: true } });
       const placed = planOf(
         step("navigate", "Open"),
-        step("click", "Click the Confirm order button", { destructive: true }),
+        step("click", "Place the order", { destructive: true }),
         step("click", grills),
         step("capture_checkpoint", "Capture", { checkpoint: "after_add", criterionIds: ["AC-1"] }),
       );
@@ -1799,6 +1844,7 @@ describe("runExploration (fake explorer)", () => {
       ]]);
       const outcome = await runExploration(ctx, { plan: placed, requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r });
       expect(outcome.revisedPlan).toBeUndefined();
+      expect(events.find((e) => e.type === "plan.not_revised")?.payload).toMatchObject({ reason: "destructive_ran", detail: expect.any(String) });
     });
 
     describe("a destructive step that failed before anything was clicked never ran (KI-085)", () => {
@@ -1835,7 +1881,7 @@ describe("runExploration (fake explorer)", () => {
       });
 
       it("one whose click was dispatched may have run: never planned again, never asked about", async () => {
-        const { ctx } = fakeCtx({ options: { allowDestructiveActions: true } });
+        const { ctx, events } = fakeCtx({ options: { allowDestructiveActions: true } });
         const { r, asked } = replanner([continueThenCapture]);
         let questions = 0;
         const session = new FakeSession({ observe: () => [element], actOn: () => ({ success: false, message: "timed out" }) });
@@ -1845,6 +1891,7 @@ describe("runExploration (fake explorer)", () => {
           assistance: { async ask() { questions++; return { kind: "stop" }; } },
         });
         expect([asked.length, questions]).toEqual([0, 0]);
+      expect(events.find((e) => e.type === "plan.not_revised")?.payload).toMatchObject({ reason: "may_have_run", detail: expect.any(String) });
       });
     });
 
@@ -1879,7 +1926,8 @@ describe("runExploration (fake explorer)", () => {
       const r: Replanner = {
         async replan(input) {
           asked.push(input);
-          return answers.shift() ?? null;
+          const steps = answers.shift() ?? null;
+          return steps ? { steps } : { steps: null, reason: "model_failed" };
         },
       };
       return { r, asked };
