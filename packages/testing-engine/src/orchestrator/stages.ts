@@ -95,7 +95,7 @@ export interface EngineStages {
   /** `site`: the pages the analysis read (KI-048); empty when none were read. */
   plan(ctx: StageContext, requirement: NormalizedRequirement, site: SitePage[]): Promise<TestPlan>;
   /** Must return (not throw) when the exploration budget or step limit is exhausted. */
-  explore(ctx: StageContext, plan: TestPlan, requirement: NormalizedRequirement): Promise<ExplorationOutcome>;
+  explore(ctx: StageContext, plan: TestPlan, requirement: NormalizedRequirement, site?: SitePage[]): Promise<ExplorationOutcome>;
   verify(
     ctx: StageContext,
     requirement: NormalizedRequirement,

@@ -309,6 +309,8 @@ export function fakeExploration(opts: { facts?: Record<string, FakeFactValue> } 
       startRecording: async () => null,
       // The scripted model answers the stages these tests are about; reviews are covered by the engine's tests.
       stepReviewer: null,
+      // These stage fixtures supply no arrival/recovery replies (KI-089, 2026-11-22).
+      replanner: null,
     },
   };
 }

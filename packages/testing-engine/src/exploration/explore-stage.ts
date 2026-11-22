@@ -33,6 +33,8 @@ export interface ExploreStageDeps {
   assistance?(ctx: StageContext): import("./assistance").AssistancePort | null;
   /** Reviews each successful action against the page (2026-11-21); absent: the run's model, null: no review. */
   stepReviewer?: import("./step-review").StepReviewer | null;
+  /** Uses the run model by default; null disables recovery/refinement for scripted tests (KI-089, 2026-11-22). */
+  replanner?: import("./replanner").Replanner | null;
   pollIntervalMs?: number;
   /** The tenant's exploration cache (V1.1 F8), used unless the run sets `useExplorationCache: false`. */
   cache?(ctx: StageContext): ObserveCache;
@@ -59,7 +61,7 @@ const START_FAILURES = {
  * `ctx.addCleanup` in case the orchestrator abandons the stage on abort.
  */
 export function createExploreStage(deps: ExploreStageDeps): EngineStages["explore"] {
-  return async (ctx, plan, requirement): Promise<ExplorationOutcome> => {
+  return async (ctx, plan, requirement, site = []): Promise<ExplorationOutcome> => {
     // Stagehand's model calls go through the run's client (before any browser starts: a run without one fails here).
     const llm = requireLlm(ctx);
     const budget = ctx.budgetSignal(ctx.budgets.explorationMs);
@@ -88,10 +90,11 @@ export function createExploreStage(deps: ExploreStageDeps): EngineStages["explor
       const started = session;
       ctx.addCleanup(() => started.close());
       starting = null;
-      const outcome = (explored = await runExploration(ctx, { plan, requirement, session, budget }, {
+      const outcome = (explored = await runExploration(ctx, { plan, requirement, session, budget, seenUrls: site.flatMap((p) => [p.url, ...(p.interactions ?? []).map((i) => i.url)]) }, {
         store: deps.store(ctx),
         ...(deps.logger ? { logger: deps.logger } : {}),
         assistance: deps.assistance?.(ctx),
+        ...(deps.replanner !== undefined ? { replanner: deps.replanner } : {}),
         ...(deps.stepReviewer !== undefined ? { stepReviewer: deps.stepReviewer } : {}),
         ...(deps.recorder ? { recorder: deps.recorder } : {}),
         ...(deps.pollIntervalMs !== undefined ? { pollIntervalMs: deps.pollIntervalMs } : {}),

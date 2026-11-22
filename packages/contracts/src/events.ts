@@ -30,7 +30,7 @@ const StagePayload = z.object({ stage: RunLifecycleSchema });
 export const ReplanReasonSchema = z.enum([
   "no_replanner", "may_have_run", "budget_aborted", "page_closed", "no_room",
   "empty_steps", "too_many_steps", "destructive_ran", "destructive_not_planned",
-  "model_failed", "validation_failed", "action_blocked",
+  "model_failed", "validation_failed", "action_blocked", "arrival_unusable",
 ]);
 export type ReplanReason = z.infer<typeof ReplanReasonSchema>;
 

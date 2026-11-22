@@ -237,6 +237,20 @@ describe("compilePlaywrightTest: the discovered flow (snapshot)", () => {
     expect(checkGeneratedSource(out.source)).toEqual([]);
   });
 
+  it("compiles arrival-refined sections in the executed golden path (KI-089, 2026-11-22)", () => {
+    const scenario = plan.scenarios[0]!;
+    const sections = ["Shipping Address Continue", "Payment Information Continue"];
+    const added = sections.map((description, i) => planned(`PS-${90 + i}`, "click", { description }));
+    const revised = { ...plan, scenarios: [{ ...scenario, steps: [...scenario.steps.slice(0, 6), ...added, ...scenario.steps.slice(6)] }] };
+    const original = shopFlow();
+    const steps = [...original.slice(0, 6), ...flow(...sections.map((name, i) => ({ kind: "act" as const, plannedStepId: `PS-${90 + i}`, element: byRole("button", name) }))), ...original.slice(6)].map((s, index) => ({ ...s, index, id: s.plannedStepId?.startsWith("PS-9") ? `st_refined_${index}` : s.id }));
+    const out = compile({ plan: revised, steps });
+    const names = Object.values(dataOf(out.dataJson).locators).map((l) => l.name);
+    expect(names).toEqual(expect.arrayContaining(sections));
+    expect([...out.source.matchAll(/\.click\(/g)]).toHaveLength(5);
+    expect(checkGeneratedSource(out.source)).toEqual([]);
+  });
+
   it("replays the golden path with semantic locators; every value comes from run-data.json", () => {
     const out = compile();
     expect(out.source).toMatchSnapshot();
