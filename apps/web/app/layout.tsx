@@ -5,8 +5,8 @@ import { AppNav } from "../components/AppNav";
 import { THEME_SCRIPT } from "../lib/theme";
 import "./globals.css";
 
-const sans = Geist({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
-const mono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
+const sans = Geist({ subsets: ["latin"], variable: "--font-geist", display: "swap" });
+const mono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono", display: "swap" });
 
 export const metadata: Metadata = { title: { default: "AI Testing Platform", template: "%s · AI Testing Platform" } };
 export const viewport: Viewport = {

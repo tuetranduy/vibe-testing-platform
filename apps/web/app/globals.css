@@ -1,3 +1,41 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *):not(:where(.theme-light, .theme-light *)));
+@custom-variant data-open (&[data-state="open"]);
+@custom-variant data-closed (&[data-state="closed"]);
+@custom-variant data-checked (&[data-state="checked"]);
+@custom-variant data-selected (&[data-selected="true"]);
+@custom-variant data-disabled (&[data-disabled]:not([data-disabled="false"]));
+
+@theme inline {
+  --font-heading: var(--display);
+  --font-sans: var(--font);
+  --font-mono: var(--mono);
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--surface-raised);
+  --color-popover-foreground: var(--text);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-contrast);
+  --color-secondary: var(--surface-raised);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--surface-muted);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent: var(--accent-soft);
+  --color-accent-foreground: var(--accent);
+  --color-destructive: var(--danger);
+  --color-border: var(--border);
+  --color-input: var(--border-strong);
+  --color-ring: var(--focus);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius-md);
+  --radius-xl: var(--radius-lg);
+}
+
 /* AI Testing Platform — one global stylesheet (Ruling R51): tokens, base, and component classes.
    "Signal": a dark-first instrument panel. Near-black surfaces, hairline borders, an electric-blue accent
    with a cyan edge for focus, progress and the one call to action. Green, red, amber and violet are
@@ -119,10 +157,10 @@
   --sidebar-rail: 68px;
   --content-w: 1200px;
   --gutter: 32px;
-  --display: var(--font-sans, ui-sans-serif), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font: var(--font-sans, ui-sans-serif), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+  --display: var(--font-geist, ui-sans-serif), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font: var(--font-geist, ui-sans-serif), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     sans-serif;
-  --mono: var(--font-mono, ui-monospace), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --mono: var(--font-geist-mono, ui-monospace), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 :root[data-theme="light"],
@@ -193,102 +231,108 @@
 
 /* ---------- Base ---------- */
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
 
-html {
-  -webkit-text-size-adjust: 100%;
-  /* Keyboard focus and in-page jumps never land under the sticky header. */
-  scroll-padding-top: calc(var(--header-h) + 16px);
-}
+  html {
+    -webkit-text-size-adjust: 100%;
+    /* Keyboard focus and in-page jumps never land under the sticky header. */
+    scroll-padding-top: calc(var(--header-h) + 16px);
+  }
 
-body {
-  margin: 0;
-  min-height: 100dvh;
-  background-color: var(--bg);
-  /* A faint lamp over the top of the page and a dot grid that fades out below it. */
-  background-image:
-    radial-gradient(1100px 520px at 72% -180px, var(--bg-glow), transparent 70%),
-    radial-gradient(700px 400px at 12% -120px, var(--bg-glow-2), transparent 70%);
-  background-repeat: no-repeat;
-  color: var(--text);
-  font-family: var(--font);
-  font-size: 16px;
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-}
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background-color: var(--bg);
+    /* A faint lamp over the top of the page and a dot grid that fades out below it. */
+    background-image:
+      radial-gradient(1100px 520px at 72% -180px, var(--bg-glow), transparent 70%),
+      radial-gradient(700px 400px at 12% -120px, var(--bg-glow-2), transparent 70%);
+    background-repeat: no-repeat;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
 
-h1,
-h2,
-h3,
-h4,
-p,
-ul,
-ol,
-figure,
-blockquote {
-  margin: 0;
-}
+  h1,
+  h2,
+  h3,
+  h4,
+  p,
+  ul,
+  ol,
+  figure,
+  blockquote {
+    margin: 0;
+  }
 
-h1,
-h2,
-h3 {
-  text-wrap: balance;
-}
+  ul { list-style: disc; }
+  ol { list-style: decimal; }
 
-h1 {
-  font-family: var(--display);
-  font-size: 2rem;
-  line-height: 1.1;
-  font-weight: 650;
-  letter-spacing: -0.035em;
-}
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
 
-h2 {
-  font-size: 1.0625rem;
-  line-height: 1.35;
-  font-weight: 620;
-  letter-spacing: -0.012em;
-}
+  h1 {
+    font-family: var(--display);
+    font-size: 2rem;
+    line-height: 1.1;
+    font-weight: 650;
+    letter-spacing: -0.035em;
+  }
 
-p {
-  text-wrap: pretty;
-}
+  h2 {
+    font-size: 1.0625rem;
+    line-height: 1.35;
+    font-weight: 620;
+    letter-spacing: -0.012em;
+  }
 
-a {
-  color: var(--accent);
-  text-underline-offset: 0.18em;
-  text-decoration-thickness: 1px;
-}
-a:hover {
-  color: var(--accent-hover);
-}
+  p {
+    text-wrap: pretty;
+  }
 
-:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}
+  a {
+    color: var(--accent);
+    text-underline-offset: 0.18em;
+    text-decoration-thickness: 1px;
+  }
+  a:hover {
+    color: var(--accent-hover);
+  }
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0 0 auto 0;
-  height: 520px;
-  z-index: -1;
-  pointer-events: none;
-  background-image: radial-gradient(var(--bg-dots) 1px, transparent 1px);
-  background-size: 22px 22px;
-  mask-image: linear-gradient(to bottom, #000 0%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 100%);
-}
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
 
-::selection {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0 0 auto 0;
+    height: 520px;
+    z-index: -1;
+    pointer-events: none;
+    background-image: radial-gradient(var(--bg-dots) 1px, transparent 1px);
+    background-size: 22px 22px;
+    mask-image: linear-gradient(to bottom, #000 0%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 100%);
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+
 }
 
 .visually-hidden {
