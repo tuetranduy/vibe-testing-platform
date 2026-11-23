@@ -112,7 +112,9 @@ export const RunOptionsSchema = z
   .object({
     /** Planned steps exploration may start, of every scenario together (not the steps each one records). */
     maxExplorationSteps: z.number().int().min(1).max(100).default(40),
-    maxRunSeconds: z.number().int().min(60).max(1800).default(300),
+    // 600 s (2026-11-23, KI-091): exploration gets 60% of it, and a checkout with a review after each action and a
+    // plan for each unseen page needs about 180 s, all of the old 300 s default's exploration budget.
+    maxRunSeconds: z.number().int().min(60).max(1800).default(600),
     generatePlaywright: z.boolean().default(true),
     /** Omitted: off when destructive actions are allowed (the rerun repeats every action), on otherwise. */
     rerunGeneratedTest: z.boolean().optional(),

@@ -1531,3 +1531,18 @@ replanner and way-there prompts (KI-078).
   package tests include the recovered-authentication URL guard and assumption-note ordering. An initial unit attempt
   exposed first-versus-last checkpoint selection and missing scenario identity in its fixture; both were corrected,
   and the final checks pass. Both Docker builds exit 0 and all services are healthy; no active run remains.
+
+## KI-091 — A checkout ran out of exploration time on the default run time limit
+- **Severity:** Medium (a long flow ended INCONCLUSIVE / EXPLORATION_BUDGET_EXHAUSTED on default settings).
+- **Where:** `packages/contracts/src/run.ts` (`maxRunSeconds` default), `apps/web/components/NewTestForm.tsx`,
+  `apps/worker/src/run-context.ts` (exploration gets 60% of the run's limit).
+- **What:** exploration of the demowebshop checkout (Books → cart → checkout, DeepSeek Flash) took about 120 s before
+  the step review (KI-082) and the arrival replans (KI-089); with them it takes 176–187 s (`run_0mwsxer24d487367bd275b3f0`,
+  `run_0mwsxlppp053df18c1db19cb1`, `run_0mwsxkldw0fdaa19ee8a1899b`). The default limit of 300 s gives exploration 180 s:
+  two runs passed at the edge, and `run_0mwsxkldw0fdaa19ee8a1899b` clicked Confirm and ran out before it captured the
+  confirmation.
+- **Resolved (2026-11-23, working tree):** the default time limit is 600 s in the API and the new-test form (exploration
+  360 s, rerun 150 s). The limit's bounds (60–1,800 s) are unchanged; a run that sets its own keeps it.
+- **Not handled:** runs created before the change, saved tests, suites and reruns copy their stored limit (300 s for
+  most). The per-action review's cost is unchanged: skipping it after steps that cannot change the page (fills, waits)
+  would shorten every run.

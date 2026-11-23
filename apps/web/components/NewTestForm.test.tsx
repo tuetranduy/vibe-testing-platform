@@ -42,7 +42,7 @@ describe("simple test setup", () => {
   it("creates a test with destructive actions already authorized and no manual input fields", async () => {
     const fetch = api(); render(<NewTestForm />);
     const user = await fill(); await user.click(create());
-    expect(payload(fetch)).toMatchObject({ targetUrl: "https://shop.example.com", requirement: "Search for a product and verify the results.", environment: "production", options: { allowDestructiveActions: true, confirmProductionHost: "shop.example.com", maxRunSeconds: 300, maxExplorationSteps: 40 } });
+    expect(payload(fetch)).toMatchObject({ targetUrl: "https://shop.example.com", requirement: "Search for a product and verify the results.", environment: "production", options: { allowDestructiveActions: true, confirmProductionHost: "shop.example.com", maxRunSeconds: 600, maxExplorationSteps: 40 } });
     for (const field of ["testData", "secrets", "testDataSetId", "credentialProfileId"]) expect(payload(fetch)).not.toHaveProperty(field);
     expect(push).toHaveBeenCalledWith("/runs/run_new");
   });

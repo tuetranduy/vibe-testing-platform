@@ -54,7 +54,7 @@ describe("CreateTestRunRequestSchema", () => {
     const r = CreateTestRunRequestSchema.parse(baseReq);
     expect(r.options.maxExplorationSteps).toBe(40);
     expect(r.options.autoConfirmCriteria).toBe(false);
-    expect(r.options.maxRunSeconds).toBe(300);
+    expect(r.options.maxRunSeconds).toBe(600);
     expect(r.options.additionalAllowedHosts).toEqual([]);
     expect(r.environment).toBe("staging");
     expect(r.browser).toBe("chromium");
