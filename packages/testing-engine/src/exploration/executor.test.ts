@@ -2561,6 +2561,34 @@ describe("runExploration (fake explorer)", () => {
     ]);
   });
 
+  it("text found twice for a click: the one control next to it is clicked and recorded (KI-096: an accordion's plus icon)", async () => {
+    // "Expand the 'Wheels / Tyres / Brakes' section": observe finds only the header's paragraph; the control is an
+    // unnamed <i tabindex="0"> beside it, outside the accessibility tree.
+    const { ctx } = fakeCtx();
+    const text = { selector: "xpath=/html[1]/body[1]/div[1]/p[1]/p[1]", description: "Wheels / Tyres / Brakes", method: "click", arguments: [] };
+    const icon = "xpath=/html[1]/body[1]/div[1]/i[1]";
+    const session = new FakeSession({ observe: () => [text] });
+    const { recorder } = fakeRecorder({ describe: (selector) => ({ role: selector === text.selector ? "paragraph" : null, name: null, text: null }) });
+    recorder.nearbyControl = async (_page, selector) => (selector === text.selector ? icon : null);
+    const plan = planOf(step("navigate", "Open"), step("click", "Expand the Modification section 'Wheels / Tyres / Brakes'"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(session.calls.filter((c) => c.op === "actOn").map((c) => (c.arg as { selector: string }).selector)).toEqual([icon]);
+    expect(outcome.steps.find((s) => s.kind === "act")!.element).toEqual({ candidates: [{ strategy: "xpath", selector: icon }], chosenIndex: 0, framePath: [] });
+  });
+
+  it("text found twice and no single control next to it: the step fails as before (KI-001, KI-096)", async () => {
+    const { ctx } = fakeCtx();
+    const text = { selector: "xpath=/html[1]/body[1]/p[1]", description: "Total", method: "click", arguments: [] };
+    const session = new FakeSession({ observe: () => [text] });
+    const { recorder } = fakeRecorder({ describe: () => ({ role: "paragraph", name: null, text: null }) });
+    recorder.nearbyControl = async () => null;
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the total"));
+    await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(session.calls.filter((c) => c.op === "actOn")).toEqual([]);
+  });
+
   it("a fact whose located element has nothing to read is looked for once more as the element that shows it itself (KI-001)", async () => {
     // "Number shown in the cart badge/link": the explorer returned the Cart link, whose text has no number.
     const { ctx } = fakeCtx();

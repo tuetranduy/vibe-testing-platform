@@ -292,6 +292,62 @@ export async function hittableLabel(page: Page, selector: string): Promise<strin
   return null;
 }
 
+/** What counts as a control next to text (KI-096): focusable or given a control's role, e.g. an icon with tabindex="0". */
+const CONTROL_SELECTOR =
+  'a[href],button,input:not([type="hidden"]),select,textarea,summary,[role="button"],[role="link"],[role="checkbox"],[role="radio"],' +
+  '[role="switch"],[role="tab"],[role="menuitem"],[role="option"],[tabindex]:not([tabindex="-1"]),[onclick]';
+/** Ancestor levels searched for the control next to text. */
+const NEARBY_LEVELS = 3;
+
+/**
+ * Runs in the browser: from the text element, up to NEARBY_LEVELS ancestors, the first that is a control itself, or
+ * holds exactly one visible control besides the text; the XPath of that control, or null (none, or two or more at the
+ * first level that has any). No named inner functions (see readDom).
+ */
+const NEARBY_CONTROL = (start: Element, args: { selector: string; levels: number }): string | null => {
+  let found: Element | null = null;
+  let level = 0;
+  for (let n: Element | null = start; n && level <= args.levels; n = n.parentElement, level++) {
+    if (n.matches(args.selector)) {
+      found = n;
+      break;
+    }
+    const inside = Array.from(n.querySelectorAll(args.selector)).filter((c) => {
+      const r = c.getBoundingClientRect();
+      return c !== start && r.width > 0 && r.height > 0;
+    });
+    if (inside.length > 1) return null;
+    if (inside.length === 1) {
+      found = inside[0]!;
+      break;
+    }
+  }
+  if (!found) return null;
+  const parts: string[] = [];
+  for (let n: Element | null = found; n; n = n.parentElement) {
+    let i = 1;
+    for (let p = n.previousElementSibling; p; p = p.previousElementSibling) if (p.tagName === n.tagName) i++;
+    parts.unshift(`${n.tagName.toLowerCase()}[${i}]`);
+  }
+  return `xpath=/${parts.join("/")}`;
+};
+
+/**
+ * The control a click on text means (KI-096): observe found only the text of an accordion header, whose control is an
+ * unnamed icon beside it (`<i tabindex="0">`, outside the accessibility tree), or the span around an "Add" paragraph.
+ * The nearest ancestor (within three levels) that is a control, or the one visible control the first level with any
+ * holds; its XPath when a click lands on it. Null when there is none, or more than one to choose from.
+ */
+export async function nearbyControl(page: Page, selector: string): Promise<string | null> {
+  const xpath = await page
+    .locator(selector)
+    .first()
+    .evaluate(NEARBY_CONTROL, { selector: CONTROL_SELECTOR, levels: NEARBY_LEVELS }, { timeout: 2_000 })
+    .catch(() => null);
+  if (!xpath) return null;
+  return (await isHittable(page, xpath)) ? xpath : null;
+}
+
 /** The XPath of the first of a locator's elements (at most MAX_ALTERNATIVES) a click would land on, or null. */
 async function firstHittable(locator: Locator): Promise<string | null> {
   const n = Math.min(await countOf(locator), MAX_ALTERNATIVES);
