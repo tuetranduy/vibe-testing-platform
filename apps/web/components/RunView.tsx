@@ -285,7 +285,7 @@ export function RunView({ runId }: { runId: string }) {
           </div>
           <div className="run-header-side flex flex-wrap items-center gap-2 max-[560px]:w-full">
             {!terminal && cancel !== "confirming" && (
-              <Button variant="danger-outline"
+              <Button variant="destructive"
                 type="button"
                 onClick={() => setCancel("confirming")}
                 disabled={cancel === "pending" || cancel === "requested"}

@@ -274,7 +274,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
               </div>
             )}
           </dl>
-          <Button size="lg" block
+          <Button size="lg" className="h-auto min-h-8 w-full whitespace-normal"
             type="button"
             onClick={confirm}
             disabled={confirming || saving || openEdits.length > 0}
@@ -295,7 +295,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
             </p>
           )}
           {startingOver === null ? (
-            <Button variant="outline" block
+            <Button variant="outline" className="h-auto min-h-8 w-full whitespace-normal"
               type="button"
               onClick={() => setStartingOver("ask")}
               disabled={confirming || saving}

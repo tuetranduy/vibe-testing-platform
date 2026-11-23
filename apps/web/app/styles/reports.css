@@ -502,14 +502,14 @@ button.artifact-link {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent);
+  color: var(--interactive);
   font: inherit;
   font-size: 0.8125rem;
   font-weight: 500;
   cursor: pointer;
 }
 button.artifact-link:hover {
-  color: var(--accent-hover);
+  color: var(--foreground);
   text-decoration: underline;
   text-underline-offset: 0.18em;
 }

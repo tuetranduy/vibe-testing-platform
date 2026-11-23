@@ -191,7 +191,7 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
         </div>
 
         <div className="actions flex flex-wrap items-center gap-2">
-          <Button variant="danger-outline" type="button" onClick={onCancel} disabled={pending}>
+          <Button variant="destructive" type="button" onClick={onCancel} disabled={pending}>
             <Icon name="stop" />
             None of these — cancel run
           </Button>

@@ -56,8 +56,8 @@ export function CommandPalette({
       <DialogContent
         aria-modal="true"
         showCloseButton={false}
-        overlayClassName="z-[60] bg-black/55 backdrop-blur-sm"
-        className="top-[12vh] z-[60] block w-[calc(100%-2rem)] max-w-[560px] translate-y-0 overflow-hidden rounded-xl border border-input bg-card p-0 shadow-[var(--shadow-lg)] sm:max-w-[560px]"
+        overlayClassName="z-[60]"
+        className="top-[12vh] z-[60] block max-w-lg translate-y-0 overflow-hidden p-0 sm:max-w-lg"
         onOpenAutoFocus={() => { returnFocus.current = document.activeElement as HTMLElement | null; }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
@@ -69,7 +69,6 @@ export function CommandPalette({
         <Command
           loop
           label="Search pages and actions"
-          className="bg-card p-0"
           filter={(_value, search, keywords) => Number(keywords?.[0]?.toLowerCase().includes(search.trim().toLowerCase()))}
         >
           <CommandInput
@@ -78,16 +77,15 @@ export function CommandPalette({
             value={query}
             onValueChange={setQuery}
           />
-          <CommandList label="Pages and actions" className="max-h-[min(360px,60vh)] p-1.5">
+          <CommandList label="Pages and actions">
             <CommandEmpty>Nothing matches “{query}”.</CommandEmpty>
             {["Go to", "Theme"].map((group) => (
-              <CommandGroup key={group} heading={group} className="p-0 **:[[cmdk-group-heading]]:uppercase">
+              <CommandGroup key={group} heading={group}>
                 {commands.filter((command) => command.group === group).map((command) => (
                   <CommandItem
                     key={command.id}
                     value={command.id}
                     keywords={[`${command.label} ${command.hint ?? ""} ${command.group}`]}
-                    className="min-h-10 cursor-pointer gap-3 px-2.5 text-muted-foreground data-selected:bg-muted data-selected:[&>.icon]:text-accent-foreground"
                     onSelect={() => {
                       setQuery("");
                       onClose();
@@ -96,13 +94,13 @@ export function CommandPalette({
                   >
                     <Icon name={command.icon} />
                     <span>{command.label}</span>
-                    {command.hint && <CommandShortcut className="font-mono tracking-normal">{command.hint}</CommandShortcut>}
+                    {command.hint && <CommandShortcut>{command.hint}</CommandShortcut>}
                   </CommandItem>
                 ))}
               </CommandGroup>
             ))}
           </CommandList>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border bg-(--surface-sunken) px-3.5 py-2 text-xs text-muted-foreground [&>span]:inline-flex [&>span]:items-center [&>span]:gap-1.5" aria-hidden="true">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground [&>span]:inline-flex [&>span]:items-center [&>span]:gap-1.5" aria-hidden="true">
             <span><kbd>↑</kbd><kbd>↓</kbd> to move</span>
             <span><kbd>↵</kbd> to open</span>
             <span><kbd>esc</kbd> to close</span>

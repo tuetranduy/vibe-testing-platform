@@ -101,7 +101,7 @@
   height: 28px;
   border-radius: 50%;
   border: 3px solid var(--border);
-  border-top-color: var(--accent);
+  border-top-color: var(--interactive);
   animation: spin 0.9s linear infinite;
 }
 @keyframes spin {
@@ -113,7 +113,7 @@
   .spinner {
     animation: none;
     border-top-color: var(--border);
-    border-right-color: var(--accent);
+    border-right-color: var(--interactive);
   }
   .live-dot {
     animation: none;
@@ -140,7 +140,7 @@
   white-space: nowrap;
 }
 .progress-now strong {
-  color: var(--accent);
+  color: var(--interactive);
   font-weight: 600;
 }
 .progress-line {
@@ -159,7 +159,7 @@
 .progress-fill {
   height: 100%;
   border-radius: inherit;
-  background: var(--accent);
+  background: var(--interactive);
   transition: width 0.4s var(--ease);
 }
 @media (prefers-reduced-motion: reduce) {
@@ -236,7 +236,7 @@
 .stage-done .stage-marker {
   background: var(--primary);
   border-color: var(--primary);
-  color: var(--primary-contrast);
+  color: var(--primary-foreground);
 }
 .stage-done .stage-line {
   background: var(--primary);
@@ -246,7 +246,7 @@
   font-weight: 500;
 }
 .stage-current .stage-marker {
-  border-color: var(--accent);
+  border-color: var(--interactive);
   box-shadow: 0 0 0 4px var(--ring);
 }
 .stage-current .stage-marker::after {
@@ -254,10 +254,10 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--interactive);
 }
 .stage-current .stage-label {
-  color: var(--accent);
+  color: var(--interactive);
   font-weight: 600;
 }
 .stage-skipped .stage-marker {
@@ -590,7 +590,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--accent);
+  color: var(--interactive);
   font-size: 0.8125rem;
   font-weight: 600;
 }
@@ -599,7 +599,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--interactive);
   box-shadow: 0 0 0 4px var(--ring);
 }
 .confirm-title {

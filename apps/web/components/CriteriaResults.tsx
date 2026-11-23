@@ -151,7 +151,7 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
       {r.status === "INCONCLUSIVE" && onReview && (
         <div className="actions flex flex-wrap items-center gap-2" aria-label={`Review ${r.criterionId}`}>
           <Button variant="outline" type="button" disabled={pending} onClick={() => decide("PASS")}>Mark as pass</Button>
-          <Button variant="danger-outline" type="button" disabled={pending} onClick={() => decide("FAIL")}>Mark as fail</Button>
+          <Button variant="destructive" type="button" disabled={pending} onClick={() => decide("FAIL")}>Mark as fail</Button>
           {pending && <span role="status">Saving review…</span>}
           {error && <p role="alert">{error}</p>}
         </div>
