@@ -1586,3 +1586,26 @@ replanner and way-there prompts (KI-078).
   14,349 output tokens). Not yet validated by a live run.
 - **Not handled:** a select whose option commits by itself (an "Actions" menu that deletes on choice) is now caught
   only by its wording, not by the model's flag. Other terms used as field labels ("Payment day") still match.
+
+## KI-094 — A custom checkbox was never ticked: its input is hidden behind the label a visitor clicks
+- **Severity:** High (the step failed every time, and the scenario stopped at it).
+- **Where:** `packages/testing-engine/src/exploration/recorder.ts` (`hittableLabel`), `executor.ts` (`reachable`,
+  `completeField`).
+- **What:** `run_0mwt0qo61004917dd94a73b19` (qa-bike-quote.bewiser.co.uk, the motorcycle quote of KI-092, DeepSeek
+  Flash): "Tick the 'I have read and agree that the above statements apply to this Motorcycle' checkbox" failed twice
+  with `locator.click: Timeout 15000ms exceeded`. Observe found the right element (`#VehicleStatementListConfirm`), but
+  the site styles its checkboxes itself: the `<input>` is 0×0 with opacity 0 and the visible control is its
+  `<label for>`. Playwright's click and check wait for the input to be visible ("element is not visible") until they
+  time out. The click-reachability check (R2) saw that the input could not be hit, but its alternatives come from the
+  input's own candidates (role, label), which all resolve to the same hidden input. The page's other two statement
+  checkboxes are built the same way.
+- **Resolved (2026-11-23, working tree):** a checkbox or radio input a click cannot land on is clicked through its
+  label (`<label for>` or a wrapping label) when a click lands on that, before the R2 alternatives, and the label is
+  recorded, so the generated test clicks it too. A required checkbox the executor fills (KI-062) is checked and recorded
+  through its label the same way (`check()` on a label checks its control). Verified on the live page with the
+  recorder's own functions: the label is found, recorded by its exact text, and clicking it ticks the input. Not yet
+  validated by a live run.
+- **Not handled:** a hidden input with no label a click lands on (a styled `<span>` sibling with no label) still fails.
+  The same run also could not recover: after the failed step, the replan (and the replan from the user's instruction)
+  was rejected, "at most 15 steps (got 30)" (`MAX_REPLAN_STEPS`), because the rest of this flow is longer than a
+  replan may be since KI-092.

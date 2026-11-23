@@ -267,6 +267,31 @@ export async function hittableAlternative(page: Page, ref: ElementRef): Promise<
   return null;
 }
 
+/**
+ * For a checkbox or radio input a click cannot land on, the XPath of its label a click would land on (KI-094): a
+ * custom-styled control hides the real input (0×0, transparent) and shows its `<label>`, which a visitor clicks. A
+ * click on the label toggles the input, and `check()` on it checks the input (Playwright retargets a label to its
+ * control). Null for any other element, or when no label is reachable.
+ */
+export async function hittableLabel(page: Page, selector: string): Promise<string | null> {
+  const input = page.locator(selector).first();
+  const labels = await input
+    .evaluate((el) => (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio") ? (el.labels?.length ?? 0) : 0), undefined, { timeout: 2_000 })
+    .catch(() => 0);
+  for (let i = 0; i < Math.min(labels, MAX_ALTERNATIVES); i++) {
+    const label = await input.evaluateHandle((el, n) => (el as HTMLInputElement).labels![n]!, i).catch(() => null);
+    if (!label) continue;
+    try {
+      if (!(await label.evaluate(HITTABLE).catch(() => false))) continue;
+      const xpath = await label.evaluate(XPATH_OF).catch(() => null);
+      if (xpath) return xpath;
+    } finally {
+      await label.dispose().catch(() => {});
+    }
+  }
+  return null;
+}
+
 /** The XPath of the first of a locator's elements (at most MAX_ALTERNATIVES) a click would land on, or null. */
 async function firstHittable(locator: Locator): Promise<string | null> {
   const n = Math.min(await countOf(locator), MAX_ALTERNATIVES);

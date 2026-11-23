@@ -58,6 +58,7 @@ import {
   fillElement,
   exactNamedControl,
   hittableAlternative,
+  hittableLabel,
   isHittable,
   reachableNamedControl,
   recordElement,
@@ -220,6 +221,8 @@ export interface RecorderPort {
   check?(page: Page, selector: string): Promise<void>;
   /** Whether a click would land on the element (isHittable, R2). Absent: every element is taken as reachable. */
   hittable?(page: Page, selector: string): Promise<boolean>;
+  /** For a checkbox or radio input a click cannot land on, its label a click lands on (hittableLabel, KI-094). */
+  hittableLabel?(page: Page, selector: string): Promise<string | null>;
   /** A reachable element the ref's role / test id / label / text candidates match (hittableAlternative, R2). */
   hittableAlternative?(page: Page, ref: ElementRef): Promise<string | null>;
   /** The first reachable element of these roles whose accessible name contains the name (reachableNamedControl, KI-072). */
@@ -252,6 +255,7 @@ export const playwrightRecorder: RecorderPort = {
   requiredEmptyFields: (page, submit, typed) => requiredEmptyFields(page, submit, typed),
   check: (page, selector) => checkElement(page, selector),
   hittable: (page, selector) => isHittable(page, selector),
+  hittableLabel: (page, selector) => hittableLabel(page, selector),
   hittableAlternative: (page, ref) => hittableAlternative(page, ref),
   namedControl: (page, name, roles) => reachableNamedControl(page, name, roles),
   exactControl: (page, name, roles) => exactNamedControl(page, name, roles),
@@ -1515,9 +1519,11 @@ class ExplorationRun {
   private async completeField(step: PlannedStep, field: RequiredField): Promise<void> {
     const facts = (await this.recorder.describeField?.(this.page, field.selector).catch(() => null)) ?? NO_FIELD_FACTS;
     const name = fieldName(facts);
+    // A hidden checkbox input is checked, and replayed, through the label a visitor clicks (KI-094).
+    const target = field.how === "check" ? ((await this.checkTarget(field.selector)) ?? field.selector) : field.selector;
     let ref: ElementRef;
     try {
-      ref = await this.recorder.record(this.page, field.selector);
+      ref = await this.recorder.record(this.page, target);
     } catch (err) {
       this.rethrowIfFatal(err);
       return; // nothing the generated test could replay: left as it is
@@ -1546,7 +1552,7 @@ class ExplorationRun {
     try {
       if (field.how === "check") {
         if (!this.recorder.check) throw new Error("recorder: check is not supported");
-        await this.recorder.check(this.page, field.selector);
+        await this.recorder.check(this.page, target);
       } else if (field.how === "select") await this.recorder.select(this.page, field.selector, input!.value);
       else await this.recorder.fill(this.page, field.selector, input!.value);
     } catch (err) {
@@ -1563,6 +1569,18 @@ class ExplorationRun {
         value: input!.value,
         ...(input!.generatedValue !== undefined ? { generatedValue: input!.generatedValue } : {}),
       });
+    }
+  }
+
+  /** The label to check a checkbox through when a click cannot land on its input (KI-094), else null. */
+  private async checkTarget(selector: string): Promise<string | null> {
+    const { hittable, hittableLabel } = this.recorder;
+    if (!hittable || !hittableLabel) return null;
+    try {
+      return (await hittable(this.page, selector)) ? null : await hittableLabel(this.page, selector);
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      return null;
     }
   }
 
@@ -2221,15 +2239,17 @@ class ExplorationRun {
   /**
    * The element a click should go to (R2): the located one when a click lands on it; otherwise (a carousel's
    * off-screen clone, an element under a banner) the first reachable element its role / test id / label / text
-   * candidates match, re-recorded so the generated test replays that one. Unchanged when the recorder cannot tell
-   * or there is no such element (the click then fails or succeeds as before).
+   * candidates match, re-recorded so the generated test replays that one. A hidden checkbox or radio input (a custom
+   * control) is clicked through its label first (KI-094): its own candidates all lead back to the hidden input.
+   * Unchanged when the recorder cannot tell or there is no such element (the click then fails or succeeds as before).
    */
   private async reachable(located: Located): Promise<Located> {
     const recorder = this.recorder;
     if (!recorder.hittable || !recorder.hittableAlternative) return located;
     try {
       if (await recorder.hittable(this.page, located.element.selector)) return located;
-      const selector = await recorder.hittableAlternative(this.page, located.ref);
+      const selector =
+        (await recorder.hittableLabel?.(this.page, located.element.selector)) ?? (await recorder.hittableAlternative(this.page, located.ref));
       if (!selector || selector === located.element.selector) return located;
       const [ref, info] = await Promise.all([recorder.record(this.page, selector), recorder.describe(this.page, selector)]);
       return { element: { ...located.element, selector }, ref, info };
