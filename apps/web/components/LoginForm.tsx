@@ -1,5 +1,9 @@
 "use client";
 
+import { Field } from "@/components/ui/field";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { useState, type FormEvent } from "react";
 import { ApiRequestError, login } from "../lib/api";
 import { resetMe } from "../lib/me";
@@ -59,17 +63,17 @@ export function LoginForm({
   }
 
   return (
-    <form className="card stack login-card" aria-labelledby="login-title" onSubmit={onSubmit} noValidate>
-      <div className="section-head">
+    <Card as="form" className="flex min-w-0 flex-col gap-5 login-card w-full max-w-[400px] bg-[color-mix(in_srgb,var(--surface)_86%,transparent)] p-8 shadow-[var(--highlight),var(--shadow-lg)] backdrop-blur-xl" aria-labelledby="login-title" onSubmit={onSubmit} noValidate>
+      <div className="flex flex-col gap-1.5 [&>.text-muted-foreground]:max-w-[68ch]">
         <h1 id="login-title" className="page-title">
           Sign in
         </h1>
-        <p className="muted">
+        <p className="text-muted-foreground">
           Use the account your administrator created for you
           {tenant ? (
             <>
               {" "}
-              in <strong className="mono">{tenant}</strong>
+              in <strong className="font-mono">{tenant}</strong>
             </>
           ) : null}
           .
@@ -83,25 +87,25 @@ export function LoginForm({
           </div>
         </div>
       )}
-      <div className="field">
+      <Field>
         <label htmlFor="login-email">E-mail address</label>
-        <input id="login-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
-      </div>
-      <div className="field">
+        <Input id="login-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
+      </Field>
+      <Field>
         <label htmlFor="login-password">Password</label>
-        <input
+        <Input
           id="login-password"
           type="password"
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
-      </div>
-      <div className="actions">
-        <button type="submit" className="button button-primary" disabled={pending}>
+      </Field>
+      <div className="actions flex flex-wrap items-center gap-2">
+        <Button type="submit" disabled={pending}>
           {pending ? "Signing in…" : "Sign in"}
-        </button>
+        </Button>
       </div>
-    </form>
+    </Card>
   );
 }

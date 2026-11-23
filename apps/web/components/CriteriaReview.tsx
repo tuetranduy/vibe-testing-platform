@@ -1,5 +1,7 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { ADDED_BY_PLATFORM, describeExpectedOutcome, isInferred, type NormalizedRequirement, type SiteAnalysis } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -142,7 +144,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
   }
   if (!requirement) {
     return (
-      <p className="muted" role="status">
+      <p className="text-muted-foreground" role="status">
         Loading criteria…
       </p>
     );
@@ -192,10 +194,10 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
     <section className="review" aria-labelledby="review-title">
       <div className="review-main">
         <div className="review-head">
-          <h2 id="review-title" className="section-title">
+          <h2 id="review-title" className="font-heading text-2xl leading-[1.2] font-semibold tracking-[-0.015em]">
             Review your test
           </h2>
-          <p className="muted">
+          <p className="text-muted-foreground">
             Check that these match your instructions. You can edit a check or remove anything you don’t need.
           </p>
         </div>
@@ -213,7 +215,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
         {analysis && <LiveSiteSummary analysis={analysis} />}
 
         {requirement.intent && (
-          <p className="review-understood">
+          <p className="m-0 flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="note-title">What I understood</span> <span>{requirement.intent.goal}</span>
           </p>
         )}
@@ -221,16 +223,16 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
         <div className="criteria-list">{stated.map(card)}</div>
 
         {(added.length > 0 || notes.length > 0) && (
-          <div className="criteria-added" role="group" aria-labelledby="added-title">
-            <h3 id="added-title" className="criteria-added-title">
+          <div className="mt-5 grid gap-3 border-t border-border pt-5 [&>.text-muted-foreground]:m-0" role="group" aria-labelledby="added-title">
+            <h3 id="added-title" className="m-0 text-base">
               {ADDED_BY_PLATFORM}
             </h3>
-            <p className="muted">
+            <p className="text-muted-foreground">
               Your instructions were short, so these checks were added from what the site shows. Remove any that you did not mean.
             </p>
             <div className="criteria-list">{added.map(card)}</div>
             {notes.length > 0 && (
-              <ul className="assumption-list">
+              <ul className="m-0 grid gap-[0.4rem] pl-[1.1rem] text-[0.9rem]">
                 {notes.map((n, i) => (
                   <li key={`${i}-${n}`}>{n}</li>
                 ))}
@@ -242,12 +244,12 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
       </div>
 
       <aside className="review-side" aria-labelledby="confirm-title">
-        <div className="card confirm-panel">
+        <Card className="confirm-panel">
           <p className="confirm-status">Waiting for you</p>
           <h3 id="confirm-title" className="confirm-title">
             Do these checks match what you meant?
           </h3>
-          <p className="muted">Nothing runs until you confirm.</p>
+          <p className="text-muted-foreground">Nothing runs until you confirm.</p>
           <dl className="confirm-counts">
             <div>
               <dt>Criteria</dt>
@@ -272,60 +274,57 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
               </div>
             )}
           </dl>
-          <button
+          <Button size="lg" block
             type="button"
-            className="button button-primary button-lg button-block"
             onClick={confirm}
             disabled={confirming || saving || openEdits.length > 0}
             aria-describedby={openEdits.length > 0 ? "confirm-blocked" : undefined}
           >
             {confirming ? "Starting…" : "Confirm and start"}
             <Icon name="arrow" />
-          </button>
+          </Button>
           {openEdits.length > 0 && (
-            <p id="confirm-blocked" className="hint">
+            <p id="confirm-blocked" className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
               <Icon name="info" /> Save or discard your {openEdits.length === 1 ? "edit" : "edits"} to {listIds(openEdits)} first.
             </p>
           )}
           {(unclear > 0 || aiJudged > 0) && (
-            <p className="hint">
+            <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
               <Icon name="info" /> Model-judged criteria are judged by AI from what the page shows; unclear checks may be reported as
               Inconclusive.
             </p>
           )}
           {startingOver === null ? (
-            <button
+            <Button variant="outline" block
               type="button"
-              className="button button-secondary button-block"
               onClick={() => setStartingOver("ask")}
               disabled={confirming || saving}
             >
               <Icon name="restart" />
               Start over with a revised requirement
-            </button>
+            </Button>
           ) : (
             <div role="group" aria-labelledby="start-over-title" className="note note-warning">
               <p id="start-over-title" className="note-title">
                 Start over?
               </p>
               <p>This cancels the current run. You can edit the requirement and start a new one.</p>
-              <div className="actions">
-                <button type="button" className="button button-danger" onClick={startOver} disabled={startingOver === "working"}>
+              <div className="actions flex flex-wrap items-center gap-2">
+                <Button variant="destructive" type="button" onClick={startOver} disabled={startingOver === "working"}>
                   {startingOver === "working" ? "Cancelling…" : "Yes, start over"}
-                </button>
-                <button
+                </Button>
+                <Button variant="outline"
                   type="button"
-                  className="button button-secondary"
                   onClick={() => setStartingOver(null)}
                   disabled={startingOver === "working"}
                   autoFocus
                 >
                   Keep reviewing
-                </button>
+                </Button>
               </div>
             </div>
           )}
-        </div>
+        </Card>
       </aside>
     </section>
   );

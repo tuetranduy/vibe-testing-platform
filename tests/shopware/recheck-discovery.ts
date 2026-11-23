@@ -41,7 +41,7 @@ try {
         await runs.lockTenant(parent.tenantId);
         if (await runs.countActive(parent.tenantId) >= Number(process.env.MAX_ACTIVE_RUNS_PER_TENANT || 3)) return null;
         const created = await runs.create({ tenantId: parent.tenantId, targetUrl: parent.targetUrl,
-          request: parent.request, ownerUserId: parent.ownerUserId, comparisonKey: parent.comparisonKey, idempotencyKey: key, requestHash: key });
+          request: parent.request, ownerUserId: parent.ownerUserId, idempotencyKey: key, requestHash: key });
         await new EventRepository(tx).append({ runId: created.id, type: 'run.created', stage: 'QUEUED',
           message: `Discovery regression using the original confirmed criteria from ${parent.id}`, payload: { targetHost: new URL(parent.targetUrl).host } });
         await runs.transition(created.id, 'QUEUED', 'ANALYZING_REQUIREMENT');

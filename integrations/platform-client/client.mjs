@@ -11,13 +11,11 @@
  * @typedef {{
  *   runId: string; sourceRunId: string; title: string; targetUrl: string; lifecycle: string;
  *   verdict: Verdict | null; finishedAt: string | null;
- *   change: "regressed" | "fixed" | "changed" | "unchanged" | "new" | null;
  * }} SuiteRunChild
  * @typedef {{
  *   id: string; suiteId: string; suiteName: string; trigger: string; status: "RUNNING" | "COMPLETED";
  *   verdict: Verdict | null; createdAt: string; finishedAt: string | null;
  *   counts: { total: number; active: number; passed: number; failed: number; blocked: number; inconclusive: number; noVerdict: number };
- *   changes?: { regressed: number; fixed: number };
  *   children: SuiteRunChild[];
  * }} SuiteRun
  */
@@ -183,13 +181,12 @@ export async function waitForSuiteRun(client, suiteRunId, opts = {}) {
 
 const VERDICT_TEXT = { PASSED: "Passed", FAILED: "Failed", BLOCKED: "Blocked", INCONCLUSIVE: "Inconclusive" };
 const VERDICT_MARK = { PASSED: "✅", FAILED: "❌", BLOCKED: "⛔", INCONCLUSIVE: "❔" };
-const CHANGE_TEXT = { regressed: "Regressed", fixed: "Fixed", changed: "Changed", unchanged: "Unchanged", new: "First run" };
 
 /** Text that can't become Markdown structure inside a table cell or a link. */
 export const md = (/** @type {string} */ text) => text.replace(/[\r\n]+/g, " ").replace(/[\\`*_[\]<>|~#]/g, (c) => `\\${c}`);
 
 /**
- * A suite run as Markdown (the job summary): the verdict, the counts, regressions, and every test with a link.
+ * A suite run as Markdown (the job summary): the verdict, the counts, and every test with a link.
  * @param {SuiteRun} run
  * @param {string} webUrl
  */
@@ -210,13 +207,10 @@ export function summaryMarkdown(run, webUrl) {
     "",
     `[Open the suite run](${base}/suite-runs/${encodeURIComponent(run.id)}) · ${c.total} ${c.total === 1 ? "test" : "tests"}: ${parts.join(", ") || "none"}`,
   ];
-  if (run.changes && (run.changes.regressed > 0 || run.changes.fixed > 0)) {
-    lines.push("", `Since their previous run: ${run.changes.regressed} regressed, ${run.changes.fixed} fixed.`);
-  }
-  lines.push("", "| Test | Result | Since the previous run |", "|---|---|---|");
+  lines.push("", "| Test | Result |", "|---|---|");
   for (const child of run.children) {
     const result = child.verdict ? `${VERDICT_MARK[child.verdict]} ${VERDICT_TEXT[child.verdict]}` : md(child.lifecycle);
-    lines.push(`| [${md(child.title || child.targetUrl)}](${base}/runs/${encodeURIComponent(child.runId)}) | ${result} | ${child.change ? CHANGE_TEXT[child.change] : "—"} |`);
+    lines.push(`| [${md(child.title || child.targetUrl)}](${base}/runs/${encodeURIComponent(child.runId)}) | ${result} |`);
   }
   return `${lines.join("\n")}\n`;
 }

@@ -1,3 +1,4 @@
+import { Card } from "@/components/ui/card";
 import { ADDED_BY_PLATFORM, assumptionsOf, type Assumption, type NormalizedRequirement } from "@platform/contracts";
 import { useId } from "react";
 
@@ -6,11 +7,11 @@ const TAG: Record<Exclude<Assumption["kind"], "note">, string> = { added: ADDED_
 /** What the analysis added or assumed, as list items: shared by the report and the printable report. */
 export function AssumptionItems({ requirement }: { requirement: NormalizedRequirement }) {
   return (
-    <ul className="assumption-list">
+    <ul className="m-0 grid gap-[0.4rem] pl-[1.1rem] text-[0.9rem]">
       {assumptionsOf(requirement).map((a, i) => (
         <li key={`${a.kind}-${a.criterionId ?? i}-${i}`}>
           {a.kind !== "note" && (
-            <span className="assumption-tag">
+            <span className="mr-2 inline-block text-xs font-semibold text-muted-foreground">
               {a.criterionId} · {TAG[a.kind]}
             </span>
           )}
@@ -30,17 +31,17 @@ export function Assumptions({ requirement }: { requirement: NormalizedRequiremen
   const titleId = useId();
   if (!requirement || assumptionsOf(requirement).length === 0) return null;
   return (
-    <section className="card assumptions" aria-labelledby={titleId}>
+    <Card as="section" className="grid gap-[0.6rem]" aria-labelledby={titleId}>
       <h2 id={titleId} className="panel-title">
         Assumptions
       </h2>
-      <p className="hint">These checks or readings are the platform&apos;s, not your words. Remove or change them in the next test&apos;s review.</p>
+      <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">These checks or readings are the platform&apos;s, not your words. Remove or change them in the next test&apos;s review.</p>
       {requirement.intent && (
-        <p className="assumption-goal">
+        <p className="m-0 flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <span className="note-title">What was understood</span> <span>{requirement.intent.goal}</span>
         </p>
       )}
       <AssumptionItems requirement={requirement} />
-    </section>
+    </Card>
   );
 }

@@ -11,20 +11,6 @@ function reportFetch(handler: () => Response) {
   const fetch = vi.fn(async (input: RequestInfo | URL) => {
     if (String(input) === REPORT) return handler();
     if (String(input).includes("/artifacts/")) return json(200, { url: "https://s3.test/x.png", expiresAt: "2099-01-01T00:00:00.000Z" });
-    // The first run of its test (V1.2 F2): the comparison panel shows nothing.
-    if (String(input).endsWith("/comparison")) {
-      return json(200, {
-        runId: "run_1",
-        baseline: null,
-        chosenBaseline: false,
-        verdict: { before: null, after: "FAILED" },
-        criteria: [],
-        counts: { regressed: 0, fixed: 0, changed: 0, unchanged: 0, added: 0, removed: 0 },
-        durationMs: { before: null, after: 1 },
-        costUsd: { before: null, after: 0 },
-        history: [],
-      });
-    }
     throw new Error(`unexpected request ${String(input)}`);
   });
   vi.stubGlobal("fetch", fetch);
@@ -123,9 +109,12 @@ describe("RunReport", () => {
     expect(screen.getByText("Browser error")).toBeInTheDocument();
     expect(screen.getByText(/infrastructure errors never count as a failed criterion/i)).toBeInTheDocument();
     // The technical message is available, but secondary: inside a collapsed disclosure.
-    const details = screen.getByText(/technical details/i).closest("details")!;
-    expect(details).not.toHaveAttribute("open");
-    expect(within(details).getByText("chromium: No usable sandbox!")).toBeInTheDocument();
+    const details = screen.getByRole("button", { name: /technical details/i });
+    expect(details).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("chromium: No usable sandbox!")).not.toBeInTheDocument();
+    await userEvent.click(details);
+    expect(details).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("chromium: No usable sandbox!")).toBeVisible();
     expect(screen.queryByRole("heading", { name: /verdict/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^AC-1\b/ })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /generated playwright test/i })).not.toBeInTheDocument();

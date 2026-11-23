@@ -1,0 +1,334 @@
+/* ---------- Settings (AI providers and defaults) ---------- */
+.key-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+.key-status code {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+}
+
+/* ---------- Choose what to test (suggested tests) ---------- */
+
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.suggestion {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 24px;
+}
+.suggestion-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.suggestion-title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+.suggestion-text {
+  margin: 0;
+}
+.needs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+}
+.needs ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.need {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--info-bg);
+  color: var(--info);
+}
+.suggestion .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+/* ---------- V1.1: accounts, settings sections, data tables ---------- */
+
+/* Sign-in: the mark over a lit card, centered in the viewport. */
+.login-page::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  left: 50%;
+  width: min(760px, 120vw);
+  aspect-ratio: 1.6;
+  transform: translate(-50%, -58%);
+  border-radius: 50%;
+  background:
+    radial-gradient(closest-side at 38% 50%, rgb(79 114 255 / 0.32), transparent),
+    radial-gradient(closest-side at 64% 46%, rgb(34 211 238 / 0.18), transparent);
+  filter: blur(40px);
+  pointer-events: none;
+}
+.login-card .page-title {
+  font-size: 1.75rem;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.data-table th {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-subtle);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: left;
+  text-transform: uppercase;
+}
+.data-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: top;
+}
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.data-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.row-disabled td {
+  color: var(--text-subtle);
+}
+
+@media (max-width: 760px) {
+  .nav-user .nav-link span:not(.sr-only) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+}
+@media (max-width: 560px) {
+  .nav-signout {
+    padding-inline: 8px;
+  }
+}
+
+/* V1.1: saved test data and credentials */
+fieldset.stack-tight {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+/* V1.1: report export */
+.print-report {
+  display: grid;
+  gap: 24px;
+  max-width: 820px;
+}
+.print-report h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 1.75rem;
+}
+.print-report h2 {
+  margin: 0 0 8px;
+  font-size: 1.125rem;
+}
+.print-report h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+.print-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.print-facts {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 4px 16px;
+  margin: 8px 0 0;
+}
+.print-facts > div {
+  display: contents;
+}
+.print-facts dt {
+  color: var(--text-muted);
+}
+.print-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.print-quote {
+  margin: 0;
+  padding: 8px 16px;
+  border-left: 3px solid var(--border-strong);
+  white-space: pre-wrap;
+}
+.print-criterion {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  break-inside: avoid;
+}
+.print-code pre {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media print {
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --text: #000000;
+    --text-muted: #333333;
+    --border: #cccccc;
+    --border-strong: #999999;
+  }
+  body {
+    background: #ffffff;
+    color: #000000;
+  }
+  .sidebar,
+  .topbar,
+  .sidebar-scrim,
+  .skip-link,
+  .no-print {
+    display: none !important;
+  }
+  .page {
+    max-width: none;
+    padding: 0;
+  }
+  .print-report {
+    max-width: none;
+  }
+}
+
+/* V1.1: usage */
+.usage-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+.usage-stats {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.usage-hero {
+  font-size: 2.5rem;
+}
+.usage-chart {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+}
+.usage-chart svg {
+  display: block;
+}
+.chart-bar {
+  fill: var(--chart-bar);
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.chart-grid {
+  stroke: var(--border-soft);
+  stroke-width: 1;
+}
+.chart-axis {
+  fill: var(--text-subtle);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.chart-tooltip {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* V1.1: the header at phone width — icon-only "New test", sign-out on the Account page */
+@media (max-width: 560px) {
+  .nav-signout {
+    display: none;
+  }
+  .nav-user .nav-link {
+    padding-inline: 8px;
+  }
+  .usage-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .usage-hero {
+    font-size: 2rem;
+  }
+}
+
+/* V1.2: suites — the ordered tests of a suite, its recent runs, a suite run's table */
+.suite-card {
+  position: relative;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.suite-card:hover {
+  border-color: var(--border-strong);
+}
+/* The whole card opens the suite; the link itself stays the only focus stop. */
+.card-link {
+  color: var(--text);
+  text-decoration: none;
+}
+.card-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.suite-card:hover .card-link,
+.card-link:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+}

@@ -1,5 +1,7 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { clearExplorationCache, getExplorationCache, type ExplorationCacheStats } from "../lib/api";
 import { isAdminUser, useMe } from "../lib/me";
@@ -42,11 +44,11 @@ export function ExplorationCacheCard() {
   }
 
   return (
-    <section className="card stack-tight" aria-labelledby="cache-title">
-      <h2 id="cache-title" className="card-title">
+    <Card as="section" className="stack-tight flex min-w-0 flex-col gap-3" aria-labelledby="cache-title">
+      <h2 id="cache-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
         Exploration cache
       </h2>
-      <p className="muted">
+      <p className="text-muted-foreground">
         Where a run found an element on a page, later runs reuse that lookup instead of asking the AI — after checking it still points at
         the same element. Page values are never cached. Entries unused for 30 days are removed.
       </p>
@@ -57,7 +59,7 @@ export function ExplorationCacheCard() {
         </p>
       )}
       {error && (
-        <p role="alert" className="field-error">
+        <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
           <Icon name="error" /> {error}
         </p>
       )}
@@ -68,27 +70,27 @@ export function ExplorationCacheCard() {
               Clear the exploration cache?
             </p>
             <p>The next runs look every element up again with the AI.</p>
-            <div className="actions">
-              <button type="button" className="button button-danger" onClick={() => void clear()}>
+            <div className="actions flex flex-wrap items-center gap-2">
+              <Button variant="destructive" type="button" onClick={() => void clear()}>
                 Yes, clear it
-              </button>
-              <button type="button" className="button button-secondary" onClick={() => setConfirming(false)}>
+              </Button>
+              <Button variant="outline" type="button" onClick={() => setConfirming(false)}>
                 Keep it
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
-          <div className="actions">
-            <button type="button" className="button button-secondary" onClick={() => setConfirming(true)} disabled={stats?.entries === 0}>
+          <div className="actions flex flex-wrap items-center gap-2">
+            <Button variant="outline" type="button" onClick={() => setConfirming(true)} disabled={stats?.entries === 0}>
               Clear cache
-            </button>
+            </Button>
             {notice && (
-              <p role="status" className="hint">
+              <p role="status" className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
                 {notice}
               </p>
             )}
           </div>
         ))}
-    </section>
+    </Card>
   );
 }

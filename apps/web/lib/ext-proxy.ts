@@ -26,7 +26,6 @@ const ENDPOINTS: { method: Method; pattern: RegExp; query: readonly string[] }[]
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}$`), query: [] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/report$`), query: [] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/report\\.md$`), query: [] },
-  { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/comparison$`), query: ["baseline"] },
 ];
 
 const PREFIX = "/api/ext";

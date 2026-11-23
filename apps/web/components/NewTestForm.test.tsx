@@ -35,7 +35,7 @@ describe("simple test setup", () => {
     render(<NewTestForm />);
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     expect(screen.queryByText(/^Secrets$|^Test data$|^Environment$|Saved credentials/)).not.toBeInTheDocument();
-    expect(screen.getByText(/Run settings/).closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: /Run settings/ })).toHaveAttribute("aria-expanded", "false");
     await waitFor(() => expect(getLlmSettings).toHaveBeenCalled());
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -93,7 +93,7 @@ describe("simple test setup", () => {
     const user = await fill();
     fireEvent.change(screen.getByLabelText("Step limit"), { target: { value: "101" } });
     await user.click(create());
-    expect(screen.getByText(/Run settings/).closest("details")).toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: /Run settings/ })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByLabelText("Step limit")).toHaveFocus();
     expect(fetch).not.toHaveBeenCalled();
   });

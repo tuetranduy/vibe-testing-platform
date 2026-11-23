@@ -1,13 +1,14 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import type { SuiteRunView } from "@platform/contracts";
 import { useEffect, useState } from "react";
 import { cancelSuiteRun, getSuiteRun } from "../lib/api";
-import { ChangeBadge, RUN_CHANGE_UI } from "./ComparisonPanel";
 import { Icon } from "./Icon";
-import { LIFECYCLE_LABEL } from "./format";
 import { displayUrl, formatWhen, plural } from "./report-format";
-import { VerdictBadge } from "./StatusBadge";
+import { LifecycleBadge, VerdictBadge } from "./StatusBadge";
 import { SuiteRunOutcome, TRIGGER_LABEL, messageOf } from "./Suites";
 
 type State = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; run: SuiteRunView };
@@ -64,7 +65,7 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
 
   if (state.status === "loading") {
     return (
-      <p className="muted" role="status">
+      <p className="text-muted-foreground" role="status">
         Loading the suite run…
       </p>
     );
@@ -76,10 +77,10 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
         <div>
           <p className="banner-title">The suite run couldn&apos;t be loaded</p>
           <p>{state.message}</p>
-          <div className="actions">
-            <button type="button" className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}>
+          <div className="actions flex flex-wrap items-center gap-2">
+            <Button variant="outline" type="button" onClick={() => setAttempt((n) => n + 1)}>
               Try again
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -100,8 +101,8 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
   }
 
   return (
-    <div className="stack-lg">
-      <header className="stack-tight">
+    <div className="flex min-w-0 flex-col gap-7">
+      <header className="stack-tight flex min-w-0 flex-col gap-3">
         <nav aria-label="Breadcrumb" className="breadcrumb">
           <ol>
             <li>
@@ -114,15 +115,15 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
           </ol>
         </nav>
         <h1 className="page-title">{run.suiteName}</h1>
-        <div className="run-meta">
+        <div className="flex flex-wrap items-center gap-2 text-[0.8125rem] text-muted-foreground">
           <SuiteRunOutcome run={run} />
-          <span className="meta-text">
+          <span className="pl-1">
             {TRIGGER_LABEL[run.trigger]}
             {run.owner ? ` by ${run.owner.name}` : ""} · <time dateTime={run.createdAt}>{formatWhen(run.createdAt)}</time>
           </span>
         </div>
         {(run.ci || run.startedWithToken) && (
-          <p className="muted">
+          <p className="text-muted-foreground">
             {run.startedWithToken && <>With the API token “{run.startedWithToken.name}”</>}
             {run.startedWithToken && run.ci && " · "}
             {run.ci && (
@@ -136,7 +137,7 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
                 )}
                 {run.ci.repository && ` for ${run.ci.repository}`}
                 {run.ci.ref && ` · ${run.ci.ref.replace(/^refs\/heads\//, "")}`}
-                {run.ci.sha && <span className="mono"> · {run.ci.sha.slice(0, 7)}</span>}
+                {run.ci.sha && <span className="font-mono"> · {run.ci.sha.slice(0, 7)}</span>}
               </>
             )}
           </p>
@@ -144,72 +145,63 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
         <p role="status" aria-live="polite">
           {countsText(run)}
         </p>
-        {(run.changes.regressed > 0 || run.changes.fixed > 0) && (
-          <p className={run.changes.regressed > 0 ? "field-error" : "muted"}>
-            <Icon name={run.changes.regressed > 0 ? "warning" : "check"} />{" "}
-            {[run.changes.regressed > 0 && `${plural(run.changes.regressed, "test")} regressed`, run.changes.fixed > 0 && `${plural(run.changes.fixed, "test")} fixed`]
-              .filter(Boolean)
-              .join(", ")}{" "}
-            since their previous run.
-          </p>
-        )}
         {run.status === "COMPLETED" && (
-          <div className="actions">
-            <a className="button button-secondary" href={`/api/v1/suite-runs/${encodeURIComponent(run.id)}/junit.xml`} download>
-              <Icon name="download" />
-              Download JUnit XML
-            </a>
+          <div className="actions flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline">
+              <a href={`/api/v1/suite-runs/${encodeURIComponent(run.id)}/junit.xml`} download>
+                <Icon name="download" />
+                Download JUnit XML
+              </a>
+            </Button>
           </div>
         )}
         {run.status === "RUNNING" && (
-          <div className="actions">
-            <button type="button" className="button button-secondary" onClick={() => void cancel()} disabled={cancelling}>
+          <div className="actions flex flex-wrap items-center gap-2">
+            <Button variant="outline" type="button" onClick={() => void cancel()} disabled={cancelling}>
               <Icon name="stop" />
               {cancelling ? "Cancelling…" : "Cancel suite run"}
-            </button>
+            </Button>
           </div>
         )}
         {cancelError && (
-          <p role="alert" className="field-error">
+          <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
             <Icon name="error" /> {cancelError}
           </p>
         )}
       </header>
 
-      <section className="card card-flush" aria-labelledby="suite-children-title">
-        <h2 id="suite-children-title" className="card-title card-flush-title">
+      <Card as="section" className="overflow-hidden p-0 max-[560px]:p-0" aria-labelledby="suite-children-title">
+        <h2 id="suite-children-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground px-5 pt-[18px] pb-3">
           Tests
         </h2>
-        <table className="history">
-          <thead>
-            <tr>
-              <th scope="col">Test</th>
-              <th scope="col">Result</th>
-              <th scope="col">Since the previous run</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table className="history">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Test</TableHead>
+              <TableHead scope="col">Result</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {run.children.map((c) => (
-              <tr key={c.runId}>
-                <td className="history-main">
+              <TableRow key={c.runId}>
+                <TableCell className="history-main">
                   <a className="row-link" href={`/runs/${encodeURIComponent(c.runId)}`}>
                     {c.title || displayUrl(c.targetUrl)}
                   </a>
                   <span className="history-host">{displayUrl(c.targetUrl)}</span>
-                </td>
-                <td className="history-result">
+                </TableCell>
+                <TableCell className="history-result">
                   {c.verdict ? (
                     <VerdictBadge verdict={c.verdict} />
                   ) : (
-                    <span className={`status status-${c.lifecycle.toLowerCase()}`}>{LIFECYCLE_LABEL[c.lifecycle]}</span>
+                    <LifecycleBadge lifecycle={c.lifecycle} />
                   )}
-                </td>
-                <td className="history-result">{c.change ? <ChangeBadge ui={RUN_CHANGE_UI[c.change]} /> : <span className="muted">—</span>}</td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </section>
+          </TableBody>
+        </Table>
+      </Card>
     </div>
   );
 }

@@ -1,5 +1,10 @@
 "use client";
 
+import { Field } from "@/components/ui/field";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Input } from "@/components/ui/input";
 import type { SuiteView } from "@platform/contracts";
 import { useEffect, useState, type FormEvent } from "react";
 import { ApiRequestError, addSuiteEntry, createSuite, listSuites } from "../lib/api";
@@ -61,65 +66,65 @@ export function AddToSuitePanel({ runId, destructive = false }: Props) {
   }
 
   return (
-    <section className="card stack" aria-labelledby="add-to-suite-title">
-      <div className="section-head">
-        <h2 id="add-to-suite-title" className="card-title">
+    <Card as="section" className="flex min-w-0 flex-col gap-5" aria-labelledby="add-to-suite-title">
+      <div className="flex flex-col gap-1.5 [&>.text-muted-foreground]:max-w-[68ch]">
+        <h2 id="add-to-suite-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
           <Icon name="layers" /> Add to a suite
         </h2>
-        <p className="muted">Rerun this test with others, by hand, on a schedule or from CI — always without AI.</p>
+        <p className="text-muted-foreground">Rerun this test with others, by hand, on a schedule or from CI — always without AI.</p>
       </div>
       {added ? (
         <p role="status">
           <Icon name="check" /> Added to <a href={`/suites/${encodeURIComponent(added.id)}`}>{added.name}</a>.
         </p>
       ) : !open ? (
-        <div className="actions">
-          <button type="button" className="button button-secondary" onClick={() => setOpen(true)}>
+        <div className="actions flex flex-wrap items-center gap-2">
+          <Button variant="outline" type="button" onClick={() => setOpen(true)}>
             <Icon name="plus" />
             Add to suite
-          </button>
+          </Button>
         </div>
       ) : (
-        <form className="stack" onSubmit={submit} noValidate aria-busy={pending}>
+        <form className="flex min-w-0 flex-col gap-5" onSubmit={submit} noValidate aria-busy={pending}>
           {suites === null && !error && (
-            <p className="muted" role="status">
+            <p className="text-muted-foreground" role="status">
               Loading suites…
             </p>
           )}
           {suites !== null && (
-            <div className="field">
+            <Field>
               <label htmlFor="add-suite-choice">Suite</label>
-              <select id="add-suite-choice" value={choice} onChange={(e) => setChoice(e.target.value)}>
+              <NativeSelect id="add-suite-choice" value={choice} onChange={(e) => setChoice(e.target.value)}>
                 {suites.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
                   </option>
                 ))}
                 <option value={NEW}>New suite…</option>
-              </select>
-            </div>
+              </NativeSelect>
+            </Field>
           )}
           {choice === NEW && (
-            <div className="field">
+            <Field>
               <label htmlFor="add-suite-name">New suite&apos;s name</label>
-              <input id="add-suite-name" value={newName} maxLength={100} onChange={(e) => setNewName(e.target.value)} />
-            </div>
+              <Input id="add-suite-name" value={newName} maxLength={100} onChange={(e) => setNewName(e.target.value)} />
+            </Field>
           )}
           {error && (
-            <p role="alert" className="field-error">
+            <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
               <Icon name="error" /> {error}
             </p>
           )}
-          <div className="actions">
-            <button type="submit" className="button button-primary" disabled={pending || suites === null}>
+          <div className="actions flex flex-wrap items-center gap-2">
+            <Button type="submit" disabled={pending || suites === null}>
               {pending ? "Adding…" : "Add"}
-            </button>
-            <button type="button" className="button button-secondary" onClick={() => setOpen(false)} disabled={pending}>
+            </Button>
+            <Button variant="outline" type="button" onClick={() => setOpen(false)} disabled={pending}>
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
       )}
-    </section>
+    </Card>
   );
 }

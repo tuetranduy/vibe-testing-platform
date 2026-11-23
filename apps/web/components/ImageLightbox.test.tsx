@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -26,12 +26,12 @@ describe("ImageLightbox", () => {
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(screen.getByRole("img", { name: "Cart page" })).toHaveAttribute("src", "https://s3.test/shot.png");
     expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
-    expect(document.body.style.overflow).toBe("hidden");
+    expect(document.body).toHaveAttribute("data-scroll-locked");
 
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(document.body.style.overflow).toBe("");
-    expect(opener).toHaveFocus();
+    expect(document.body).not.toHaveAttribute("data-scroll-locked");
+    await waitFor(() => expect(opener).toHaveFocus());
   });
 
   it("switches between fit to width and actual size, by the button or a click on the image", async () => {
@@ -39,11 +39,11 @@ describe("ImageLightbox", () => {
     render(<Opener />);
     await user.click(screen.getByRole("button", { name: "Open" }));
     const img = screen.getByRole("img");
-    expect(img).not.toHaveClass("lightbox-image-actual");
+    expect(img).not.toHaveClass("max-w-none");
     await user.click(screen.getByRole("button", { name: "Actual size" }));
-    expect(img).toHaveClass("lightbox-image-actual");
+    expect(img).toHaveClass("max-w-none");
     await user.click(img);
-    expect(img).not.toHaveClass("lightbox-image-actual");
+    expect(img).not.toHaveClass("max-w-none");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
@@ -55,7 +55,7 @@ describe("ImageLightbox", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Open" }));
-    fireEvent.mouseDown(document.querySelector(".lightbox-backdrop")!);
+    fireEvent.mouseDown(document.querySelector('[data-slot="lightbox-stage"]')!);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 

@@ -1,3 +1,4 @@
+import { Card } from "@/components/ui/card";
 import type { RunLifecycle } from "@platform/contracts";
 import { STAGE_LABELS, runStages, stagesFor, type ProgressState, type StageState } from "../lib/progress-reducer";
 import { Icon, type IconName } from "./Icon";
@@ -28,8 +29,8 @@ export function RunProgress({ progress, lifecycle, survey = false }: Props) {
   const { percent, outcome } = progress;
   const now = outcome ? null : currentStage ? STAGE_LABELS[currentStage] : null;
   return (
-    <section className="card progress-card" aria-labelledby="progress-title">
-      <h2 id="progress-title" className="visually-hidden">
+    <Card as="section" className="progress-card" aria-labelledby="progress-title">
+      <h2 id="progress-title" className="sr-only">
         Progress
       </h2>
       <div className="progress-head">
@@ -78,6 +79,6 @@ export function RunProgress({ progress, lifecycle, survey = false }: Props) {
           );
         })}
       </ol>
-    </section>
+    </Card>
   );
 }

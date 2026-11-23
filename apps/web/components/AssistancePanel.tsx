@@ -1,5 +1,8 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { answerAssistance } from "../lib/api";
 import { useArtifactUrl } from "../lib/artifacts";
@@ -33,7 +36,7 @@ export function AssistancePanel({ runId, request }: { runId: string; request: No
   }
 
   return (
-    <section className="card stack" aria-labelledby="assistance-title">
+    <Card as="section" className="flex min-w-0 flex-col gap-5" aria-labelledby="assistance-title">
       <h2 id="assistance-title">The test is stuck — tell it what to do next</h2>
       <p style={{ overflowWrap: "anywhere" }}>{request.question}</p>
       <p style={{ overflowWrap: "anywhere" }}>Current URL: {request.url}</p>
@@ -44,7 +47,7 @@ export function AssistancePanel({ runId, request }: { runId: string; request: No
         <p role="status">{image.status === "error" ? image.message : "Loading screenshot…"}</p>
       )}
       <label htmlFor="assistance-instruction">What should the test do next?</label>
-      <textarea
+      <Textarea
         id="assistance-instruction"
         rows={4}
         maxLength={2000}
@@ -54,14 +57,14 @@ export function AssistancePanel({ runId, request }: { runId: string; request: No
         style={{ width: "100%", boxSizing: "border-box" }}
       />
       {error && <p role="alert">{error}</p>}
-      <div className="actions">
-        <button className="button button-primary" disabled={pending || seconds === 0 || !text.trim()} onClick={() => void answer({ instruction: text.trim() })}>
+      <div className="actions flex flex-wrap items-center gap-2">
+        <Button type="button" disabled={pending || seconds === 0 || !text.trim()} onClick={() => void answer({ instruction: text.trim() })}>
           Continue with this instruction
-        </button>
-        <button className="button button-secondary" disabled={pending || seconds === 0} onClick={() => void answer({ stop: true })}>
+        </Button>
+        <Button variant="outline"  disabled={pending || seconds === 0} onClick={() => void answer({ stop: true })}>
           Stop here
-        </button>
+        </Button>
       </div>
-    </section>
+    </Card>
   );
 }

@@ -16,10 +16,9 @@ const suiteRun = (patch: Partial<SuiteRun> = {}): SuiteRun => ({
   createdAt: "2026-09-30T10:00:00.000Z",
   finishedAt: "2026-09-30T10:02:00.000Z",
   counts: { total: 2, active: 0, passed: 2, failed: 0, blocked: 0, inconclusive: 0, noVerdict: 0 },
-  changes: { regressed: 0, fixed: 0 },
   children: [
-    { runId: "run_a", sourceRunId: "run_s", title: "Add to cart | fast", targetUrl: "https://shop.example.com/", lifecycle: "COMPLETED", verdict: "PASSED", finishedAt: null, change: "unchanged" },
-    { runId: "run_b", sourceRunId: "run_t", title: "Checkout", targetUrl: "https://shop.example.com/", lifecycle: "COMPLETED", verdict: "PASSED", finishedAt: null, change: "new" },
+    { runId: "run_a", sourceRunId: "run_s", title: "Add to cart | fast", targetUrl: "https://shop.example.com/", lifecycle: "COMPLETED", verdict: "PASSED", finishedAt: null },
+    { runId: "run_b", sourceRunId: "run_t", title: "Checkout", targetUrl: "https://shop.example.com/", lifecycle: "COMPLETED", verdict: "PASSED", finishedAt: null },
   ],
   ...patch,
 });
@@ -109,12 +108,11 @@ describe("waitForSuiteRun", () => {
 
 describe("summaryMarkdown", () => {
   it("leads with the verdict and links every test, escaping titles", () => {
-    const text = summaryMarkdown(suiteRun({ verdict: "FAILED", changes: { regressed: 1, fixed: 0 } }), `${URL_}/`);
+    const text = summaryMarkdown(suiteRun({ verdict: "FAILED" }), `${URL_}/`);
     expect(text.startsWith("## ❌ Failed: suite “Checkout smoke”\n")).toBe(true);
     expect(text).toContain(`[Open the suite run](${URL_}/suite-runs/srn_1) · 2 tests: 2 passed`);
-    expect(text).toContain("Since their previous run: 1 regressed, 0 fixed.");
-    expect(text).toContain(`| [Add to cart \\| fast](${URL_}/runs/run_a) | ✅ Passed | Unchanged |`);
-    expect(text).toContain("| First run |");
+    expect(text).toContain(`| [Add to cart \\| fast](${URL_}/runs/run_a) | ✅ Passed |`);
+    expect(text).toContain(`| [Checkout](${URL_}/runs/run_b) | ✅ Passed |`);
   });
 });
 

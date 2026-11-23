@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { ADDED_BY_PLATFORM, isInferred, type AcceptanceCriterion, type CriterionResult, type NormalizedRequirement, type TestReport } from "@platform/contracts";
 import { useState } from "react";
 import { reviewResult } from "../lib/api";
@@ -35,14 +36,14 @@ export function CriteriaResults({ runId, criteria, requirement, diagnostics, art
 
   return (
     <section className="results-section" aria-labelledby="criteria-title">
-      <div className="section-head">
-        <h2 id="criteria-title" className="section-title">
+      <div className="flex flex-col gap-1.5 [&>.text-muted-foreground]:max-w-[68ch]">
+        <h2 id="criteria-title" className="font-heading text-2xl leading-[1.2] font-semibold tracking-[-0.015em]">
           Results by criterion
         </h2>
-        {criteria.length > 0 && <p className="muted">Open a criterion for its expected and actual values, steps and evidence.</p>}
+        {criteria.length > 0 && <p className="text-muted-foreground">Open a criterion for its expected and actual values, steps and evidence.</p>}
       </div>
       {criteria.length === 0 ? (
-        <p className="card muted">No criterion results were recorded{partial ? " before the run stopped" : ""}.</p>
+        <p className="card text-muted-foreground">No criterion results were recorded{partial ? " before the run stopped" : ""}.</p>
       ) : (
         <ul className="results">
           {criteria.map((r) => (
@@ -103,7 +104,7 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
         </span>
         <div className="result-main">
           <h3 className="result-heading">
-            <button
+            <Button variant="plain"
               type="button"
               id={toggleId}
               className="result-toggle"
@@ -114,17 +115,17 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
               <span className="result-id">{r.criterionId}</span>{" "}
               <span className="result-statement">{criterion?.statement ?? `Criterion ${r.criterionId}`}</span>
               <Icon name="chevron" className="result-chevron" />
-            </button>
+            </Button>
           </h3>
 
           <p className="result-meta">
             {!r.critical && (
-              <span className="weight-tag" title="A non-critical criterion is reported but never changes the verdict">
+              <span className="mr-2 inline-flex items-center rounded-full border border-input px-2 py-px text-xs font-[560] text-muted-foreground" title="A non-critical criterion is reported but never changes the verdict">
                 Non-critical
               </span>
             )}
             {criterion && isInferred(criterion) && (
-              <span className="weight-tag origin-tag" title={criterion.rationale ?? undefined}>
+              <span className="mr-2 inline-flex items-center rounded-full border border-input px-2 py-px text-xs font-[560] text-muted-foreground ml-[0.35rem]" title={criterion.rationale ?? undefined}>
                 {ADDED_BY_PLATFORM}
               </span>
             )}
@@ -146,11 +147,11 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
         </div>
       </div>
 
-      {r.review && <p className="hint">Automated result: Inconclusive — {reasonText(r.review.originalReason)}. Reviewed {new Date(r.review.reviewedAt).toLocaleString()}.</p>}
+      {r.review && <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Automated result: Inconclusive — {reasonText(r.review.originalReason)}. Reviewed {new Date(r.review.reviewedAt).toLocaleString()}.</p>}
       {r.status === "INCONCLUSIVE" && onReview && (
-        <div className="actions" aria-label={`Review ${r.criterionId}`}>
-          <button type="button" className="button button-secondary" disabled={pending} onClick={() => decide("PASS")}>Mark as pass</button>
-          <button type="button" className="button button-danger-quiet" disabled={pending} onClick={() => decide("FAIL")}>Mark as fail</button>
+        <div className="actions flex flex-wrap items-center gap-2" aria-label={`Review ${r.criterionId}`}>
+          <Button variant="outline" type="button" disabled={pending} onClick={() => decide("PASS")}>Mark as pass</Button>
+          <Button variant="danger-outline" type="button" disabled={pending} onClick={() => decide("FAIL")}>Mark as fail</Button>
           {pending && <span role="status">Saving review…</span>}
           {error && <p role="alert">{error}</p>}
         </div>
@@ -161,7 +162,7 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
             <Icon name="note" /> {r.verdictSource === "AI_JUDGMENT" ? "AI reasoning" : "AI note"}
           </p>
           <p>{r.aiNote}</p>
-          <p className="hint">
+          <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
             {r.verdictSource === "AI_JUDGMENT"
               ? "Why the AI judged the actual result this way. Check the screenshot it was judged on."
               : "The AI model's opinion. It never sets the status."}

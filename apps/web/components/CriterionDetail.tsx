@@ -26,7 +26,7 @@ export function CriterionDetail({ id, labelledBy, runId, result, criterion, diag
         {criterion ? (
           <>
             <blockquote className="source-quote">“{criterion.sourceText}”</blockquote>
-            <p className="hint">From your requirement</p>
+            <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">From your requirement</p>
             {criterion.preconditions.length > 0 && (
               <ul className="needs">
                 {criterion.preconditions.map((p, i) => (
@@ -36,7 +36,7 @@ export function CriterionDetail({ id, labelledBy, runId, result, criterion, diag
             )}
           </>
         ) : (
-          <p className="muted">The requirement text isn&apos;t available for this run.</p>
+          <p className="text-muted-foreground">The requirement text isn&apos;t available for this run.</p>
         )}
       </section>
 
@@ -50,19 +50,19 @@ export function CriterionDetail({ id, labelledBy, runId, result, criterion, diag
       <section className="detail-section">
         <h4>Actual</h4>
         <div className={`detail-box${failed ? " detail-box-fail" : ""}`}>
-          {result.actual === null ? <p className="muted">Not observed</p> : <p className="detail-value">{result.actual}</p>}
+          {result.actual === null ? <p className="text-muted-foreground">Not observed</p> : <p className="detail-value">{result.actual}</p>}
         </div>
       </section>
 
       <section className="detail-section">
         <h4>Related steps</h4>
         {result.relatedStepIds.length === 0 ? (
-          <p className="muted">No steps are linked to this criterion.</p>
+          <p className="text-muted-foreground">No steps are linked to this criterion.</p>
         ) : (
           <ol className="step-list">
             {result.relatedStepIds.map((stepId) => {
               const step = steps.get(stepId);
-              return <li key={stepId}>{step ? <span>{step.message}</span> : <span className="muted">Step {stepId}</span>}</li>;
+              return <li key={stepId}>{step ? <span>{step.message}</span> : <span className="text-muted-foreground">Step {stepId}</span>}</li>;
             })}
           </ol>
         )}

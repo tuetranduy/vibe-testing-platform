@@ -1,5 +1,11 @@
 "use client";
 
+import { Field } from "@/components/ui/field";
+import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import type { ApiTokenScope, ApiTokenView, CreatedApiToken } from "@platform/contracts";
 import { useEffect, useState, type FormEvent } from "react";
 import { createApiToken, listApiTokens, revokeApiToken } from "../lib/api";
@@ -58,7 +64,7 @@ export function ApiTokens({ all = false }: { all?: boolean }) {
   }
 
   return (
-    <div className="stack-lg">
+    <div className="flex min-w-0 flex-col gap-7">
       {!all && (
         <NewToken
           onCreated={(t) => {
@@ -69,44 +75,44 @@ export function ApiTokens({ all = false }: { all?: boolean }) {
       )}
       {created && <CreatedToken token={created} onDone={() => setCreated(null)} />}
       {error && (
-        <p role="alert" className="field-error">
+        <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
           <Icon name="error" /> {error}
         </p>
       )}
-      <section className="card stack" aria-labelledby="tokens-title">
-        <h2 id="tokens-title" className="card-title">
+      <Card as="section" className="flex min-w-0 flex-col gap-5" aria-labelledby="tokens-title">
+        <h2 id="tokens-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
           <Icon name="key" /> {all ? "Everyone's tokens" : "Your tokens"}
         </h2>
         {tokens === null && !error && (
-          <p className="muted" role="status">
+          <p className="text-muted-foreground" role="status">
             Loading tokens…
           </p>
         )}
-        {tokens?.length === 0 && <p className="muted">No tokens yet.</p>}
+        {tokens?.length === 0 && <p className="text-muted-foreground">No tokens yet.</p>}
         {tokens && tokens.length > 0 && (
-          <ul className="suite-run-list" aria-label="Tokens">
+          <ul className="m-0 grid list-none gap-2.5 p-0 [&>li]:flex [&>li]:flex-wrap [&>li]:items-center [&>li]:gap-x-3.5 [&>li]:gap-y-2" aria-label="Tokens">
             {tokens.map((t) => (
-              <li key={t.id} className="schedule-row">
-                <div className="stack-tight">
+              <li key={t.id} className="justify-between border-t border-(--border-soft) py-2.5 first:border-t-0">
+                <div className="stack-tight flex min-w-0 flex-col gap-3">
                   <span>
-                    <strong>{t.name}</strong> <span className="mono muted">tap_{t.prefix}…</span>
-                    {all && <span className="muted"> · {t.user.name}</span>}
+                    <strong>{t.name}</strong> <span className="font-mono text-muted-foreground">tap_{t.prefix}…</span>
+                    {all && <span className="text-muted-foreground"> · {t.user.name}</span>}
                   </span>
-                  <span className="muted">
+                  <span className="text-muted-foreground">
                     {t.scopes.map((s) => SCOPE_TEXT[s]).join(", ")} · {status(t)} ·{" "}
                     {t.lastUsedAt ? `last used ${formatWhen(t.lastUsedAt)}` : "never used"}
                   </span>
                 </div>
                 {live(t) && (
-                  <button type="button" className="button button-quiet" onClick={() => void revoke(t.id)} aria-label={`Revoke “${t.name}”`}>
+                  <Button variant="ghost" type="button" onClick={() => void revoke(t.id)} aria-label={`Revoke “${t.name}”`}>
                     Revoke
-                  </button>
+                  </Button>
                 )}
               </li>
             ))}
           </ul>
         )}
-      </section>
+      </Card>
     </div>
   );
 }
@@ -138,47 +144,47 @@ function NewToken({ onCreated }: { onCreated: (t: CreatedApiToken) => void }) {
 
   const toggle = (s: ApiTokenScope) => setScopes((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
   return (
-    <form className="card stack" onSubmit={submit} noValidate aria-labelledby="new-token-title" aria-busy={pending}>
-      <div className="section-head">
-        <h2 id="new-token-title" className="card-title">
+    <Card as="form" className="flex min-w-0 flex-col gap-5" onSubmit={submit} noValidate aria-labelledby="new-token-title" aria-busy={pending}>
+      <div className="flex flex-col gap-1.5 [&>.text-muted-foreground]:max-w-[68ch]">
+        <h2 id="new-token-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
           <Icon name="plus" /> New API token
         </h2>
-        <p className="muted">For CI jobs and scripts: it acts as you, limited to what you allow here.</p>
+        <p className="text-muted-foreground">For CI jobs and scripts: it acts as you, limited to what you allow here.</p>
       </div>
-      <div className="field">
+      <Field>
         <label htmlFor="token-name">Name</label>
-        <input id="token-name" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
-      </div>
-      <fieldset className="field">
+        <Input id="token-name" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
+      </Field>
+      <Field as="fieldset">
         <legend>Permissions</legend>
         {(Object.keys(SCOPE_TEXT) as ApiTokenScope[]).map((s) => (
-          <label key={s} className="choice">
-            <input type="checkbox" checked={scopes.includes(s)} onChange={() => toggle(s)} />
+          <label key={s} className="flex min-h-8 cursor-pointer items-center gap-2.5 text-[0.9375rem] has-disabled:cursor-not-allowed has-disabled:text-muted-foreground">
+            <Checkbox checked={scopes.includes(s)} onCheckedChange={() => toggle(s)} />
             {SCOPE_TEXT[s]}
           </label>
         ))}
-      </fieldset>
-      <div className="field">
+      </Field>
+      <Field>
         <label htmlFor="token-expiry">Expires after</label>
-        <select id="token-expiry" value={expiry} onChange={(e) => setExpiry(e.target.value as typeof expiry)}>
+        <NativeSelect id="token-expiry" value={expiry} onChange={(e) => setExpiry(e.target.value as typeof expiry)}>
           {EXPIRY.map((x) => (
             <option key={x.value} value={x.value}>
               {x.label}
             </option>
           ))}
-        </select>
-      </div>
+        </NativeSelect>
+      </Field>
       {error && (
-        <p role="alert" className="field-error">
+        <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
           <Icon name="error" /> {error}
         </p>
       )}
-      <div className="actions">
-        <button type="submit" className="button button-primary" disabled={pending}>
+      <div className="actions flex flex-wrap items-center gap-2">
+        <Button type="submit" disabled={pending}>
           {pending ? "Creating…" : "Create token"}
-        </button>
+        </Button>
       </div>
-    </form>
+    </Card>
   );
 }
 
@@ -188,12 +194,11 @@ function CreatedToken({ token, onDone }: { token: CreatedApiToken; onDone: () =>
     <div className="note note-warning" role="status">
       <p className="note-title">Copy “{token.name}” now: it won&apos;t be shown again</p>
       <p>
-        <code className="mono token-value">{token.token}</code>
+        <code className="font-mono block rounded-sm bg-(--surface-sunken) px-2.5 py-2 wrap-anywhere select-all">{token.token}</code>
       </p>
-      <div className="actions">
-        <button
+      <div className="actions flex flex-wrap items-center gap-2">
+        <Button variant="outline"
           type="button"
-          className="button button-secondary"
           onClick={() =>
             void navigator.clipboard?.writeText(token.token).then(
               () => setCopied(true),
@@ -202,10 +207,10 @@ function CreatedToken({ token, onDone }: { token: CreatedApiToken; onDone: () =>
           }
         >
           <Icon name="copy" /> {copied ? "Copied" : "Copy token"}
-        </button>
-        <button type="button" className="button button-quiet" onClick={onDone}>
+        </Button>
+        <Button variant="ghost" type="button" onClick={onDone}>
           Done
-        </button>
+        </Button>
       </div>
     </div>
   );

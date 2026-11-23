@@ -48,7 +48,6 @@ describe("/api/ext (V1.2 F4)", () => {
     ["GET", "/api/ext/v1/test-runs/run_1", GET, "http://api.internal:3001/v1/test-runs/run_1"],
     ["GET", "/api/ext/v1/test-runs/run_1/report", GET, "http://api.internal:3001/v1/test-runs/run_1/report"],
     ["GET", "/api/ext/v1/test-runs/run_1/report.md", GET, "http://api.internal:3001/v1/test-runs/run_1/report.md"],
-    ["GET", "/api/ext/v1/test-runs/run_1/comparison?baseline=run_0", GET, "http://api.internal:3001/v1/test-runs/run_1/comparison?baseline=run_0"],
   ] as const)("forwards %s %s with the token as X-Api-Token", async (method, path, handler, upstreamUrl) => {
     const calls = stubUpstream();
     const res = await handler(req(method, path, { cookie: "platform_session=sess_0123456789abcdef", "x-session-token": "nope" }, method === "POST" ? "{}" : undefined));

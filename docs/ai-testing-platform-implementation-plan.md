@@ -81,7 +81,6 @@ Test suites on 2026-09-29: typecheck clean; `pnpm test` ≈ 2,000 passing; `pnpm
 | A23 | D12 | 1–5 scenarios per plan, each from a clean session, one Playwright test each; planner output format changed | spec F9, KI-031 |
 | A24 | Sequencing | V1.2 built (branch `feat/v1.2`, 2026-09-30) while items 1–3 below still wait for a paid model key; no V1.2 feature changes a prompt | `specs/2026-09-30-v1.2-design.md` |
 | A25 | D2, admission | Suites and suite runs: a suite run reruns each saved test as its own run and takes one active-run slot; its verdict is FAILED > BLOCKED > INCONCLUSIVE (incl. errored / cancelled) > PASSED | spec F1, KI-038 |
-| A26 | Reporting | Runs of the same test share a comparison key (URL + requirement); a completed run is compared with the previous one, criterion by criterion | spec F2, KI-039 |
 | A27 | Jobs (2.5) | Suite schedules: BullMQ job schedulers mirrored from `suite_schedules`, consumed by the API; a firing runs as the schedule's creator with the suite's saved credentials | spec F3, KI-037 |
 | A28 | D6 | User-owned, scoped API tokens through the web app's `/api/ext` path; JUnit XML, a GitHub Action and a CLI | spec F4–F5, KI-036, KI-040 |
 
@@ -2175,7 +2174,6 @@ Scheduled runs run saved suites only (no model call).
 - scheduled runs;
 - API token management for external triggers;
 - GitHub Actions integration;
-- compare current result to previous run;
 - reusable compiled Playwright suites.
 
 ### V2

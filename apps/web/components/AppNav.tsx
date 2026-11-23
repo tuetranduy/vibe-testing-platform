@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { logout } from "../lib/api";
@@ -105,7 +106,7 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
   return (
     <>
       <div className="topbar">
-        <button
+        <Button variant="plain"
           ref={menuButton}
           type="button"
           className="icon-button"
@@ -115,18 +116,20 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
           onClick={() => setDrawerOpen(true)}
         >
           <Icon name="menu" />
-        </button>
+        </Button>
         <Brand />
-        <a className="button button-primary topbar-cta" href="/runs/new" aria-label="New test">
-          <Icon name="plus" />
-        </a>
+        <Button asChild>
+          <a className="topbar-cta" href="/runs/new" aria-label="New test">
+            <Icon name="plus" />
+          </a>
+        </Button>
       </div>
 
       <aside id="sidebar" ref={sidebar} className="sidebar" data-open={drawerOpen} tabIndex={-1} aria-label="Sidebar">
         <div className="sidebar-head">
           <Brand />
-          <button type="button" className="icon-button drawer-close" aria-label="Close menu" onClick={() => closeDrawer(true)}><Icon name="x" /></button>
-          <button
+          <Button variant="plain" type="button" className="icon-button drawer-close" aria-label="Close menu" onClick={() => closeDrawer(true)}><Icon name="x" /></Button>
+          <Button variant="plain"
             type="button"
             className="icon-button sidebar-collapse"
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -134,19 +137,21 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
             onClick={toggleCollapsed}
           >
             <Icon name="sidebar" />
-          </button>
+          </Button>
         </div>
 
-        <a className="button button-primary nav-cta" href="/runs/new" aria-current={current("/runs/new")} title="New test">
-          <Icon name="plus" />
-          <span className="nav-cta-label">New test</span>
-        </a>
+        <Button asChild>
+          <a className="nav-cta" href="/runs/new" aria-current={current("/runs/new")} title="New test">
+            <Icon name="plus" />
+            <span className="nav-cta-label">New test</span>
+          </a>
+        </Button>
 
-        <button type="button" className="jump-trigger" onClick={() => setPaletteOpen(true)} title="Search or jump to (⌘K)">
+        <Button variant="plain" type="button" className="jump-trigger" onClick={() => setPaletteOpen(true)} title="Search or jump to (⌘K)">
           <Icon name="search" />
           <span className="jump-label">Search or jump to…</span>
           <kbd aria-hidden="true">⌘K</kbd>
-        </button>
+        </Button>
 
         <nav aria-label="Main" className="app-nav">
           <div className="nav-section-label" aria-hidden="true">
@@ -156,30 +161,30 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
             <div key={n.href} onClick={() => closeDrawer(false)}>
               <a className="nav-link" href={n.href} aria-current={current(n.href)} title={n.label}>
                 <Icon name={n.icon} />
-                <span className="nav-label">{n.label}</span>
+                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis">{n.label}</span>
               </a>
 
             </div>
           ))}
         </nav>
 
-        <div className="sidebar-foot">
+        <div className="flex flex-col gap-2.5 border-t border-border pt-3">
           <ThemeToggle />
           {me && (
-            <div className="nav-user">
+            <div className="nav-user flex min-w-0 items-center gap-1">
               <a className="user-link" href="/account" aria-current={pathname === "/account" ? "page" : undefined} title={me.email}>
                 <span className="avatar" aria-hidden="true">
                   {initials(me.name)}
                 </span>
-                <span className="user-text">
-                  <span className="user-name">{me.name}</span>
-                  <span className="user-email" aria-hidden="true">
+                <span className="flex min-w-0 flex-col leading-tight">
+                  <span className="truncate text-[0.8125rem] font-semibold">{me.name}</span>
+                  <span className="truncate text-xs text-(--text-subtle)" aria-hidden="true">
                     {me.email}
                   </span>
                 </span>{" "}
-                <span className="visually-hidden">(your account)</span>
+                <span className="sr-only">(your account)</span>
               </a>
-              <button
+              <Button variant="plain"
                 type="button"
                 className="icon-button nav-signout"
                 aria-label="Sign out"
@@ -188,7 +193,7 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
                 disabled={signingOut}
               >
                 <Icon name="logout" />
-              </button>
+              </Button>
             </div>
           )}
         </div>

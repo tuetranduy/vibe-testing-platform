@@ -12,11 +12,11 @@ export default async function NewTestPage({
   const { from, suggestion } = await searchParams;
   return (
     <div className="new-test">
-      <div className="new-test-main">
-        <div className="title-block">
+      <div className="new-test-main flex min-w-0 flex-col gap-6">
+        <div className="title-block flex min-w-0 flex-col gap-2">
           <p className="eyebrow">New test</p>
           <h1 className="page-title">Create a test</h1>
-          <p className="page-lede">
+          <p className="max-w-[650px] text-[0.95rem] leading-[1.7] text-muted-foreground">
             Describe a flow, review the checks, and get results backed by a real browser.
           </p>
         </div>

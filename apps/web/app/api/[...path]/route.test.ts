@@ -68,7 +68,6 @@ describe("API proxy allow-list", () => {
     ["PATCH", "/api/v1/users/usr_1", PATCH],
     ["POST", "/api/v1/test-runs/run_1/rerun", POST],
     ["GET", "/api/v1/test-runs/run_1/report.md", GET],
-    ["GET", "/api/v1/test-runs/run_1/comparison?baseline=run_0", GET],
     ["GET", "/api/v1/usage?from=2026-09-01&to=2026-09-29&owner=me", GET],
     ["GET", "/api/v1/api-tokens?user=all", GET],
     ["POST", "/api/v1/api-tokens", POST],

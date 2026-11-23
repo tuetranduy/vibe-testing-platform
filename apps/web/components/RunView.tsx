@@ -1,5 +1,7 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { isTerminalLifecycle, type RunLifecycle, type TestRunSummary } from "@platform/contracts";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ApiRequestError, cancelRun, getRun, type ConfirmResult } from "../lib/api";
@@ -11,12 +13,13 @@ import { Disclosure } from "./Disclosure";
 import { Icon, type IconName } from "./Icon";
 import { LiveEvidence } from "./LiveEvidence";
 import { LiveStats } from "./LiveStats";
+import { LifecycleBadge } from "./StatusBadge";
 import { RunFlow } from "./RunFlow";
 import { RunProgress } from "./RunProgress";
 import { RunReport } from "./RunReport";
 import { RunTimeline } from "./RunTimeline";
 import { SuggestionReview } from "./SuggestionReview";
-import { CANCEL_REASON_TEXT, ERROR_CATEGORY_LABEL, LIFECYCLE_LABEL, VERDICT_LABEL } from "./format";
+import { CANCEL_REASON_TEXT, ERROR_CATEGORY_LABEL, VERDICT_LABEL } from "./format";
 import { llmChoiceText } from "./llm-format";
 import { displayUrl, formatWhen, runTitle } from "./report-format";
 
@@ -198,20 +201,22 @@ export function RunView({ runId }: { runId: string }) {
 
   if (loadError) {
     return (
-      <section className="stack" aria-labelledby="run-error-title">
+      <section className="flex min-w-0 flex-col gap-5" aria-labelledby="run-error-title">
         <h1 id="run-error-title">{loadError.notFound ? "Run not found" : "The run couldn't be loaded"}</h1>
-        <p className="muted">{loadError.notFound ? "Check the link, or start a new test." : loadError.message}</p>
+        <p className="text-muted-foreground">{loadError.notFound ? "Check the link, or start a new test." : loadError.message}</p>
         <p>
-          <a className="button button-secondary" href="/runs/new">
-            New test
-          </a>
+          <Button asChild variant="outline">
+            <a href="/runs/new">
+              New test
+            </a>
+          </Button>
         </p>
       </section>
     );
   }
   if (!summary) {
     return (
-      <p className="muted" role="status">
+      <p className="text-muted-foreground" role="status">
         Loading run…
       </p>
     );
@@ -225,11 +230,11 @@ export function RunView({ runId }: { runId: string }) {
   const analyzing = !surveying && (lifecycle === "QUEUED" || lifecycle === "ANALYZING_REQUIREMENT");
 
   return (
-    <div className="stack-lg run-workspace">
-      <p className="visually-hidden" role="status" aria-live="polite" aria-atomic="true" data-announcer>
+    <div className="flex min-w-0 flex-col gap-7 run-workspace">
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-announcer>
         {announcement}
       </p>
-      <header className="run-header">
+      <header className="flex flex-col gap-3.5 pb-0">
         <nav aria-label="Breadcrumb" className="breadcrumb">
           <ol>
             <li>
@@ -238,16 +243,14 @@ export function RunView({ runId }: { runId: string }) {
             <li aria-current="page">{summary.runId}</li>
           </ol>
         </nav>
-        <div className="run-header-row">
-          <div className="run-header-main">
+        <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
+          <div className="flex min-w-0 max-w-[880px] flex-[1_1_420px] flex-col gap-3">
             <h1 className="run-title">{runTitle(summary)}</h1>
-            <div className="run-meta">
-              <span className={`status status-${lifecycle.toLowerCase()}`}>
-                <Icon name={STATUS_ICON(lifecycle)} /> {LIFECYCLE_LABEL[lifecycle]}
-              </span>
+            <div className="flex flex-wrap items-center gap-2 text-[0.8125rem] text-muted-foreground" data-slot="run-meta">
+              <LifecycleBadge lifecycle={lifecycle} icon={STATUS_ICON(lifecycle)} />
               <span className="meta-chip" title={summary.targetUrl}>
                 <Icon name="globe" />
-                <span className="visually-hidden">Website: </span>
+                <span className="sr-only">Website: </span>
                 {displayUrl(summary.targetUrl)}
               </span>
               {summary.kind === "rerun" && summary.sourceRunId && (
@@ -271,32 +274,33 @@ export function RunView({ runId }: { runId: string }) {
               {summary.llm && (
                 <span className="meta-chip" title={summary.llm.model}>
                   <Icon name="sliders" />
-                  <span className="visually-hidden">Model: </span>
+                  <span className="sr-only">Model: </span>
                   {llmChoiceText(summary.llm)}
                 </span>
               )}
-              <span className="meta-text">
+              <span className="pl-1">
                 Created <time dateTime={summary.createdAt}>{formatWhen(summary.createdAt)}</time>
               </span>
             </div>
           </div>
-          <div className="run-header-side">
+          <div className="run-header-side flex flex-wrap items-center gap-2 max-[560px]:w-full">
             {!terminal && cancel !== "confirming" && (
-              <button
+              <Button variant="danger-outline"
                 type="button"
-                className="button button-danger-quiet"
                 onClick={() => setCancel("confirming")}
                 disabled={cancel === "pending" || cancel === "requested"}
               >
                 <Icon name="stop" />
                 {cancel === "idle" ? "Cancel run" : "Cancelling…"}
-              </button>
+              </Button>
             )}
             {terminal && (
-              <a className="button button-secondary" href={`/runs/new?from=${encodeURIComponent(runId)}`}>
-                <Icon name="restart" />
-                Run again
-              </a>
+              <Button asChild variant="outline">
+                <a href={`/runs/new?from=${encodeURIComponent(runId)}`}>
+                  <Icon name="restart" />
+                  Run again
+                </a>
+              </Button>
             )}
           </div>
         </div>
@@ -319,13 +323,13 @@ export function RunView({ runId }: { runId: string }) {
               Cancel this run?
             </p>
             <p>The run stops at its next step. Evidence captured so far is kept.</p>
-            <div className="actions">
-              <button type="button" className="button button-danger" onClick={requestCancel}>
+            <div className="actions flex flex-wrap items-center gap-2">
+              <Button variant="destructive" type="button" onClick={requestCancel}>
                 Yes, cancel run
-              </button>
-              <button type="button" className="button button-secondary" onClick={() => setCancel("idle")} autoFocus>
+              </Button>
+              <Button variant="outline" type="button" onClick={() => setCancel("idle")} autoFocus>
                 Keep running
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -340,7 +344,7 @@ export function RunView({ runId }: { runId: string }) {
         </div>
       )}
       {!terminal && (connection === "reconnecting" || connection === "failed") && (
-        <p className="connection" role="status">
+        <p className="flex items-center gap-2 text-[0.9375rem] text-(--warning)" role="status">
           <Icon name="warning" />{" "}
           {connection === "reconnecting" ? "Connection lost — reconnecting…" : "Live updates are unavailable. Reload the page to retry."}
         </p>
@@ -365,30 +369,30 @@ export function RunView({ runId }: { runId: string }) {
       )}
 
       {!terminal && <Disclosure title="Run activity" hint="Detailed execution stages.">
-        <div className="stack"><RunProgress progress={progress} lifecycle={lifecycle} survey={blank} /></div>
+        <div className="flex min-w-0 flex-col gap-5"><RunProgress progress={progress} lifecycle={lifecycle} survey={blank} /></div>
       </Disclosure>}
 
       {analyzing ? (
-        <section className="card analyzing" aria-labelledby="analyzing-title">
+        <Card as="section" className="analyzing" aria-labelledby="analyzing-title">
           <span className="spinner" aria-hidden="true" />
           <div>
             <h2 id="analyzing-title">Analyzing your requirement</h2>
-            <p className="muted">
+            <p className="text-muted-foreground">
               Turning it into acceptance criteria you can review before anything runs. This usually takes under a minute.
             </p>
           </div>
-        </section>
+        </Card>
       ) : surveying ? (
         <>
-          <section className="card analyzing" aria-labelledby="surveying-title">
+          <Card as="section" className="analyzing" aria-labelledby="surveying-title">
             <span className="spinner" aria-hidden="true" />
             <div>
               <h2 id="surveying-title">Exploring the website for test ideas</h2>
-              <p className="muted">
+              <p className="text-muted-foreground">
                 The agent explores pages and controls, captures screenshots, and suggests useful tests for you to choose from.
               </p>
             </div>
-          </section>
+          </Card>
           <div className="live-grid">
             <LiveEvidence runId={runId} screenshot={progress.latestScreenshot} />
             <div className="live-side">
@@ -413,7 +417,7 @@ export function RunView({ runId }: { runId: string }) {
             fallback={<Outcome lifecycle={lifecycle} summary={summary} progress={progress} />}
           />
           <Disclosure title="Run activity" hint="The stages and timeline of this run.">
-            <div className="stack">
+            <div className="flex min-w-0 flex-col gap-5">
               <RunProgress progress={progress} />
               <RunTimeline items={progress.timeline} />
             </div>
@@ -473,7 +477,7 @@ function Outcome({ lifecycle, summary, progress }: { lifecycle: RunLifecycle; su
         </h2>
         {category && <p className="verdict">{ERROR_CATEGORY_LABEL[category]}</p>}
         <p>{o?.kind === "errored" ? o.message : "The run hit an infrastructure problem."}</p>
-        <p className="muted">Infrastructure errors never count as a failed criterion.</p>
+        <p className="text-muted-foreground">Infrastructure errors never count as a failed criterion.</p>
       </div>
     </section>
   );

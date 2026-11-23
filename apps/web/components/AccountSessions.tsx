@@ -1,5 +1,7 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import type { SessionInfo } from "@platform/contracts";
 import { useEffect, useState } from "react";
 import { listSessions, revokeOtherSessions, revokeSession } from "../lib/api";
@@ -78,52 +80,52 @@ export function AccountSessions() {
 
   const others = (sessions ?? []).filter((s) => !s.current).length;
   return (
-    <section className="card stack" aria-labelledby="account-sessions">
-      <h2 id="account-sessions" className="card-title">
+    <Card as="section" className="flex min-w-0 flex-col gap-5" aria-labelledby="account-sessions">
+      <h2 id="account-sessions" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
         <Icon name="monitor" /> Where you're signed in
       </h2>
       {error && (
-        <p role="alert" className="field-error">
+        <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
           <Icon name="error" /> {error}
         </p>
       )}
       {sessions === null && !error && (
-        <p className="muted" role="status">
+        <p className="text-muted-foreground" role="status">
           Loading sessions…
         </p>
       )}
       {sessions && sessions.length > 0 && (
-        <ul className="suite-run-list" aria-label="Sessions">
+        <ul className="m-0 grid list-none gap-2.5 p-0 [&>li]:flex [&>li]:flex-wrap [&>li]:items-center [&>li]:gap-x-3.5 [&>li]:gap-y-2" aria-label="Sessions">
           {sessions.map((s) => (
-            <li key={s.id} className="schedule-row">
-              <div className="stack-tight">
+            <li key={s.id} className="justify-between border-t border-(--border-soft) py-2.5 first:border-t-0">
+              <div className="stack-tight flex min-w-0 flex-col gap-3">
                 <span>
                   <strong>{describeAgent(s.userAgent)}</strong>
-                  {s.current && <span className="muted"> · this session</span>}
+                  {s.current && <span className="text-muted-foreground"> · this session</span>}
                 </span>
-                <span className="muted">
+                <span className="text-muted-foreground">
                   Signed in {formatWhen(s.createdAt)} · last active {formatWhen(s.lastSeenAt)} · ends {formatWhen(s.expiresAt)}
                 </span>
               </div>
               {!s.current && (
-                <button type="button" className="button button-quiet" onClick={() => void endOne(s.id)} aria-label={`Sign out ${describeAgent(s.userAgent)}, signed in ${formatWhen(s.createdAt)}`}>
+                <Button variant="ghost" type="button" onClick={() => void endOne(s.id)} aria-label={`Sign out ${describeAgent(s.userAgent)}, signed in ${formatWhen(s.createdAt)}`}>
                   Sign out
-                </button>
+                </Button>
               )}
             </li>
           ))}
         </ul>
       )}
-      <div className="actions">
-        <button type="button" className="button button-secondary" onClick={() => void endOthers()} disabled={sessions !== null && others === 0}>
+      <div className="actions flex flex-wrap items-center gap-2">
+        <Button variant="outline" type="button" onClick={() => void endOthers()} disabled={sessions !== null && others === 0}>
           Sign out other sessions
-        </button>
+        </Button>
         {notice && (
-          <p role="status" className="hint">
+          <p role="status" className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
             {notice}
           </p>
         )}
       </div>
-    </section>
+    </Card>
   );
 }

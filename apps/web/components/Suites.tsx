@@ -1,11 +1,16 @@
 "use client";
 
+import { Field } from "@/components/ui/field";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import type { SuiteRunBrief, SuiteView } from "@platform/contracts";
 import { useEffect, useState, type FormEvent } from "react";
 import { ApiRequestError, createSuite, listSuites } from "../lib/api";
 import { Icon } from "./Icon";
 import { formatWhen, plural } from "./report-format";
-import { VerdictBadge } from "./StatusBadge";
+import { LifecycleBadge, VerdictBadge } from "./StatusBadge";
 
 type State = { status: "loading" } | { status: "ready"; suites: SuiteView[] } | { status: "error"; message: string };
 
@@ -16,9 +21,7 @@ export const messageOf = (err: unknown, fallback = "Something went wrong.") =>
 export function SuiteRunOutcome({ run }: { run: Pick<SuiteRunBrief, "status" | "verdict"> }) {
   if (run.status === "COMPLETED" && run.verdict) return <VerdictBadge verdict={run.verdict} />;
   return (
-    <span className="status">
-      <Icon name="current" /> Running
-    </span>
+    <LifecycleBadge icon="current">Running</LifecycleBadge>
   );
 }
 
@@ -50,7 +53,7 @@ export function Suites({ navigate = (url: string) => window.location.assign(url)
 
   if (state.status === "loading") {
     return (
-      <p className="muted" role="status">
+      <p className="text-muted-foreground" role="status">
         Loading suites…
       </p>
     );
@@ -62,10 +65,10 @@ export function Suites({ navigate = (url: string) => window.location.assign(url)
         <div>
           <p className="banner-title">Suites couldn&apos;t be loaded</p>
           <p>{state.message}</p>
-          <div className="actions">
-            <button type="button" className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}>
+          <div className="actions flex flex-wrap items-center gap-2">
+            <Button variant="outline" type="button" onClick={() => setAttempt((n) => n + 1)}>
               Try again
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -73,23 +76,23 @@ export function Suites({ navigate = (url: string) => window.location.assign(url)
   }
 
   return (
-    <div className="stack-lg">
+    <div className="flex min-w-0 flex-col gap-7">
       {state.suites.length === 0 && !creating && (
-        <div className="card empty-state">
+        <Card className="empty-state">
           <Icon name="layers" />
           <h2>No suites yet</h2>
-          <p className="muted">
+          <p className="text-muted-foreground">
             A suite reruns saved Playwright tests together — no exploring and no AI. Create one, then add tests from finished runs.
           </p>
-        </div>
+        </Card>
       )}
       {state.suites.length > 0 && (
-        <ul className="saved-list">
+        <ul className="m-0 grid list-none gap-4 p-0">
           {state.suites.map((s) => (
             <li key={s.id}>
-              <article className="card stack-tight suite-card" aria-labelledby={`suite-${s.id}`}>
-                <div className="saved-head">
-                  <h2 id={`suite-${s.id}`} className="suite-card-title">
+              <Card as="article" className="stack-tight flex min-w-0 flex-col gap-3 suite-card" aria-labelledby={`suite-${s.id}`}>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 [&>.text-muted-foreground]:m-0 [&>.text-muted-foreground]:text-[0.8125rem]">
+                  <h2 id={`suite-${s.id}`} className="text-[1.0625rem] font-[620]">
                     <a className="card-link" href={`/suites/${encodeURIComponent(s.id)}`}>
                       {s.name}
                     </a>
@@ -97,7 +100,7 @@ export function Suites({ navigate = (url: string) => window.location.assign(url)
                   {s.lastRun && <SuiteRunOutcome run={s.lastRun} />}
                 </div>
                 {s.description && <p>{s.description}</p>}
-                <p className="muted">
+                <p className="text-muted-foreground">
                   {plural(s.entryCount, "test")}
                   {s.lastRun ? (
                     <>
@@ -109,7 +112,7 @@ export function Suites({ navigate = (url: string) => window.location.assign(url)
                   )}
                   {s.owner ? ` · ${s.owner.name}` : ""}
                 </p>
-              </article>
+              </Card>
             </li>
           ))}
         </ul>
@@ -117,11 +120,11 @@ export function Suites({ navigate = (url: string) => window.location.assign(url)
       {creating ? (
         <NewSuiteForm onCancel={() => setCreating(false)} onCreated={(id) => navigate(`/suites/${encodeURIComponent(id)}`)} />
       ) : (
-        <div className="actions">
-          <button type="button" className="button button-primary" onClick={() => setCreating(true)}>
+        <div className="actions flex flex-wrap items-center gap-2">
+          <Button type="button" onClick={() => setCreating(true)}>
             <Icon name="plus" />
             New suite
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -152,13 +155,13 @@ function NewSuiteForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
   }
 
   return (
-    <form className="card stack" onSubmit={submit} noValidate aria-labelledby="new-suite-title" aria-busy={pending}>
-      <h2 id="new-suite-title" className="card-title">
+    <Card as="form" className="flex min-w-0 flex-col gap-5" onSubmit={submit} noValidate aria-labelledby="new-suite-title" aria-busy={pending}>
+      <h2 id="new-suite-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
         New suite
       </h2>
-      <div className="field">
+      <Field>
         <label htmlFor="suite-name">Name</label>
-        <input
+        <Input
           id="suite-name"
           value={name}
           maxLength={100}
@@ -167,25 +170,25 @@ function NewSuiteForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
           aria-describedby={error ? "suite-name-error" : undefined}
         />
         {error && (
-          <p id="suite-name-error" className="field-error">
+          <p id="suite-name-error" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
             <Icon name="error" /> {error}
           </p>
         )}
-      </div>
-      <div className="field">
+      </Field>
+      <Field>
         <label htmlFor="suite-description">
-          Description <span className="muted">(optional)</span>
+          Description <span className="text-muted-foreground">(optional)</span>
         </label>
-        <textarea id="suite-description" rows={2} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
-      </div>
-      <div className="actions">
-        <button type="submit" className="button button-primary" disabled={pending}>
+        <Textarea id="suite-description" rows={2} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
+      </Field>
+      <div className="actions flex flex-wrap items-center gap-2">
+        <Button type="submit" disabled={pending}>
           {pending ? "Creating…" : "Create suite"}
-        </button>
-        <button type="button" className="button button-secondary" onClick={onCancel} disabled={pending}>
+        </Button>
+        <Button variant="outline" type="button" onClick={onCancel} disabled={pending}>
           Cancel
-        </button>
+        </Button>
       </div>
-    </form>
+    </Card>
   );
 }

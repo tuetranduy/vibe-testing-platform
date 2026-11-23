@@ -1,5 +1,7 @@
 "use client";
 
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { applyTheme, readThemePref, THEME_EVENT, type ThemePref } from "../lib/theme";
 import { Icon, type IconName } from "./Icon";
@@ -32,19 +34,18 @@ export function ThemeToggle() {
 
   return (
     <div role="group" aria-label="Theme" className="theme-toggle">
-      {OPTIONS.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          className="theme-option"
-          aria-pressed={pref === o.value}
-          title={`${o.label} theme`}
-          onClick={() => applyTheme(o.value)}
-        >
-          <Icon name={o.icon} />
-          <span className="visually-hidden">{o.label}</span>
-        </button>
-      ))}
+      <TooltipProvider delayDuration={450}>
+        {OPTIONS.map((o) => (
+          <Tooltip key={o.value}>
+            <TooltipTrigger asChild>
+              <Button variant="plain" type="button" className="theme-option" aria-pressed={pref === o.value} aria-label={o.label} onClick={() => applyTheme(o.value)}>
+                <Icon name={o.icon} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>{o.label} theme</TooltipContent>
+          </Tooltip>
+        ))}
+      </TooltipProvider>
     </div>
   );
 }

@@ -1,5 +1,8 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Table, TableCaption, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import type { UsageReport } from "@platform/contracts";
 import { useEffect, useRef, useState } from "react";
 import { getUsage } from "../lib/api";
@@ -59,42 +62,42 @@ export function UsageDashboard({ today = () => new Date() }: { today?: () => Dat
   }, [range, owner, attempt]);
 
   return (
-    <div className="stack-lg">
-      <div className="page-head">
-        <div className="title-block">
+    <div className="flex min-w-0 flex-col gap-7">
+      <div className="page-head flex flex-wrap items-center justify-between gap-[18px]">
+        <div className="title-block flex min-w-0 flex-col gap-2">
           <h1 className="page-title">Usage</h1>
-          <p className="page-lede">
+          <p className="max-w-[650px] text-[0.95rem] leading-[1.7] text-muted-foreground">
             What the AI model calls of {me && !admin ? "your" : "the"} test runs cost. Estimates from each model&apos;s list price; reruns
             of a saved test make no model calls.
           </p>
         </div>
       </div>
       <div className="usage-filters" role="group" aria-label="Filters">
-        <div className="filter-chips" role="group" aria-label="Period">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Period">
           {RANGES.map((r) => (
-            <button key={r} type="button" className="chip" aria-pressed={range === r} onClick={() => setRange(r)}>
+            <Button variant="plain" key={r} type="button" className="chip" aria-pressed={range === r} onClick={() => setRange(r)}>
               Last {r} days
-            </button>
+            </Button>
           ))}
         </div>
         {admin && (
-          <div className="filter-chips" role="group" aria-label="Whose runs">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Whose runs">
             {(
               [
                 ["all", "Everyone's runs"],
                 ["me", "My runs"],
               ] as const
             ).map(([id, label]) => (
-              <button key={id} type="button" className="chip" aria-pressed={owner === id} onClick={() => setOwner(id)}>
+              <Button variant="plain" key={id} type="button" className="chip" aria-pressed={owner === id} onClick={() => setOwner(id)}>
                 {label}
-              </button>
+              </Button>
             ))}
           </div>
         )}
       </div>
 
       {state.status === "loading" && (
-        <p className="muted" role="status">
+        <p className="text-muted-foreground" role="status">
           Loading usage…
         </p>
       )}
@@ -104,10 +107,10 @@ export function UsageDashboard({ today = () => new Date() }: { today?: () => Dat
           <div>
             <p className="banner-title">Usage couldn&apos;t be loaded</p>
             <p>{state.message}</p>
-            <div className="actions">
-              <button type="button" className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}>
+            <div className="actions flex flex-wrap items-center gap-2">
+              <Button variant="outline" type="button" onClick={() => setAttempt((n) => n + 1)}>
                 Try again
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -121,180 +124,180 @@ function UsageBody({ usage }: { usage: UsageReport }) {
   const t = usage.totals;
   return (
     <>
-      <div className="stats usage-stats">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-4 usage-stats">
         <div className="stat" role="group" aria-label="Estimated cost">
-          <p className="stat-label">Estimated cost</p>
+          <p className="text-[0.8125rem] font-medium text-muted-foreground">Estimated cost</p>
           <p className="stat-value usage-hero">{formatUsd(t.estimatedCostUsd)}</p>
           <p className="stat-sub">
             {shortDay(usage.from)} – {shortDay(usage.to)} (UTC)
           </p>
         </div>
         <div className="stat" role="group" aria-label="Model calls">
-          <p className="stat-label">Model calls</p>
+          <p className="text-[0.8125rem] font-medium text-muted-foreground">Model calls</p>
           <p className="stat-value">{t.llmCalls.toLocaleString("en-US")}</p>
           <p className="stat-sub">in {t.runs === 1 ? "1 run" : `${t.runs} runs`}</p>
         </div>
         <div className="stat" role="group" aria-label="Tokens">
-          <p className="stat-label">Tokens</p>
+          <p className="text-[0.8125rem] font-medium text-muted-foreground">Tokens</p>
           <p className="stat-value">{compact(t.inputTokens + t.outputTokens)}</p>
           <p className="stat-sub">
             {compact(t.inputTokens)} in · {compact(t.outputTokens)} out
           </p>
         </div>
         <div className="stat" role="group" aria-label="Average per run">
-          <p className="stat-label">Average per run</p>
+          <p className="text-[0.8125rem] font-medium text-muted-foreground">Average per run</p>
           <p className="stat-value">{t.runs === 0 ? "—" : formatUsd(t.estimatedCostUsd / t.runs)}</p>
           <p className="stat-sub">runs with model calls</p>
         </div>
       </div>
 
-      <section className="card stack" aria-labelledby="usage-daily-title">
-        <div className="section-head">
-          <h2 id="usage-daily-title" className="card-title">
+      <Card as="section" className="flex min-w-0 flex-col gap-5" aria-labelledby="usage-daily-title">
+        <div className="flex flex-col gap-1.5 [&>.text-muted-foreground]:max-w-[68ch]">
+          <h2 id="usage-daily-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
             Estimated cost per day
           </h2>
         </div>
-        {t.llmCalls === 0 ? <p className="muted">No model calls in this period.</p> : <DailyCostChart days={usage.byDay} />}
-      </section>
+        {t.llmCalls === 0 ? <p className="text-muted-foreground">No model calls in this period.</p> : <DailyCostChart days={usage.byDay} />}
+      </Card>
       {t.llmCalls > 0 && (
         <Disclosure title="Show as a table" hint="Every day of the period.">
-          <div className="data-table-wrap">
-            <table className="data-table">
-              <caption className="visually-hidden">Estimated cost per day</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Day (UTC)</th>
-                  <th scope="col" className="num">
+          <div className="relative overflow-x-auto">
+            <Table className="data-table">
+              <TableCaption className="sr-only">Estimated cost per day</TableCaption>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Day (UTC)</TableHead>
+                  <TableHead scope="col" className="num">
                     Model calls
-                  </th>
-                  <th scope="col" className="num">
+                  </TableHead>
+                  <TableHead scope="col" className="num">
                     Estimated cost
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {usage.byDay.map((d) => (
-                  <tr key={d.day}>
-                    <td>{d.day}</td>
-                    <td className="num">{d.llmCalls}</td>
-                    <td className="num">{formatUsd(d.estimatedCostUsd)}</td>
-                  </tr>
+                  <TableRow key={d.day}>
+                    <TableCell>{d.day}</TableCell>
+                    <TableCell className="num">{d.llmCalls}</TableCell>
+                    <TableCell className="num">{formatUsd(d.estimatedCostUsd)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </Disclosure>
       )}
 
       {t.llmCalls > 0 && (
-        <div className="usage-grid">
-          <section className="card table-card" aria-labelledby="usage-models-title">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] gap-4">
+          <Card as="section" className="table-card" aria-labelledby="usage-models-title">
             <div className="table-toolbar">
-              <h2 id="usage-models-title" className="card-title">
+              <h2 id="usage-models-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
                 By model
               </h2>
             </div>
-            <div className="data-table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Model</th>
-                    <th scope="col" className="num">
+            <div className="relative overflow-x-auto">
+              <Table className="data-table">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">Model</TableHead>
+                    <TableHead scope="col" className="num">
                       Calls
-                    </th>
-                    <th scope="col" className="num">
+                    </TableHead>
+                    <TableHead scope="col" className="num">
                       Tokens
-                    </th>
-                    <th scope="col" className="num">
+                    </TableHead>
+                    <TableHead scope="col" className="num">
                       Cost
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {usage.byModel.map((m) => (
-                    <tr key={`${m.provider}/${m.model}`}>
-                      <td title={m.model}>{m.label}</td>
-                      <td className="num">{m.llmCalls}</td>
-                      <td className="num">{compact(m.inputTokens + m.outputTokens)}</td>
-                      <td className="num">{formatUsd(m.estimatedCostUsd)}</td>
-                    </tr>
+                    <TableRow key={`${m.provider}/${m.model}`}>
+                      <TableCell title={m.model}>{m.label}</TableCell>
+                      <TableCell className="num">{m.llmCalls}</TableCell>
+                      <TableCell className="num">{compact(m.inputTokens + m.outputTokens)}</TableCell>
+                      <TableCell className="num">{formatUsd(m.estimatedCostUsd)}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
-          </section>
-          <section className="card table-card" aria-labelledby="usage-stages-title">
+          </Card>
+          <Card as="section" className="table-card" aria-labelledby="usage-stages-title">
             <div className="table-toolbar">
-              <h2 id="usage-stages-title" className="card-title">
+              <h2 id="usage-stages-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
                 By stage
               </h2>
             </div>
-            <div className="data-table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Stage</th>
-                    <th scope="col" className="num">
+            <div className="relative overflow-x-auto">
+              <Table className="data-table">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">Stage</TableHead>
+                    <TableHead scope="col" className="num">
                       Calls
-                    </th>
-                    <th scope="col" className="num">
+                    </TableHead>
+                    <TableHead scope="col" className="num">
                       Cost
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {usage.byStage.map((s) => (
-                    <tr key={s.stage}>
-                      <td>{LIFECYCLE_LABEL[s.stage]}</td>
-                      <td className="num">{s.llmCalls}</td>
-                      <td className="num">{formatUsd(s.estimatedCostUsd)}</td>
-                    </tr>
+                    <TableRow key={s.stage}>
+                      <TableCell>{LIFECYCLE_LABEL[s.stage]}</TableCell>
+                      <TableCell className="num">{s.llmCalls}</TableCell>
+                      <TableCell className="num">{formatUsd(s.estimatedCostUsd)}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
-          </section>
+          </Card>
         </div>
       )}
 
       {usage.topRuns.length > 0 && (
-        <section className="card table-card" aria-labelledby="usage-runs-title">
+        <Card as="section" className="table-card" aria-labelledby="usage-runs-title">
           <div className="table-toolbar">
-            <h2 id="usage-runs-title" className="card-title">
+            <h2 id="usage-runs-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
               Most expensive runs
             </h2>
           </div>
-          <div className="data-table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">Run</th>
-                  <th scope="col">Website</th>
-                  {usage.scope === "all" && <th scope="col">By</th>}
-                  <th scope="col" className="num">
+          <div className="relative overflow-x-auto">
+            <Table className="data-table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Run</TableHead>
+                  <TableHead scope="col">Website</TableHead>
+                  {usage.scope === "all" && <TableHead scope="col">By</TableHead>}
+                  <TableHead scope="col" className="num">
                     Calls
-                  </th>
-                  <th scope="col" className="num">
+                  </TableHead>
+                  <TableHead scope="col" className="num">
                     Cost
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {usage.topRuns.map((r) => (
-                  <tr key={r.runId}>
-                    <td>
+                  <TableRow key={r.runId}>
+                    <TableCell>
                       <a href={`/runs/${encodeURIComponent(r.runId)}`}>{runTitle(r)}</a>
-                    </td>
-                    <td className="mono">{hostOf(r.targetUrl)}</td>
-                    {usage.scope === "all" && <td>{r.owner?.name ?? "—"}</td>}
-                    <td className="num">{r.llmCalls}</td>
-                    <td className="num">{formatUsd(r.estimatedCostUsd)}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="font-mono">{hostOf(r.targetUrl)}</TableCell>
+                    {usage.scope === "all" && <TableCell>{r.owner?.name ?? "—"}</TableCell>}
+                    <TableCell className="num">{r.llmCalls}</TableCell>
+                    <TableCell className="num">{formatUsd(r.estimatedCostUsd)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
-        </section>
+        </Card>
       )}
     </>
   );
@@ -391,7 +394,7 @@ function DailyCostChart({ days }: { days: UsageReport["byDay"] }) {
         <div className="chart-tooltip" role="status" style={{ left: Math.min(W - 70, Math.max(70, PAD.left + (hover! + 0.5) * slot)) }}>
           <strong>{shortDay(shown.day)}</strong>
           <span>{formatUsd(shown.estimatedCostUsd)}</span>
-          <span className="muted">{shown.llmCalls === 1 ? "1 call" : `${shown.llmCalls} calls`}</span>
+          <span className="text-muted-foreground">{shown.llmCalls === 1 ? "1 call" : `${shown.llmCalls} calls`}</span>
         </div>
       )}
     </div>

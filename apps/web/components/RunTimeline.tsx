@@ -1,3 +1,4 @@
+import { Card } from "@/components/ui/card";
 import type { TimelineItem, Tone } from "../lib/progress-reducer";
 import { Icon, type IconName } from "./Icon";
 import { formatTime } from "./format";
@@ -13,15 +14,15 @@ const TONE: Record<Tone, { icon: IconName | null; label: string | null }> = {
 /** Newest first. Only the server's template messages and ids are shown — never model output. */
 export function RunTimeline({ items }: { items: TimelineItem[] }) {
   return (
-    <section className="card timeline-card" aria-labelledby="timeline-title">
+    <Card as="section" className="timeline-card" aria-labelledby="timeline-title">
       <div className="timeline-card-head">
-        <h2 id="timeline-title" className="card-title">
+        <h2 id="timeline-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
           Timeline
         </h2>
-        {items.length > 0 && <span className="hint">Newest first</span>}
+        {items.length > 0 && <span className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Newest first</span>}
       </div>
       {items.length === 0 ? (
-        <p className="muted">Waiting for the first update…</p>
+        <p className="text-muted-foreground">Waiting for the first update…</p>
       ) : (
         <ol className="timeline" aria-label="Timeline" tabIndex={0}>
           {[...items].reverse().map((item) => {
@@ -33,7 +34,7 @@ export function RunTimeline({ items }: { items: TimelineItem[] }) {
                 </span>
                 <span className="timeline-body">
                   <span className="timeline-message">
-                    {tone.label && <span className="visually-hidden">{tone.label}: </span>}
+                    {tone.label && <span className="sr-only">{tone.label}: </span>}
                     {item.message}
                   </span>
                   {item.reference && <span className="ref">{item.reference}</span>}
@@ -44,6 +45,6 @@ export function RunTimeline({ items }: { items: TimelineItem[] }) {
           })}
         </ol>
       )}
-    </section>
+    </Card>
   );
 }
