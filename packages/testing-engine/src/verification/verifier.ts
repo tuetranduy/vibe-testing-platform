@@ -110,7 +110,16 @@ function decide(input: VerifyCriterionInput): ProvisionalResult {
   // 2. Authenticated precondition with no way to log in.
   const plannedSteps = plan.scenarios.flatMap((s) => s.steps);
   const authenticated = criterion.preconditions.find((p) => p.kind === "authenticated");
-  if (authenticated && !plannedSteps.some((s) => s.kind === "login")) {
+  // KI-090 (2026-11-23): a recovery can sign in or register using act steps. A successful transition
+  // before this check in its own scenario counts too; continuing as guest never authenticates a user.
+  const recovered = plan.scenarios.some((scenario) => {
+    const captures = new Set(scenario.steps.filter((s) => s.kind === "capture_checkpoint" && refs.some((r) => r.checkpoint === s.checkpoint)).map((s) => s.id));
+    const capture = input.steps.findLast((s) => s.scenarioId === scenario.id && s.plannedStepId !== null && captures.has(s.plannedStepId));
+    return capture !== undefined && input.steps.some((s) => s.scenarioId === scenario.id && s.index < capture.index && s.onGoldenPath && s.kind === "act" && s.outcome === "SUCCESS" && !s.signInPrompt
+      && /\b(?:submit.*(?:login|sign[ -]?in|registration)|log[ -]?in|sign[ -]?in|register|create.*account)\b/i.test(s.instruction)
+      && !/\bguest\b/i.test(s.instruction) && !/\/(?:login|signin|sign-in|register|registration)(?:[/?#]|$)/i.test(s.urlAfter) && pageOf(s.urlBefore) !== pageOf(s.urlAfter));
+  });
+  if (authenticated && !plannedSteps.some((s) => s.kind === "login") && !recovered) {
     return result("BLOCKED", "PRECONDITION_NOT_MET", `The plan has no login step for the precondition: ${authenticated.description}`);
   }
 

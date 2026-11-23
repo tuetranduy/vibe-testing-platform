@@ -45,6 +45,9 @@ export const EvalCaseSchema = z.object({
     forbiddenOutcomeKinds: z.array(Kind).default([]),
     /** Precondition kinds no criterion may have, e.g. `authenticated` for a requirement that never logs in (KI-001). */
     forbiddenPreconditions: z.array(z.enum(["authenticated", "test_data", "secret"])).default([]),
+    /** KI-090 (2026-11-23): distinguish completed outcomes and keep explicit sign-in. */
+    statementPattern: z.string().optional(),
+    requiredPreconditions: z.array(z.enum(["authenticated", "test_data", "secret"])).default([]),
     /** Test data keys some text check must compare with (`match.testDataKey`, KI-001). */
     textChecksAgainstTestData: z.array(z.string()).default([]),
     /**
@@ -96,6 +99,7 @@ export function loadCases(dir = CASES_DIR): EvalCase[] {
 export function scoreCase(
   c: EvalCase,
   criteria: {
+    statement?: string;
     expectedOutcome: { kind: string; match?: unknown; item?: unknown };
     ambiguity: unknown;
     preconditions: { kind: string; ref?: string | null }[];
@@ -104,6 +108,10 @@ export function scoreCase(
   }[],
 ): string[] {
   const failures: string[] = [];
+  if (c.expect.statementPattern && !criteria.some((x) => new RegExp(c.expect.statementPattern!, "i").test(x.statement ?? ""))) failures.push("no statement describes the required result");
+  for (const kind of c.expect.requiredPreconditions) {
+    if (!criteria.some((x) => x.preconditions.some((p) => p.kind === kind))) failures.push(`missing required ${kind} precondition`);
+  }
   const inferred = criteria.filter((x) => x.origin === "inferred").length;
   if (inferred < c.expect.inferred.min || inferred > c.expect.inferred.max) {
     failures.push(`${inferred} criteria added by the analysis, expected ${c.expect.inferred.min} to ${c.expect.inferred.max}`);

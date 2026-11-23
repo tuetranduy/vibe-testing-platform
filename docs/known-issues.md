@@ -1457,3 +1457,77 @@ replanner and way-there prompts (KI-078).
   and integration attempts exposed fixed-reply fixtures consuming the new arrival calls; explicit null replanner
   injection now keeps those fixtures scoped to their browser/stage behavior, with real arrival behavior covered by
   executor/prompt/compiler regressions and the live runs above. The local Docker stack is left running, with no active run.
+
+## KI-090 — Successful checkout was weakened to opening checkout, with an invented sign-in requirement
+- **Severity:** High (false passes without an order, or false blocking of guest checkout).
+- **Cause (2026-11-23):** the compiler prompt said to check "what the next page shows" without distinguishing an
+  action's completed result from its first page. Post-validation checked quotes, fact declarations, thresholds and
+  wording, but neither completion scope nor authentication grounding. The intent/assumption path could therefore
+  describe either reading as objective. The compiler receives neither destructive permission nor a reason to weaken
+  completion: permission belongs to planning/execution.
+- **Read-only evidence:** the three original runs read home, producttag/10/book, cart and books; none observed
+  checkout or a mandatory sign-in restriction. They saw ordinary Register/Log in navigation. The successful order
+  run's product-tag interactions also reached a nonempty cart; that observation still did not establish checkout's
+  requirements. Model reasoning/output before validation is not persisted, so the exact sampling cause is unknown.
+  - `run_0mwrwu90yfd7491bd97bc275a`: AC-3 "Completing the checkout shows the order confirmation / thank-you result
+    instead of an error", no preconditions; its executed plan includes Confirm and order confirmation. PASSED.
+  - `run_0mwrwtoy194ae0d299160d649`: AC-3 "Clicking Checkout from the cart proceeds to the checkout page or an
+    order confirmation", no preconditions; its assumption explicitly accepts either page. Its plan uses guest checkout
+    and captures checkout sections without Confirm. PASSED, a false claim of completed-checkout coverage.
+  - `run_0mwrwxw3w10a12ae4c2a715ce`: AC-3 "After clicking Checkout from the shopping cart, the checkout step is
+    displayed to the user", authenticated precondition "Checkout requires a signed-in customer account". Ambiguity
+    explicitly attributes the weaker reading to destructive order placement/payment/address data. Its revised plan
+    uses guest checkout but no login step; verifier rule 2 returned BLOCKED / PRECONDITION_NOT_MET before reading
+    facts. No observed restriction supported that precondition.
+- **Fix (2026-11-23):** the prompt requires the completed outcome for successful checkout, registration, submission
+  and booking; boolean confirmation/result checks avoid invented exact wording. Explicit page-opening requirements
+  retain their narrower scope. Destructive permission never changes the criterion. Deterministic post-validation
+  rejects known completion wording paired with an intermediate-page statement or fact description, including
+  "page or confirmation" alternatives, for the existing correction round. Unknown wording remains model interpreted.
+  Existing intent, inferred-check grounding, ambiguity, salvage and Added by the platform behavior remain in place.
+- **Authentication:** post-validation removes an authenticated precondition unless requirement wording states sign-in
+  or observed page inventories explicitly restrict access with no guest path, recording the removal in `assumption`.
+  An ordinary login link or a model's site-check note cannot establish this restriction. Registration itself does not
+  require an existing account. The planner still receives supported preconditions and plans credential fills/login;
+  missing inputs are generated, not deterministically blocked (KI-080's made-up login can therefore still fail).
+  The verifier additionally recognizes a successful golden sign-in/registration act that changes page before this
+  criterion's checkpoint in the same scenario, even when recovery added no planned `login` kind. Guest continuation
+  does not satisfy an explicit authenticated precondition. Existing unresolved-prompt and failed-login rules remain.
+- **Validation:** completion/page-opening/sign-in post-validation tests, prompt assertions and recovered-authentication
+  verifier tests; four compiler eval cases distinguish checkout completion, registration completion, checkout-page
+  opening and logged-in order history. `pnpm eval requirement-compiler` loads/validates 44 cases and exits 0 offline;
+  ANTHROPIC_API_KEY is absent, so no new model scores are claimed and no encrypted key was read.
+- **Live evidence (rebuilt local stack, DeepSeek Flash/default, 2026-11-23):**
+  - `run_0mwsxer24d487367bd275b3f0`: AC-3 "Checkout completes and the site shows its order confirmation result."
+    Preconditions `[]`; **PASSED**, order confirmation observed and confirmed by the generated Playwright rerun.
+  - `run_0mwsxkldw0fdaa19ee8a1899b`: AC-3 "Completing the checkout places the order and the site shows its order
+    confirmation." Preconditions `[]`; **INCONCLUSIVE / EXPLORATION_BUDGET_EXHAUSTED**. Confirm PS-57 executed
+    successfully (`step_mwsxpus5a16a3c04f5c9`), arrival refined the remaining confirmation capture, then the budget
+    expired before PS-59 captured the required fact. AC-1/AC-2 passed their rerun; AC-3 correctly did not pass merely
+    for reaching checkout or dispatching Confirm. This run does not prove the order result.
+  - `run_0mwsxlppp053df18c1db19cb1`: AC-3 "The checkout completes and the site shows its order confirmation."
+    Preconditions `[]`; **PASSED**, order confirmation observed and confirmed by the generated Playwright rerun.
+  - `run_0mwsxlpsr9b7d633ed51bf28a`: "log in and verify the user sees their order history", no supplied credentials.
+    AC-1 "After logging in, the order history page displays the user's order history." Kept authenticated
+    ("The user is logged in to the store."), test_data `user_email` and secret `user_password` preconditions;
+    **BLOCKED / LOGIN_FAILED**: PS-5 submitted login but stayed on `/login`; `/customer/orders` redirected to
+    `/login?ReturnUrl=%2fcustomer%2forders`. Later generated-credential retries also failed. No claim that an existing
+    customer can be authenticated with generated values; this remains the KI-080 planner limitation.
+  - `run_0mwsxr60d49e41820103a2b5a`: same checkout requirement with destructive permission off. AC-3 "After
+    completing checkout, the site shows the order confirmation result." Preconditions `[]`; **BLOCKED /
+    DESTRUCTIVE_ACTION_NOT_AUTHORIZED**. The existing conservative policy cut the plan at PS-22 "Continue … confirm
+    the payment method" (matched `confirm payment`); the criterion was not weakened, and no order result was claimed.
+  - No `assistance.requested` event occurred in these five runs; no assistance answer was supplied. The stack was
+    idle before both builds and is left running on the final source (the last build also includes the conservative
+    recovered-authentication URL guard and assumption-note ordering; the completed checkout semantics are unchanged).
+- **Remaining:** one of three authorized live attempts exhausted its exploration budget after Confirm, so successful
+  execution is not guaranteed. Existing-account login still needs real credentials; generated values are not an
+  existing customer's password. Completion/access text detection is intentionally narrow and English; unfamiliar or
+  translated wording relies on the prompt. Explicit access restrictions in inventories are conservative evidence;
+  an ordinary login form is insufficient. Broader model scoring remains KI-076/KI-078, with no fabricated baseline.
+- **Checks (2026-11-23, test commands sequential):** `pnpm typecheck` exits 0; `pnpm test` exits 0 across all
+  packages (testing-engine 50 files / 1,068 tests; API 24 / 296; worker 25 / 224); `pnpm test:integration` exits 0
+  (7 / 36); `pnpm test:e2e` exits 0 (11 files / 31 tests passed, 1 file/test skipped). The final typecheck and
+  package tests include the recovered-authentication URL guard and assumption-note ordering. An initial unit attempt
+  exposed first-versus-last checkpoint selection and missing scenario identity in its fixture; both were corrected,
+  and the final checks pass. Both Docker builds exit 0 and all services are healthy; no active run remains.

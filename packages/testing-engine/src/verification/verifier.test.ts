@@ -892,3 +892,20 @@ describe("a checkpoint taken on the site's server error page (KI-074)", () => {
     expect(statusOf(run(other, { steps, facts: [fact(title, false, steps[5]!.id)] }))).toEqual(["FAIL", null]);
   });
 });
+
+it.each(["Submit the login form", "Submit the registration form"])("recovered authentication before the checkpoint counts without a planned login: %s (KI-090, 2026-11-23)", (instruction) => {
+  const steps = cartExploration().steps;
+  for (const s of steps) s.scenarioId = "SC-1";
+  const act = steps.find((s) => s.plannedStepId === "PS-3")!;
+  act.instruction = instruction;
+  act.urlBefore = `${TARGET}login`;
+  act.urlAfter = `${TARGET}account`;
+  const rule = { kind: "numeric_compare", left: after, operator: "gt", right: before } as const;
+  const criterion = { preconditions: [{ kind: "authenticated" as const, description: "Signed in" }] };
+  expect(run(rule, { values: { before: 0, after: 1 }, steps, criterion }).status).toBe("PASS");
+  act.urlAfter = `${TARGET}register`;
+  expect(run(rule, { values: { before: 0, after: 1 }, steps, criterion }).reason).toBe("PRECONDITION_NOT_MET");
+  act.urlAfter = `${TARGET}account`;
+  act.instruction = "Continue as Guest";
+  expect(run(rule, { values: { before: 0, after: 1 }, steps, criterion }).reason).toBe("PRECONDITION_NOT_MET");
+});
