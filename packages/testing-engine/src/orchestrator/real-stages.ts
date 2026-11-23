@@ -5,6 +5,7 @@ import { createRunTestStage, type RunTestStageDeps } from "../playwright-runner/
 import { createPlanStage } from "../planner/planner";
 import { createReportStage, type ReportStageDeps } from "../reporting/report-builder";
 import { createAnalyzeStage, type AnalyzeStageDeps } from "../requirement/compiler";
+import { withAutonomousDiscovery, type AutonomousSurveyDeps } from "../survey/autonomous-survey";
 import { createSurveyStage, type SurveyStageDeps } from "../survey/survey-stage";
 import { verifyStage } from "../verification/verify-stage";
 import type { EngineStages } from "./stages";
@@ -13,6 +14,7 @@ import type { EngineStages } from "./stages";
 export interface RealStageDeps {
   /** The run's sandbox without Stagehand, and screenshot storage, for the survey (a blank requirement). */
   survey: SurveyStageDeps;
+  discovery?: AutonomousSurveyDeps;
   /** Browser sandbox, explorer and persistence for the explore stage (Task 14). */
   exploration: ExploreStageDeps;
   /** Persistence for the generated test (Task 16, Ruling R28). */
@@ -33,7 +35,7 @@ export interface RealStageDeps {
  */
 export function createRealStages(deps: RealStageDeps): EngineStages {
   return {
-    survey: createSurveyStage(deps.survey), // spec 2026-09-28-suggest-tests
+    survey: withAutonomousDiscovery(createSurveyStage(deps.survey), deps.discovery),
     analyze: createAnalyzeStage(deps.analyze), // Task 10; V1.3: against the live site
     plan: createPlanStage(), // Task 12
     explore: createExploreStage(deps.exploration), // Task 14

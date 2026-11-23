@@ -18,6 +18,20 @@ const validEnv: Record<string, string | undefined> = {
 };
 
 describe("loadEnv", () => {
+  it("keeps Browser Use off by default and requires an absolute launcher and exact development fixture URL", () => {
+    const settings = {
+      BROWSER_USE_DISCOVERY_LAUNCHER: path.join(os.tmpdir(), "launcher"),
+      BROWSER_USE_DISCOVERY_FIXTURE_URL: "http://localhost:4178",
+    };
+    expect(loadEnv(validEnv).BROWSER_USE_DISCOVERY_LAUNCHER).toBeUndefined();
+    expect(loadEnv({ ...validEnv, ...settings }).BROWSER_USE_DISCOVERY_FIXTURE_URL).toBe("http://localhost:4178/");
+    expect(() => loadEnv({ ...validEnv, BROWSER_USE_DISCOVERY_LAUNCHER: settings.BROWSER_USE_DISCOVERY_LAUNCHER })).toThrow(/BROWSER_USE_DISCOVERY_FIXTURE_URL/);
+    expect(() => loadEnv({ ...validEnv, ...settings, BROWSER_USE_DISCOVERY_LAUNCHER: "launcher" })).toThrow(/absolute executable path/);
+    expect(() => loadEnv({ ...validEnv, ...settings, BROWSER_USE_DISCOVERY_FIXTURE_URL: "not a URL" })).toThrow(/BROWSER_USE_DISCOVERY_FIXTURE_URL/);
+    expect(() => loadEnv({ ...validEnv, ...settings, BROWSER_USE_DISCOVERY_FIXTURE_URL: "http://localhost:4178/?key=private" })).toThrow(/query or fragment/);
+    expect(() => loadEnv({ ...validEnv, ...settings, NODE_ENV: "production" })).toThrow(/disposable discovery pilot/);
+  });
+
   it("SURVEY_TIMEOUT_SECONDS: the survey's hard deadline, 180 by default", () => {
     expect(loadEnv(validEnv).SURVEY_TIMEOUT_SECONDS).toBe(180);
     expect(loadEnv({ ...validEnv, SURVEY_TIMEOUT_SECONDS: "60" }).SURVEY_TIMEOUT_SECONDS).toBe(60);

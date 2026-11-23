@@ -1,0 +1,21 @@
+#!/bin/sh
+# One-shot Browser Use discovery launcher (Node runs this with no args, env = PATH only).
+#   stdin:  {"schemaVersion":"discovery.v1","runId":"...","targetUrl":"..."}
+#   stdout: {"schemaVersion":"discovery.v1","runId":"...","status":"...","candidates":[...]}
+# Config comes from a file because the caller strips the environment:
+#   $BROWSER_USE_DISCOVERY_ENV, else <app>/discovery.env (gitignored; see discovery.env.example).
+set -eu
+APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+CONFIG=${BROWSER_USE_DISCOVERY_ENV:-$APP_DIR/discovery.env}
+if [ -f "$CONFIG" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$CONFIG"
+  set +a
+fi
+PY="$APP_DIR/.venv/bin/python"
+if [ ! -x "$PY" ]; then
+  echo '{"event":"discovery.config_error","code":"venv_missing: run uv sync --frozen in apps/browser-use-discovery"}' >&2
+  exit 127
+fi
+PYTHONPATH="$APP_DIR/src" PYTHONDONTWRITEBYTECODE=1 exec "$PY" -P -m discovery_service.launcher

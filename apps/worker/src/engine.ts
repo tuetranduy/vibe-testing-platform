@@ -17,6 +17,7 @@ import {
   type WorkspaceConfig,
 } from "@platform/testing-engine";
 import type { WorkerLogger } from "./deps";
+import { createBrowserUseDiscoveryClient } from "./discovery-client";
 import { createExplorationDeps, createExplorationStore } from "./exploration";
 import { createGenerateTestDeps } from "./generated-test";
 import type { WorkerMetrics } from "./metrics";
@@ -35,6 +36,8 @@ export type EngineConfig = Partial<
     | "RUNNER_NODE_MODULES_DIR"
     | "RUNNER_URL"
     | "RUNNER_TOKEN"
+    | "BROWSER_USE_DISCOVERY_LAUNCHER"
+    | "BROWSER_USE_DISCOVERY_FIXTURE_URL"
   >
 >;
 
@@ -118,6 +121,11 @@ export function createEngines(config: EngineConfig, deps: EngineDeps): Engines {
   });
   const real = createRealStages({
     survey,
+    discovery: config.BROWSER_USE_DISCOVERY_LAUNCHER && config.BROWSER_USE_DISCOVERY_FIXTURE_URL ? {
+      fixtureUrl: config.BROWSER_USE_DISCOVERY_FIXTURE_URL,
+      port: createBrowserUseDiscoveryClient(config.BROWSER_USE_DISCOVERY_LAUNCHER),
+      logger: deps.logger,
+    } : undefined,
     exploration,
     generateTest: createGenerateTestDeps(deps.db, deps.logger),
     runTest,

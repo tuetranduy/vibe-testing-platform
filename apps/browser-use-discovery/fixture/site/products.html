@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Products - Fixture Tea Shop</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body><header><h1>Fixture Tea Shop</h1><nav aria-label="Main"><a href="/">Home</a> | <a href="/products.html">Products</a> | <a href="/cart.html">Cart</a> | <a href="/contact.html">Contact</a> | <a href="/about.html">About</a></nav></header>
+<main>
+<h2>All teas</h2>
+<p id="filter-status" aria-live="polite"></p>
+<label for="sort">Sort by</label>
+<select id="sort"><option value="name">Name</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></select>
+<ul id="product-list">
+  <li data-name="Assam" data-price="7.5" data-kind="black"><a href="/product-assam.html">Assam</a> <span class="price">$7.50</span></li>
+  <li data-name="Earl Grey" data-price="8" data-kind="black"><a href="/product-earl-grey.html">Earl Grey</a> <span class="price">$8.00</span></li>
+  <li data-name="Sencha" data-price="9.25" data-kind="green"><a href="/product-sencha.html">Sencha</a> <span class="price">$9.25</span></li>
+</ul>
+<p id="no-results" hidden>No teas match your search.</p>
+</main><footer><p>Disposable QA fixture. No real orders, accounts or payments.</p></footer></body></html>

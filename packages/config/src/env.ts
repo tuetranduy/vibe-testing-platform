@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { DiscoveryFixtureUrlSchema } from "@platform/contracts";
 import { z } from "zod";
 
 const intWithDefault = (def: number, min = 1, max = 1_000_000) =>
@@ -137,6 +138,9 @@ const EnvSchema = z
     ANALYSIS_TIMEOUT_SECONDS: intWithDefault(120),
     /** A blank requirement's survey (explore the site, suggest tests): its hard deadline. Page loading stops at 60 % of it. */
     SURVEY_TIMEOUT_SECONDS: intWithDefault(180),
+    /** Setting both opts the real survey into discovery on one disposable development fixture. */
+    BROWSER_USE_DISCOVERY_LAUNCHER: emptyAsUnset(z.string().refine(path.isAbsolute, "must be an absolute executable path")),
+    BROWSER_USE_DISCOVERY_FIXTURE_URL: emptyAsUnset(DiscoveryFixtureUrlSchema),
     WORKER_CONCURRENCY: intWithDefault(2),
     /** A suite schedule's least time between two runs (V1.2 F3). */
     SCHEDULE_MIN_INTERVAL_MINUTES: intWithDefault(15, 1, 24 * 60),
@@ -177,6 +181,16 @@ const EnvSchema = z
       ),
   })
   .superRefine((env, ctx) => {
+    if (env.BROWSER_USE_DISCOVERY_LAUNCHER && env.NODE_ENV === "production") {
+      ctx.addIssue({ code: "custom", path: ["BROWSER_USE_DISCOVERY_LAUNCHER"], message: "the disposable discovery pilot is for development and test" });
+    }
+    if (Boolean(env.BROWSER_USE_DISCOVERY_LAUNCHER) !== Boolean(env.BROWSER_USE_DISCOVERY_FIXTURE_URL)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [env.BROWSER_USE_DISCOVERY_LAUNCHER ? "BROWSER_USE_DISCOVERY_FIXTURE_URL" : "BROWSER_USE_DISCOVERY_LAUNCHER"],
+        message: "both Browser Use discovery settings are required to enable the disposable fixture pilot",
+      });
+    }
     if (env.RUNNER_URL && !env.RUNNER_TOKEN) {
       ctx.addIssue({ code: "custom", path: ["RUNNER_TOKEN"], message: "is required with RUNNER_URL (the runner service's shared token)" });
     }
