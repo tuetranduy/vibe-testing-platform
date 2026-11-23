@@ -27,7 +27,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const [catalogFailed, setCatalogFailed] = useState(false);
   const [model, setModel] = useState("");
   const [reasoning, setReasoning] = useState<ReasoningLevel | "">("");
-  const [maxRunSeconds, setMaxRunSeconds] = useState("300");
+  const [maxRunSeconds, setMaxRunSeconds] = useState("600");
   const [maxSteps, setMaxSteps] = useState("40");
   const [autoConfirm, setAutoConfirm] = useState(false);
   const [rerun, setRerun] = useState(true);

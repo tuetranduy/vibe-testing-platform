@@ -221,3 +221,54 @@ describe("postValidate: wording the requirement never wrote (KI-070)", () => {
     expect(normalizeText("  “Wishlist   is EMPTY.” ")).toBe("wishlist is empty");
   });
 });
+
+/** Completion is a result, while opening a page remains a useful check in its own right (KI-090, 2026-11-23). */
+describe("completed outcomes and grounded authentication", () => {
+  const output = (text: string, statement: string, description = statement): CompilerOutput => ({
+    criteria: [{ sourceText: text, statement, expectedOutcome: { kind: "visible", fact: { key: "resultShown", checkpoint: "after_action" }, expected: true }, preconditions: [{ kind: "authenticated", description: "Requires sign-in" }], ambiguity: null }],
+    facts: [{ key: "resultShown", checkpoint: "after_action", description, valueType: "boolean" }],
+  });
+  it.each(["user can checkout successfully", "user can register successfully", "place an order", "submit the form", "book a room"])("rejects a page-only check for %s", (text) => {
+    const r = postValidate(output(text, "The next page is displayed"), { originalText: text, testData: {} });
+    expect(r).toEqual({ ok: false, issues: [expect.stringContaining("completion required")] });
+  });
+  it("rejects an alternative that can pass on the intermediate page", () => {
+    const text = "user can checkout successfully";
+    expect(postValidate(output(text, "Checkout proceeds to the checkout page or an order confirmation"), { originalText: text, testData: {} }).ok).toBe(false);
+  });
+  it("rejects a completion statement reading only the intermediate page", () => {
+    const text = "user can checkout successfully";
+    expect(postValidate(output(text, "The order confirmation is shown", "Whether the checkout page is displayed"), { originalText: text, testData: {} }).ok).toBe(false);
+  });
+  it.each(["the checkout page opens", "the registration page is displayed"])("keeps %s and records dropping invented sign-in", (text) => {
+    const r = postValidate(output(text, "The requested page opens"), { originalText: text, testData: {} });
+    expect(r.ok && r.draft.criteria[0]).toMatchObject({ statement: "The requested page opens", preconditions: [], assumption: expect.stringContaining("Removed authenticated") });
+  });
+  it.each(["logged-in user can view their orders", "log in and view order history", "my account shows orders", "as a registered user view orders"])("keeps stated authentication: %s", (text) => {
+    const r = postValidate(output(text, "Order history is shown"), { originalText: text, testData: {} });
+    expect(r.ok && r.draft.criteria[0]!.preconditions).toHaveLength(1);
+  });
+  it.each(["user can checkout successfully", "user can register successfully"])("keeps the completed outcome for %s", (text) => {
+    const r = postValidate(output(text, "The confirmation of the completed action is shown"), { originalText: text, testData: {} });
+    expect(r.ok && r.draft.criteria[0]!.preconditions).toEqual([]);
+  });
+});
+
+it("keeps only an observed access restriction without a guest path (KI-090, 2026-11-23)", () => {
+  const originalText = "Verify the user sees order history";
+  const output: CompilerOutput = {
+    criteria: [{ sourceText: originalText, statement: "Order history is shown", expectedOutcome: { kind: "visible", fact: { key: "ordersShown", checkpoint: "orders" }, expected: true }, preconditions: [{ kind: "authenticated", description: "Access requires sign-in" }], ambiguity: null }],
+    facts: [{ key: "ordersShown", checkpoint: "orders", description: "Whether order history is shown", valueType: "boolean" }],
+  };
+  const inventory = { title: "Orders", description: "Sign in required to view order history", headings: [], links: [], forms: [], buttons: [] as string[] };
+  const pages = [{ url: "https://example.com/orders", inventory }];
+  let r = postValidate(output, { originalText, testData: {}, pages });
+  expect(r.ok && r.draft.criteria[0]!.preconditions).toHaveLength(1);
+  inventory.buttons.push("Continue as Guest");
+  r = postValidate(output, { originalText, testData: {}, pages });
+  expect(r.ok && r.draft.criteria[0]!.preconditions).toEqual([]);
+  inventory.description = "";
+  inventory.buttons = ["Log in"];
+  r = postValidate(output, { originalText, testData: {}, pages });
+  expect(r.ok && r.draft.criteria[0]!.preconditions).toEqual([]);
+});

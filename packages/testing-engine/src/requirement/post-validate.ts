@@ -10,6 +10,7 @@ import {
   type ExpectedOutcome,
   type FactRequest,
   type TestDataValue,
+  type SitePage,
 } from "@platform/contracts";
 import type { RequirementDraft } from "../orchestrator/stages";
 import type { CompilerOutput } from "./model-output";
@@ -30,15 +31,17 @@ export type PostValidation = { ok: true; draft: RequirementDraft } | { ok: false
  */
 export function postValidate(
   output: Pick<CompilerOutput, "criteria" | "facts">,
-  source: { originalText: string; testData: Record<string, TestDataValue>; secretNames?: readonly string[] },
+  source: { originalText: string; testData: Record<string, TestDataValue>; secretNames?: readonly string[]; pages?: readonly SitePage[] },
 ): PostValidation {
   const assembled: RequirementDraft = {
     originalText: source.originalText,
     criteria: output.criteria.map((c, i) => ({ ...c, id: `AC-${i + 1}`, critical: true })),
     facts: output.facts,
   };
+  const completionIssues = outcomeIssues(assembled);
+  if (completionIssues.length > 0) return { ok: false, issues: completionIssues };
   const draft = withTestDataPreconditions(
-    replaceUnstatedTexts(replaceUnstatedThresholds(assembled, statedNumbers(source.originalText, source.testData)), source),
+    replaceUnstatedTexts(replaceUnstatedThresholds(dropUnsupportedAuthentication(assembled, source.pages ?? []), statedNumbers(source.originalText, source.testData)), source),
   );
   const secretIssues = draft.criteria.flatMap((c, i) => {
     const key = c.expectedOutcome.kind === "text_matches" ? c.expectedOutcome.match.testDataKey : undefined;
@@ -204,4 +207,46 @@ export function numbersInText(text: string): number[] {
     if (parts.length > 1) out.push(Number(`${parts.slice(0, -1).join("")}.${parts.at(-1)}`));
   }
   return out.filter(Number.isFinite);
+}
+
+/**
+ * KI-090 (2026-11-23): completion wording cannot be satisfied by arriving at a form. Keep this deliberately
+ * narrow: page-opening requirements and unfamiliar verbs stay with the model; known completion flows get a
+ * correction when their statement or the facts they actually read describe only the intermediate page.
+ */
+function outcomeIssues(draft: RequirementDraft): string[] {
+  return draft.criteria.flatMap((c, i) => {
+    const completion = /\b(?:check\s?out|register|place\s+(?:an?\s+)?order|submit\s+(?:the\s+|a\s+)?form|book\s+(?:a|an|the)\b)/i.test(c.sourceText)
+      && /\b(?:successfully|complete|can|place|submit|book|register)\b/i.test(c.sourceText)
+      && !/\b(?:page|form)\s+(?:opens?|is displayed|is shown)\b/i.test(c.sourceText);
+    if (!completion) return [];
+    const finished = /\b(?:confirmation|confirmed|thank[ -]?you|order (?:is |was |has been )?(?:placed|processed)|account (?:is |was |has been )?created|registration (?:is )?(?:complete|successful)|submission (?:result|success)|booking (?:result|complete|successful))\b/i;
+    const intermediate = /\b(?:page|form|step|screen|started|proceeds? to|opens?|displayed)\b/i;
+    const reads = factRefsOf(c.expectedOutcome).map(({ ref }) => draft.facts.find((f) => f.key === ref.key && f.checkpoint === ref.checkpoint)?.description ?? "");
+    const texts = [c.statement, ...reads, ...(c.expectedOutcome.kind === "semantic" ? [c.expectedOutcome.description] : [])];
+    // An "X page or confirmation" alternative still permits a false pass on the page.
+    const weakAlternative = texts.some((t) => /\bor\b/i.test(t) && intermediate.test(t) && finished.test(t));
+    if (!weakAlternative && texts.some((t) => finished.test(t)) && !reads.some((t) => intermediate.test(t) && !finished.test(t))) return [];
+    if (!texts.some((t) => intermediate.test(t))) return [];
+    return [`criteria.${i}.expectedOutcome: completion required by sourceText; check the completed action's confirmation/result, never just an intermediate page or a page-or-confirmation alternative`];
+  });
+}
+
+/**
+ * KI-090 (2026-11-23): a site's ordinary login link is not evidence that the requested flow needs an account.
+ * Only an explicit access restriction observed in an inventory supports an unstated precondition, and a guest
+ * path defeats that inference. Record the removal as an assumption so criteria review/report explain it.
+ */
+function dropUnsupportedAuthentication(draft: RequirementDraft, pages: readonly SitePage[]): RequirementDraft {
+  const states = pages.flatMap((p) => [p.inventory, ...(p.interactions ?? []).map((a) => a.inventory)]);
+  const observed = states.map((s) => JSON.stringify(s));
+  const required = observed.some((s) => /(?:must|required to|need to) (?:log[ -]?in|sign[ -]?in)|(?:login|sign[ -]?in|authentication) (?:is )?required/i.test(s));
+  const guest = observed.some((s) => /(?:checkout|continue|proceed|as) (?:as )?(?:a )?guest/i.test(s));
+  const stated = /\b(?:log[ -]?in|logged[ -]?in|sign[ -]?in|signed[ -]?in|my account|registered user|authenticated)\b/i.test(draft.originalText);
+  if (stated || (required && !guest)) return draft;
+  return { ...draft, criteria: draft.criteria.map((c) => c.preconditions.some((p) => p.kind === "authenticated") ? {
+    ...c,
+    preconditions: c.preconditions.filter((p) => p.kind !== "authenticated"),
+    assumption: ["Removed authenticated precondition: neither the requirement nor observed site access restrictions require sign-in without a guest path", c.assumption].filter(Boolean).join("; ").slice(0, 300),
+  } : c) };
 }

@@ -42,7 +42,7 @@ export interface CompileRequirementInput {
 /** A compiled draft plus the advisory insights (V1.3): site checks and suggested test data. */
 export type CompiledRequirement = RequirementDraft & { insights: RequirementInsights };
 
-type Source = { originalText: string; testData: Record<string, TestDataValue>; secretNames: string[] };
+type Source = { originalText: string; testData: Record<string, TestDataValue>; secretNames: string[]; pages?: readonly SitePage[] };
 type Settled = { ok: true; draft: RequirementDraft; output: CompilerOutput; notes: string[] } | { ok: false; issues: string[] };
 
 const clip = (text: string, max: number): string => text.replace(/\s+/g, " ").trim().slice(0, max);
@@ -122,7 +122,7 @@ function intentOf(output: CompilerOutput, notes: string[], originalText: string,
 export async function compileRequirement(llm: RequirementLlm, input: CompileRequirementInput): Promise<CompiledRequirement> {
   // A blank requirement is surveyed, never compiled: analysis only runs on a chosen text.
   if (input.originalText.trim() === "") throw new ContractError("The requirement is empty: there is nothing to compile");
-  const source = { originalText: input.originalText, testData: input.testData, secretNames: input.secretNames };
+  const source = { originalText: input.originalText, testData: input.testData, secretNames: input.secretNames, pages: input.site?.pages };
   const pages = input.site?.pages ?? [];
   const screenshot = pages.length > 0 ? (input.site?.screenshot ?? null) : null;
   const text = buildRequirementPrompt({

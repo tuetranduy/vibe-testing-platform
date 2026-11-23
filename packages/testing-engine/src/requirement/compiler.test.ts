@@ -13,6 +13,7 @@ import { runAnalysis, type RunPorts } from "../orchestrator/orchestrator";
 import { createRealStages } from "../orchestrator/real-stages";
 import type { EventDraft, RequirementDraft, StageContext } from "../orchestrator/stages";
 import { compileRequirement, createAnalyzeStage } from "./compiler";
+import { REQUIREMENT_SYSTEM_PROMPT } from "./prompts";
 import { THRESHOLD_NOT_STATED } from "./post-validate";
 
 /** A redactor that masks the given values: the run's redactor is key-based, but the plumbing applies whatever it is given. */
@@ -532,4 +533,12 @@ describe("compileRequirement: intent and inferred criteria (2026-11-11)", () => 
     expect(system).toContain('"origin":"inferred"');
     expect(system).toMatch(/only when .*pages are provided/i);
   });
+});
+
+it("requires completed outcomes and observed authentication rather than invented access restrictions (KI-090, 2026-11-23)", () => {
+  expect(REQUIREMENT_SYSTEM_PROMPT).toContain('"Checkout successfully" means the order is placed');
+  expect(REQUIREMENT_SYSTEM_PROMPT).toContain('"register successfully" means the account is created');
+  expect(REQUIREMENT_SYSTEM_PROMPT).toContain('"the checkout page opens" checks only that page');
+  expect(REQUIREMENT_SYSTEM_PROMPT).toContain("never weaken it to opening a page");
+  expect(REQUIREMENT_SYSTEM_PROMPT).toContain("with no guest path");
 });
