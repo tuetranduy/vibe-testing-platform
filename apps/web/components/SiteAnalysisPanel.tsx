@@ -1,5 +1,6 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
 import type { SiteAnalysis } from "@platform/contracts";
 import { Icon } from "./Icon";
 
@@ -10,7 +11,7 @@ export function LiveSiteSummary({ analysis }: { analysis: SiteAnalysis }) {
   const read = analysis.pages.filter((p) => p.status === "READ");
   const notFound = analysis.checks.filter((c) => c.status === "NOT_FOUND").length;
   return (
-    <section className="card site-analysis" aria-labelledby="site-analysis-title">
+    <Card as="section" className="site-analysis" aria-labelledby="site-analysis-title">
       <h3 id="site-analysis-title" className="site-analysis-title">
         <Icon name="globe" /> Checked against the live site
       </h3>
@@ -41,6 +42,6 @@ export function LiveSiteSummary({ analysis }: { analysis: SiteAnalysis }) {
           {analysis.reason ? `: ${analysis.reason}.` : "."} The criteria come from the requirement alone.
         </p>
       )}
-    </section>
+    </Card>
   );
 }

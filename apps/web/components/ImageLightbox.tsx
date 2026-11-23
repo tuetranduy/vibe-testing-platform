@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./Icon";
@@ -50,12 +51,12 @@ export function ImageLightbox({ src, alt, caption, onClose, onError }: Props) {
       <div role="dialog" aria-modal="true" aria-label={caption ?? alt} className="lightbox">
         <div className="lightbox-bar">
           <p className="lightbox-caption">{caption ?? alt}</p>
-          <button type="button" className="lightbox-button" aria-pressed={actualSize} onClick={() => setActualSize((a) => !a)}>
+          <Button variant="plain" type="button" className="lightbox-button" aria-pressed={actualSize} onClick={() => setActualSize((a) => !a)}>
             {actualSize ? "Fit to width" : "Actual size"}
-          </button>
-          <button ref={closeButton} type="button" className="lightbox-button" aria-label="Close" onClick={onClose}>
+          </Button>
+          <Button variant="plain" ref={closeButton} type="button" className="lightbox-button" aria-label="Close" onClick={onClose}>
             <Icon name="x" />
-          </button>
+          </Button>
         </div>
         <div className="lightbox-stage" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
           {/* Short-lived signed URL: an error means it expired, so the caller fetches a fresh one. */}

@@ -1,5 +1,8 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import type { SuiteRunView } from "@platform/contracts";
 import { useEffect, useState } from "react";
 import { cancelSuiteRun, getSuiteRun } from "../lib/api";
@@ -76,9 +79,9 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
           <p className="banner-title">The suite run couldn&apos;t be loaded</p>
           <p>{state.message}</p>
           <div className="actions">
-            <button type="button" className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}>
+            <Button variant="outline" type="button"  onClick={() => setAttempt((n) => n + 1)}>
               Try again
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -145,18 +148,20 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
         </p>
         {run.status === "COMPLETED" && (
           <div className="actions">
-            <a className="button button-secondary" href={`/api/v1/suite-runs/${encodeURIComponent(run.id)}/junit.xml`} download>
-              <Icon name="download" />
-              Download JUnit XML
-            </a>
+            <Button asChild variant="outline">
+              <a  href={`/api/v1/suite-runs/${encodeURIComponent(run.id)}/junit.xml`} download>
+                <Icon name="download" />
+                Download JUnit XML
+              </a>
+            </Button>
           </div>
         )}
         {run.status === "RUNNING" && (
           <div className="actions">
-            <button type="button" className="button button-secondary" onClick={() => void cancel()} disabled={cancelling}>
+            <Button variant="outline" type="button"  onClick={() => void cancel()} disabled={cancelling}>
               <Icon name="stop" />
               {cancelling ? "Cancelling…" : "Cancel suite run"}
-            </button>
+            </Button>
           </div>
         )}
         {cancelError && (
@@ -166,38 +171,38 @@ export function SuiteRunPage({ suiteRunId, pollMs = SUITE_RUN_POLL_MS }: { suite
         )}
       </header>
 
-      <section className="card card-flush" aria-labelledby="suite-children-title">
+      <Card as="section" className="card-flush" aria-labelledby="suite-children-title">
         <h2 id="suite-children-title" className="card-title card-flush-title">
           Tests
         </h2>
-        <table className="history">
-          <thead>
-            <tr>
-              <th scope="col">Test</th>
-              <th scope="col">Result</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table className="history">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Test</TableHead>
+              <TableHead scope="col">Result</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {run.children.map((c) => (
-              <tr key={c.runId}>
-                <td className="history-main">
+              <TableRow key={c.runId}>
+                <TableCell className="history-main">
                   <a className="row-link" href={`/runs/${encodeURIComponent(c.runId)}`}>
                     {c.title || displayUrl(c.targetUrl)}
                   </a>
                   <span className="history-host">{displayUrl(c.targetUrl)}</span>
-                </td>
-                <td className="history-result">
+                </TableCell>
+                <TableCell className="history-result">
                   {c.verdict ? (
                     <VerdictBadge verdict={c.verdict} />
                   ) : (
                     <span className={`status status-${c.lifecycle.toLowerCase()}`}>{LIFECYCLE_LABEL[c.lifecycle]}</span>
                   )}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </section>
+          </TableBody>
+        </Table>
+      </Card>
     </div>
   );
 }

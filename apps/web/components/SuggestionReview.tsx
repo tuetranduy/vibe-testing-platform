@@ -1,5 +1,8 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 import type { Suggestion, SuggestionSetResponse, TestRunSummary } from "@platform/contracts";
 import { useEffect, useState } from "react";
 import { ApiRequestError, getSuggestions, selectSuggestion } from "../lib/api";
@@ -111,7 +114,7 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
             const editing = draft?.id === s.id ? draft : null;
             const textId = `${s.id}-text`;
             return (
-              <article key={s.id} className="card suggestion" aria-labelledby={`${s.id}-title`}>
+              <Card as="article" key={s.id} className="suggestion" aria-labelledby={`${s.id}-title`}>
                 <div className="suggestion-head">
                   <h3 id={`${s.id}-title`} className="suggestion-title">
                     {s.title}
@@ -125,7 +128,7 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
                 {editing ? (
                   <div className="field">
                     <label htmlFor={textId}>The test to run</label>
-                    <textarea
+                    <Textarea
                       id={textId}
                       rows={4}
                       value={editing.text}
@@ -161,33 +164,35 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
                 <div className="actions">
                   {editing ? (
                     <>
-                      <button type="button" className="button button-primary" onClick={() => void choose(s, editing.text)} disabled={pending}>
+                      <Button type="button"  onClick={() => void choose(s, editing.text)} disabled={pending}>
                         {pending ? "Starting…" : "Continue with this test"}
                         <Icon name="arrow" />
-                      </button>
-                      <button type="button" className="button button-secondary" onClick={() => setDraft(null)} disabled={pending}>
+                      </Button>
+                      <Button variant="outline" type="button"  onClick={() => setDraft(null)} disabled={pending}>
                         Back
-                      </button>
+                      </Button>
                     </>
                   ) : (
-                    <button type="button" className="button button-primary" onClick={() => open(s)} disabled={pending}>
+                    <Button type="button"  onClick={() => open(s)} disabled={pending}>
                       Test this<span className="visually-hidden">: {s.title}</span>
-                    </button>
+                    </Button>
                   )}
-                  <a className="button button-secondary" href={`/runs/new?from=${encodeURIComponent(runId)}&suggestion=${encodeURIComponent(s.id)}`}>
-                    Start as a separate test<span className="visually-hidden">: {s.title}</span>
-                  </a>
+                  <Button asChild variant="outline">
+                    <a  href={`/runs/new?from=${encodeURIComponent(runId)}&suggestion=${encodeURIComponent(s.id)}`}>
+                      Start as a separate test<span className="visually-hidden">: {s.title}</span>
+                    </a>
+                  </Button>
                 </div>
-              </article>
+              </Card>
             );
           })}
         </div>
 
         <div className="actions">
-          <button type="button" className="button button-danger-quiet" onClick={onCancel} disabled={pending}>
+          <Button variant="danger-outline" type="button"  onClick={onCancel} disabled={pending}>
             <Icon name="stop" />
             None of these — cancel run
-          </button>
+          </Button>
         </div>
 
         {set.pages.length > 0 && (

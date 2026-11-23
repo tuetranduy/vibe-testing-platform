@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import type { ArtifactType } from "@platform/contracts";
 import { useState, type MouseEvent } from "react";
 import { useArtifactUrl } from "../lib/artifacts";
@@ -80,13 +81,13 @@ function ArtifactItem({ runId, artifactId, info }: { runId: string; artifactId: 
   } else if (state.status === "ready" && info?.type === "SCREENSHOT") {
     body = (
       <>
-        <button type="button" className="artifact-zoom" aria-label={`View full size: ${caption}`} onClick={() => setZoomed(true)}>
+        <Button variant="plain" type="button" className="artifact-zoom" aria-label={`View full size: ${caption}`} onClick={() => setZoomed(true)}>
           {/* Short-lived signed URL: an error means it expired, so fetch a fresh one. */}
           <img className="artifact-image" src={state.url} alt={caption} onError={onLoadError} />
-        </button>
-        <button type="button" className="artifact-link" onClick={() => setZoomed(true)}>
+        </Button>
+        <Button variant="plain" type="button" className="artifact-link" onClick={() => setZoomed(true)}>
           <Icon name="image" /> View full size
-        </button>
+        </Button>
         {zoomed && <ImageLightbox src={state.url} alt={caption} caption={caption} onClose={() => setZoomed(false)} onError={onLoadError} />}
       </>
     );
@@ -102,9 +103,11 @@ function ArtifactItem({ runId, artifactId, info }: { runId: string; artifactId: 
   } else if (state.status === "ready") {
     body = (
       <div className="artifact-file">
-        <a className="button button-secondary" href={state.url} download onClick={guardExpiry}>
-          <Icon name="download" /> Download {label.toLowerCase()}
-        </a>
+        <Button asChild variant="outline">
+          <a  href={state.url} download onClick={guardExpiry}>
+            <Icon name="download" /> Download {label.toLowerCase()}
+          </a>
+        </Button>
         {info?.type === "TRACE" && (
           <p className="hint">
             Open it with <code>npx playwright show-trace trace.zip</code>, or drop it on trace.playwright.dev.

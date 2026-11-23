@@ -1,5 +1,6 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { ProgressState } from "../lib/progress-reducer";
 
@@ -32,12 +33,12 @@ export function LiveStats({ progress }: { progress: ProgressState }) {
 function Stat({ label, children }: { label: string; children: ReactNode }) {
   const id = useId();
   return (
-    <div role="group" aria-labelledby={id} className="card live-stat">
+    <Card role="group" aria-labelledby={id} className="live-stat">
       <span id={id} className="live-stat-label">
         {label}
       </span>
       <span className="live-stat-value">{children}</span>
-    </div>
+    </Card>
   );
 }
 

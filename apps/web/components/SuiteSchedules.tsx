@@ -1,5 +1,9 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Input } from "@/components/ui/input";
 import type { ScheduleView, SuiteDetail } from "@platform/contracts";
 import { useEffect, useState, type FormEvent } from "react";
 import { ApiRequestError, createSchedule, deleteSchedule, listSchedules, updateSchedule } from "../lib/api";
@@ -73,7 +77,7 @@ export function SuiteSchedules({ suite }: { suite: SuiteDetail }) {
   const blocked = suite.secretNames.length > 0;
 
   return (
-    <section className="card stack" aria-labelledby="schedules-title">
+    <Card as="section" className="stack" aria-labelledby="schedules-title">
       <div className="section-head">
         <h2 id="schedules-title" className="card-title">
           <Icon name="clock" /> Schedules
@@ -109,13 +113,13 @@ export function SuiteSchedules({ suite }: { suite: SuiteDetail }) {
         />
       ) : (
         <div className="actions">
-          <button type="button" className="button button-secondary" onClick={() => setAdding(true)} disabled={blocked || suite.entryCount === 0}>
+          <Button variant="outline" type="button"  onClick={() => setAdding(true)} disabled={blocked || suite.entryCount === 0}>
             <Icon name="plus" />
             Add a schedule
-          </button>
+          </Button>
         </div>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -179,17 +183,15 @@ function ScheduleRow({
         )}
       </div>
       <div className="actions">
-        <button
+        <Button variant="ghost"
           type="button"
-          className="button button-quiet"
           disabled={busy || (!s.enabled && blocked)}
           onClick={() => void act(async () => onChange(await updateSchedule(s.id, { cron: s.cron, timezone: s.timezone, enabled: !s.enabled })))}
         >
           {s.enabled ? "Pause" : "Resume"}
-        </button>
-        <button
+        </Button>
+        <Button variant="ghost"
           type="button"
-          className="button button-quiet"
           disabled={busy}
           aria-label={`Delete the schedule “${describeCron(s.cron)}”`}
           onClick={() =>
@@ -200,7 +202,7 @@ function ScheduleRow({
           }
         >
           Delete
-        </button>
+        </Button>
       </div>
     </li>
   );
@@ -231,30 +233,30 @@ function NewSchedule({ suiteId, onCancel, onCreated }: { suiteId: string; onCanc
     <form className="stack" onSubmit={submit} noValidate aria-busy={pending} aria-label="New schedule">
       <div className="field">
         <label htmlFor="schedule-preset">When</label>
-        <select id="schedule-preset" value={preset} onChange={(e) => setPreset(e.target.value as Preset)}>
+        <NativeSelect id="schedule-preset" value={preset} onChange={(e) => setPreset(e.target.value as Preset)}>
           {(Object.keys(PRESET_LABEL) as Preset[]).map((p) => (
             <option key={p} value={p}>
               {PRESET_LABEL[p]}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       {(preset === "daily" || preset === "weekdays") && (
         <div className="field">
           <label htmlFor="schedule-time">Time</label>
-          <input id="schedule-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+          <Input id="schedule-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
         </div>
       )}
       {preset === "custom" && (
         <div className="field">
           <label htmlFor="schedule-cron">Cron expression</label>
-          <input id="schedule-cron" className="mono" value={cron} onChange={(e) => setCron(e.target.value)} />
+          <Input id="schedule-cron" className="mono" value={cron} onChange={(e) => setCron(e.target.value)} />
           <p className="hint">Five fields: minute hour day-of-month month day-of-week.</p>
         </div>
       )}
       <div className="field">
         <label htmlFor="schedule-timezone">Time zone</label>
-        <input id="schedule-timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} />
+        <Input id="schedule-timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} />
       </div>
       {error && (
         <p role="alert" className="field-error">
@@ -262,12 +264,12 @@ function NewSchedule({ suiteId, onCancel, onCreated }: { suiteId: string; onCanc
         </p>
       )}
       <div className="actions">
-        <button type="submit" className="button button-primary" disabled={pending}>
+        <Button type="submit"  disabled={pending}>
           {pending ? "Adding…" : "Add schedule"}
-        </button>
-        <button type="button" className="button button-secondary" onClick={onCancel} disabled={pending}>
+        </Button>
+        <Button variant="outline" type="button"  onClick={onCancel} disabled={pending}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );

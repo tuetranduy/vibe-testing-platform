@@ -1,3 +1,4 @@
+import { Card } from "@/components/ui/card";
 import { ADDED_BY_PLATFORM, assumptionsOf, type Assumption, type NormalizedRequirement } from "@platform/contracts";
 import { useId } from "react";
 
@@ -30,7 +31,7 @@ export function Assumptions({ requirement }: { requirement: NormalizedRequiremen
   const titleId = useId();
   if (!requirement || assumptionsOf(requirement).length === 0) return null;
   return (
-    <section className="card assumptions" aria-labelledby={titleId}>
+    <Card as="section" className="assumptions" aria-labelledby={titleId}>
       <h2 id={titleId} className="panel-title">
         Assumptions
       </h2>
@@ -41,6 +42,6 @@ export function Assumptions({ requirement }: { requirement: NormalizedRequiremen
         </p>
       )}
       <AssumptionItems requirement={requirement} />
-    </section>
+    </Card>
   );
 }

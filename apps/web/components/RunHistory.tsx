@@ -1,5 +1,9 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Table, TableCaption, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { isTerminalLifecycle, type TestRunSummary } from "@platform/contracts";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { listRuns } from "../lib/api";
@@ -143,16 +147,16 @@ export function RunHistory() {
                 ["me", "My runs"],
               ] as const
             ).map(([id, label]) => (
-              <button key={id} type="button" className="chip" aria-pressed={owner === id} onClick={() => setOwner(id)}>
+              <Button variant="plain" key={id} type="button" className="chip" aria-pressed={owner === id} onClick={() => setOwner(id)}>
                 {label}
-              </button>
+              </Button>
             ))}
           </div>
         )}
       </div>
       <div className="history-header-actions actions">
-        {hasRuns && <button type="button" className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}><Icon name="restart" />Refresh</button>}
-        {hasRuns && <a className="button button-primary" href="/runs/new"><Icon name="plus" />New test</a>}
+        {hasRuns && <Button variant="outline" type="button"  onClick={() => setAttempt((n) => n + 1)}><Icon name="restart" />Refresh</Button>}
+        {hasRuns && <Button asChild><a  href="/runs/new"><Icon name="plus" />New test</a></Button>}
       </div>
     </div>
   );
@@ -163,7 +167,7 @@ export function RunHistory() {
       <div className="history-loading" role="status">
         <span className="visually-hidden">Loading test runs…</span>
         <div className="summary-grid" aria-hidden="true">{[0, 1, 2, 3].map((n) => <div className="skeleton skeleton-stat" key={n} />)}</div>
-        <div className="card skeleton-table" aria-hidden="true">{[0, 1, 2, 3].map((n) => <div className="skeleton skeleton-row" key={n} />)}</div>
+        <Card className="skeleton-table" aria-hidden="true">{[0, 1, 2, 3].map((n) => <div className="skeleton skeleton-row" key={n} />)}</Card>
       </div>
     );
   } else if (load.status === "error") {
@@ -174,16 +178,16 @@ export function RunHistory() {
           <p className="banner-title">We couldn&apos;t load the test runs</p>
           <p>{load.message}</p>
           <div className="actions">
-            <button type="button" className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}>
+            <Button variant="outline" type="button"  onClick={() => setAttempt((n) => n + 1)}>
               Try again
-            </button>
+            </Button>
           </div>
         </div>
       </div>
     );
   } else if (items.length === 0) {
     body = (
-      <section className="card empty-state" aria-labelledby="empty-title">
+      <Card as="section" className="empty-state" aria-labelledby="empty-title">
         <Icon name="file" />
         <h2 id="empty-title">No test runs yet</h2>
         <p className="muted">Turn a user flow into a browser test. Your results and evidence will appear here.</p>
@@ -192,11 +196,13 @@ export function RunHistory() {
           <li><span>2</span>Describe what should work</li>
           <li><span>3</span>Review the evidence</li>
         </ol>
-        <a className="button button-primary" href="/runs/new">
-          <Icon name="plus" />
-          New test
-        </a>
-      </section>
+        <Button asChild>
+          <a  href="/runs/new">
+            <Icon name="plus" />
+            New test
+          </a>
+        </Button>
+      </Card>
     );
   } else {
     const active = FILTERS.find((f) => f.id === filter)!;
@@ -213,7 +219,7 @@ export function RunHistory() {
           <RunningNow runs={items} />
         </div>
 
-        <section className="card table-card" aria-labelledby="runs-title">
+        <Card as="section" className="table-card" aria-labelledby="runs-title">
           <h2 id="runs-title" className="visually-hidden">
             All runs
           </h2>
@@ -224,7 +230,7 @@ export function RunHistory() {
                 Filter runs by website or requirement
               </label>
               <Icon name="search" />
-              <input
+              <Input
                 id={searchId}
                 type="search"
                 placeholder="Filter by website or requirement"
@@ -238,9 +244,9 @@ export function RunHistory() {
           <div className="table-toolbar">
             <div role="group" aria-label="Show" className="filter-chips">
               {chips.map((f) => (
-                <button key={f.id} type="button" className="chip" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
+                <Button variant="plain" key={f.id} type="button" className="chip" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
                   {f.label} <span className="chip-count">{f.count}</span>
-                </button>
+                </Button>
               ))}
             </div>
             <p className="toolbar-note" role="status">
@@ -253,21 +259,20 @@ export function RunHistory() {
           {visible.length === 0 ? (
             <div className="history-nomatch">
               <p>No runs match {query.trim() ? "this filter" : "this result"}.</p>
-              <button
+              <Button variant="outline"
                 type="button"
-                className="button button-secondary"
                 onClick={() => {
                   setFilter("all");
                   setQuery("");
                 }}
               >
                 Show all runs
-              </button>
+              </Button>
             </div>
           ) : (
             <RunTable runs={visible} />
           )}
-        </section>
+        </Card>
 
         {moreError && (
           <p role="alert" className="field-error">
@@ -276,9 +281,9 @@ export function RunHistory() {
         )}
         {nextCursor && (
           <div className="history-more">
-            <button type="button" className="button button-secondary" onClick={loadMore} disabled={loadingMore}>
+            <Button variant="outline" type="button"  onClick={loadMore} disabled={loadingMore}>
               {loadingMore ? "Loading…" : "Load more"}
-            </button>
+            </Button>
           </div>
         )}
       </>
@@ -314,31 +319,31 @@ function RunSummary({ runs }: { runs: TestRunSummary[] }) {
 
 function RunTable({ runs }: { runs: TestRunSummary[] }) {
   return (
-    <table className="history" role="table">
-      <caption className="visually-hidden">Test runs</caption>
-      <thead role="rowgroup">
-        <tr role="row">
-          <th role="columnheader" scope="col">
+    <Table className="history" role="table">
+      <TableCaption className="visually-hidden">Test runs</TableCaption>
+      <TableHeader role="rowgroup">
+        <TableRow role="row">
+          <TableHead role="columnheader" scope="col">
             Result
-          </th>
-          <th role="columnheader" scope="col">
+          </TableHead>
+          <TableHead role="columnheader" scope="col">
             Requirement
-          </th>
-          <th role="columnheader" scope="col">
+          </TableHead>
+          <TableHead role="columnheader" scope="col">
             Created
-          </th>
-          <th role="columnheader" scope="col">
+          </TableHead>
+          <TableHead role="columnheader" scope="col">
             Duration
-          </th>
-        </tr>
-      </thead>
-      <tbody role="rowgroup">
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody role="rowgroup">
         {runs.map((r) => (
-          <tr role="row" key={r.runId} className={isTerminalLifecycle(r.lifecycle) ? undefined : "history-row-active"}>
-            <td role="cell" className="history-result">
+          <TableRow role="row" key={r.runId} className={isTerminalLifecycle(r.lifecycle) ? undefined : "history-row-active"}>
+            <TableCell role="cell" className="history-result">
               <RunResult run={r} />
-            </td>
-            <td role="cell" className="history-main">
+            </TableCell>
+            <TableCell role="cell" className="history-main">
               <a className="row-link" href={`/runs/${encodeURIComponent(r.runId)}`} title={runTitle(r)}>
                 {runTitle(r)}
               </a>
@@ -346,20 +351,20 @@ function RunTable({ runs }: { runs: TestRunSummary[] }) {
               {r.environment === "production" && r.allowDestructiveActions && <span className="history-tag">Changes site data</span>}
               {r.kind === "rerun" && <span className="history-kind">Rerun</span>}
               {r.owner && <span className="history-owner">by {r.owner.name}</span>}
-            </td>
-            <td role="cell" className="history-created">
+            </TableCell>
+            <TableCell role="cell" className="history-created">
               <time dateTime={r.createdAt}>{formatWhen(r.createdAt)}</time>
-            </td>
-            <td role="cell" className="history-duration">
+            </TableCell>
+            <TableCell role="cell" className="history-duration">
               <div className="history-duration-inner">
                 <RunDuration run={r} />
                 <Icon name="next" className="row-chevron" />
               </div>
-            </td>
-          </tr>
+            </TableCell>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }
 
@@ -404,7 +409,7 @@ function ResultsOverview({ runs }: { runs: TestRunSummary[] }) {
   const other = runs.length - finished;
 
   return (
-    <section className="card mix-card" aria-labelledby={titleId}>
+    <Card as="section" className="mix-card" aria-labelledby={titleId}>
       <div className="mix-head">
         <h2 id={titleId} className="panel-title">
           Results of the last {plural(runs.length, "run")}
@@ -445,7 +450,7 @@ function ResultsOverview({ runs }: { runs: TestRunSummary[] }) {
           </li>
         )}
       </ul>
-    </section>
+    </Card>
   );
 }
 
@@ -463,10 +468,12 @@ function RunningNow({ runs }: { runs: TestRunSummary[] }) {
           Test something new
         </h2>
         <p className="running-idle-text">Describe what should work, then follow a real browser as it checks it.</p>
-        <a className="button button-on-ink" href="/runs/new">
-          <Icon name="plus" />
-          New test
-        </a>
+        <Button asChild variant="on-ink">
+          <a  href="/runs/new">
+            <Icon name="plus" />
+            New test
+          </a>
+        </Button>
       </section>
     );
   }

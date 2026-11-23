@@ -1,5 +1,9 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import type { LlmKeyProvider, LlmSettingsView, ReasoningLevel } from "@platform/contracts";
 import { useEffect, useState, type FormEvent } from "react";
 import { ApiRequestError, getLlmSettings, saveLlmDefaults, saveProviderKey } from "../lib/api";
@@ -53,9 +57,9 @@ export function LlmSettings() {
           <p className="banner-title">Settings couldn&apos;t be loaded</p>
           <p>{state.message}</p>
           <div className="actions">
-            <button type="button" className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}>
+            <Button variant="outline" type="button"  onClick={() => setAttempt((n) => n + 1)}>
               Try again
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -121,7 +125,7 @@ function ProviderKeyCard({ provider, onSaved }: { provider: ProviderView; onSave
 
   const { key } = provider;
   return (
-    <form className="card stack-tight" aria-labelledby={`${id}-title`} onSubmit={onSubmit} noValidate>
+    <Card as="form" className="stack-tight" aria-labelledby={`${id}-title`} onSubmit={onSubmit} noValidate>
       <h3 id={`${id}-title`} className="card-title">
         {provider.label}
       </h3>
@@ -144,7 +148,7 @@ function ProviderKeyCard({ provider, onSaved }: { provider: ProviderView; onSave
         <label htmlFor={id}>
           API key<span className="visually-hidden"> for {provider.label}</span>
         </label>
-        <input
+        <Input
           id={id}
           type="password"
           autoComplete="off"
@@ -161,13 +165,13 @@ function ProviderKeyCard({ provider, onSaved }: { provider: ProviderView; onSave
         )}
       </div>
       <div className="actions">
-        <button type="submit" className="button button-primary" disabled={pending}>
+        <Button type="submit"  disabled={pending}>
           Save key
-        </button>
+        </Button>
         {key.source === "settings" && !confirming && (
-          <button type="button" className="button button-quiet" onClick={() => setConfirming(true)} disabled={pending}>
+          <Button variant="ghost" type="button"  onClick={() => setConfirming(true)} disabled={pending}>
             Remove saved key
-          </button>
+          </Button>
         )}
       </div>
       {confirming && (
@@ -179,12 +183,12 @@ function ProviderKeyCard({ provider, onSaved }: { provider: ProviderView; onSave
             </p>
             <p>Tests then use the server&apos;s key, if it has one; without any key, tests on {provider.label} models are refused.</p>
             <div className="actions">
-              <button type="button" className="button button-danger" onClick={() => void send(null)} disabled={pending}>
+              <Button variant="destructive" type="button"  onClick={() => void send(null)} disabled={pending}>
                 Yes, remove key
-              </button>
-              <button type="button" className="button button-secondary" onClick={() => setConfirming(false)}>
+              </Button>
+              <Button variant="outline" type="button"  onClick={() => setConfirming(false)}>
                 Keep key
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -194,7 +198,7 @@ function ProviderKeyCard({ provider, onSaved }: { provider: ProviderView; onSave
           {notice}
         </p>
       )}
-    </form>
+    </Card>
   );
 }
 
@@ -238,7 +242,7 @@ function DefaultsForm({ view, onSaved }: { view: LlmSettingsView; onSaved: (view
   }
 
   return (
-    <form className="card stack" aria-labelledby="defaults-title" onSubmit={onSubmit} noValidate>
+    <Card as="form" className="stack" aria-labelledby="defaults-title" onSubmit={onSubmit} noValidate>
       <div className="section-head">
         <h2 id="defaults-title" className="section-title">
           Defaults for new tests
@@ -263,7 +267,7 @@ function DefaultsForm({ view, onSaved }: { view: LlmSettingsView; onSaved: (view
       <div className="field-pair">
         <div className="field">
           <label htmlFor="defaults-model">Model</label>
-          <select
+          <NativeSelect
             id="defaults-model"
             value={model}
             onChange={(e) => chooseModel(e.target.value)}
@@ -276,7 +280,7 @@ function DefaultsForm({ view, onSaved }: { view: LlmSettingsView; onSaved: (view
               </option>
             )}
             <ModelOptions models={view.models} />
-          </select>
+          </NativeSelect>
           <p id="defaults-model-price" className="hint">
             {selected ? priceText(selected.price) : `The server's default model (${view.defaults.label}) is not offered here.`}
           </p>
@@ -288,7 +292,7 @@ function DefaultsForm({ view, onSaved }: { view: LlmSettingsView; onSaved: (view
         </div>
         <div className="field">
           <label htmlFor="defaults-reasoning">Reasoning</label>
-          <select
+          <NativeSelect
             id="defaults-reasoning"
             value={reasoning}
             onChange={(e) => setReasoning(e.target.value as ReasoningLevel)}
@@ -301,7 +305,7 @@ function DefaultsForm({ view, onSaved }: { view: LlmSettingsView; onSaved: (view
                 {level === "default" ? modelDefaultLabel(selected) : LEVEL_LABEL[level]}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           {errors.reasoning && (
             <p id="defaults-reasoning-error" className="field-error">
               <Icon name="error" /> {errors.reasoning}
@@ -310,15 +314,15 @@ function DefaultsForm({ view, onSaved }: { view: LlmSettingsView; onSaved: (view
         </div>
       </div>
       <div className="actions">
-        <button type="submit" className="button button-primary" disabled={pending}>
+        <Button type="submit"  disabled={pending}>
           Save defaults
-        </button>
+        </Button>
         {notice && (
           <p role="status" className="hint">
             {notice}
           </p>
         )}
       </div>
-    </form>
+    </Card>
   );
 }

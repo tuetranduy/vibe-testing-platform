@@ -1,5 +1,7 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import type { SessionInfo } from "@platform/contracts";
 import { useEffect, useState } from "react";
 import { listSessions, revokeOtherSessions, revokeSession } from "../lib/api";
@@ -78,7 +80,7 @@ export function AccountSessions() {
 
   const others = (sessions ?? []).filter((s) => !s.current).length;
   return (
-    <section className="card stack" aria-labelledby="account-sessions">
+    <Card as="section" className="stack" aria-labelledby="account-sessions">
       <h2 id="account-sessions" className="card-title">
         <Icon name="monitor" /> Where you're signed in
       </h2>
@@ -106,24 +108,24 @@ export function AccountSessions() {
                 </span>
               </div>
               {!s.current && (
-                <button type="button" className="button button-quiet" onClick={() => void endOne(s.id)} aria-label={`Sign out ${describeAgent(s.userAgent)}, signed in ${formatWhen(s.createdAt)}`}>
+                <Button variant="ghost" type="button"  onClick={() => void endOne(s.id)} aria-label={`Sign out ${describeAgent(s.userAgent)}, signed in ${formatWhen(s.createdAt)}`}>
                   Sign out
-                </button>
+                </Button>
               )}
             </li>
           ))}
         </ul>
       )}
       <div className="actions">
-        <button type="button" className="button button-secondary" onClick={() => void endOthers()} disabled={sessions !== null && others === 0}>
+        <Button variant="outline" type="button"  onClick={() => void endOthers()} disabled={sessions !== null && others === 0}>
           Sign out other sessions
-        </button>
+        </Button>
         {notice && (
           <p role="status" className="hint">
             {notice}
           </p>
         )}
       </div>
-    </section>
+    </Card>
   );
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { assumptionsOf, isInferred, qualifiedPassLabel, type TestReport, type TestRunSummary } from "@platform/contracts";
 import { useEffect, useRef, useState } from "react";
 import { getReport, getRun } from "../lib/api";
@@ -61,12 +63,14 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
   return (
     <article className="print-report theme-light">
       <div className="print-toolbar no-print">
-        <button type="button" className="button button-primary" onClick={() => window.print()}>
+        <Button type="button"  onClick={() => window.print()}>
           Print or save as PDF
-        </button>
-        <a className="button button-secondary" href={`/runs/${encodeURIComponent(runId)}`}>
-          Back to the run
-        </a>
+        </Button>
+        <Button asChild variant="outline">
+          <a  href={`/runs/${encodeURIComponent(runId)}`}>
+            Back to the run
+          </a>
+        </Button>
       </div>
 
       <header className="print-head">
@@ -133,28 +137,28 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
 
       <section>
         <h2>Summary</h2>
-        <table className="data-table print-table">
-          <thead>
-            <tr>
-              <th scope="col">Criteria</th>
-              <th scope="col">Passed</th>
-              <th scope="col">Failed</th>
-              <th scope="col">Blocked</th>
-              <th scope="col">Inconclusive</th>
-              <th scope="col">Confirmed by rerun</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>{s.totalCriteria}</td>
-              <td>{s.passed}</td>
-              <td>{s.failed}</td>
-              <td>{s.blocked}</td>
-              <td>{s.inconclusive}</td>
-              <td>{s.confirmedByRerun}</td>
-            </tr>
-          </tbody>
-        </table>
+        <Table className="data-table print-table">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Criteria</TableHead>
+              <TableHead scope="col">Passed</TableHead>
+              <TableHead scope="col">Failed</TableHead>
+              <TableHead scope="col">Blocked</TableHead>
+              <TableHead scope="col">Inconclusive</TableHead>
+              <TableHead scope="col">Confirmed by rerun</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow>
+              <TableCell>{s.totalCriteria}</TableCell>
+              <TableCell>{s.passed}</TableCell>
+              <TableCell>{s.failed}</TableCell>
+              <TableCell>{s.blocked}</TableCell>
+              <TableCell>{s.inconclusive}</TableCell>
+              <TableCell>{s.confirmedByRerun}</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
         {s.nonCritical.total > 0 && (
           <p>
             {s.nonCritical.total} non-critical ({s.nonCritical.notPassed} did not pass): reported, but the verdict ignores them.

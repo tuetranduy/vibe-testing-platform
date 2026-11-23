@@ -1,5 +1,6 @@
 "use client";
 
+import { Input } from "@/components/ui/input";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { MAIN_NAV, SETTINGS_NAV } from "../lib/nav";
 import { applyTheme } from "../lib/theme";
@@ -89,7 +90,7 @@ export function CommandPalette({
       <div role="dialog" aria-modal="true" aria-label="Search or jump to" className="palette">
         <div className="palette-search">
           <Icon name="search" />
-          <input
+          <Input
             autoFocus
             type="text"
             role="combobox"

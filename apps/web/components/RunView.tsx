@@ -1,5 +1,7 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { isTerminalLifecycle, type RunLifecycle, type TestRunSummary } from "@platform/contracts";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ApiRequestError, cancelRun, getRun, type ConfirmResult } from "../lib/api";
@@ -202,9 +204,11 @@ export function RunView({ runId }: { runId: string }) {
         <h1 id="run-error-title">{loadError.notFound ? "Run not found" : "The run couldn't be loaded"}</h1>
         <p className="muted">{loadError.notFound ? "Check the link, or start a new test." : loadError.message}</p>
         <p>
-          <a className="button button-secondary" href="/runs/new">
-            New test
-          </a>
+          <Button asChild variant="outline">
+            <a  href="/runs/new">
+              New test
+            </a>
+          </Button>
         </p>
       </section>
     );
@@ -282,21 +286,22 @@ export function RunView({ runId }: { runId: string }) {
           </div>
           <div className="run-header-side">
             {!terminal && cancel !== "confirming" && (
-              <button
+              <Button variant="danger-outline"
                 type="button"
-                className="button button-danger-quiet"
                 onClick={() => setCancel("confirming")}
                 disabled={cancel === "pending" || cancel === "requested"}
               >
                 <Icon name="stop" />
                 {cancel === "idle" ? "Cancel run" : "Cancelling…"}
-              </button>
+              </Button>
             )}
             {terminal && (
-              <a className="button button-secondary" href={`/runs/new?from=${encodeURIComponent(runId)}`}>
-                <Icon name="restart" />
-                Run again
-              </a>
+              <Button asChild variant="outline">
+                <a  href={`/runs/new?from=${encodeURIComponent(runId)}`}>
+                  <Icon name="restart" />
+                  Run again
+                </a>
+              </Button>
             )}
           </div>
         </div>
@@ -320,12 +325,12 @@ export function RunView({ runId }: { runId: string }) {
             </p>
             <p>The run stops at its next step. Evidence captured so far is kept.</p>
             <div className="actions">
-              <button type="button" className="button button-danger" onClick={requestCancel}>
+              <Button variant="destructive" type="button"  onClick={requestCancel}>
                 Yes, cancel run
-              </button>
-              <button type="button" className="button button-secondary" onClick={() => setCancel("idle")} autoFocus>
+              </Button>
+              <Button variant="outline" type="button"  onClick={() => setCancel("idle")} autoFocus>
                 Keep running
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -369,7 +374,7 @@ export function RunView({ runId }: { runId: string }) {
       </Disclosure>}
 
       {analyzing ? (
-        <section className="card analyzing" aria-labelledby="analyzing-title">
+        <Card as="section" className="analyzing" aria-labelledby="analyzing-title">
           <span className="spinner" aria-hidden="true" />
           <div>
             <h2 id="analyzing-title">Analyzing your requirement</h2>
@@ -377,10 +382,10 @@ export function RunView({ runId }: { runId: string }) {
               Turning it into acceptance criteria you can review before anything runs. This usually takes under a minute.
             </p>
           </div>
-        </section>
+        </Card>
       ) : surveying ? (
         <>
-          <section className="card analyzing" aria-labelledby="surveying-title">
+          <Card as="section" className="analyzing" aria-labelledby="surveying-title">
             <span className="spinner" aria-hidden="true" />
             <div>
               <h2 id="surveying-title">Exploring the website for test ideas</h2>
@@ -388,7 +393,7 @@ export function RunView({ runId }: { runId: string }) {
                 The agent explores pages and controls, captures screenshots, and suggests useful tests for you to choose from.
               </p>
             </div>
-          </section>
+          </Card>
           <div className="live-grid">
             <LiveEvidence runId={runId} screenshot={progress.latestScreenshot} />
             <div className="live-side">

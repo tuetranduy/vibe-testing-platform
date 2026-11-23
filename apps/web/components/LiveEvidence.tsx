@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { useArtifactUrl } from "../lib/artifacts";
 import type { ScreenshotRef } from "../lib/progress-reducer";
@@ -33,10 +34,10 @@ export function LiveEvidence({ runId, screenshot }: Props) {
           </div>
         ) : state.status === "ready" ? (
           <figure className="evidence-figure">
-            <button type="button" className="artifact-zoom" aria-label={`View full size: ${screenshot.message}`} onClick={() => setZoomed(true)}>
+            <Button variant="plain" type="button" className="artifact-zoom" aria-label={`View full size: ${screenshot.message}`} onClick={() => setZoomed(true)}>
               {/* Short-lived signed URL: an error means it expired, so fetch a fresh one. */}
               <img src={state.url} alt={screenshot.message} onError={onLoadError} />
-            </button>
+            </Button>
             {zoomed && <ImageLightbox src={state.url} alt={screenshot.message} caption={screenshot.message} onClose={() => setZoomed(false)} onError={onLoadError} />}
             <figcaption>
               <span>{screenshot.message}</span>

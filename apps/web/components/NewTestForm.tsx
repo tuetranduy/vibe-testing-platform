@@ -1,5 +1,10 @@
 "use client";
 
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { NativeSelect } from "@/components/ui/native-select";
 import { CreateTestRunRequestSchema, HttpUrlSchema, type CreateTestRunRequestInput, type LlmSettingsView, type ReasoningLevel } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -134,20 +139,20 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
         {banner && <div role="alert" className="banner banner-error"><Icon name="warning" /><div><p>{banner.message}</p>{banner.settings && <a href="/settings">Choose an available model in Settings</a>}</div></div>}
         <div className="field setup-field">
           <label htmlFor="targetUrl"><span className="field-number">1</span> Which website?</label>
-          <div className="input-with-icon"><Icon name="globe" /><input id="targetUrl" type="url" inputMode="url" autoComplete="url" placeholder="https://your-website.com" value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} {...invalid("targetUrl")} /></div>
+          <div className="input-with-icon"><Icon name="globe" /><Input id="targetUrl" type="url" inputMode="url" autoComplete="url" placeholder="https://your-website.com" value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} {...invalid("targetUrl")} /></div>
           {errorFor("targetUrl")}
         </div>
         <div className="setup-field">
           <p className="field-label"><span className="field-number">2</span> What would you like to test?</p>
           <div className="test-mode" role="group" aria-label="How to start">
-            <button type="button" aria-pressed={mode === "describe"} onClick={() => setMode("describe")}><Icon name="file" /><span>Describe a test</span></button>
-            <button type="button" aria-pressed={mode === "explore"} onClick={() => setMode("explore")}><Icon name="sparkle" /><span>Find test ideas</span></button>
+            <Button variant="plain" type="button" aria-pressed={mode === "describe"} onClick={() => setMode("describe")}><Icon name="file" /><span>Describe a test</span></Button>
+            <Button variant="plain" type="button" aria-pressed={mode === "explore"} onClick={() => setMode("explore")}><Icon name="sparkle" /><span>Find test ideas</span></Button>
           </div>
           {mode === "describe" ? <div className="field">
             <label className="visually-hidden" htmlFor="requirement">Test instructions</label>
-            <textarea ref={prompt} id="requirement" rows={5} placeholder="For example: Search for a product, add it to the cart, and check that the total updates." value={requirement} onChange={(e) => setRequirement(e.target.value)} {...invalid("requirement")} />
+            <Textarea ref={prompt} id="requirement" rows={5} placeholder="For example: Search for a product, add it to the cart, and check that the total updates." value={requirement} onChange={(e) => setRequirement(e.target.value)} {...invalid("requirement")} />
             {errorFor("requirement")}
-            <div className="example-row" role="group" aria-label="Example tests"><span className="hint">Try an example</span>{EXAMPLES.map((ex) => <button key={ex.label} type="button" className="example-chip" onClick={() => { setRequirement(ex.text); prompt.current?.focus(); }}><Icon name={ex.icon} />{ex.label}</button>)}</div>
+            <div className="example-row" role="group" aria-label="Example tests"><span className="hint">Try an example</span>{EXAMPLES.map((ex) => <Button variant="plain" key={ex.label} type="button" className="example-chip" onClick={() => { setRequirement(ex.text); prompt.current?.focus(); }}><Icon name={ex.icon} />{ex.label}</Button>)}</div>
           </div> : <div className="explore-intro"><Icon name="sparkle" /><div><strong>Let the agent find a starting point.</strong><p>It explores your website and suggests useful tests. Choose an idea, review the checks, and start when you’re ready.</p></div></div>}
         </div>
       </div>
@@ -155,19 +160,19 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
         <summary><span><Icon name="sliders" /> Run settings <span className="muted">· optional</span></span><Icon name="chevron" /></summary>
         <div className="stack">
           <div className="field-pair">
-            <div className="field"><label htmlFor="model">AI model</label><select id="model" value={model} disabled={!catalog} onChange={(e) => { setModel(e.target.value); setReasoning(""); }} {...invalid("model")}><option value="">{catalog ? `Default · ${catalog.defaults.label}` : "Default model"}</option>{catalog && modelGroups(catalog.models).map((group) => <optgroup key={group.label} label={group.label}>{group.models.map((m) => <option key={m.id} value={m.id} disabled={!m.available}>{m.label}{m.available ? "" : " · add a key in Settings"}</option>)}</optgroup>)}</select>{errorFor("model")}{catalogFailed && <p className="hint">Model choices couldn’t be loaded. The default model will be used.</p>}</div>
-            <div className="field"><label htmlFor="reasoning">Thinking level</label><select id="reasoning" value={reasoning} onChange={(e) => setReasoning(e.target.value as ReasoningLevel | "")} {...invalid("reasoning")}><option value="">Model default</option>{levels.map((level) => <option key={level} value={level}>{LEVEL_LABEL[level]}</option>)}</select>{errorFor("reasoning")}</div>
+            <div className="field"><label htmlFor="model">AI model</label><NativeSelect id="model" value={model} disabled={!catalog} onChange={(e) => { setModel(e.target.value); setReasoning(""); }} {...invalid("model")}><option value="">{catalog ? `Default · ${catalog.defaults.label}` : "Default model"}</option>{catalog && modelGroups(catalog.models).map((group) => <optgroup key={group.label} label={group.label}>{group.models.map((m) => <option key={m.id} value={m.id} disabled={!m.available}>{m.label}{m.available ? "" : " · add a key in Settings"}</option>)}</optgroup>)}</NativeSelect>{errorFor("model")}{catalogFailed && <p className="hint">Model choices couldn’t be loaded. The default model will be used.</p>}</div>
+            <div className="field"><label htmlFor="reasoning">Thinking level</label><NativeSelect id="reasoning" value={reasoning} onChange={(e) => setReasoning(e.target.value as ReasoningLevel | "")} {...invalid("reasoning")}><option value="">Model default</option>{levels.map((level) => <option key={level} value={level}>{LEVEL_LABEL[level]}</option>)}</NativeSelect>{errorFor("reasoning")}</div>
           </div>
           <div className="field-pair">
-            <div className="field"><label htmlFor="maxRunSeconds">Time limit (seconds)</label><input id="maxRunSeconds" type="number" min={60} max={1800} value={maxRunSeconds} onChange={(e) => setMaxRunSeconds(e.target.value)} {...invalid("maxRunSeconds")} />{errorFor("maxRunSeconds")}</div>
-            <div className="field"><label htmlFor="maxExplorationSteps">Step limit</label><input id="maxExplorationSteps" type="number" min={1} max={100} value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} {...invalid("maxExplorationSteps")} /><p className="hint">Steps in the test plan.</p>{errorFor("maxExplorationSteps")}</div>
+            <div className="field"><label htmlFor="maxRunSeconds">Time limit (seconds)</label><Input id="maxRunSeconds" type="number" min={60} max={1800} value={maxRunSeconds} onChange={(e) => setMaxRunSeconds(e.target.value)} {...invalid("maxRunSeconds")} />{errorFor("maxRunSeconds")}</div>
+            <div className="field"><label htmlFor="maxExplorationSteps">Step limit</label><Input id="maxExplorationSteps" type="number" min={1} max={100} value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} {...invalid("maxExplorationSteps")} /><p className="hint">Steps in the test plan.</p>{errorFor("maxExplorationSteps")}</div>
           </div>
-          <label className="choice"><input type="checkbox" checked={rerun} onChange={(e) => setRerun(e.target.checked)} />Verify results by rerunning the saved test</label>
-          <label className="choice"><input type="checkbox" checked={autoConfirm} onChange={(e) => setAutoConfirm(e.target.checked)} />Start immediately after planning (skip review)</label>
-          <div className="field"><label htmlFor="additionalAllowedHosts">Other website hosts</label><input id="additionalAllowedHosts" placeholder="login.example.com, help.example.com" value={hosts} onChange={(e) => setHosts(e.target.value)} {...invalid("additionalAllowedHosts")} /><p className="hint">Only needed if the test moves to another host.</p>{errorFor("additionalAllowedHosts")}</div>
+          <label className="choice"><Checkbox checked={rerun} onCheckedChange={(checked) => setRerun(checked === true)} />Verify results by rerunning the saved test</label>
+          <label className="choice"><Checkbox checked={autoConfirm} onCheckedChange={(checked) => setAutoConfirm(checked === true)} />Start immediately after planning (skip review)</label>
+          <div className="field"><label htmlFor="additionalAllowedHosts">Other website hosts</label><Input id="additionalAllowedHosts" placeholder="login.example.com, help.example.com" value={hosts} onChange={(e) => setHosts(e.target.value)} {...invalid("additionalAllowedHosts")} /><p className="hint">Only needed if the test moves to another host.</p>{errorFor("additionalAllowedHosts")}</div>
         </div>
       </details>
-      <div className="composer-footer"><p className="composer-note"><Icon name="shield" />{autoConfirm ? "The test starts after planning." : "Review the checks before the test runs."}</p><button className="button button-primary button-lg" type="submit" disabled={pending || prefill === "loading"}>{pending ? "Starting…" : mode === "explore" ? "Explore website" : "Create test"}<Icon name="arrow" /></button></div>
+      <div className="composer-footer"><p className="composer-note"><Icon name="shield" />{autoConfirm ? "The test starts after planning." : "Review the checks before the test runs."}</p><Button size="lg"  type="submit" disabled={pending || prefill === "loading"}>{pending ? "Starting…" : mode === "explore" ? "Explore website" : "Create test"}<Icon name="arrow" /></Button></div>
     </form>
   );
 }

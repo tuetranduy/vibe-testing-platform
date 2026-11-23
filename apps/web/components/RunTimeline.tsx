@@ -1,3 +1,4 @@
+import { Card } from "@/components/ui/card";
 import type { TimelineItem, Tone } from "../lib/progress-reducer";
 import { Icon, type IconName } from "./Icon";
 import { formatTime } from "./format";
@@ -13,7 +14,7 @@ const TONE: Record<Tone, { icon: IconName | null; label: string | null }> = {
 /** Newest first. Only the server's template messages and ids are shown — never model output. */
 export function RunTimeline({ items }: { items: TimelineItem[] }) {
   return (
-    <section className="card timeline-card" aria-labelledby="timeline-title">
+    <Card as="section" className="timeline-card" aria-labelledby="timeline-title">
       <div className="timeline-card-head">
         <h2 id="timeline-title" className="card-title">
           Timeline
@@ -44,6 +45,6 @@ export function RunTimeline({ items }: { items: TimelineItem[] }) {
           })}
         </ol>
       )}
-    </section>
+    </Card>
   );
 }

@@ -1,5 +1,9 @@
 "use client";
 
+import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 import { describeExpectedOutcome, type ExpectedOutcome, type FactRequest } from "@platform/contracts";
 import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "./Icon";
@@ -132,7 +136,7 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
   const input = (field: Field, label: string, value: string, onChange: (v: string) => void) => (
     <div className="field">
       <label htmlFor={id(field)}>{label}</label>
-      <input
+      <Input
         id={id(field)}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -171,11 +175,11 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
         <>
           <div className="field">
             <label htmlFor={id("mode")}>How it matches</label>
-            <select id={id("mode")} value={draft.mode} onChange={(e) => set({ mode: e.target.value as Draft["mode"] })}>
+            <NativeSelect id={id("mode")} value={draft.mode} onChange={(e) => set({ mode: e.target.value as Draft["mode"] })}>
               <option value="contains">Contains</option>
               <option value="equals">Is exactly</option>
               {outcome.match.testDataKey === undefined && <option value="regex">Matches the pattern</option>}
-            </select>
+            </NativeSelect>
           </div>
           {outcome.match.testDataKey === undefined ? (
             textField(draft.mode === "regex" ? "Pattern" : "Text")
@@ -185,7 +189,7 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
             </p>
           )}
           <label className="choice">
-            <input type="checkbox" checked={draft.caseSensitive} onChange={(e) => set({ caseSensitive: e.target.checked })} />
+            <Checkbox checked={draft.caseSensitive} onCheckedChange={(checked) => set({ caseSensitive: checked === true })} />
             Match case
           </label>
         </>
@@ -195,13 +199,13 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
         <>
           <div className="field">
             <label htmlFor={id("operator")}>Comparison</label>
-            <select id={id("operator")} value={draft.operator} onChange={(e) => set({ operator: e.target.value as Compare })}>
+            <NativeSelect id={id("operator")} value={draft.operator} onChange={(e) => set({ operator: e.target.value as Compare })}>
               {OPERATORS.map(([value, words]) => (
                 <option key={value} value={value}>
                   {words}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
           {typeof outcome.right === "number" && numberField("Compared with")}
         </>
@@ -213,10 +217,10 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
         <>
           <div className="field">
             <label htmlFor={id("match")}>How it matches</label>
-            <select id={id("match")} value={draft.match} onChange={(e) => set({ match: e.target.value as Draft["match"] })}>
+            <NativeSelect id={id("match")} value={draft.match} onChange={(e) => set({ match: e.target.value as Draft["match"] })}>
               <option value="contains">Contains</option>
               <option value="equals">Is exactly</option>
-            </select>
+            </NativeSelect>
           </div>
           {typeof outcome.item === "string" && textField("Item")}
         </>
@@ -234,12 +238,12 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
       )}
 
       <div className="actions">
-        <button type="button" className="button button-primary" onClick={save} disabled={busy}>
+        <Button type="button"  onClick={save} disabled={busy}>
           {busy ? "Saving…" : "Save check"}
-        </button>
-        <button type="button" className="button button-quiet" onClick={onDiscard} disabled={busy}>
+        </Button>
+        <Button variant="ghost" type="button"  onClick={onDiscard} disabled={busy}>
           Discard
-        </button>
+        </Button>
       </div>
     </div>
   );

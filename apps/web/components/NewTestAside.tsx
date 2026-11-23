@@ -1,5 +1,6 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
 import type { TestRunSummary } from "@platform/contracts";
 import { useEffect, useId, useState } from "react";
 import { listRuns } from "../lib/api";
@@ -16,7 +17,7 @@ const STEPS = [
 export function HowItWorks() {
   const titleId = useId();
   return (
-    <section className="card how-card" aria-labelledby={titleId}>
+    <Card as="section" className="how-card" aria-labelledby={titleId}>
       <h2 id={titleId}>From idea to evidence</h2>
       <ol className="how-steps">
         {STEPS.map((s, i) => (
@@ -31,7 +32,7 @@ export function HowItWorks() {
           </li>
         ))}
       </ol>
-    </section>
+    </Card>
   );
 }
 
@@ -57,7 +58,7 @@ export function RecentRuns() {
 
   if (runs.length === 0) return null;
   return (
-    <section className="card recent-card" aria-labelledby={titleId}>
+    <Card as="section" className="recent-card" aria-labelledby={titleId}>
       <h2 id={titleId} className="panel-title">
         Start from a recent run
       </h2>
@@ -74,6 +75,6 @@ export function RecentRuns() {
           </li>
         ))}
       </ul>
-    </section>
+    </Card>
   );
 }

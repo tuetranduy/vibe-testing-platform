@@ -1,5 +1,7 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import type { CancelReason, TestReport, TestRunSummary } from "@platform/contracts";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { getReport, reportMarkdownPath } from "../lib/api";
@@ -74,9 +76,9 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
             <p className="banner-title">The report couldn&apos;t be loaded</p>
             <p>{state.message}</p>
             <div className="actions">
-              <button type="button" className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}>
+              <Button variant="outline" type="button"  onClick={() => setAttempt((n) => n + 1)}>
                 Try again
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -92,14 +94,18 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
       <ReportSummary report={report} cancelReason={cancelReason} llm={llm} />
       <Assumptions requirement={report.requirement} />
       <div className="actions report-actions">
-        <a className="button button-secondary" href={reportMarkdownPath(runId)} download>
-          <Icon name="download" />
-          Download Markdown
-        </a>
-        <a className="button button-secondary" href={`/runs/${encodeURIComponent(runId)}/print`} target="_blank" rel="noopener">
-          <Icon name="print" />
-          Print or save as PDF
-        </a>
+        <Button asChild variant="outline">
+          <a  href={reportMarkdownPath(runId)} download>
+            <Icon name="download" />
+            Download Markdown
+          </a>
+        </Button>
+        <Button asChild variant="outline">
+          <a  href={`/runs/${encodeURIComponent(runId)}/print`} target="_blank" rel="noopener">
+            <Icon name="print" />
+            Print or save as PDF
+          </a>
+        </Button>
       </div>
       <CriteriaResults
         runId={runId}
@@ -115,12 +121,12 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
         <ArtifactList runId={runId} artifactIds={artifacts.map((a) => a.artifactId)} artifacts={artifactMap} />
       </Disclosure>
       {general.length > 0 && (
-        <section className="card" aria-labelledby="diagnostics-title">
+        <Card as="section"  aria-labelledby="diagnostics-title">
           <h2 id="diagnostics-title" className="card-title">
             Diagnostics
           </h2>
           <FailureDiagnostics findings={general} />
-        </section>
+        </Card>
       )}
       {report.generatedTest && <Disclosure title="Saved test code" hint="View the reusable Playwright test and verification details."><GeneratedTestViewer test={report.generatedTest} playwright={report.playwright} requirement={report.requirement} /></Disclosure>}
       {secretNames && report.generatedTest && report.generatedTest.compiledCriteria.length > 0 && (

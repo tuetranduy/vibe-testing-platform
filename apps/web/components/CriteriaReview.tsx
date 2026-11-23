@@ -1,5 +1,7 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { ADDED_BY_PLATFORM, describeExpectedOutcome, isInferred, type NormalizedRequirement, type SiteAnalysis } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -242,7 +244,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
       </div>
 
       <aside className="review-side" aria-labelledby="confirm-title">
-        <div className="card confirm-panel">
+        <Card className="confirm-panel">
           <p className="confirm-status">Waiting for you</p>
           <h3 id="confirm-title" className="confirm-title">
             Do these checks match what you meant?
@@ -272,16 +274,15 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
               </div>
             )}
           </dl>
-          <button
+          <Button size="lg" block
             type="button"
-            className="button button-primary button-lg button-block"
             onClick={confirm}
             disabled={confirming || saving || openEdits.length > 0}
             aria-describedby={openEdits.length > 0 ? "confirm-blocked" : undefined}
           >
             {confirming ? "Starting…" : "Confirm and start"}
             <Icon name="arrow" />
-          </button>
+          </Button>
           {openEdits.length > 0 && (
             <p id="confirm-blocked" className="hint">
               <Icon name="info" /> Save or discard your {openEdits.length === 1 ? "edit" : "edits"} to {listIds(openEdits)} first.
@@ -294,15 +295,14 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
             </p>
           )}
           {startingOver === null ? (
-            <button
+            <Button variant="outline" block
               type="button"
-              className="button button-secondary button-block"
               onClick={() => setStartingOver("ask")}
               disabled={confirming || saving}
             >
               <Icon name="restart" />
               Start over with a revised requirement
-            </button>
+            </Button>
           ) : (
             <div role="group" aria-labelledby="start-over-title" className="note note-warning">
               <p id="start-over-title" className="note-title">
@@ -310,22 +310,21 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
               </p>
               <p>This cancels the current run. You can edit the requirement and start a new one.</p>
               <div className="actions">
-                <button type="button" className="button button-danger" onClick={startOver} disabled={startingOver === "working"}>
+                <Button variant="destructive" type="button"  onClick={startOver} disabled={startingOver === "working"}>
                   {startingOver === "working" ? "Cancelling…" : "Yes, start over"}
-                </button>
-                <button
+                </Button>
+                <Button variant="outline"
                   type="button"
-                  className="button button-secondary"
                   onClick={() => setStartingOver(null)}
                   disabled={startingOver === "working"}
                   autoFocus
                 >
                   Keep reviewing
-                </button>
+                </Button>
               </div>
             </div>
           )}
-        </div>
+        </Card>
       </aside>
     </section>
   );

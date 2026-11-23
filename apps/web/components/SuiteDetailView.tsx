@@ -1,5 +1,9 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import type { SuiteDetail, SuiteEntryView, SuiteRunBrief } from "@platform/contracts";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
@@ -60,9 +64,9 @@ export function SuiteDetailView({ suiteId, navigate = (url) => window.location.a
           <p className="banner-title">The suite couldn&apos;t be loaded</p>
           <p>{state.message}</p>
           <div className="actions">
-            <button type="button" className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}>
+            <Button variant="outline" type="button"  onClick={() => setAttempt((n) => n + 1)}>
               Try again
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -118,12 +122,12 @@ function RunSuiteCard({ suite, navigate }: { suite: SuiteDetail; navigate: (url:
       setPending(false);
     }
   }
-  return <section className="card stack" aria-labelledby="run-suite-title">
+  return <Card as="section" className="stack" aria-labelledby="run-suite-title">
     <div className="section-head"><h2 id="run-suite-title" className="card-title">Run this suite</h2><p className="muted">Replay all {plural(suite.entryCount, "saved test")} in order.</p></div>
     {legacy && <p className="note note-warning">Some saved tests use an older setup. Replace them with fresh tests before running this suite.</p>}
     {error && <p role="alert" className="field-error">{error}</p>}
-    <div className="actions"><button type="button" className="button button-primary" onClick={() => void start()} disabled={pending || legacy || suite.entryCount === 0}><Icon name="arrow" />{pending ? "Starting…" : "Run suite"}</button>{suite.entryCount === 0 && <p className="muted">Add a test first.</p>}</div>
-  </section>;
+    <div className="actions"><Button type="button"  onClick={() => void start()} disabled={pending || legacy || suite.entryCount === 0}><Icon name="arrow" />{pending ? "Starting…" : "Run suite"}</Button>{suite.entryCount === 0 && <p className="muted">Add a test first.</p>}</div>
+  </Card>;
 }
 
 function EntryResult({ entry }: { entry: SuiteEntryView }) {
@@ -166,7 +170,7 @@ function EntriesCard({ suite, onChange }: { suite: SuiteDetail; onChange: (s: Su
     });
 
   return (
-    <section className="card stack" aria-labelledby="entries-title" aria-busy={busy}>
+    <Card as="section" className="stack" aria-labelledby="entries-title" aria-busy={busy}>
       <div className="section-head">
         <h2 id="entries-title" className="card-title">
           <Icon name="layers" /> Tests
@@ -194,33 +198,31 @@ function EntriesCard({ suite, onChange }: { suite: SuiteDetail; onChange: (s: Su
               </div>
               <EntryResult entry={e} />
               <div className="actions suite-entry-actions">
-                <button
+                <Button variant="ghost"
                   type="button"
-                  className="button button-quiet"
                   onClick={() => void move(i, i - 1)}
                   disabled={busy || i === 0}
                   aria-label={`Move “${e.title}” up`}
                 >
                   Up
-                </button>
-                <button
+                </Button>
+                <Button variant="ghost"
                   type="button"
-                  className="button button-quiet"
                   onClick={() => void move(i, i + 1)}
                   disabled={busy || i === suite.entries.length - 1}
                   aria-label={`Move “${e.title}” down`}
                 >
                   Down
-                </button>
-                <button
+                </Button>
+                <Button variant="ghost"
                   type="button"
-                  className="button button-quiet button-quiet-danger"
+                  className="button-quiet-danger"
                   onClick={() => void remove(e.sourceRunId)}
                   disabled={busy}
                   aria-label={`Remove “${e.title}” from the suite`}
                 >
                   Remove
-                </button>
+                </Button>
               </div>
             </li>
           ))}
@@ -231,13 +233,13 @@ function EntriesCard({ suite, onChange }: { suite: SuiteDetail; onChange: (s: Su
           <Icon name="error" /> {error}
         </p>
       )}
-    </section>
+    </Card>
   );
 }
 
 function RecentRuns({ runs }: { runs: SuiteRunBrief[] }) {
   return (
-    <section className="card stack" aria-labelledby="suite-runs-title">
+    <Card as="section" className="stack" aria-labelledby="suite-runs-title">
       <h2 id="suite-runs-title" className="card-title">
         Recent runs
       </h2>
@@ -256,7 +258,7 @@ function RecentRuns({ runs }: { runs: SuiteRunBrief[] }) {
           ))}
         </ul>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -305,19 +307,19 @@ function SuiteSettings({
   }
 
   return (
-    <form className="card stack" onSubmit={save} noValidate aria-labelledby="suite-settings-title" aria-busy={pending}>
+    <Card as="form" className="stack" onSubmit={save} noValidate aria-labelledby="suite-settings-title" aria-busy={pending}>
       <h2 id="suite-settings-title" className="card-title">
         <Icon name="sliders" /> Suite settings
       </h2>
       <div className="field">
         <label htmlFor="suite-edit-name">Name</label>
-        <input id="suite-edit-name" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
+        <Input id="suite-edit-name" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
       </div>
       <div className="field">
         <label htmlFor="suite-edit-description">
           Description <span className="muted">(optional)</span>
         </label>
-        <textarea id="suite-edit-description" rows={2} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
+        <Textarea id="suite-edit-description" rows={2} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
       </div>
       {message && (
         <p role={message.kind === "error" ? "alert" : "status"} className={message.kind === "error" ? "field-error" : "muted"}>
@@ -325,25 +327,25 @@ function SuiteSettings({
         </p>
       )}
       <div className="actions">
-        <button type="submit" className="button button-primary" disabled={pending}>
+        <Button type="submit"  disabled={pending}>
           Save settings
-        </button>
+        </Button>
         {confirmingDelete ? (
           <>
-            <button type="button" className="button button-danger" onClick={() => void remove()} disabled={pending}>
+            <Button variant="destructive" type="button"  onClick={() => void remove()} disabled={pending}>
               Delete “{suite.name}”
-            </button>
-            <button type="button" className="button button-secondary" onClick={() => setConfirmingDelete(false)} disabled={pending}>
+            </Button>
+            <Button variant="outline" type="button"  onClick={() => setConfirmingDelete(false)} disabled={pending}>
               Keep it
-            </button>
+            </Button>
           </>
         ) : (
-          <button type="button" className="button button-danger-quiet actions-end" onClick={() => setConfirmingDelete(true)} disabled={pending}>
+          <Button variant="danger-outline" type="button" className="actions-end" onClick={() => setConfirmingDelete(true)} disabled={pending}>
             Delete suite
-          </button>
+          </Button>
         )}
       </div>
       {confirmingDelete && <p className="muted">Its schedules are deleted too; its past runs stay in the history.</p>}
-    </form>
+    </Card>
   );
 }

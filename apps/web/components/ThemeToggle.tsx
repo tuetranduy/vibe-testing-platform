@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { applyTheme, readThemePref, THEME_EVENT, type ThemePref } from "../lib/theme";
 import { Icon, type IconName } from "./Icon";
@@ -33,7 +34,7 @@ export function ThemeToggle() {
   return (
     <div role="group" aria-label="Theme" className="theme-toggle">
       {OPTIONS.map((o) => (
-        <button
+        <Button variant="plain"
           key={o.value}
           type="button"
           className="theme-option"
@@ -43,7 +44,7 @@ export function ThemeToggle() {
         >
           <Icon name={o.icon} />
           <span className="visually-hidden">{o.label}</span>
-        </button>
+        </Button>
       ))}
     </div>
   );

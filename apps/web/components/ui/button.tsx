@@ -4,50 +4,46 @@ import { cn } from "@/lib/utils"
 import { Slot } from "radix-ui"
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex shrink-0 items-center justify-center gap-2 rounded-[9px] border border-transparent text-sm leading-[1.2] font-[550] tracking-[-0.005em] whitespace-nowrap no-underline touch-manipulation transition focus-visible:outline-2 active:enabled:translate-y-px disabled:cursor-not-allowed disabled:opacity-50",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/80",
-        outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
-        secondary:
-          "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
-        ghost:
-          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
-        destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
-        link: "text-primary underline-offset-4 hover:underline",
+        default: "bg-[image:var(--primary-gradient)] text-primary-foreground shadow-[0_3px_8px_rgb(50_78_190_/_0.12)] hover:bg-[image:var(--primary-gradient-hover)] hover:text-primary-foreground",
+        outline: "border-input bg-secondary text-secondary-foreground hover:border-(--text-subtle) hover:bg-(--surface-hover) hover:text-foreground",
+        ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
+        destructive: "bg-(--danger-solid) text-(--danger-contrast) hover:bg-(--danger-hover)",
+        "danger-outline": "border-input bg-card text-destructive hover:border-(--danger-border) hover:bg-(--danger-bg)",
+        "danger-ghost": "text-destructive hover:bg-(--danger-bg)",
+        "on-ink": "bg-(--ink-text) text-(--ink) hover:bg-white hover:text-(--ink)",
       },
       size: {
-        default:
-          "h-8 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        xs: "h-6 gap-1 rounded-[min(var(--radius-md),10px)] px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-7 gap-1 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
-        lg: "h-9 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+        default: "min-h-[38px] px-[15px] py-2",
+        lg: "min-h-[46px] px-[22px] py-3",
+        xs: "min-h-6 gap-1 px-2 text-xs",
+        sm: "min-h-7 gap-1 px-2.5 text-xs",
         icon: "size-8",
-        "icon-xs":
-          "size-6 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
-        "icon-sm":
-          "size-7 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg",
+        "icon-xs": "size-6",
+        "icon-sm": "size-7",
         "icon-lg": "size-9",
       },
+      block: {
+        true: "flex w-full text-center whitespace-normal",
+      },
     },
-    defaultVariants: {
-      variant: "default",
-      size: "default",
-    },
+    defaultVariants: { variant: "default", size: "default" },
   }
-)
+);
 
 function Button({
   className,
   variant = "default",
   size = "default",
   asChild = false,
+  block,
   ...props
 }: React.ComponentProps<"button"> &
-  VariantProps<typeof buttonVariants> & {
+  Omit<VariantProps<typeof buttonVariants>, "variant"> & {
+    variant?: NonNullable<VariantProps<typeof buttonVariants>["variant"]> | "plain";
     asChild?: boolean
   }) {
   const Comp = asChild ? Slot.Root : "button"
@@ -57,7 +53,7 @@ function Button({
       data-slot="button"
       data-variant={variant}
       data-size={size}
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={variant === "plain" ? className : cn(buttonVariants({ variant, size, block }), className)}
       {...props}
     />
   )

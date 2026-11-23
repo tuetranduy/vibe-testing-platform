@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Icon, type IconName } from "./Icon";
 
@@ -154,7 +155,7 @@ export function ComposerMenu<V extends string>({ id, label, icon, value, display
 
   return (
     <div className="composer-menu" ref={rootRef}>
-      <button
+      <Button variant="plain"
         ref={buttonRef}
         id={id}
         type="button"
@@ -173,7 +174,7 @@ export function ComposerMenu<V extends string>({ id, label, icon, value, display
         <Icon name={icon} />
         <span className="composer-chip-text">{display}</span>
         <Icon name="chevron" className="composer-chip-chevron" />
-      </button>
+      </Button>
       {open && (
         <ul
           ref={listRef}

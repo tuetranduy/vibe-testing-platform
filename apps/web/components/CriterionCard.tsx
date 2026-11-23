@@ -1,5 +1,8 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 import { describeExpectedOutcome, isInferred, type AcceptanceCriterion, type CriterionProposalResponse, type ExpectedOutcome, type FactRequest, type SiteCheck } from "@platform/contracts";
 import { useEffect, useRef, useState } from "react";
 import { CheckEditor } from "./CheckEditor";
@@ -101,7 +104,7 @@ export function CriterionCard({
   const aiJudged = c.expectedOutcome.kind === "semantic";
 
   return (
-    <article className={`card criterion${c.ambiguity ? " criterion-unclear" : aiJudged ? " criterion-ai" : ""}`} aria-labelledby={`${c.id}-title`}>
+    <Card as="article" className={`criterion${c.ambiguity ? " criterion-unclear" : aiJudged ? " criterion-ai" : ""}`} aria-labelledby={`${c.id}-title`}>
       <h3 id={`${c.id}-title`} className="criterion-id">
         {c.id}
       </h3>
@@ -173,9 +176,9 @@ export function CriterionCard({
         {editing && onRevise && onAccept && <CheckRewrite criterionId={c.id} currentPreconditions={c.preconditions} busy={busy} onRevise={onRevise} onAccept={onAccept} />}
         {editing && aiJudged && (
           <div className="actions">
-            <button type="button" className="button button-quiet" onClick={() => setEditing(false)}>
+            <Button variant="ghost" type="button"  onClick={() => setEditing(false)}>
               Close
-            </button>
+            </Button>
           </div>
         )}
 
@@ -186,12 +189,11 @@ export function CriterionCard({
         {onCriticalChange && (
           <div className="weight-field">
             <label className="choice">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={c.critical}
                 disabled={busy || (c.critical && !canMakeNonCritical)}
                 aria-describedby={`${c.id}-weight-hint`}
-                onChange={async (e) => setWeightError(await onCriticalChange(e.target.checked))}
+                onCheckedChange={async (checked) => setWeightError(await onCriticalChange(checked === true))}
               />
               <span>Critical</span>
             </label>
@@ -255,9 +257,8 @@ export function CriterionCard({
             </p>
             <p>It won&apos;t be checked in this run.</p>
             <div className="actions">
-              <button
+              <Button variant="destructive"
                 type="button"
-                className="button button-danger"
                 onClick={() => {
                   setRemoving(false);
                   onRemove();
@@ -265,10 +266,10 @@ export function CriterionCard({
                 disabled={busy}
               >
                 Yes, remove
-              </button>
-              <button type="button" className="button button-secondary" onClick={() => setRemoving(false)} autoFocus>
+              </Button>
+              <Button variant="outline" type="button"  onClick={() => setRemoving(false)} autoFocus>
                 Keep it
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -276,30 +277,28 @@ export function CriterionCard({
         {!editing && !removing && (
           <div className="actions">
             {(!aiJudged || onRevise) && (
-              <button
+              <Button variant="outline"
                 ref={editButton}
                 type="button"
-                className="button button-secondary"
                 onClick={() => setEditing(true)}
                 disabled={busy}
                 aria-label={`Edit check ${c.id}`}
               >
                 Edit check
-              </button>
+              </Button>
             )}
-            <button
+            <Button variant="ghost"
               type="button"
-              className="button button-quiet"
               onClick={() => setRemoving(true)}
               disabled={busy || !canRemove}
               title={canRemove ? undefined : "At least one criterion is required"}
               aria-label={`Remove ${c.id}`}
             >
               Remove
-            </button>
+            </Button>
           </div>
         )}
       </div>
-    </article>
+    </Card>
   );
 }

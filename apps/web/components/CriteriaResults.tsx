@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { ADDED_BY_PLATFORM, isInferred, type AcceptanceCriterion, type CriterionResult, type NormalizedRequirement, type TestReport } from "@platform/contracts";
 import { useState } from "react";
 import { reviewResult } from "../lib/api";
@@ -103,7 +104,7 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
         </span>
         <div className="result-main">
           <h3 className="result-heading">
-            <button
+            <Button variant="plain"
               type="button"
               id={toggleId}
               className="result-toggle"
@@ -114,7 +115,7 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
               <span className="result-id">{r.criterionId}</span>{" "}
               <span className="result-statement">{criterion?.statement ?? `Criterion ${r.criterionId}`}</span>
               <Icon name="chevron" className="result-chevron" />
-            </button>
+            </Button>
           </h3>
 
           <p className="result-meta">
@@ -149,8 +150,8 @@ function CriterionRow({ runId, result: r, criterion, expanded, onToggle, diagnos
       {r.review && <p className="hint">Automated result: Inconclusive — {reasonText(r.review.originalReason)}. Reviewed {new Date(r.review.reviewedAt).toLocaleString()}.</p>}
       {r.status === "INCONCLUSIVE" && onReview && (
         <div className="actions" aria-label={`Review ${r.criterionId}`}>
-          <button type="button" className="button button-secondary" disabled={pending} onClick={() => decide("PASS")}>Mark as pass</button>
-          <button type="button" className="button button-danger-quiet" disabled={pending} onClick={() => decide("FAIL")}>Mark as fail</button>
+          <Button variant="outline" type="button"  disabled={pending} onClick={() => decide("PASS")}>Mark as pass</Button>
+          <Button variant="danger-outline" type="button"  disabled={pending} onClick={() => decide("FAIL")}>Mark as fail</Button>
           {pending && <span role="status">Saving review…</span>}
           {error && <p role="alert">{error}</p>}
         </div>

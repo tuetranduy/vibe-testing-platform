@@ -1,5 +1,7 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { useId, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 
@@ -11,9 +13,9 @@ export function Disclosure({ title, hint, children }: { title: string; hint?: st
   const [open, setOpen] = useState(false);
   const id = useId();
   return (
-    <section className="card disclosure">
+    <Card as="section" className="disclosure">
       <h2 className="disclosure-heading">
-        <button
+        <Button variant="plain"
           type="button"
           className="disclosure-toggle"
           aria-expanded={open}
@@ -22,7 +24,7 @@ export function Disclosure({ title, hint, children }: { title: string; hint?: st
         >
           <span>{title}</span>
           <Icon name="chevron" className="disclosure-chevron" />
-        </button>
+        </Button>
       </h2>
       {hint && !open && <p className="muted disclosure-hint">{hint}</p>}
       {open && (
@@ -30,6 +32,6 @@ export function Disclosure({ title, hint, children }: { title: string; hint?: st
           {children}
         </div>
       )}
-    </section>
+    </Card>
   );
 }

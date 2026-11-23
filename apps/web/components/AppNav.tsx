@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { logout } from "../lib/api";
@@ -105,7 +106,7 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
   return (
     <>
       <div className="topbar">
-        <button
+        <Button variant="plain"
           ref={menuButton}
           type="button"
           className="icon-button"
@@ -115,18 +116,20 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
           onClick={() => setDrawerOpen(true)}
         >
           <Icon name="menu" />
-        </button>
+        </Button>
         <Brand />
-        <a className="button button-primary topbar-cta" href="/runs/new" aria-label="New test">
-          <Icon name="plus" />
-        </a>
+        <Button asChild>
+          <a className="topbar-cta" href="/runs/new" aria-label="New test">
+            <Icon name="plus" />
+          </a>
+        </Button>
       </div>
 
       <aside id="sidebar" ref={sidebar} className="sidebar" data-open={drawerOpen} tabIndex={-1} aria-label="Sidebar">
         <div className="sidebar-head">
           <Brand />
-          <button type="button" className="icon-button drawer-close" aria-label="Close menu" onClick={() => closeDrawer(true)}><Icon name="x" /></button>
-          <button
+          <Button variant="plain" type="button" className="icon-button drawer-close" aria-label="Close menu" onClick={() => closeDrawer(true)}><Icon name="x" /></Button>
+          <Button variant="plain"
             type="button"
             className="icon-button sidebar-collapse"
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -134,19 +137,21 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
             onClick={toggleCollapsed}
           >
             <Icon name="sidebar" />
-          </button>
+          </Button>
         </div>
 
-        <a className="button button-primary nav-cta" href="/runs/new" aria-current={current("/runs/new")} title="New test">
-          <Icon name="plus" />
-          <span className="nav-cta-label">New test</span>
-        </a>
+        <Button asChild>
+          <a className="nav-cta" href="/runs/new" aria-current={current("/runs/new")} title="New test">
+            <Icon name="plus" />
+            <span className="nav-cta-label">New test</span>
+          </a>
+        </Button>
 
-        <button type="button" className="jump-trigger" onClick={() => setPaletteOpen(true)} title="Search or jump to (⌘K)">
+        <Button variant="plain" type="button" className="jump-trigger" onClick={() => setPaletteOpen(true)} title="Search or jump to (⌘K)">
           <Icon name="search" />
           <span className="jump-label">Search or jump to…</span>
           <kbd aria-hidden="true">⌘K</kbd>
-        </button>
+        </Button>
 
         <nav aria-label="Main" className="app-nav">
           <div className="nav-section-label" aria-hidden="true">
@@ -179,7 +184,7 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
                 </span>{" "}
                 <span className="visually-hidden">(your account)</span>
               </a>
-              <button
+              <Button variant="plain"
                 type="button"
                 className="icon-button nav-signout"
                 aria-label="Sign out"
@@ -188,7 +193,7 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
                 disabled={signingOut}
               >
                 <Icon name="logout" />
-              </button>
+              </Button>
             </div>
           )}
         </div>

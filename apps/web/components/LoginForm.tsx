@@ -1,5 +1,8 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { useState, type FormEvent } from "react";
 import { ApiRequestError, login } from "../lib/api";
 import { resetMe } from "../lib/me";
@@ -59,7 +62,7 @@ export function LoginForm({
   }
 
   return (
-    <form className="card stack login-card" aria-labelledby="login-title" onSubmit={onSubmit} noValidate>
+    <Card as="form" className="stack login-card" aria-labelledby="login-title" onSubmit={onSubmit} noValidate>
       <div className="section-head">
         <h1 id="login-title" className="page-title">
           Sign in
@@ -85,11 +88,11 @@ export function LoginForm({
       )}
       <div className="field">
         <label htmlFor="login-email">E-mail address</label>
-        <input id="login-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Input id="login-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
       </div>
       <div className="field">
         <label htmlFor="login-password">Password</label>
-        <input
+        <Input
           id="login-password"
           type="password"
           autoComplete="current-password"
@@ -98,10 +101,10 @@ export function LoginForm({
         />
       </div>
       <div className="actions">
-        <button type="submit" className="button button-primary" disabled={pending}>
+        <Button type="submit"  disabled={pending}>
           {pending ? "Signing in…" : "Sign in"}
-        </button>
+        </Button>
       </div>
-    </form>
+    </Card>
   );
 }

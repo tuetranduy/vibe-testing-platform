@@ -1,5 +1,8 @@
 "use client";
 
+import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { useState, type FormEvent } from "react";
 import { ApiRequestError, changePassword, logout } from "../lib/api";
 import { resetMe, useMe } from "../lib/me";
@@ -43,7 +46,7 @@ export function AccountSettings({ navigate = (url: string) => window.location.as
   const input = (f: Field, label: string, autoComplete: string) => (
     <div className="field">
       <label htmlFor={`account-${f}`}>{label}</label>
-      <input
+      <Input
         id={`account-${f}`}
         type="password"
         autoComplete={autoComplete}
@@ -63,7 +66,7 @@ export function AccountSettings({ navigate = (url: string) => window.location.as
   return (
     <div className="stack-lg">
       {me && (
-        <section className="card stack-tight" aria-labelledby="account-who">
+        <Card as="section" className="stack-tight" aria-labelledby="account-who">
           <h2 id="account-who" className="card-title">
             Signed in as
           </h2>
@@ -71,9 +74,8 @@ export function AccountSettings({ navigate = (url: string) => window.location.as
             <strong>{me.name}</strong> · {me.email} · {me.role === "admin" ? "Administrator" : "Member"}
           </p>
           <div className="actions">
-            <button
+            <Button variant="outline"
               type="button"
-              className="button button-secondary"
               onClick={async () => {
                 await logout().catch(() => {});
                 resetMe();
@@ -81,11 +83,11 @@ export function AccountSettings({ navigate = (url: string) => window.location.as
               }}
             >
               Sign out
-            </button>
+            </Button>
           </div>
-        </section>
+        </Card>
       )}
-      <form className="card stack" aria-labelledby="account-password" onSubmit={onSubmit} noValidate>
+      <Card as="form" className="stack" aria-labelledby="account-password" onSubmit={onSubmit} noValidate>
         <h2 id="account-password" className="card-title">
           Change password
         </h2>
@@ -93,16 +95,16 @@ export function AccountSettings({ navigate = (url: string) => window.location.as
         {input("newPassword", "New password", "new-password")}
         {input("confirm", "New password again", "new-password")}
         <div className="actions">
-          <button type="submit" className="button button-primary" disabled={pending}>
+          <Button type="submit"  disabled={pending}>
             Change password
-          </button>
+          </Button>
           {notice && (
             <p role="status" className="hint">
               {notice}
             </p>
           )}
         </div>
-      </form>
+      </Card>
     </div>
   );
 }

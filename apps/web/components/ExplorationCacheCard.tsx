@@ -1,5 +1,7 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { clearExplorationCache, getExplorationCache, type ExplorationCacheStats } from "../lib/api";
 import { isAdminUser, useMe } from "../lib/me";
@@ -42,7 +44,7 @@ export function ExplorationCacheCard() {
   }
 
   return (
-    <section className="card stack-tight" aria-labelledby="cache-title">
+    <Card as="section" className="stack-tight" aria-labelledby="cache-title">
       <h2 id="cache-title" className="card-title">
         Exploration cache
       </h2>
@@ -69,19 +71,19 @@ export function ExplorationCacheCard() {
             </p>
             <p>The next runs look every element up again with the AI.</p>
             <div className="actions">
-              <button type="button" className="button button-danger" onClick={() => void clear()}>
+              <Button variant="destructive" type="button"  onClick={() => void clear()}>
                 Yes, clear it
-              </button>
-              <button type="button" className="button button-secondary" onClick={() => setConfirming(false)}>
+              </Button>
+              <Button variant="outline" type="button"  onClick={() => setConfirming(false)}>
                 Keep it
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
           <div className="actions">
-            <button type="button" className="button button-secondary" onClick={() => setConfirming(true)} disabled={stats?.entries === 0}>
+            <Button variant="outline" type="button"  onClick={() => setConfirming(true)} disabled={stats?.entries === 0}>
               Clear cache
-            </button>
+            </Button>
             {notice && (
               <p role="status" className="hint">
                 {notice}
@@ -89,6 +91,6 @@ export function ExplorationCacheCard() {
             )}
           </div>
         ))}
-    </section>
+    </Card>
   );
 }

@@ -1,3 +1,4 @@
+import { Card } from "@/components/ui/card";
 import { qualifiedPassLabel, type CancelReason, type RunVerdict, type TestReport, type TestRunSummary } from "@platform/contracts";
 import { useId, type ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
@@ -185,12 +186,12 @@ function CriteriaMix({ summary }: { summary: TestReport["summary"] }) {
 function Stat({ label, value, children }: { label: string; value: string; children?: ReactNode }) {
   const id = useId();
   return (
-    <div role="group" aria-labelledby={id} className="card stat">
+    <Card role="group" aria-labelledby={id} className="stat">
       <p id={id} className="stat-label">
         {label}
       </p>
       <p className="stat-value">{value}</p>
       {children}
-    </div>
+    </Card>
   );
 }

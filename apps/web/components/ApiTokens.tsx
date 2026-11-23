@@ -1,5 +1,10 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import type { ApiTokenScope, ApiTokenView, CreatedApiToken } from "@platform/contracts";
 import { useEffect, useState, type FormEvent } from "react";
 import { createApiToken, listApiTokens, revokeApiToken } from "../lib/api";
@@ -73,7 +78,7 @@ export function ApiTokens({ all = false }: { all?: boolean }) {
           <Icon name="error" /> {error}
         </p>
       )}
-      <section className="card stack" aria-labelledby="tokens-title">
+      <Card as="section" className="stack" aria-labelledby="tokens-title">
         <h2 id="tokens-title" className="card-title">
           <Icon name="key" /> {all ? "Everyone's tokens" : "Your tokens"}
         </h2>
@@ -98,15 +103,15 @@ export function ApiTokens({ all = false }: { all?: boolean }) {
                   </span>
                 </div>
                 {live(t) && (
-                  <button type="button" className="button button-quiet" onClick={() => void revoke(t.id)} aria-label={`Revoke “${t.name}”`}>
+                  <Button variant="ghost" type="button"  onClick={() => void revoke(t.id)} aria-label={`Revoke “${t.name}”`}>
                     Revoke
-                  </button>
+                  </Button>
                 )}
               </li>
             ))}
           </ul>
         )}
-      </section>
+      </Card>
     </div>
   );
 }
@@ -138,7 +143,7 @@ function NewToken({ onCreated }: { onCreated: (t: CreatedApiToken) => void }) {
 
   const toggle = (s: ApiTokenScope) => setScopes((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
   return (
-    <form className="card stack" onSubmit={submit} noValidate aria-labelledby="new-token-title" aria-busy={pending}>
+    <Card as="form" className="stack" onSubmit={submit} noValidate aria-labelledby="new-token-title" aria-busy={pending}>
       <div className="section-head">
         <h2 id="new-token-title" className="card-title">
           <Icon name="plus" /> New API token
@@ -147,26 +152,26 @@ function NewToken({ onCreated }: { onCreated: (t: CreatedApiToken) => void }) {
       </div>
       <div className="field">
         <label htmlFor="token-name">Name</label>
-        <input id="token-name" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
+        <Input id="token-name" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
       </div>
       <fieldset className="field">
         <legend>Permissions</legend>
         {(Object.keys(SCOPE_TEXT) as ApiTokenScope[]).map((s) => (
           <label key={s} className="choice">
-            <input type="checkbox" checked={scopes.includes(s)} onChange={() => toggle(s)} />
+            <Checkbox checked={scopes.includes(s)} onCheckedChange={() => toggle(s)} />
             {SCOPE_TEXT[s]}
           </label>
         ))}
       </fieldset>
       <div className="field">
         <label htmlFor="token-expiry">Expires after</label>
-        <select id="token-expiry" value={expiry} onChange={(e) => setExpiry(e.target.value as typeof expiry)}>
+        <NativeSelect id="token-expiry" value={expiry} onChange={(e) => setExpiry(e.target.value as typeof expiry)}>
           {EXPIRY.map((x) => (
             <option key={x.value} value={x.value}>
               {x.label}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       {error && (
         <p role="alert" className="field-error">
@@ -174,11 +179,11 @@ function NewToken({ onCreated }: { onCreated: (t: CreatedApiToken) => void }) {
         </p>
       )}
       <div className="actions">
-        <button type="submit" className="button button-primary" disabled={pending}>
+        <Button type="submit"  disabled={pending}>
           {pending ? "Creating…" : "Create token"}
-        </button>
+        </Button>
       </div>
-    </form>
+    </Card>
   );
 }
 
@@ -191,9 +196,8 @@ function CreatedToken({ token, onDone }: { token: CreatedApiToken; onDone: () =>
         <code className="mono token-value">{token.token}</code>
       </p>
       <div className="actions">
-        <button
+        <Button variant="outline"
           type="button"
-          className="button button-secondary"
           onClick={() =>
             void navigator.clipboard?.writeText(token.token).then(
               () => setCopied(true),
@@ -202,10 +206,10 @@ function CreatedToken({ token, onDone }: { token: CreatedApiToken; onDone: () =>
           }
         >
           <Icon name="copy" /> {copied ? "Copied" : "Copy token"}
-        </button>
-        <button type="button" className="button button-quiet" onClick={onDone}>
+        </Button>
+        <Button variant="ghost" type="button"  onClick={onDone}>
           Done
-        </button>
+        </Button>
       </div>
     </div>
   );

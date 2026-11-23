@@ -1,5 +1,9 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Input } from "@/components/ui/input";
 import type { SuiteView } from "@platform/contracts";
 import { useEffect, useState, type FormEvent } from "react";
 import { ApiRequestError, addSuiteEntry, createSuite, listSuites } from "../lib/api";
@@ -61,7 +65,7 @@ export function AddToSuitePanel({ runId, destructive = false }: Props) {
   }
 
   return (
-    <section className="card stack" aria-labelledby="add-to-suite-title">
+    <Card as="section" className="stack" aria-labelledby="add-to-suite-title">
       <div className="section-head">
         <h2 id="add-to-suite-title" className="card-title">
           <Icon name="layers" /> Add to a suite
@@ -74,10 +78,10 @@ export function AddToSuitePanel({ runId, destructive = false }: Props) {
         </p>
       ) : !open ? (
         <div className="actions">
-          <button type="button" className="button button-secondary" onClick={() => setOpen(true)}>
+          <Button variant="outline" type="button"  onClick={() => setOpen(true)}>
             <Icon name="plus" />
             Add to suite
-          </button>
+          </Button>
         </div>
       ) : (
         <form className="stack" onSubmit={submit} noValidate aria-busy={pending}>
@@ -89,20 +93,20 @@ export function AddToSuitePanel({ runId, destructive = false }: Props) {
           {suites !== null && (
             <div className="field">
               <label htmlFor="add-suite-choice">Suite</label>
-              <select id="add-suite-choice" value={choice} onChange={(e) => setChoice(e.target.value)}>
+              <NativeSelect id="add-suite-choice" value={choice} onChange={(e) => setChoice(e.target.value)}>
                 {suites.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
                   </option>
                 ))}
                 <option value={NEW}>New suite…</option>
-              </select>
+              </NativeSelect>
             </div>
           )}
           {choice === NEW && (
             <div className="field">
               <label htmlFor="add-suite-name">New suite&apos;s name</label>
-              <input id="add-suite-name" value={newName} maxLength={100} onChange={(e) => setNewName(e.target.value)} />
+              <Input id="add-suite-name" value={newName} maxLength={100} onChange={(e) => setNewName(e.target.value)} />
             </div>
           )}
           {error && (
@@ -111,15 +115,15 @@ export function AddToSuitePanel({ runId, destructive = false }: Props) {
             </p>
           )}
           <div className="actions">
-            <button type="submit" className="button button-primary" disabled={pending || suites === null}>
+            <Button type="submit"  disabled={pending || suites === null}>
               {pending ? "Adding…" : "Add"}
-            </button>
-            <button type="button" className="button button-secondary" onClick={() => setOpen(false)} disabled={pending}>
+            </Button>
+            <Button variant="outline" type="button"  onClick={() => setOpen(false)} disabled={pending}>
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
       )}
-    </section>
+    </Card>
   );
 }

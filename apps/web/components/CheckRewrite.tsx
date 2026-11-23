@@ -1,5 +1,7 @@
 "use client";
 
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 import { describeExpectedOutcome, type AcceptanceCriterion, type CriterionProposalResponse } from "@platform/contracts";
 import { useId, useState } from "react";
 import { Icon } from "./Icon";
@@ -59,7 +61,7 @@ export function CheckRewrite({ criterionId, currentPreconditions, busy, onRevise
     <div className="check-rewrite stack">
       <div className="field">
         <label htmlFor={`${uid}-words`}>Describe the check in your own words</label>
-        <textarea
+        <Textarea
           id={`${uid}-words`}
           rows={2}
           maxLength={MAX}
@@ -78,9 +80,9 @@ export function CheckRewrite({ criterionId, currentPreconditions, busy, onRevise
         </p>
       )}
       <div className="actions">
-        <button type="button" className="button button-secondary" onClick={() => void rewrite()} disabled={busy || working !== null}>
+        <Button variant="outline" type="button"  onClick={() => void rewrite()} disabled={busy || working !== null}>
           {working === "rewriting" ? "Rewriting…" : "Rewrite with AI"}
-        </button>
+        </Button>
       </div>
 
       {proposal && proposed && (
@@ -112,12 +114,12 @@ export function CheckRewrite({ criterionId, currentPreconditions, busy, onRevise
             </p>
           )}
           <div className="actions">
-            <button type="button" className="button button-primary" onClick={() => void accept()} disabled={busy || working !== null}>
+            <Button type="button"  onClick={() => void accept()} disabled={busy || working !== null}>
               {working === "saving" ? "Saving…" : "Use this check"}
-            </button>
-            <button type="button" className="button button-quiet" onClick={() => setProposal(null)} disabled={working !== null}>
+            </Button>
+            <Button variant="ghost" type="button"  onClick={() => setProposal(null)} disabled={working !== null}>
               Discard
-            </button>
+            </Button>
           </div>
         </div>
       )}

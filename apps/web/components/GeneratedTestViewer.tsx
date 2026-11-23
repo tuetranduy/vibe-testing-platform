@@ -1,5 +1,7 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import type { NormalizedRequirement, TestReport } from "@platform/contracts";
 import { Fragment, useEffect, useId, useMemo, useState } from "react";
 import { highlightLines } from "../lib/highlight";
@@ -40,7 +42,7 @@ export function GeneratedTestViewer({ test, playwright, requirement }: Props) {
       </div>
 
       {(test.notCompiled.length > 0 || test.notes.length > 0) && (
-        <div className="card stack-tight">
+        <Card className="stack-tight">
           {test.notCompiled.length > 0 && (
             <div className="stack-tight">
               <h3 className="subhead">Not in the test</h3>
@@ -69,7 +71,7 @@ export function GeneratedTestViewer({ test, playwright, requirement }: Props) {
               </ul>
             </div>
           )}
-        </div>
+        </Card>
       )}
 
       <div className="ink code-panel">
@@ -122,9 +124,9 @@ function CopyButton({ text }: { text: string }) {
   }
 
   return (
-    <button type="button" className="copy-button" onClick={copy}>
+    <Button variant="plain" type="button" className="copy-button" onClick={copy}>
       <Icon name={state === "copied" ? "check" : "copy"} />
       <span aria-live="polite">{state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy" : "Copy"}</span>
-    </button>
+    </Button>
   );
 }
