@@ -103,7 +103,29 @@ describe("validateReplan", () => {
   it("rejects a login the scenario did not plan, a fill without a value reference, and too many steps", () => {
     expect(validateReplan({ steps: [out("login", "Submit the login form"), ...good] }, input())).toMatchObject({ ok: false });
     expect(validateReplan({ steps: [out("fill", "Type the email"), ...good] }, input())).toMatchObject({ ok: false });
-    expect(validateReplan({ steps: [...Array.from({ length: 12 }, () => out("click", "Click 'Next'")), ...good] }, input())).toMatchObject({ ok: false });
+    // It replaces the failed step and the 3 after it, plus at most 15 more: 19 (KI-095).
+    expect(validateReplan({ steps: [...Array.from({ length: 16 }, () => out("click", "Click 'Next'")), ...good] }, input())).toMatchObject({ ok: false, issues: ["at most 19 steps (got 20)"] });
+  });
+
+  it("may replan everything it replaces: a long form flow's remaining steps plus the recovery (KI-095, run_0mwt0qo61004917dd94a73b19)", () => {
+    // The failed step had 28 steps after it; the replan of all 29, plus a recovery step, was rejected at 15.
+    const long = Array.from({ length: 28 }, (_, i) => planned(`PS-${10 + i}`, "click", `Click option ${i}`));
+    const base = input({ remaining: [...long, scenario.steps[4]!] });
+    const steps = [...Array.from({ length: 29 }, (_, i) => out("click", `Click option ${i}`)), ...good];
+    expect(validateReplan({ steps }, base)).toMatchObject({ ok: true });
+    // 1 failed + 29 after it + 15: 45.
+    expect(validateReplan({ steps: [...Array.from({ length: 13 }, () => out("click", "Click 'Next'")), ...steps] }, base)).toMatchObject({ ok: false, issues: ["at most 45 steps (got 46)"] });
+  });
+
+  it("never plans past the room the plan has left (maxSteps)", () => {
+    expect(validateReplan({ steps: good }, input({ maxSteps: 3 }))).toMatchObject({ ok: false, issues: ["at most 3 steps (got 4)"] });
+    expect(validateReplan({ steps: good }, input({ maxSteps: 4 }))).toMatchObject({ ok: true });
+  });
+
+  it("an arrival refinement may add up to 30 steps to what it rewrites", () => {
+    const steps = [...Array.from({ length: 30 }, () => out("click", "Click 'Next'")), ...good];
+    expect(validateReplan({ steps }, input({ arrived: true }))).toMatchObject({ ok: true });
+    expect(validateReplan({ steps: [out("click", "One more"), ...steps] }, input({ arrived: true }))).toMatchObject({ ok: false, issues: ["at most 34 steps (got 35)"] });
   });
 
   it("rejects a secret the scenario never used; a test data key may be new (its value is generated) (review finding)", () => {
@@ -144,10 +166,16 @@ describe("createReplanner", () => {
     expect(sent).toContain("https://shop.test/");
   });
 
-  it("leaves room for a reasoning model's thinking: the client's default output budget, not 4,000 tokens (KI-081)", async () => {
+  it("leaves room for a reasoning model's thinking and a long replan: the planner's budget and timeout (KI-081, KI-095)", async () => {
     const { llm, transport } = setup({ json: { steps: good } });
     await createReplanner(llm)!.replan(input(), call);
-    expect(transport.requests[0]!.maxTokens).toBeGreaterThanOrEqual(16_000);
+    expect(transport.requests[0]!.maxTokens).toBe(32_000);
+    expect(transport.requests[0]!.timeoutMs).toBe(300_000);
+  });
+
+  it("tells the model this replan's step limit", () => {
+    expect(buildReplanPrompt(input())).toContain("At most 19 steps");
+    expect(buildReplanPrompt(input({ maxSteps: 7 }))).toContain("At most 7 steps");
   });
 
   it("a step that opened a sign-in prompt: the message says so and how to get past it (KI-080)", async () => {
@@ -167,6 +195,13 @@ describe("createReplanner", () => {
     expect(await createReplanner(destructive.llm)!.replan(input(), call)).toMatchObject({ steps: null, reason: "action_blocked" });
     const invalid = setup({ json: { steps: good.slice(0, 1) } }, { json: { steps: good.slice(0, 1) } });
     expect(await createReplanner(invalid.llm)!.replan(input(), call)).toMatchObject({ steps: null, reason: "validation_failed", issues: [expect.stringContaining("never captured")] });
+  });
+
+  it("a value-entry step the model flagged destructive is kept, unflagged (KI-093)", async () => {
+    const flagged = { ...out("select", "Select the purchased date", { inputRef: { source: "literal", key: "01/12/2022" } }), destructive: true };
+    const { llm } = setup({ json: { steps: [flagged, ...good] } });
+    const result = await createReplanner(llm)!.replan(input(), call);
+    expect(result.steps?.map((s) => [s.kind, s.destructive])).toEqual([["select", false], ["navigate", false], ["click", false], ["click", false], ["capture_checkpoint", false]]);
   });
 
   it("reports a failed model call separately from validation", async () => {

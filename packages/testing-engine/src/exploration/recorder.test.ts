@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LOCATOR_STRATEGY_ORDER } from "../shared/locator-policy";
 import { captureCheckpoint, captureFact, modeForValueType, readFact } from "./fact-reader";
 import { captureNamedFact, namedFactSubject } from "./named-facts";
-import { checkElement, describeElement, describeField, elementAction, fieldValue, fillElement, exactNamedControl, hittableAlternative, isHittable, reachableNamedControl, recordElement, requiredEmptyFields, selectElementOption } from "./recorder";
+import { checkElement, describeElement, describeField, elementAction, fieldValue, fillElement, exactNamedControl, hittableAlternative, hittableLabel, isHittable, reachableNamedControl, recordElement, requiredEmptyFields, selectElementOption } from "./recorder";
 
 /**
  * Real Chromium (Playwright's build, launched headless without a proxy) on a static fixture
@@ -576,6 +576,36 @@ describe("isHittable / hittableAlternative (R2: a carousel's off-screen clone)",
     await page.setContent(CAROUSEL);
     const ref = await recordElement(page, "#under");
     expect(await hittableAlternative(page, ref)).toBeNull();
+  });
+});
+
+describe("hittableLabel (KI-094: a custom checkbox whose input is hidden behind its label)", () => {
+  // As on qa-bike-quote.bewiser.co.uk: the input is 0×0 and transparent, its <label for> is what a visitor clicks.
+  const CUSTOM = `<div style="position:relative;padding:20px">
+    <input type="checkbox" id="agree" style="position:absolute;left:0;opacity:0;width:0;height:0">
+    <label for="agree"><p>I have read and agree that the above statements apply to this Motorcycle</p></label>
+  </div>
+  <label style="display:block;padding:20px"><input type="radio" name="mod" value="yes" style="opacity:0;width:0;height:0;position:absolute"> Yes</label>
+  <button id="plain">Continue</button>`;
+  const LABEL_FOR = "xpath=/html[1]/body[1]/div[1]/label[1]";
+  const WRAPPING = "xpath=/html[1]/body[1]/label[1]";
+
+  it("a hidden checkbox or radio input: the XPath of the label a click lands on", async () => {
+    await page.setContent(CUSTOM);
+    expect(await isHittable(page, "#agree")).toBe(false);
+    expect(await hittableLabel(page, "#agree")).toBe(LABEL_FOR);
+    expect(await hittableLabel(page, 'input[type="radio"]')).toBe(WRAPPING);
+  });
+
+  it("checking through that label checks the input (Playwright retargets a label to its control)", async () => {
+    await page.setContent(CUSTOM);
+    await checkElement(page, LABEL_FOR);
+    expect(await page.locator("#agree").isChecked()).toBe(true);
+  });
+
+  it("anything but a checkbox or radio input: null", async () => {
+    await page.setContent(CUSTOM);
+    expect(await hittableLabel(page, "#plain")).toBeNull();
   });
 });
 

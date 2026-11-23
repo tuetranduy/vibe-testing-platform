@@ -38,6 +38,10 @@ describe("assertActionAllowed — default policy denies destructive actions", ()
     ["Purchases the item", "purchases"],
     ["The item is purchased", "purchased"],
     ["Continue purchasing", "purchasing"],
+    // A field noun elsewhere does not excuse the act itself (KI-093).
+    ["Purchase the item on the selected date", "purchase"],
+    ["Click Purchase", "purchase"],
+    ["Purchase now", "purchase"],
     ["Unsubscribes from the newsletter", "unsubscribes"],
     ["The user is unsubscribed", "unsubscribed"],
     ["Try unsubscribing", "unsubscribing"],
@@ -177,6 +181,22 @@ describe("assertActionAllowed — default policy allows benign actions", () => {
     "Cancel", // plain cancel of a dialog
   ])("%j", (instruction) => {
     expect(assertActionAllowed({ instruction }, deny)).toEqual({ allowed: true });
+  });
+
+  // A purchase word naming a field or a record is not the act of buying (KI-093: a motorcycle quote's "Purchased date").
+  it.each([
+    "Select the purchased date",
+    "Enter the purchase price",
+    "Fill in the Purchase Date field",
+    "Open the purchase history",
+    "Enter the date of purchase",
+    "Type the year of purchase",
+  ])("%j", (instruction) => {
+    expect(assertActionAllowed({ instruction }, deny)).toEqual({ allowed: true });
+  });
+
+  it("allows a field whose label names a purchase", () => {
+    expect(assertActionAllowed({ instruction: "choose the date", elementRole: "combobox", elementName: "Purchased date" }, deny)).toEqual({ allowed: true });
   });
 
   it("allows a checkout button on its own (navigation, no submit semantics)", () => {

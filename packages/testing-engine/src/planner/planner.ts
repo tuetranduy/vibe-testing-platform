@@ -3,21 +3,13 @@ import type { ActionPolicy } from "@platform/security";
 import { requireLlm, type StageContext } from "../orchestrator/stages";
 import type { RequirementLlm } from "../requirement/compiler";
 import { applyBlocking } from "./blocking";
-import { PlannerOutputSchema } from "./model-output";
+import { PLANNER_MAX_TOKENS, PLANNER_TIMEOUT_MS, PlannerOutputSchema } from "./model-output";
 import { validatePlanOutput } from "./post-validate";
 import { PLANNER_SYSTEM_PROMPT, buildPlannerPrompt } from "./prompts";
 import { actionPolicyFor } from "../shared/action-policy";
 
 export { actionPolicyFor };
 
-/**
- * A plan of up to 100 steps is about 8,000 tokens of JSON, and a reasoning model's thinking counts against the same
- * budget: at the client's 16,000, DeepSeek Flash spent all of it thinking about a 74-step quote flow and answered
- * nothing (run_0mwsywc5i4ea89000d0fac718).
- */
-const PLANNER_MAX_TOKENS = 32_000;
-/** 32,000 tokens at DeepSeek Flash's ~200 tokens/s is about 160 s, past the transports' 120 s default. */
-const PLANNER_TIMEOUT_MS = 300_000;
 
 export interface PlanTestInput {
   runId: string;

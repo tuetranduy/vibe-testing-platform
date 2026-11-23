@@ -895,6 +895,27 @@ describe("runExploration (fake explorer)", () => {
       expect(auto[0]!.instruction).toBe('Fill the required field "First name" the plan left empty');
     });
 
+    it("a required checkbox whose input is hidden is checked and recorded through its label (KI-094)", async () => {
+      const { ctx } = fakeCtx({ testData: { email: "qa@demo.test" } });
+      const hidden = "xpath=/html[1]/body[1]/r[1]";
+      const label = "xpath=/html[1]/body[1]/label[1]";
+      const form = registerForm([{ selector: hidden, how: "check", facts: { type: "checkbox", label: "I accept the terms" } }]);
+      form.recorder.hittable = async (_page, selector) => selector !== hidden;
+      form.recorder.hittableLabel = async (_page, selector) => (selector === hidden ? label : null);
+      const plan = planOf(
+        step("navigate", "Open the target URL"),
+        step("fill", "Type the email", { inputRef: { source: "testData", key: "email" } }),
+        step("submit", "Submit the registration form"),
+      );
+      const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session: form.session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: form.recorder });
+
+      expect(outcome.stopReason).toBe("COMPLETED");
+      expect(form.checks).toEqual([label]);
+      const check = outcome.steps.find((s) => s.fillMethod === "check")!;
+      expect([check.outcome, check.element]).toEqual(["SUCCESS", { candidates: [{ strategy: "xpath", selector: label }], chosenIndex: 0, framePath: [] }]);
+      expect(check.instruction).toBe('Check the required field "I accept the terms" the plan left empty');
+    });
+
     it("a field the run has test data for gets that value; a confirm field gets the value typed into the field it confirms", async () => {
       const { ctx } = fakeCtx({ testData: { email: "qa@demo.test", last_name: "Doe" }, secrets: { password: "Pw-123456789!" } });
       const session = new FakeSession({
@@ -1314,6 +1335,25 @@ describe("runExploration (fake explorer)", () => {
     const act = outcome.steps.find((s) => s.kind === "act")!;
     expect([act.outcome, act.onGoldenPath]).toEqual(["SUCCESS", true]);
     expect(act.element).toEqual({ candidates: [{ strategy: "xpath", selector: twin }], chosenIndex: 0, framePath: [] });
+  });
+
+  it("a hidden checkbox input (a custom checkbox): its label is clicked and recorded, before any other alternative (KI-094)", async () => {
+    const { ctx } = fakeCtx();
+    const input = { selector: "xpath=/html[1]/body[1]/form[1]/div[1]/input[1]", description: "I have read and agree", method: "click", arguments: [] };
+    const label = "xpath=/html[1]/body[1]/form[1]/div[1]/label[1]";
+    const session = new FakeSession({ observe: () => [input] });
+    const { recorder } = fakeRecorder({ describe: () => ({ role: "checkbox", name: "I have read and agree", text: null }) });
+    let alternatives = 0;
+    recorder.hittable = async (_page, selector) => selector !== input.selector;
+    recorder.hittableLabel = async (_page, selector) => (selector === input.selector ? label : null);
+    recorder.hittableAlternative = async () => (alternatives++, null);
+    const plan = planOf(step("navigate", "Open"), step("click", "Tick the 'I have read and agree' checkbox"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(session.calls.filter((c) => c.op === "actOn").map((c) => (c.arg as ObservedElement).selector)).toEqual([label]);
+    expect(outcome.steps.find((s) => s.kind === "act")!.element).toEqual({ candidates: [{ strategy: "xpath", selector: label }], chosenIndex: 0, framePath: [] });
+    expect(alternatives).toBe(0);
   });
 
   it("a reachable located element is clicked as located; no alternative is looked for (R2)", async () => {
@@ -1755,6 +1795,8 @@ describe("runExploration (fake explorer)", () => {
 
       expect(asked).toHaveLength(1);
       expect([asked[0]!.failed.id, asked[0]!.done.map((s) => s.id), asked[0]!.remaining.map((s) => s.id), asked[0]!.firstId]).toEqual(["PS-2", ["PS-1"], ["PS-3"], 4]);
+      // PS-1 and PS-2 are kept: room for 98 more within the plan's 100 steps (KI-095).
+      expect(asked[0]!.maxSteps).toBe(98);
       expect(session.calls.filter((c) => c.op === "navigate").map((c) => c.arg)).toContain("https://shop.test/grills");
       expect(outcome.facts.map((f) => [f.key, f.checkpoint])).toContainEqual(["cartCount", "after_add"]);
       expect(outcome.revisedPlan?.scenarios[0]!.steps.map((s) => s.id)).toEqual(["PS-1", "PS-2", "PS-4", "PS-5"]);

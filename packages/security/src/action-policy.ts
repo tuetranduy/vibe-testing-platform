@@ -239,13 +239,25 @@ const E = "(?![\\p{L}\\p{N}])";
 const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const termRegex = (term: string): RegExp => new RegExp(`${B}${term.split(" ").map(escape).join("\\s+")}${E}`, "u");
 
+/**
+ * A purchase word that names a field or a record rather than the act of buying: followed by one of these nouns
+ * ("Purchased date", "purchase price", "purchase history") or after "<noun> of" ("date of purchase"). A motorcycle
+ * quote's "Purchased date" field blocked the whole quote flow (KI-093). Buying is still caught by "purchase" on its
+ * own, "buy now", "pay" and the commit rule ("Complete the purchase").
+ */
+const PURCHASE_TERMS: ReadonlySet<string> = new Set(["purchase", "purchases", "purchased", "purchasing"]);
+const PURCHASE_FIELD_NOUNS = ["date", "day", "month", "year", "time", "price", "value", "cost", "amount", "history", "details", "summary", "receipt", "records"];
+const FIELD_NOUN = `(?:${PURCHASE_FIELD_NOUNS.join("|")})`;
+const purchaseRegex = (term: string): RegExp =>
+  new RegExp(`(?<!${B}${FIELD_NOUN}\\s+of\\s+)${B}${escape(term)}${E}(?!\\s+${FIELD_NOUN}${E})`, "u");
+
 // Longest first, so "pay now" is reported instead of "pay".
 const UNCONDITIONAL: ReadonlyArray<{ term: DestructiveTerm; re: RegExp }> = DESTRUCTIVE_TERMS.filter(
   (t) => t !== "checkout",
 )
   .slice()
   .sort((a, b) => b.length - a.length)
-  .map((term) => ({ term, re: termRegex(term) }));
+  .map((term) => ({ term, re: PURCHASE_TERMS.has(term) ? purchaseRegex(term) : termRegex(term) }));
 
 const CHECKOUT_RE = new RegExp(`${B}check ?out${E}`, "u");
 const CHECKOUT_SUBMIT_RE = new RegExp(`${B}(?:${CHECKOUT_SUBMIT_TERMS.join("|")})${E}`, "u");

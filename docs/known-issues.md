@@ -1566,6 +1566,59 @@ replanner and way-there prompts (KI-078).
   allowed) planned 73 steps in one scenario, nothing blocked, in 41 s and 10,024 output tokens. Not yet validated by
   a live run.
 - **Not handled:** whether every offered model accepts 32,000 output tokens was not checked against each provider's
-  documentation. In the replay the model left out the requirement's conditional "If address not found, …" steps, and
-  flagged "Select the purchased date" destructive: with destructive actions denied, that cut the plan after 7 steps
-  and blocked AC-2 to AC-6.
+  documentation. In the replay the model left out the requirement's conditional "If address not found, …" steps. It
+  also flagged "Select the purchased date" destructive (KI-093).
+
+## KI-093 — A "Purchased date" field was treated as a purchase, cutting a quote flow after 7 steps
+- **Severity:** High (with destructive actions denied, every criterion after the field was blocked; with them allowed,
+  a step not flagged destructive could not use a field labelled "Purchased date").
+- **Where:** `packages/security/src/action-policy.ts` (`purchase` terms), `packages/testing-engine/src/shared/action-policy.ts`
+  (`plannedDestructive`), `planner/post-validate.ts`, `exploration/replanner.ts`.
+- **What:** replaying `run_0mwsywc5i4ea89000d0fac718`'s planning (KI-092) with destructive actions denied, the plan
+  stopped at "Select the purchased date" and AC-2 to AC-6 were `DESTRUCTIVE_ACTION_NOT_AUTHORIZED`, for two reasons:
+  "purchased" is a destructive term, so the wording matched (as would the field's own label at execution), and
+  DeepSeek Flash had flagged the select step `destructive: true`.
+- **Resolved (2026-11-23, working tree):** a purchase word followed by a field noun (date, price, value, history, …)
+  or after "<noun> of" ("date of purchase") is not a match; "Purchase now", "Click Purchase" and "Complete the
+  purchase" still are. The model's flag is dropped on fill, select and search steps, in the plan and in replans: entering
+  a value commits nothing, the click or submit after it does and is still checked; their wording still is too. Two
+  replays with destructive actions denied planned all 73 steps with nothing flagged or blocked (55 s, 12,904 and
+  14,349 output tokens). Not yet validated by a live run.
+- **Not handled:** a select whose option commits by itself (an "Actions" menu that deletes on choice) is now caught
+  only by its wording, not by the model's flag. Other terms used as field labels ("Payment day") still match.
+
+## KI-094 — A custom checkbox was never ticked: its input is hidden behind the label a visitor clicks
+- **Severity:** High (the step failed every time, and the scenario stopped at it).
+- **Where:** `packages/testing-engine/src/exploration/recorder.ts` (`hittableLabel`), `executor.ts` (`reachable`,
+  `completeField`).
+- **What:** `run_0mwt0qo61004917dd94a73b19` (qa-bike-quote.bewiser.co.uk, the motorcycle quote of KI-092, DeepSeek
+  Flash): "Tick the 'I have read and agree that the above statements apply to this Motorcycle' checkbox" failed twice
+  with `locator.click: Timeout 15000ms exceeded`. Observe found the right element (`#VehicleStatementListConfirm`), but
+  the site styles its checkboxes itself: the `<input>` is 0×0 with opacity 0 and the visible control is its
+  `<label for>`. Playwright's click and check wait for the input to be visible ("element is not visible") until they
+  time out. The click-reachability check (R2) saw that the input could not be hit, but its alternatives come from the
+  input's own candidates (role, label), which all resolve to the same hidden input. The page's other two statement
+  checkboxes are built the same way.
+- **Resolved (2026-11-23, working tree):** a checkbox or radio input a click cannot land on is clicked through its
+  label (`<label for>` or a wrapping label) when a click lands on that, before the R2 alternatives, and the label is
+  recorded, so the generated test clicks it too. A required checkbox the executor fills (KI-062) is checked and recorded
+  through its label the same way (`check()` on a label checks its control). Verified on the live page with the
+  recorder's own functions: the label is found, recorded by its exact text, and clicking it ticks the input. Not yet
+  validated by a live run.
+- **Not handled:** a hidden input with no label a click lands on (a styled `<span>` sibling with no label) still fails.
+  The same run also could not recover from the failed step (KI-095).
+
+## KI-095 — A failed step in a long flow could never be replanned: a replan was capped at 15 steps
+- **Severity:** High (any failed step with more than about 14 steps after it ended the scenario, even with the user's
+  instruction).
+- **Where:** `packages/testing-engine/src/exploration/replanner.ts` (`replanLimit`), `executor.ts` (`maxSteps`).
+- **What:** in `run_0mwt0qo61004917dd94a73b19` (KI-094) the checkbox step failed with 28 steps after it. A replan
+  replaces the failed step and every step after it, but it could have at most 15 steps (30 for an arrival refinement):
+  both automatic replans and the one from the user's instruction ("fill remaining fields and click continue…") came
+  back with 30 steps and were rejected, "at most 15 steps (got 30)", and the run asked for help again. Since KI-092 a
+  scenario may have 100 steps, so this limit was hit by every long flow.
+- **Resolved (2026-11-23, working tree):** a replan may have the steps it replaces plus 15 (30 for an arrival
+  refinement), within the room the plan has left of its 100 steps, which the executor now passes (`maxSteps`). The
+  limit is in each request's message instead of the system prompt. Replans use the planner's 32,000-token budget and
+  300 s timeout. Not yet validated by a live run.
+- **Not handled:** no eval scores the replanner; the prompt's limit wording changed without a model run.
