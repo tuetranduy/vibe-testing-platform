@@ -10,6 +10,8 @@ import { readFact, type FactReadMode } from "../exploration/fact-reader";
 import { locatorFor } from "../exploration/recorder";
 import { collapseText, foldText, parseNumber } from "../shared/fact-values";
 import { evaluateRule } from "../verification/rules";
+import { CUSTOM_DROPDOWN, MONTHS } from "../exploration/custom-dropdown.fixture";
+import { selectElementOption } from "../exploration/recorder";
 import { HELPERS_SOURCE } from "./helpers-template";
 
 /**
@@ -34,6 +36,7 @@ interface Helpers {
   readTextList(locator: Locator, waitMs?: number): Promise<string[] | null>;
   readItemTexts(locator: Locator, itemSelector: string, waitMs?: number): Promise<string[] | null>;
   refreshEmails(data: unknown): void;
+  chooseOption(field: Locator, value: string, timeoutMs?: number): Promise<void>;
 }
 
 let helpers: Helpers;
@@ -309,5 +312,44 @@ describe("refreshEmails (KI-077)", () => {
     helpers.refreshEmails(first);
     helpers.refreshEmails(second);
     expect(first.inputs.input1).not.toBe(second.inputs.input1);
+  });
+});
+
+describe("chooseOption (KI-097) chooses as the recorder's selectElementOption does", () => {
+  let chooser: Browser;
+  let tab: Page;
+  beforeAll(async () => {
+    chooser = await chromium.launch({ headless: true });
+    tab = await chooser.newPage();
+  });
+  afterAll(async () => {
+    await chooser?.close();
+  });
+
+  it.each([
+    ["an option inside the widget", {}, "December", "December"],
+    ["an option the value starts, in a list appended to the body", { portal: true }, "sept", "September"],
+    ["an option shown only once the value is typed", { onlyWhenTyped: true }, "December", "December"],
+  ] as const)("%s", async (_what, opts, value, expected) => {
+    await tab.setContent(CUSTOM_DROPDOWN(MONTHS, opts));
+    await helpers.chooseOption(tab.locator("#month-input"), value);
+    const replayed = await tab.locator("#month .ng-value").textContent();
+    await tab.setContent(CUSTOM_DROPDOWN(MONTHS, opts));
+    await selectElementOption(tab, "#month-input", value);
+    expect(replayed).toBe(expected);
+    expect(await tab.locator("#month .ng-value").textContent()).toBe(replayed);
+  });
+
+  it("fails, like the recorder, on an option the list lacks and on a choice the page drops", async () => {
+    await tab.setContent(CUSTOM_DROPDOWN(MONTHS));
+    await expect(helpers.chooseOption(tab.locator("#month-input"), "Smarch", 500)).rejects.toThrow(/no option "Smarch".*January/);
+    await tab.setContent(CUSTOM_DROPDOWN(MONTHS, { dropsChoice: true }));
+    await expect(helpers.chooseOption(tab.locator("#month-input"), "May")).rejects.toThrow(/did not keep/);
+  });
+
+  it("uses selectOption on a native select", async () => {
+    await tab.setContent(`<select id="s"><option value="">-</option><option value="de">Germany</option></select>`);
+    await helpers.chooseOption(tab.locator("#s"), "Germany");
+    expect(await tab.locator("#s").inputValue()).toBe("de");
   });
 });

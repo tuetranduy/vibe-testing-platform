@@ -85,9 +85,11 @@ export const ExplorationStepSchema = z.object({
   generatedValue: z.string().max(1000).nullable().optional(),
   /**
    * How a fill the executor added itself is replayed (KI-062: a form's required field the plan left empty, filled before
-   * the form is submitted): typed, an option chosen, or checked. Absent: a planned fill, replayed by its planned step's kind.
+   * the form is submitted): typed, an option chosen, or checked. `choose`: an option chosen in a custom dropdown that is
+   * not a `<select>` (KI-097: ng-select's `<input role="combobox">`), replayed with the helpers' `chooseOption`. Absent: a
+   * planned fill, replayed by its planned step's kind.
    */
-  fillMethod: z.enum(["fill", "select", "check"]).optional(),
+  fillMethod: z.enum(["fill", "select", "check", "choose"]).optional(),
   /**
    * How an `act` step was performed: `press_enter` when a search without a submit button was submitted by pressing
    * Enter in its field (2026-11-06, R1). Pointer actions retain their method too, so

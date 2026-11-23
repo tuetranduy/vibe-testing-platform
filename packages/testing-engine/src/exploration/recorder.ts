@@ -557,10 +557,15 @@ export async function checkElement(page: Page, target: ElementTarget, opts: Reco
 
 /**
  * Deterministic `<select>` choice by our own code (the value comes from test data, a secret or the
- * requirement, never from the model). Matches an option by value or label.
+ * requirement, never from the model). Matches an option by value or label. Returns how it chose: `select` for a
+ * native `<select>`, `choose` for a custom dropdown (KI-097), which the generated test replays with `chooseOption`.
  */
-export async function selectElementOption(page: Page, target: ElementTarget, value: string, opts: RecorderOptions = {}): Promise<void> {
+export async function selectElementOption(page: Page, target: ElementTarget, value: string, opts: RecorderOptions = {}): Promise<"select" | "choose"> {
   const handle = await resolveHandle(page, target, opts);
+  if (!(await handle.evaluate((el) => (el as Element).localName === "select"))) {
+    await chooseCustomOption(page, handle, value, opts);
+    return "choose";
+  }
   // A page can put the select back on its placeholder right after the change (KI-064: the Shopware register page's
   // first choice of a country is undone by its own re-render; a second one holds). Read it back after a moment and
   // choose again, a few times; a choice the page never keeps is an error, never a recorded success.
@@ -574,9 +579,115 @@ export async function selectElementOption(page: Page, target: ElementTarget, val
     }
     await page.waitForTimeout(SELECT_SETTLE_MS);
     const now = await handle.evaluate((el) => (el as HTMLSelectElement).value).catch(() => null);
-    if (now === null || chosen.includes(now)) return; // gone from the page (the next step decides), or kept
+    if (now === null || chosen.includes(now)) return "select"; // gone from the page (the next step decides), or kept
     if (attempt >= SELECT_ATTEMPTS) throw new Error(`recorder: select failed: the page did not keep the option (it shows "${now}")`);
   }
+}
+
+/**
+ * A dropdown that is not a `<select>` (KI-097: ng-select's `<input role="combobox">`, where `selectOption` throws "not a
+ * <select> element"): click the field to open its list, click the visible `role="option"` whose text is the value
+ * (else the one option it starts, else the one that contains it), and check the field then shows that option. When the
+ * open list has no such option and the field takes text (a searchable dropdown, a long or virtual list), the value is
+ * typed to narrow it first. helpers-template.ts `chooseOption` does the same in the generated test.
+ */
+async function chooseCustomOption(page: Page, handle: ElementHandle, value: string, opts: RecorderOptions): Promise<void> {
+  const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const fail = (why: string) => new Error(`recorder: select failed: ${why}`);
+  try {
+    await handle.click({ timeout });
+  } catch (err) {
+    throw fail(`the dropdown did not open: ${(err instanceof Error ? err.message : String(err)).split("\n")[0]!.slice(0, 200)}`);
+  }
+  let option = await waitForOption(page, handle, value, Math.min(timeout, OPTION_WAIT_MS));
+  if (!option && (await handle.isEditable().catch(() => false))) {
+    await handle.fill(value, { timeout });
+    option = await waitForOption(page, handle, value, Math.min(timeout, OPTION_WAIT_MS));
+  }
+  if (!option) {
+    // What the list offers without the typed text, for the replanner.
+    if (await handle.isEditable().catch(() => false)) await handle.fill("", { timeout }).catch(() => {});
+    const offered = ((await handle.evaluate(dropdownOption, null).catch(() => null)) ?? []) as string[];
+    throw fail(`no option "${value}" in the dropdown's list${offered.length ? ` (it offers: ${offered.slice(0, 15).join(", ")})` : " (no options shown)"}`);
+  }
+  const label = await option.evaluate((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim());
+  try {
+    await option.click({ timeout });
+  } catch (err) {
+    throw fail(`the option "${label}" could not be clicked: ${(err instanceof Error ? err.message : String(err)).split("\n")[0]!.slice(0, 200)}`);
+  }
+  await page.waitForTimeout(SELECT_SETTLE_MS);
+  const kept = await handle.evaluate(showsChoice, label).catch(() => null);
+  if (kept === false) throw fail(`the page did not keep the option "${label}"`);
+}
+
+/** How long an opened (or narrowed) dropdown may take to show the option. */
+const OPTION_WAIT_MS = 2_000;
+
+async function waitForOption(page: Page, handle: ElementHandle, value: string, waitMs: number): Promise<ElementHandle | null> {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    const found = (await handle.evaluateHandle(dropdownOption, value)).asElement();
+    if (found) return found as ElementHandle;
+    if (Date.now() >= deadline) return null;
+    await page.waitForTimeout(100);
+  }
+}
+
+/**
+ * Runs in the page (no named inner functions, see readDom). The visible, enabled options of the field's list — the list
+ * its `aria-controls`/`aria-owns` names, else the nearest ancestor (up to six levels) that holds options, else the
+ * page's (a list appended to the body). With a value: the option whose text is it, else the one option whose text starts
+ * with it, else the one that contains it (case and spacing ignored), or null. Without: the options' texts.
+ */
+function dropdownOption(el: Element, value: string | null): HTMLElement | string[] | null {
+  const box = el.closest("[role=combobox]") ?? el;
+  const ids = [...new Set((box === el ? [el] : [box, el]).flatMap((n) => `${n.getAttribute("aria-controls") ?? ""} ${n.getAttribute("aria-owns") ?? ""}`.split(/\s+/)).filter(Boolean))];
+  let scopes: ParentNode[] = ids.map((id) => document.getElementById(id)).filter((n): n is HTMLElement => n !== null);
+  if (scopes.length === 0) {
+    let n: Element | null = el.parentElement;
+    for (let level = 0; n && level < 6; level++, n = n.parentElement) {
+      if (n.querySelector("[role=option]")) {
+        scopes = [n];
+        break;
+      }
+    }
+  }
+  if (scopes.length === 0) scopes = [document];
+  const options = scopes
+    .flatMap((s) => Array.from(s.querySelectorAll<HTMLElement>("[role=option]")))
+    .filter((o) => {
+      const r = o.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && getComputedStyle(o).visibility !== "hidden" && o.getAttribute("aria-disabled") !== "true";
+    });
+  const texts = options.map((o) => (o.textContent ?? "").replace(/\s+/g, " ").trim());
+  if (value === null) return texts.filter(Boolean);
+  const want = value.replace(/\s+/g, " ").trim().toLowerCase();
+  const folded = texts.map((t) => t.toLowerCase());
+  const exact = folded.indexOf(want);
+  if (exact >= 0) return options[exact]!;
+  const starts = folded.flatMap((t, i) => (t.startsWith(want) ? [i] : []));
+  if (starts.length === 1) return options[starts[0]!]!;
+  const contains = folded.flatMap((t, i) => (t.includes(want) ? [i] : []));
+  return contains.length === 1 ? options[contains[0]!]! : null;
+}
+
+/**
+ * Runs in the page: whether the field shows the chosen option — its own value, or the text of the widget around it (up
+ * to three levels, ng-select's value container) outside any open list.
+ */
+function showsChoice(el: Element, label: string): boolean {
+  const want = label.replace(/\s+/g, " ").trim().toLowerCase();
+  if (((el as HTMLInputElement).value ?? "").replace(/\s+/g, " ").trim().toLowerCase() === want) return true;
+  let root: Element = el;
+  for (let level = 0; level < 3 && root.parentElement; level++) root = root.parentElement;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let text = "";
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    if (t.parentElement?.closest("[role=listbox], [role=option]")) continue;
+    text += ` ${t.textContent ?? ""}`;
+  }
+  return text.replace(/\s+/g, " ").trim().toLowerCase().includes(want);
 }
 
 /** How long a chosen option must hold before it counts, and how many times it is chosen (KI-064). */

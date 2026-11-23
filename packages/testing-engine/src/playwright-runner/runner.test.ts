@@ -7,7 +7,7 @@ import path from "node:path";
 import { RerunResultSchema, type GeneratedTest } from "@platform/contracts";
 import { createRunRedactor } from "@platform/security";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ACTION_HELPERS_V1_SOURCE, ACTION_HELPERS_V2_SOURCE, ACTION_HELPERS_V3_SOURCE, HELPERS_SOURCE, PRE_ACTION_HELPERS_SOURCE } from "../compiler/helpers-template";
+import { ACTION_HELPERS_V1_SOURCE, ACTION_HELPERS_V2_SOURCE, ACTION_HELPERS_V3_SOURCE, ACTION_HELPERS_V4_SOURCE, HELPERS_SOURCE, PRE_ACTION_HELPERS_SOURCE } from "../compiler/helpers-template";
 import type { EvidenceStore, EvidenceUpload } from "../evidence/collector";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
 import { buildPlaywrightConfig } from "./config-template";
@@ -352,7 +352,7 @@ describe("runGeneratedTest", () => {
     expect(out.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it.each([["before KI-049", PRE_ACTION_HELPERS_SOURCE], ["before KI-058", ACTION_HELPERS_V1_SOURCE], ["before KI-077", ACTION_HELPERS_V2_SOURCE], ["before made-up usernames", ACTION_HELPERS_V3_SOURCE]])("reruns a saved test with a previous reviewed helper template (%s) using the current fixed helpers", async (_when, helpersSource) => {
+  it.each([["before KI-049", PRE_ACTION_HELPERS_SOURCE], ["before KI-058", ACTION_HELPERS_V1_SOURCE], ["before KI-077", ACTION_HELPERS_V2_SOURCE], ["before made-up usernames", ACTION_HELPERS_V3_SOURCE], ["before chooseOption (KI-097)", ACTION_HELPERS_V4_SOURCE]])("reruns a saved test with a previous reviewed helper template (%s) using the current fixed helpers", async (_when, helpersSource) => {
     const spawn = fakeSpawn(writesResults({ steps: [{ title: title("AC-1") }] }, 0));
     const test = { ...generated(["AC-1"]), helpersSource };
     const out = await runGeneratedTest(runInput(test), { spawn, workspace: { baseDir: base } });

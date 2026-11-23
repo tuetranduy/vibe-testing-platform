@@ -34,7 +34,7 @@ import { SourceWriter, ident, lit, member } from "./source-builder";
  * Replay: the golden path (`onGoldenPath && outcome === "SUCCESS"`) in index order, up to the last
  * checkpoint a compiled criterion needs. The test opens `data.targetUrl` first (the executor's first
  * navigate is that same open); a later navigate → `page.goto` of its URL; act → click; fill → fill,
- * or selectOption when the planned step is a `select`. Elements are located with the recorded
+ * or selectOption when the planned step is a `select` (helpers' chooseOption for a custom dropdown, KI-097). Elements are located with the recorded
  * (chosen) candidate exactly as the recorder's `resolveElement` does; an XPath one gets a
  * `// brittle-locator` comment and a note. Navigation and actions are hard: a failure stops the test
  * and later criteria are simply not reached.
@@ -402,6 +402,12 @@ class Compiler {
             return;
           }
           const value = this.inputValue(step);
+          if (step.fillMethod === "choose") {
+            // A custom dropdown, not a <select> (KI-097): open it and click the option, as the recorder did.
+            const choose = this.helper("chooseOption");
+            this.withLocator(w, step.element!, `Step ${step.index} (choose)`, (l) => `await ${choose}(${l}, ${value});`);
+            return;
+          }
           const planned = step.plannedStepId && this.plannedKind.get(step.plannedStepId) === "select";
           const method = (step.fillMethod ?? (planned ? "select" : "fill")) === "select" ? "selectOption" : "fill";
           this.withLocator(w, step.element!, `Step ${step.index} (fill)`, (l) => `await ${l}.${method}(${value});`);

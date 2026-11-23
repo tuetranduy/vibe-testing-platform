@@ -249,11 +249,10 @@ export function refreshEmails(data: unknown): void {
 `;
 
 /**
- * The current template: ACTION_HELPERS_V2_SOURCE and `refreshEmails` for made-up emails and usernames (KI-077). Tests
- * saved with ACTION_HELPERS_V3_SOURCE, ACTION_HELPERS_V2_SOURCE, ACTION_HELPERS_V1_SOURCE or PRE_ACTION_HELPERS_SOURCE stay
- * accepted.
+ * The template of made-up usernames: ACTION_HELPERS_V2_SOURCE and `refreshEmails` for made-up emails and usernames
+ * (KI-077). Tests saved with it stay accepted (and run with HELPERS_SOURCE).
  */
-export const HELPERS_SOURCE = `${ACTION_HELPERS_V2_SOURCE}
+export const ACTION_HELPERS_V4_SOURCE = `${ACTION_HELPERS_V2_SOURCE}
 /**
  * Gives every email address (qa.<token>@example.com) and username (qa_<token>) the platform made up a new token, the
  * same one wherever that value appears in the run data (KI-077). The account exploration created with it exists now, so
@@ -286,6 +285,109 @@ export function refreshEmails(data: unknown): void {
 }
 `;
 
+/**
+ * The current template: ACTION_HELPERS_V4_SOURCE and `chooseOption` for a custom dropdown (KI-097). Tests saved with
+ * ACTION_HELPERS_V4_SOURCE, ACTION_HELPERS_V3_SOURCE, ACTION_HELPERS_V2_SOURCE, ACTION_HELPERS_V1_SOURCE or
+ * PRE_ACTION_HELPERS_SOURCE stay accepted.
+ */
+export const HELPERS_SOURCE = `${ACTION_HELPERS_V4_SOURCE}
+/**
+ * The option of a dropdown whose text is the value (else the one whose text starts with it, else the one that contains
+ * it; case and spacing ignored), among the visible, enabled role="option" elements of the field's list: the one its
+ * aria-controls/aria-owns names, else the nearest ancestor (up to six levels) holding options, else the page's. Without
+ * a value: the options' texts. The recorder's dropdownOption, run in the page.
+ */
+const DROPDOWN_OPTION = (el: Element, value: string | null): HTMLElement | string[] | null => {
+  const box = el.closest("[role=combobox]") ?? el;
+  const ids = [...new Set((box === el ? [el] : [box, el]).flatMap((n) => ((n.getAttribute("aria-controls") ?? "") + " " + (n.getAttribute("aria-owns") ?? "")).split(/\\s+/)).filter(Boolean))];
+  let scopes: ParentNode[] = ids.map((id) => document.getElementById(id)).filter((n): n is HTMLElement => n !== null);
+  if (scopes.length === 0) {
+    let n: Element | null = el.parentElement;
+    for (let level = 0; n && level < 6; level++, n = n.parentElement) {
+      if (n.querySelector("[role=option]")) {
+        scopes = [n];
+        break;
+      }
+    }
+  }
+  if (scopes.length === 0) scopes = [document];
+  const options = scopes
+    .flatMap((s) => Array.from(s.querySelectorAll<HTMLElement>("[role=option]")))
+    .filter((o) => {
+      const r = o.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && getComputedStyle(o).visibility !== "hidden" && o.getAttribute("aria-disabled") !== "true";
+    });
+  const texts = options.map((o) => (o.textContent ?? "").replace(/\\s+/g, " ").trim());
+  if (value === null) return texts.filter(Boolean);
+  const want = value.replace(/\\s+/g, " ").trim().toLowerCase();
+  const folded = texts.map((t) => t.toLowerCase());
+  const exact = folded.indexOf(want);
+  if (exact >= 0) return options[exact]!;
+  const starts = folded.flatMap((t, i) => (t.startsWith(want) ? [i] : []));
+  if (starts.length === 1) return options[starts[0]!]!;
+  const contains = folded.flatMap((t, i) => (t.includes(want) ? [i] : []));
+  return contains.length === 1 ? options[contains[0]!]! : null;
+};
+
+/**
+ * Whether the field shows the chosen option: its own value, or the text of the widget around it (up to three levels)
+ * outside any open list. The recorder's showsChoice, run in the page.
+ */
+const SHOWS_CHOICE = (el: Element, label: string): boolean => {
+  const want = label.replace(/\\s+/g, " ").trim().toLowerCase();
+  if (((el as HTMLInputElement).value ?? "").replace(/\\s+/g, " ").trim().toLowerCase() === want) return true;
+  let root: Element = el;
+  for (let level = 0; level < 3 && root.parentElement; level++) root = root.parentElement;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let text = "";
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    if (t.parentElement?.closest("[role=listbox], [role=option]")) continue;
+    text += " " + (t.textContent ?? "");
+  }
+  return text.replace(/\\s+/g, " ").trim().toLowerCase().includes(want);
+};
+
+/**
+ * Chooses an option of a dropdown that is not a <select> (KI-097: ng-select's <input role="combobox">), as exploration
+ * did: clicks the field to open its list and clicks the option (DROPDOWN_OPTION). When the open list has no such option
+ * and the field takes text (a searchable dropdown), the value is typed to narrow it first. Fails unless the field then
+ * shows the option. A native <select> gets selectOption.
+ */
+export async function chooseOption(field: Locator, value: string, timeoutMs = 5_000): Promise<void> {
+  if (await field.evaluate((el) => el.localName === "select", undefined, { timeout: timeoutMs })) {
+    await field.selectOption(value, { timeout: timeoutMs });
+    return;
+  }
+  const page = field.page();
+  const find = async (waitMs: number) => {
+    const deadline = Date.now() + waitMs;
+    for (;;) {
+      const found = (await field.evaluateHandle(DROPDOWN_OPTION, value)).asElement();
+      if (found) return found;
+      if (Date.now() >= deadline) return null;
+      await page.waitForTimeout(100);
+    }
+  };
+  await field.click({ timeout: timeoutMs });
+  let option = await find(Math.min(timeoutMs, 2_000));
+  if (!option && (await field.isEditable().catch(() => false))) {
+    await field.fill(value, { timeout: timeoutMs });
+    option = await find(Math.min(timeoutMs, 2_000));
+  }
+  if (!option) {
+    if (await field.isEditable().catch(() => false)) await field.fill("", { timeout: timeoutMs }).catch(() => {});
+    const offered = ((await field.evaluate(DROPDOWN_OPTION, null).catch(() => null)) ?? []) as string[];
+    throw new Error("chooseOption: no option " + JSON.stringify(value) + " in the dropdown's list (it offers: " + offered.slice(0, 15).join(", ") + ")");
+  }
+  const label = await option.evaluate((el) => (el.textContent ?? "").replace(/\\s+/g, " ").trim());
+  await option.click({ timeout: timeoutMs });
+  await page.waitForTimeout(300);
+  if ((await field.evaluate(SHOWS_CHOICE, label).catch(() => null)) === false) {
+    throw new Error("chooseOption: the page did not keep the option " + JSON.stringify(label));
+  }
+}
+`;
+
 /** The names helpers.ts exports: the only ones a generated test may import from it (AST guard). */
 export const HELPER_EXPORTS = [
   "trackActionRequests",
@@ -302,4 +404,5 @@ export const HELPER_EXPORTS = [
   "readTextList",
   "readItemTexts",
   "refreshEmails",
+  "chooseOption",
 ] as const;

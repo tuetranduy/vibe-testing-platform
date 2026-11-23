@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LOCATOR_STRATEGY_ORDER } from "../shared/locator-policy";
 import { captureCheckpoint, captureFact, modeForValueType, readFact } from "./fact-reader";
 import { captureNamedFact, namedFactSubject } from "./named-facts";
+import { CUSTOM_DROPDOWN, MONTHS } from "./custom-dropdown.fixture";
 import { checkElement, describeElement, describeField, elementAction, fieldValue, fillElement, exactNamedControl, hittableAlternative, hittableLabel, isHittable, nearbyControl, reachableNamedControl, recordElement, requiredEmptyFields, selectElementOption } from "./recorder";
 
 /**
@@ -544,6 +545,53 @@ describe("selectElementOption (a page that drops the first choice, KI-064)", () 
     await page.setContent(`<select id="c"><option value="">-</option><option value="a">A</option></select>
       <script>document.getElementById("c").addEventListener("change", (e) => setTimeout(() => { e.target.selectedIndex = 0; }, 20));</script>`);
     await expect(selectElementOption(page, "#c", "a")).rejects.toThrow(/did not keep/);
+  });
+
+  it("reports a native select as chosen with selectOption", async () => {
+    await page.setContent(`<select id="c"><option value="">-</option><option value="a">A</option></select>`);
+    expect(await selectElementOption(page, "#c", "A")).toBe("select");
+  });
+});
+
+
+describe("selectElementOption on a custom dropdown (an input with role=combobox, KI-097)", () => {
+  const shown = () => page.locator("#month .ng-value").textContent();
+
+  it("opens the list and clicks the option with that text; the field shows it", async () => {
+    await page.setContent(CUSTOM_DROPDOWN(MONTHS));
+    expect(await selectElementOption(page, "#month-input", "December")).toBe("choose");
+    expect(await shown()).toBe("December");
+  });
+
+  it("matches case and spacing loosely, and an option the value starts", async () => {
+    await page.setContent(CUSTOM_DROPDOWN(MONTHS));
+    expect(await selectElementOption(page, "#month-input", "  september ")).toBe("choose");
+    expect(await shown()).toBe("September");
+    await page.setContent(CUSTOM_DROPDOWN(["2021 (used)", "2022 (new)"]));
+    await selectElementOption(page, "#month-input", "2022");
+    expect(await shown()).toBe("2022 (new)");
+  });
+
+  it("finds the list the field controls when it is appended to the body", async () => {
+    await page.setContent(CUSTOM_DROPDOWN(MONTHS, { portal: true }));
+    await selectElementOption(page, "#month-input", "sept");
+    expect(await shown()).toBe("September");
+  });
+
+  it("types the value into a searchable field when the open list does not show the option", async () => {
+    await page.setContent(CUSTOM_DROPDOWN(MONTHS, { onlyWhenTyped: true }));
+    await selectElementOption(page, "#month-input", "December");
+    expect(await shown()).toBe("December");
+  });
+
+  it("an option the list does not have is an error naming the options it has", async () => {
+    await page.setContent(CUSTOM_DROPDOWN(MONTHS));
+    await expect(selectElementOption(page, "#month-input", "Smarch", { timeoutMs: 500 })).rejects.toThrow(/no option "Smarch".*January/);
+  });
+
+  it("a choice the field does not show afterwards is an error, not a success", async () => {
+    await page.setContent(CUSTOM_DROPDOWN(MONTHS, { dropsChoice: true }));
+    await expect(selectElementOption(page, "#month-input", "May")).rejects.toThrow(/did not keep/);
   });
 });
 

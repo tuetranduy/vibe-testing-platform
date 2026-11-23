@@ -1632,3 +1632,25 @@ replanner and way-there prompts (KI-078).
   live run.
 - **Not handled:** the icon is replayed by a positional XPath only, which breaks if the page's structure before it
   changes. A header whose row holds two controls (an icon and an info link) is still refused.
+
+## KI-097 — A custom dropdown's option was never chosen: `selectOption` only works on a `<select>`
+- **Severity:** High (every planned `select` on a dropdown that is not a native `<select>` failed both attempts and
+  stopped the scenario).
+- **Where:** `packages/testing-engine/src/exploration/recorder.ts` (`selectElementOption`), `executor.ts` (`fill`),
+  `compiler/test-compiler.ts`, `compiler/helpers-template.ts` (`chooseOption`).
+- **What:** `run_0mwt58kfh5795c21dcde0864a` (qa-bike-quote.bewiser.co.uk, the quote of KI-092) stopped at PS-150 "Select
+  'December' in the PurchaseDateMonth dropdown": steps #19 and #21 failed with `elementHandle.selectOption: Error: Element
+  is not a <select> element`. The field is an Angular ng-select: observe returned its `<input role="combobox">`, and a
+  click opens a `role="listbox"` of `role="option"` divs (Please Select, January … December). Retrying could never help;
+  AC-2 to AC-6 ended INCONCLUSIVE. The same form's PurchaseDateYear is built the same way.
+- **Resolved (2026-11-23, working tree):** a `select` on an element that is not a `<select>` clicks it to open its list
+  and clicks the visible, enabled `role="option"` whose text is the value (else the one option it starts, else the one
+  that contains it; case and spacing ignored), in the list the field's `aria-controls`/`aria-owns` names, else the
+  nearest ancestor holding options, else the page's. When the open list lacks the option and the field takes text, the
+  value is typed to narrow it first. The field (its value or the widget's text outside the list) must then show the
+  option, else the step fails; a missing option fails naming the options offered. The step is recorded with
+  `fillMethod: "choose"` and replayed by the helpers' new `chooseOption` (helpers template V5; tests saved with V4 stay
+  accepted). Checked on the live page by the recorder and by the helper: Month "December" and Year "2022" are shown and
+  the date control turns `ng-valid`. Not yet validated by a live run.
+- **Not handled:** options without `role="option"` (a plain `<ul><li>` menu) are not found; a `fill` step planned on such
+  a dropdown still types into it.
