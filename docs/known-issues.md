@@ -1561,7 +1561,11 @@ replanner and way-there prompts (KI-078).
 - **Resolved (2026-11-23, working tree):** a scenario may have up to 100 steps, the existing limit for the whole plan
   (`MAX_PLAN_STEPS`); a plan over 100 in all scenarios gets a correction that says so. The planner asks for 32,000
   output tokens and a 300 s request timeout (an LLM call may now set its own; the transports' default stays 120 s).
-  A replan may grow a scenario to the same 100-step limit. Not yet validated by a live run.
-- **Not handled:** the prompt changed (the step limit's wording) without `pnpm eval planner`. Whether every offered
-  model accepts 32,000 output tokens was not checked against each provider's documentation. The requirement's
-  conditional step ("If address not found, …") still contradicts the rule against conditional steps.
+  A replan may grow a scenario to the same 100-step limit. `pnpm eval planner` on DeepSeek Flash: 17/18, as before
+  (evals/BASELINE.md). Replaying the run's confirmed requirement and page with its policy (destructive actions
+  allowed) planned 73 steps in one scenario, nothing blocked, in 41 s and 10,024 output tokens. Not yet validated by
+  a live run.
+- **Not handled:** whether every offered model accepts 32,000 output tokens was not checked against each provider's
+  documentation. In the replay the model left out the requirement's conditional "If address not found, …" steps, and
+  flagged "Select the purchased date" destructive: with destructive actions denied, that cut the plan after 7 steps
+  and blocked AC-2 to AC-6.

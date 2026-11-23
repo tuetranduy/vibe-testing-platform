@@ -57,6 +57,7 @@ commit of `packages/testing-engine/src/requirement/prompts.ts`, and any failing 
 | 2026-11-06 | deepseek-flash, rule "never invent wording" + deterministic rewrite of an unstated text to `visible` (KI-070), with cases 34–35 | a0b6cf8 + this change | 35/35 (100%) | 144,695 / 29,468 | $0.08 | — (177 s). Cases 34–35 score `noInventedText` (a rewrite counts as a failure): none rewritten |
 | 2026-11-05 | deepseek-v4-pro (`LLM_REASONING=minimal`), the same | this change | 31/33 (93.9%) | 143,554 / 13,716 | $0.12 | spanish-newsletter (`visible`, not `text_matches`), selected-product-with-pages (`semantic`, 3 ambiguous); both failed this way before. Cases 32–33 pass |
 | 2026-11-19 | deepseek-flash (thinking high), KI-076: the intent prompts, cases 36–40 | 3461abb | 37/40 (92.5%) | 204,725 / 41,584 | $0.11 | test-the-search-with-pages (1 criterion, expected 2–6), test-this-website-with-pages and look-good-show-price-with-pages (one criterion checked a text the requirement never wrote, rewritten to `visible`) — 248 s. The no-pages variants pass: the failures are with live-site pages |
+| 2026-11-23 | deepseek-flash (thinking high), KI-092: up to 100 steps per scenario (wording "in all scenarios together"), 32,000-token budget | 275ba57 | 17/18 (94.4%) | 48,593 / 26,015 | $0.05 | empty-cart (only a navigate and a click; AC-1 blocked: a "remove" step read as destructive, as on 2026-09-30 and 2026-10-06) — 145 s. A replay of `run_0mwsywc5i4ea89000d0fac718`'s planning input (not a case) planned 73 steps in one scenario in 41 s (10,024 tokens out); at 16,000 tokens and 50 steps it had errored after 77 s |
 
 The second row's prompt change fixes a `test_data` precondition invented for a value written in the
 requirement (seen in the Milestone B demo: "Search for iPhone 17 Pro…" got a `test_data` precondition
@@ -135,7 +136,7 @@ runs, so V4 Pro can still fold two starting states into one scenario. `expect.sc
 
 What a case checks (`evals/planner/cases/*.yaml`, each with a hand-written confirmed requirement, most
 reusing a requirement-compiler input): planning succeeds without `ContractError` (every checkpoint
-captured once, in order, no unknown criterion ids, ≤ 50 steps); every `expect.requiredStepKinds` kind
+captured once, in order, no unknown criterion ids, ≤ 100 steps); every `expect.requiredStepKinds` kind
 appears; the scenario has at most `expect.maxSteps` steps; the blocked criteria and reasons equal
 `expect.blocked` exactly (so the model must reference the inputs and mark the destructive steps that
 our deterministic blocking relies on); with `requiresLogin`, a `login` step is preceded by a `fill`
