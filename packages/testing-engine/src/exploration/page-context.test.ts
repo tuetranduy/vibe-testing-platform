@@ -40,7 +40,7 @@ describe("page context (2026-11-21)", () => {
 
   it("names the open checkout step and excludes every closed section's controls (2026-11-22, KI-087)", async () => {
     const names = ["Billing Address", "Shipping Address", "Shipping Method", "Payment Method", "Payment Information", "Confirm Order"];
-    for (const open of [1, 2, 3]) {
+    for (const open of [0, 1, 2, 3]) {
       await page.setContent(`<style>.step.closed{display:none}</style><ol id="checkout-steps">
         ${names.map((name, i) => `<li class="tab-section ${i === open ? "active" : ""}">
           <h2><span>${i + 1}</span> ${name}</h2><div class="step ${i === open ? "" : "closed"}">
@@ -50,6 +50,7 @@ describe("page context (2026-11-21)", () => {
       expect(dom.locationSummary).toContain(`Open/current steps or sections: ["${open + 1} ${names[open]}"]`);
       expect(dom.locationSummary).toContain(`Visible headings (in order): ["1 Billing Address","2 Shipping Address"`);
       for (let i = 0; i < names.length; i++) {
+        expect(dom.locationSummary).toContain(`${i + 1} ${names[i]}`);
         if (i === open) {
           expect(dom.html).toContain(`Only section ${i} content`);
           expect(dom.html).toContain(`id="continue-${i}"`);

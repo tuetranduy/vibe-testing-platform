@@ -231,7 +231,7 @@ export async function runExecution(ctx: StageContext, ports: RunPorts, stages: E
     // EXPLORING
     await ports.transition("EXPLORING");
     await started(ports, "EXPLORING");
-    exploration = await guard(ctx, stages.explore(ctx, plan, requirement));
+    exploration = await guard(ctx, stages.explore(ctx, plan, requirement, analysis?.pageContents ?? []));
     // A plan exploration revised is the plan that ran: saved, and what verification, the test and the report read.
     if (exploration.revisedPlan) {
       plan = exploration.revisedPlan;

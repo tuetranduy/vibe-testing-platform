@@ -30,7 +30,7 @@ import type { Page } from "playwright-core";
 import { describe, expect, it } from "vitest";
 import type { ZodType } from "zod";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
-import { namedControl, quotedNames, runExploration, type ExplorationStore, type RecorderPort } from "./executor";
+import { pagePath, namedControl, quotedNames, runExploration, type ExplorationStore, type RecorderPort } from "./executor";
 import type { FieldFacts, InputGenerator, InputRequest } from "./input-generator";
 import type { CriterionJudge, JudgeRequest } from "./judge";
 import { factFromReadings, type FactCaptureInput } from "./fact-reader";
@@ -2989,5 +2989,72 @@ describe("judging unclear criteria from what the page shows", () => {
     const plan = { ...planOf(step("navigate", "Open the target URL")), blockedCriteria: [{ criterionId: "AC-1", reason: "DESTRUCTIVE_ACTION_NOT_AUTHORIZED" as const, detail: "x" }] };
     await runExploration(ctx, { plan, requirement: requirementWith([]), session: withPage(new FakeSession()), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, judge });
     expect(requests).toEqual([]);
+  });
+});
+
+
+describe("arrival refinement (KI-089, 2026-11-22)", () => {
+  it("uses path identity for queries, fragments, trailing slashes and SPA history routes", () => {
+    expect(pagePath("https://shop.test/cart/?token=secret#billing")).toBe("/cart");
+    expect(pagePath("https://shop.test/cart#shipping")).toBe("/cart");
+    expect(pagePath("https://shop.test/checkout")).not.toBe(pagePath("https://shop.test/cart"));
+    expect(pagePath("about:blank")).toBeNull();
+  });
+
+  const exercise = async (seenUrls: string[], usable = true, enabled = true, destructive = false, matching = false) => {
+    const { ctx, events } = fakeCtx({ options: { allowDestructiveActions: true } });
+    const session = new FakeSession();
+    const asked: ReplanInput[] = [];
+    const original = planOf(step("navigate", `Open ${TARGET}`), step("navigate", "Open https://shop.test/checkout"), step(destructive ? "click" : "navigate", destructive ? "Click the Confirm order button" : "Open https://shop.test/done", { destructive }));
+    const r: Replanner = { async replan(input) {
+      asked.push(input);
+      return usable ? { steps: [{ id: `PS-${input.firstId}`, kind: "navigate", description: destructive ? (matching ? "Click the Confirm order button" : "Click delete my account") : "Open https://shop.test/refined", criterionIds: [], destructive }] } : { steps: null, reason: "model_failed" };
+    } };
+    const outcome = await runExploration(ctx, { plan: original, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1), seenUrls }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: enabled ? r : null });
+    return { outcome, events, asked, session };
+  };
+
+  it("refines the pending steps on arrival and executes and retains the revision", async () => {
+    const { outcome, events, asked, session } = await exercise([TARGET]);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.arrived).toBe(true);
+    expect(asked[0]!.url).toBe("https://shop.test/checkout");
+    expect(asked[0]!.done).toHaveLength(2);
+    expect(session.calls.some((c) => c.op === "navigate" && c.arg === "https://shop.test/refined")).toBe(true);
+    expect(outcome.revisedPlan?.scenarios[0]!.steps.at(-1)?.description).toContain("/refined");
+    expect(events.find((e) => e.type === "plan.revised")?.message).toContain("from the page as it is");
+  });
+
+  it("does not refine a seen page or without a replanner", async () => {
+    expect((await exercise([TARGET, "https://shop.test/checkout/?x=1"])).asked).toHaveLength(0);
+    expect((await exercise([TARGET], true, false)).events.some((e) => e.type.startsWith("plan."))).toBe(false);
+  });
+
+  it("keeps an unusable plan with an arrival diagnostic", async () => {
+    const { outcome, events } = await exercise([TARGET], false);
+    expect(outcome.revisedPlan).toBeUndefined();
+    expect(events).toContainEqual(expect.objectContaining({ type: "plan.not_revised", payload: expect.objectContaining({ reason: "arrival_unusable", detail: expect.stringContaining("model_failed") }) }));
+  });
+
+  it("rejects an unrelated destructive action on arrival", async () => {
+    const { outcome, events } = await exercise([TARGET], true, true, true);
+    // Rewording an unrelated destructive action is rejected by the shared KI-084 guard.
+    expect(outcome.revisedPlan).toBeUndefined();
+    expect(events).toContainEqual(expect.objectContaining({ type: "plan.not_revised", payload: expect.objectContaining({ detail: expect.stringContaining("destructive_not_planned") }) }));
+  });
+
+  it("retains the pending authorized Confirm action", async () => {
+    const { outcome, events } = await exercise([TARGET], true, true, true, true);
+    expect(outcome.revisedPlan?.scenarios[0]!.steps.at(-1)?.description).toBe("Click the Confirm order button");
+    expect(events.some((e) => e.type === "plan.revised")).toBe(true);
+  });
+
+  it("attempts once per path and at most three times per scenario", async () => {
+    const { ctx } = fakeCtx();
+    const asked: ReplanInput[] = [];
+    const routes = [TARGET, "/a", "/b", "/a?again=1", "/c", "/d", "/done"];
+    const original = planOf(...routes.map((route) => step("navigate", `Open ${route.startsWith("https:") ? route : `https://shop.test${route}`}`)));
+    await runExploration(ctx, { plan: original, requirement: requirementWith([]), session: new FakeSession(), budget: ctx.budgetSignal(1), seenUrls: [TARGET] }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: { async replan(input) { asked.push(input); return { steps: null, reason: "model_failed" }; } } });
+    expect(asked.map((i) => pagePath(i.url))).toEqual(["/a", "/b", "/c"]);
   });
 });

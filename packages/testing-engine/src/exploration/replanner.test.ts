@@ -2,7 +2,7 @@ import type { NormalizedRequirement, PlannedStep, TestScenario } from "@platform
 import { FakeTransport, LlmClient, type FakeReply } from "@platform/llm";
 import { createRunRedactor } from "@platform/security";
 import { describe, expect, it } from "vitest";
-import { createReplanner, validateReplan, type ReplanInput } from "./replanner";
+import { buildReplanPrompt, createReplanner, validateReplan, type ReplanInput } from "./replanner";
 
 const requirement: NormalizedRequirement = {
   runId: "run_1",
@@ -185,4 +185,15 @@ describe("createReplanner", () => {
     controller.abort(new Error("cancelled"));
     await expect(createReplanner(llm)!.replan(input(), { ...call, signal: controller.signal })).rejects.toThrow();
   });
+});
+
+
+it("refines unseen pages from visible sections without treating arrival as failure (KI-089, 2026-11-22)", () => {
+  const prompt = buildReplanPrompt(input({ arrived: true }));
+  expect(prompt).toContain("no step failed");
+  expect(prompt).toContain("one separate Continue action per section");
+  expect(prompt).toContain("every destructive action still ahead");
+  expect(prompt).toContain("every pending checkpoint");
+  expect(prompt).toContain(requirement.originalText);
+  expect(prompt).toContain("The next step to refine");
 });

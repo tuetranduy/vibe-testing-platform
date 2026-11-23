@@ -180,6 +180,17 @@ export interface ExplorationStore {
   saveScreenshot(input: { png: Buffer; fileName: string; sensitivity: ArtifactSensitivity }): Promise<{ artifactId: string }>;
 }
 
+/**
+ * Path identity avoids query secrets and repeated refinements for filters/accordion states (KI-089, 2026-11-22).
+ * History-API SPA path changes count; hash-only routers share a page. Trailing slashes share a path; case stays significant.
+ */
+export function pagePath(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    return /^https?:$/.test(parsed.protocol) ? parsed.pathname.replace(/\/+$/, "") || "/" : null;
+  } catch { return null; }
+}
+
 /** Deterministic page access (DOM reads, our own fills). The default is the Playwright recorder. */
 export interface RecorderPort {
   pointerAction?(page: Page, selector: string, method: "scroll_into_view" | "hover" | "double_click"): Promise<void>;
@@ -248,6 +259,8 @@ export const playwrightRecorder: RecorderPort = {
 
 export interface ExplorationInput {
   plan: TestPlan;
+  /** URLs in the exact pages/interactions given to the planner (KI-089, 2026-11-22). */
+  seenUrls?: string[];
   requirement: NormalizedRequirement;
   /** Started with `signal: budget`, so an operation in flight stops when the budget runs out. */
   session: ExplorerSession;
@@ -749,6 +762,20 @@ class ExplorationRun {
     const opensTarget = first?.kind === "navigate" && opensTargetPage(first.description, targetUrl);
     let judgeAfter = this.judgeSchedule(scenario);
     let replans = 0;
+    const seenPaths = new Set((this.input.seenUrls ?? []).map(pagePath));
+    const refinedPaths = new Set<string>();
+    // Per URL path, not per accordion state; queries and hashes do not distinguish pages (KI-089, 2026-11-22).
+    const refineArrival = async (at: number): Promise<boolean> => {
+      const path = pagePath(this.url());
+      if (this.input.seenUrls === undefined || !this.replanner || !path || seenPaths.has(path) || refinedPaths.has(path) || refinedPaths.size >= 3 || !planned[at + 1]) return false;
+      refinedPaths.add(path);
+      const steps = await this.replan(scenario, planned, at + 1, false, { arrived: true });
+      if (!steps) return false;
+      planned.splice(at + 1, planned.length, ...steps);
+      this.revised.set(scenario.id, [...planned]);
+      judgeAfter = this.judgeSchedule({ ...scenario, steps: planned });
+      return true;
+    };
 
     await this.ctx.boundary();
     if (opensTarget) this.startPlanned();
@@ -759,7 +786,8 @@ class ExplorationRun {
     if (opensTarget) {
       const review = await this.reviewAction(first, [], planned.slice(1));
       await this.flushReview();
-      if (review?.verdict === "off_track" && replans < MAX_REPLANS) {
+      const refined = await refineArrival(0);
+      if (!refined && review?.verdict === "off_track" && replans < MAX_REPLANS) {
         const steps = await this.replan(scenario, planned, 0, false, { observation: review.observation, page: review.page });
         if (steps) { replans++; planned.splice(1, planned.length, ...steps); this.revised.set(scenario.id, [...planned]); judgeAfter = this.judgeSchedule({ ...scenario, steps: planned }); }
       }
@@ -782,6 +810,7 @@ class ExplorationRun {
         this.revised.set(scenario.id, [...planned]);
         judgeAfter = this.judgeSchedule({ ...scenario, steps: planned });
       };
+      const previousPath = pagePath(this.url());
       let review: Awaited<ReturnType<ExplorationRun["reviewAction"]>> = null;
       try {
         if (this.stepReviewer && step.kind !== "wait_for" && step.kind !== "capture_checkpoint") this.pendingReview = [];
@@ -795,6 +824,10 @@ class ExplorationRun {
         const steps = automatic ?? await this.askForHelp(scenario, planned, i);
         if (!steps) throw err;
         revise(steps, automatic === null);
+        continue;
+      }
+      if (pagePath(this.url()) !== previousPath && await refineArrival(i)) {
+        await this.judgeCriteria(step, judgeAfter.get(step.id) ?? []);
         continue;
       }
       if (review?.verdict === "off_track" && replans < MAX_REPLANS) {
@@ -916,10 +949,10 @@ class ExplorationRun {
     planned: PlannedStep[],
     at: number,
     signIn = false,
-    { observation, page, guidance }: { observation?: string; page?: PageContext; guidance?: string } = {},
+    { observation, page, guidance, arrived }: { observation?: string; page?: PageContext; guidance?: string; arrived?: boolean } = {},
   ): Promise<PlannedStep[] | null> {
     const failed = planned[at]!;
-    // Only recovery attempts enter this method; on-track steps produce no diagnostic (KI-086, 2026-11-22).
+    // Recovery and unseen-page arrivals enter here; ordinary on-track steps produce no diagnostic (KI-089, 2026-11-22).
     const rejected = async (reason: ReplanReason, detail?: string): Promise<null> => {
       let redacted = detail ? this.redactString(detail) : undefined;
       // These diagnostics enter the public timeline: strip credential values even when model context retains them.
@@ -929,9 +962,9 @@ class ExplorationRun {
       }
       const payload = {
         scenarioId: scenario.id,
-        afterStepId: failed.id,
-        reason,
-        ...(redacted ? { detail: redacted.slice(0, 500) } : {}),
+        afterStepId: arrived ? planned[at - 1]!.id : failed.id,
+        reason: arrived ? "arrival_unusable" as const : reason,
+        ...((redacted || arrived) ? { detail: `${arrived ? `${reason}: ` : ""}${redacted ?? ""}`.slice(0, 500) } : {}),
       };
       const message = `Step ${failed.id}: the rest of the scenario was not planned again (${reason})`;
       await this.ctx.publish({ type: "plan.not_revised", message, payload });
@@ -939,17 +972,19 @@ class ExplorationRun {
       return null;
     };
     if (!this.replanner) return rejected("no_replanner");
-    if (!signIn && this.mayHaveRun(failed)) return rejected("may_have_run", failed.description);
+    if (!arrived && !signIn && this.mayHaveRun(failed)) return rejected("may_have_run", failed.description);
     if (this.input.budget.aborted) return rejected("budget_aborted");
     if (this.pageClosed()) return rejected("page_closed");
     const ids = [...this.input.plan.scenarios.flatMap((s) => s.steps), ...[...this.revised.values()].flat(), ...planned].map((s) => Number(/^PS-(\d+)$/.exec(s.id)?.[1] ?? 0));
     const firstId = Math.max(0, ...ids) + 1;
     const others = this.input.plan.scenarios.filter((s) => s.id !== scenario.id).reduce((n, s) => n + (this.revised.get(s.id) ?? s.steps).length, 0);
-    const room = Math.min(50 - (at + 1), MAX_PLAN_STEPS - others - (at + 1), 999 - firstId + 1);
+    const retained = arrived ? at : at + 1;
+    const room = Math.min(50 - retained, MAX_PLAN_STEPS - others - retained, 999 - firstId + 1);
     if (room <= 0) return rejected("no_room");
     const result = await (async () => this.replanner!.replan(
       {
         requirement: this.input.requirement,
+        ...(arrived ? { arrived: true } : {}),
         scenario,
         done: planned.slice(0, at),
         failed: observation ? { ...failed, description: `${failed.description} — Review: ${observation}` } : failed,
@@ -986,14 +1021,15 @@ class ExplorationRun {
     // plan's own destructive steps were still ahead: a checkout that failed on its way to "Confirm order" is planned
     // again with its confirm, which the replanner rewords (KI-084). Past a sign-in prompt nothing was done yet: the
     // prompted step, or one planned after it, may run as planned (KI-080).
-    const ranDestructive = planned.slice(0, at).some(isDestructiveStep) || (!signIn && this.mayHaveRun(failed));
+    const ranDestructive = planned.slice(0, at).some(isDestructiveStep) || (!arrived && !signIn && this.mayHaveRun(failed));
     const ahead = signIn ? [failed, ...planned.slice(at + 1)] : [failed, ...planned.slice(at + 1)].filter(isDestructiveStep);
     const denied = steps.find((s) => isDestructiveStep(s) && (ranDestructive || !ahead.some((p) => sameAction(p.description, s.description))));
     if (denied) return rejected(ranDestructive ? "destructive_ran" : "destructive_not_planned", denied.description);
+    if (arrived && ahead.some((p) => !steps.some((s) => isDestructiveStep(s) && sameAction(p.description, s.description)))) return rejected("destructive_not_planned", "The refinement omitted a destructive action still ahead");
     await this.ctx.publish({
       type: "plan.revised",
-      message: `Step ${failed.id} ${guidance ? "received the user’s instruction" : signIn ? "opened a sign-in prompt" : observation ? "went off track" : "failed"}: the rest of the scenario was planned again (${steps.length} steps)`,
-      payload: { scenarioId: scenario.id, afterStepId: failed.id, stepCount: steps.length },
+      message: arrived ? `After step ${planned[at - 1]!.id}: the remaining steps were planned from the page as it is (${steps.length} steps)` : `Step ${failed.id} ${guidance ? "received the user’s instruction" : signIn ? "opened a sign-in prompt" : observation ? "went off track" : "failed"}: the rest of the scenario was planned again (${steps.length} steps)`,
+      payload: { scenarioId: scenario.id, afterStepId: arrived ? planned[at - 1]!.id : failed.id, stepCount: steps.length },
     });
     return steps;
   }

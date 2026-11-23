@@ -1397,3 +1397,63 @@ replan: AC-1, AC-2 and AC-3 confirmed by the Playwright rerun, order placed. The
 and went on. Every step review named the section the screenshot showed (22 on track, 0 off track). 73 model calls,
 $0.066, 198 s. Still open: the planner's missing sections (recovered, not planned), and scores for the reviewer,
 replanner and way-there prompts (KI-078).
+
+## KI-089 — Plans inferred the sections of pages the planner never saw
+- **Severity:** High (a guessed checkout sequence omitted required sections; recovery hid the plan's mismatch).
+- **Cause (2026-11-22):** the survey/analysis pages supplied to the planner never reached a checkout needing a cart.
+  KI-088 could recover omitted Shipping Address and Payment Information Continues, but the plan and report still
+  described the inferred path, and recovery had only three intermediate clicks.
+- **Fix (2026-11-22):** execution carries the exact analysis `pageContents` URLs and resulting interaction URLs given
+  to the planner. After a successful action changes to an unseen normalized URL path, pending steps are refined from
+  the live page by the existing replanner with `arrived: true`. An explicit initial navigation can refine too. Paths
+  retain case and normalize trailing slashes; query strings and fragments are ignored (filter values, tokens and
+  accordion states must not trigger repeated calls). History-API SPA path changes qualify; hash-only routers share
+  one page. This deliberately cannot distinguish different pages served at the same path or origins sharing a path.
+- **Bounds and validation:** one attempt per unseen path per scenario, at most three arrival attempts per scenario,
+  independent of the two failure replans; null replanners skip refinement. Ordinary callers without survey context
+  retain their behavior; the real stage always supplies the planner's page list, including an empty list. Arrival
+  answers may contain 30 steps instead of recovery's 15 because an address form plus several sections needs room;
+  existing scenario/global plan/id limits, action policy, checkpoint order and secret restrictions still apply.
+  KI-084's destructive-ahead matching is reused, and an arrival answer omitting a pending destructive action is rejected.
+- **Prompt/context:** arrival is explicitly a refinement, with no failed step. It rewrites the pending prefix step
+  and everything after it using visible headings/controls in order, one Continue per accordion section, preserving
+  every pending checkpoint, requirement values and pending destructive action, and adding no unrelated work. The
+  requirement text and destructive flags are supplied. KI-087 already exposes every visible closed-section heading
+  while hiding closed contents; the browser fixture now also verifies arrival with Billing Address open and all six
+  headings available. KI-088 recovery is unchanged.
+- **Persistence:** accepted answers publish `plan.revised` saying the steps were planned from the page as it is;
+  unusable answers retain the plan and publish `plan.not_revised / arrival_unusable`, with the bounded underlying
+  reason in redacted detail. The executed prefix is preserved and the orchestrator saves `revisedPlan` for verification,
+  compilation and reporting. Regressions cover executor arrival/bounds/seen/null/unusable/destructive cases, the arrival
+  prompt, compiled golden-path actions and orchestration's revised-plan handoff to the compiler and report.
+- **Live evidence (rebuilt local stack, DeepSeek Flash/default, 2026-11-22):**
+  - `run_0mwrwu90yfd7491bd97bc275a`: **PASSED**, order placed, all checks confirmed by the generated Playwright rerun;
+    56 model calls, estimated $0.055397, no assistance and no KI-088 recovery clicks. Arrival revisions after PS-9
+    (`/login/checkoutasguest`) and PS-21 (`/onepagecheckout`) replace the credential-based guess with guest checkout
+    and the actual address form. The latter has PS-36–43 billing fields, PS-44 Billing Address Continue, PS-45 Shipping
+    Address Continue, PS-46 Shipping Method Continue, PS-47 Payment Method Continue, PS-48 Payment Information Continue,
+    PS-49 Confirm Order, then the confirmation checkpoint (refined again on the success URL after PS-49). Every section
+    is planned and executed; the database's recorded act steps name these actions directly, with no `By index: the way to:`.
+  - `run_0mwrwtoy194ae0d299160d649`: **PASSED**, 32 model calls, estimated $0.036809, no assistance and no KI-088
+    recovery clicks, but **not a complete-checkout proof**. Its original criteria/11-step plan only require reaching a
+    checkout page, with no pending order-placement step. Arrival at the guest page adds guest checkout and a checkpoint;
+    a further checkout refinement is rejected as `arrival_unusable / destructive_not_planned` (the checkpoint wording
+    itself mentions confirm-order, which the existing action heuristic regards as destructive). The original checkpoint
+    is kept and the generated test confirms only that limited scope. This separate criteria/plan undercoverage remains
+    open; KI-089 must not invent a new destructive action the plan did not authorize.
+  - `run_0mwrwxw3w10a12ae4c2a715ce` (additional attempt): **BLOCKED / PRECONDITION_NOT_MET**, 37 model calls,
+    estimated $0.035244, no assistance or KI-088 recovery clicks. Its original criterion required authentication and
+    its plan only reached checkout; refinements after PS-8 (`/login`), PS-18 (`/login/checkoutasguest`) and PS-20
+    (`/onepagecheckout`) retain that limited checkpoint via guest checkout. The authentication precondition remains
+    unmet. This is not a complete-checkout proof either; only the second run demonstrates all sections/order placement.
+- **Remaining:** criteria/planner scope can still interpret “checkout successfully” as reaching checkout or impose an
+  unnecessary authentication precondition; this arrival refinement preserves rather than broadens those criteria.
+  Hash-only SPA routes and query-only pages are intentionally grouped. Other unseen pages still use model inference
+  for controls behind closed sections, guided by their visible headings; no model scoring baseline is claimed (KI-078).
+- **Final checks (2026-11-22, run sequentially):** `pnpm typecheck` exits 0; `pnpm test` exits 0 across all packages
+  (testing engine: 50 files / 1,049 tests; worker: 25 files / 224 tests); `pnpm test:integration` exits 0 (7 files /
+  36 tests); `pnpm test:e2e` exits 0 (11 files / 31 tests passed, 1 file/test skipped). `pnpm eval planner` exits 0
+  and validates/loads all 18 offline cases; no API key is configured, so no model scores are claimed. The initial unit
+  and integration attempts exposed fixed-reply fixtures consuming the new arrival calls; explicit null replanner
+  injection now keeps those fixtures scoped to their browser/stage behavior, with real arrival behavior covered by
+  executor/prompt/compiler regressions and the live runs above. The local Docker stack is left running, with no active run.

@@ -326,7 +326,7 @@ describe("V1.3: the live-site analysis, suggested test data and blocked evidence
     expect(seen).toEqual([[login]]);
   });
 
-  it("a plan exploration revised is saved, then verified, compiled and reported (2026-11-19)", async () => {
+  it("an arrival-refined plan is saved, verified, compiled and reported (KI-089, 2026-11-22)", async () => {
     const p = ports("PLANNING");
     p.ports.getConfirmedRequirement = async () => ({
       ...(await createFakeStages().analyze(context(request("A user can register with an email address.")))),
@@ -348,12 +348,14 @@ describe("V1.3: the live-site analysis, suggested test data and blocked evidence
     const seen: TestPlan[] = [];
     const verify = stages.verify;
     stages.verify = (ctx, requirement, plan, exploration) => (seen.push(plan), verify(ctx, requirement, plan, exploration));
+    const generateTest = stages.generateTest;
+    stages.generateTest = async (ctx, input) => (seen.push(input.plan), generateTest(ctx, input));
     const report = stages.report;
     stages.report = async (ctx, input) => (seen.push(input.plan), report(ctx, input));
     await runExecution(context(request("A user can register with an email address.")), p.ports, stages);
     expect(saved).toHaveLength(2);
     expect(saved[1]).toBe(revised);
-    expect(seen).toEqual([revised, revised]);
+    expect(seen).toEqual([revised, revised, revised]);
   });
 
   it("without a site analysis the planner gets no pages", async () => {

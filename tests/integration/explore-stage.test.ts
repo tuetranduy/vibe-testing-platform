@@ -176,6 +176,8 @@ describe("real explore stage through the sandbox (demo shop, scripted model)", (
       throw Object.assign(new Error(`ENOTFOUND ${host}`), { code: "ENOTFOUND" });
     };
     const explore = createExploreStage({
+      // This scripted browser/review fixture has no arrival or recovery replies (KI-089, 2026-11-22).
+      replanner: null,
       openSandbox: (c) => openRunSandbox(c, { resolve: resolver, privateAllowlist: [`shop.test:${shop.port}`], logger: silent, extensions: [extension] }),
       explorer: new StagehandExplorer({ connectTimeoutMs: 90_000, extensionId: extension.id }),
       store: (c) => createExplorationStore({ db: tdb.db, storage, config: { artifactRetentionDays: 30, secretArtifactRetentionDays: 7 } }, c),
