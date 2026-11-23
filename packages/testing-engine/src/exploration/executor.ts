@@ -1003,6 +1003,7 @@ class ExplorationRun {
         firstId,
         targetUrl: this.ctx.request.targetUrl,
         policy: this.policy,
+        maxSteps: room,
       },
       { runId: this.ctx.runId, signal: this.input.budget, deadlineAt: this.ctx.deadlineAt, redact: this.ctx.redact },
     ))().catch(async (err: unknown) => {

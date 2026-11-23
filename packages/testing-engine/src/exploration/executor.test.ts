@@ -1795,6 +1795,8 @@ describe("runExploration (fake explorer)", () => {
 
       expect(asked).toHaveLength(1);
       expect([asked[0]!.failed.id, asked[0]!.done.map((s) => s.id), asked[0]!.remaining.map((s) => s.id), asked[0]!.firstId]).toEqual(["PS-2", ["PS-1"], ["PS-3"], 4]);
+      // PS-1 and PS-2 are kept: room for 98 more within the plan's 100 steps (KI-095).
+      expect(asked[0]!.maxSteps).toBe(98);
       expect(session.calls.filter((c) => c.op === "navigate").map((c) => c.arg)).toContain("https://shop.test/grills");
       expect(outcome.facts.map((f) => [f.key, f.checkpoint])).toContainEqual(["cartCount", "after_add"]);
       expect(outcome.revisedPlan?.scenarios[0]!.steps.map((s) => s.id)).toEqual(["PS-1", "PS-2", "PS-4", "PS-5"]);

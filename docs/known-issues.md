@@ -1606,6 +1606,19 @@ replanner and way-there prompts (KI-078).
   recorder's own functions: the label is found, recorded by its exact text, and clicking it ticks the input. Not yet
   validated by a live run.
 - **Not handled:** a hidden input with no label a click lands on (a styled `<span>` sibling with no label) still fails.
-  The same run also could not recover: after the failed step, the replan (and the replan from the user's instruction)
-  was rejected, "at most 15 steps (got 30)" (`MAX_REPLAN_STEPS`), because the rest of this flow is longer than a
-  replan may be since KI-092.
+  The same run also could not recover from the failed step (KI-095).
+
+## KI-095 — A failed step in a long flow could never be replanned: a replan was capped at 15 steps
+- **Severity:** High (any failed step with more than about 14 steps after it ended the scenario, even with the user's
+  instruction).
+- **Where:** `packages/testing-engine/src/exploration/replanner.ts` (`replanLimit`), `executor.ts` (`maxSteps`).
+- **What:** in `run_0mwt0qo61004917dd94a73b19` (KI-094) the checkbox step failed with 28 steps after it. A replan
+  replaces the failed step and every step after it, but it could have at most 15 steps (30 for an arrival refinement):
+  both automatic replans and the one from the user's instruction ("fill remaining fields and click continue…") came
+  back with 30 steps and were rejected, "at most 15 steps (got 30)", and the run asked for help again. Since KI-092 a
+  scenario may have 100 steps, so this limit was hit by every long flow.
+- **Resolved (2026-11-23, working tree):** a replan may have the steps it replaces plus 15 (30 for an arrival
+  refinement), within the room the plan has left of its 100 steps, which the executor now passes (`maxSteps`). The
+  limit is in each request's message instead of the system prompt. Replans use the planner's 32,000-token budget and
+  300 s timeout. Not yet validated by a live run.
+- **Not handled:** no eval scores the replanner; the prompt's limit wording changed without a model run.

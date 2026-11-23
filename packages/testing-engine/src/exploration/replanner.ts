@@ -2,6 +2,7 @@ import { pageContextParts, type PageContext } from "./page-context";
 import {
   CancelledError,
   ContractError,
+  MAX_PLAN_STEPS,
   type NormalizedRequirement,
   type PageInventory,
   type PlannedStep,
@@ -11,7 +12,7 @@ import type { LlmClient } from "@platform/llm";
 import type { ActionPolicy } from "@platform/security";
 import { z } from "zod";
 import { applyBlocking } from "../planner/blocking";
-import { PlannerStepOutputSchema, type PlannerStepOutput } from "../planner/model-output";
+import { PLANNER_MAX_TOKENS, PLANNER_TIMEOUT_MS, PlannerStepOutputSchema, type PlannerStepOutput } from "../planner/model-output";
 import { checkpointOrder, neededCheckpoints } from "../planner/post-validate";
 import { plannedDestructive } from "../shared/action-policy";
 
@@ -30,7 +31,10 @@ import { plannedDestructive } from "../shared/action-policy";
 
 /** Replans per scenario. */
 export const MAX_REPLANS = 2;
-/** Steps a replan may plan. */
+/**
+ * Steps a replan may add to the ones it replaces (the failed step and every step after it). It was the whole limit:
+ * a quote flow with 28 steps left after a failed checkbox could not be replanned at all (KI-095).
+ */
 export const MAX_REPLAN_STEPS = 15;
 /** A newly seen form may need fields and several sections, rather than a short recovery (KI-089, 2026-11-22). */
 export const MAX_ARRIVAL_STEPS = 30;
@@ -61,6 +65,14 @@ export interface ReplanInput {
   firstId: number;
   targetUrl: string;
   policy: ActionPolicy;
+  /** The steps the plan has room for (MAX_PLAN_STEPS across scenarios); absent: MAX_PLAN_STEPS. */
+  maxSteps?: number;
+}
+
+/** How many steps this replan may have: what it replaces, plus MAX_REPLAN_STEPS (MAX_ARRIVAL_STEPS), within the plan's room. */
+export function replanLimit(input: Pick<ReplanInput, "arrived" | "remaining" | "maxSteps">): number {
+  const extra = input.arrived ? MAX_ARRIVAL_STEPS : MAX_REPLAN_STEPS;
+  return Math.min(input.maxSteps ?? MAX_PLAN_STEPS, 1 + input.remaining.length + extra);
 }
 
 export interface ReplanCall {
@@ -79,7 +91,7 @@ export interface Replanner {
   replan(input: ReplanInput, call: ReplanCall): Promise<ReplanResult>;
 }
 
-const OutputSchema = z.object({ steps: z.array(PlannerStepOutputSchema).min(1).max(MAX_REPLAN_STEPS * 2) });
+const OutputSchema = z.object({ steps: z.array(PlannerStepOutputSchema).min(1).max(MAX_PLAN_STEPS) });
 
 type Validation = { ok: true; steps: PlannedStep[] } | { ok: false; issues: string[] };
 
@@ -91,7 +103,7 @@ const pendingCheckpoints = (input: ReplanInput): string[] =>
 export function validateReplan(output: { steps: PlannerStepOutput[] }, input: ReplanInput): Validation {
   const issues: string[] = [];
   const steps = output.steps;
-  const limit = input.arrived ? MAX_ARRIVAL_STEPS : MAX_REPLAN_STEPS;
+  const limit = replanLimit(input);
   if (steps.length > limit) issues.push(`at most ${limit} steps (got ${steps.length})`);
   const owned = new Set(input.scenario.criterionIds);
   const pending = pendingCheckpoints(input);
@@ -162,7 +174,7 @@ Rules:
 - Every "fill" step references its value in "inputRef" with an available test data key or secret name, or a literal written in the requirement. Never write a value into a description.
 - Add no login step unless the steps planned after the failed one had one, or the message says the step opened a sign-in prompt.
 - Mark a step "destructive": true when it commits a lasting change (deletes, pays, places an order, sends). Whether it may run is decided by the platform.
-- At most ${MAX_REPLAN_STEPS} steps (${MAX_ARRIVAL_STEPS} for an arrival refinement); prefer the shortest path.`;
+- No more steps than the message allows; prefer the shortest path.`;
 
 /** What to do about a sign-in prompt the step opened (KI-080): the platform decides and goes on, it never stops there. */
 const SIGN_IN_INSTRUCTIONS = `That step ran, but the site opened its sign-in prompt instead of doing what the step was for. Get past the prompt first, in the first way the page allows:
@@ -196,6 +208,7 @@ export function buildReplanPrompt(input: ReplanInput): string {
     JSON.stringify(input.remaining.map(brief)),
     "",
     `Checkpoints still to capture, in order: ${list(pendingCheckpoints(input))}`,
+    `At most ${replanLimit(input)} steps.`,
     `Test data keys available: ${list(input.testDataKeys)}`,
     `Secret names available: ${list(input.secretNames)}`,
     "",
@@ -229,8 +242,10 @@ export function createReplanner(llm: LlmClient | null): Replanner | null {
           runId: call.runId,
           signal: call.signal,
           deadlineAt: call.deadlineAt ?? null,
-          // The client's default budget: a reasoning model's thinking counts against it, and 4,000 tokens ran out
-          // before the steps were written (KI-081).
+          // The planner's budget: a reasoning model's thinking counts against it (4,000 tokens ran out before the
+          // steps were written, KI-081), and a replan of a long flow is nearly a plan (KI-095).
+          maxTokens: PLANNER_MAX_TOKENS,
+          timeoutMs: PLANNER_TIMEOUT_MS,
           redact: call.redact,
         }));
       } catch (err) {

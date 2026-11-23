@@ -9,6 +9,15 @@ import { z } from "zod";
 export const MAX_PLANNED_STEPS = MAX_PLAN_STEPS;
 
 /**
+ * A plan of up to 100 steps is about 8,000 tokens of JSON, and a reasoning model's thinking counts against the same
+ * budget: at the client's 16,000, DeepSeek Flash spent all of it thinking about a 74-step quote flow and answered
+ * nothing (run_0mwsywc5i4ea89000d0fac718). A replan of a long flow is nearly as long (KI-095).
+ */
+export const PLANNER_MAX_TOKENS = 32_000;
+/** 32,000 tokens at DeepSeek Flash's ~200 tokens/s is about 160 s, past the transports' 120 s default. */
+export const PLANNER_TIMEOUT_MS = 300_000;
+
+/**
  * One step as the model returns it. Every field is required (explicit nulls) so the structured-output
  * schema has no optional keys; step ids (PS-1…n) are assigned by the planner, not the model.
  */
