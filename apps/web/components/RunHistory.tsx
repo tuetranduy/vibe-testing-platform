@@ -466,7 +466,7 @@ function RunningNow({ runs }: { runs: TestRunSummary[] }) {
           Test something new
         </h2>
         <p className="running-idle-text">Describe what should work, then follow a real browser as it checks it.</p>
-        <Button asChild variant="on-ink">
+        <Button asChild variant="default">
           <a href="/runs/new">
             <Icon name="plus" />
             New test

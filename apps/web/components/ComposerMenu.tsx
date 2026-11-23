@@ -55,7 +55,6 @@ export function ComposerMenu<V extends string>({ id, label, icon, value, display
       aria-labelledby={`${labelId}-${option.value}-label`}
       aria-describedby={option.hint ? `${labelId}-${option.value}-hint` : undefined}
       disabled={option.disabled}
-      className="min-h-9 cursor-pointer rounded-md px-2.5 py-1.5 pr-8 focus:bg-(--surface-hover) focus:text-foreground"
     >
       <span className="flex min-w-0 flex-col gap-px">
         <span id={`${labelId}-${option.value}-label`}>{option.label}</span>
@@ -75,29 +74,27 @@ export function ComposerMenu<V extends string>({ id, label, icon, value, display
     >
       <SelectTrigger
         id={id}
-        showChevron={false}
         aria-label={`${label}: ${display}`}
         aria-invalid={invalid || undefined}
         aria-describedby={describedBy}
         title={label}
         className={cn(
-          "group min-w-0 max-w-full cursor-pointer gap-1.5 rounded-full border-transparent bg-transparent py-1 pr-2 pl-2.5 text-[0.8125rem] font-medium text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground data-open:border-border data-open:bg-muted data-open:text-foreground dark:bg-transparent dark:hover:bg-muted [&_svg]:size-4",
+          "min-w-0 max-w-full",
           tone === "warning" && "border-(--warning-border) bg-(--warning-bg) text-(--warning) hover:bg-(--warning-bg) hover:text-(--warning) dark:bg-(--warning-bg)"
         )}
       >
         <Icon name={icon} />
         <span className="truncate">{display}</span>
-        <Icon name="chevron" className="size-3.5 opacity-70 transition-transform group-data-open:rotate-180" />
       </SelectTrigger>
       <SelectContent
         position="popper"
         align={align}
         aria-label={label}
-        className="max-h-80 min-w-[220px] max-w-[min(340px,calc(100vw-32px))] rounded-xl border border-border p-1.5 shadow-[var(--shadow-lg)]"
+        className="min-w-48 max-w-[min(340px,calc(100vw-32px))]"
       >
         {groups.map((group, index) => group.name ? (
-          <SelectGroup key={index} aria-label={group.name} className="p-0">
-            <SelectLabel className="px-2.5 pt-2 pb-1 text-[0.6875rem] tracking-wide uppercase">{group.name}</SelectLabel>
+          <SelectGroup key={index} aria-label={group.name}>
+            <SelectLabel>{group.name}</SelectLabel>
             {group.options.map(renderOption)}
           </SelectGroup>
         ) : group.options.map(renderOption))}

@@ -10,10 +10,15 @@ export function SettingsNav() {
   const me = useMe();
   const links = SETTINGS_NAV.filter((l) => !l.admin || isAdminUser(me));
   return (
-    <nav aria-label="Settings" className="flex w-full gap-1 overflow-x-auto border-b border-border [scrollbar-width:none]">
-      {links.map((l) => (
-        <a key={l.href} className="relative px-3 pt-2 pb-3 text-sm font-medium whitespace-nowrap text-(--text-subtle) no-underline transition-colors hover:text-foreground aria-[current=page]:font-semibold aria-[current=page]:text-foreground aria-[current=page]:after:absolute aria-[current=page]:after:inset-x-2 aria-[current=page]:after:-bottom-px aria-[current=page]:after:h-0.5 aria-[current=page]:after:rounded-full aria-[current=page]:after:bg-[image:var(--accent-gradient)]" href={l.href} aria-current={pathname === l.href ? "page" : undefined}>
-          {l.label}
+    <nav aria-label="Settings" className="flex w-fit max-w-full items-center gap-1 overflow-x-auto rounded-lg bg-muted p-1 [scrollbar-width:none]">
+      {links.map((link) => (
+        <a
+          key={link.href}
+          className="inline-flex shrink-0 items-center justify-center rounded-md border border-transparent px-2.5 py-1 text-sm font-medium whitespace-nowrap text-muted-foreground no-underline transition-colors hover:text-foreground aria-[current=page]:border-border aria-[current=page]:bg-background aria-[current=page]:text-foreground dark:aria-[current=page]:bg-input/30"
+          href={link.href}
+          aria-current={pathname === link.href ? "page" : undefined}
+        >
+          {link.label}
         </a>
       ))}
     </nav>

@@ -340,7 +340,7 @@ function SuiteSettings({
             </Button>
           </>
         ) : (
-          <Button variant="danger-outline" type="button" className="ml-auto" onClick={() => setConfirmingDelete(true)} disabled={pending}>
+          <Button variant="destructive" type="button" className="ml-auto" onClick={() => setConfirmingDelete(true)} disabled={pending}>
             Delete suite
           </Button>
         )}

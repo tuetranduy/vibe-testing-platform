@@ -3,10 +3,6 @@
 .search-field {
   width: min(100%, 340px);
 }
-.search-field input:not([type="checkbox"]):not([type="radio"]) {
-  border-color: var(--border);
-  border-radius: var(--radius-md);
-}
 
 .overview {
   display: grid;
@@ -234,10 +230,10 @@ a.running-card:hover {
   border-color: var(--border-strong);
 }
 .chip[aria-pressed="true"] {
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--accent);
+  border-color: color-mix(in srgb, var(--interactive) 55%, var(--border));
   color: var(--text);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive) 12%, transparent);
   font-weight: 600;
 }
 .chip[aria-pressed="true"] .chip-count {
@@ -296,7 +292,7 @@ a.running-card:hover {
 }
 .history tbody tr:hover .row-link,
 .row-link:focus-visible {
-  color: var(--accent);
+  color: var(--interactive);
   text-decoration: underline;
 }
 /* The whole row opens the run; the link itself stays the only focus stop. */
@@ -354,7 +350,7 @@ a.running-card:hover {
   transform: translateX(2px);
 }
 .history tbody tr.history-row-active {
-  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+  background: color-mix(in srgb, var(--accent) 45%, var(--surface));
 }
 .history-nomatch {
   display: flex;

@@ -63,7 +63,7 @@ export function LoginForm({
   }
 
   return (
-    <Card as="form" className="flex min-w-0 flex-col gap-5 login-card w-full max-w-[400px] bg-[color-mix(in_srgb,var(--surface)_86%,transparent)] p-8 shadow-[var(--highlight),var(--shadow-lg)] backdrop-blur-xl" aria-labelledby="login-title" onSubmit={onSubmit} noValidate>
+    <Card as="form" className="login-card w-full max-w-sm gap-5 p-6" aria-labelledby="login-title" onSubmit={onSubmit} noValidate>
       <div className="flex flex-col gap-1.5 [&>.text-muted-foreground]:max-w-[68ch]">
         <h1 id="login-title" className="page-title">
           Sign in

@@ -78,22 +78,6 @@
 /* ---------- V1.1: accounts, settings sections, data tables ---------- */
 
 /* Sign-in: the mark over a lit card, centered in the viewport. */
-.login-page::before {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  top: 50%;
-  left: 50%;
-  width: min(760px, 120vw);
-  aspect-ratio: 1.6;
-  transform: translate(-50%, -58%);
-  border-radius: 50%;
-  background:
-    radial-gradient(closest-side at 38% 50%, rgb(79 114 255 / 0.32), transparent),
-    radial-gradient(closest-side at 64% 46%, rgb(34 211 238 / 0.18), transparent);
-  filter: blur(40px);
-  pointer-events: none;
-}
 .login-card .page-title {
   font-size: 1.75rem;
 }
@@ -329,6 +313,6 @@ fieldset.stack-tight {
 }
 .suite-card:hover .card-link,
 .card-link:focus-visible {
-  color: var(--accent);
+  color: var(--interactive);
   text-decoration: underline;
 }

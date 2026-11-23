@@ -5,13 +5,15 @@ type CardElement = "div" | "section" | "form" | "article";
 
 function Card<T extends CardElement = "div">({
   as,
+  size = "default",
   className,
   ...props
-}: React.ComponentProps<T> & { as?: T }) {
+}: React.ComponentProps<T> & { as?: T; size?: "default" | "sm" }) {
   return React.createElement(as ?? "div", {
     ...props,
     "data-slot": "card",
-    className: cn("min-w-0 rounded-xl border border-border bg-card text-card-foreground p-6 shadow-[var(--shadow)] max-[560px]:px-4 max-[560px]:py-[18px]", className),
+    "data-size": size,
+    className: cn("group/card flex flex-col gap-(--card-spacing) overflow-hidden rounded-xl bg-card py-(--card-spacing) text-sm text-card-foreground ring-1 ring-foreground/10 [--card-spacing:--spacing(4)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(3)] data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl", "min-w-0 px-(--card-spacing)", className),
   });
 }
 

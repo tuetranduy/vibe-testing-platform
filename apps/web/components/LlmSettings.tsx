@@ -269,6 +269,7 @@ function DefaultsForm({ view, onSaved }: { view: LlmSettingsView; onSaved: (view
         <Field>
           <label htmlFor="defaults-model">Model</label>
           <NativeSelect
+            className="w-full"
             id="defaults-model"
             value={model}
             onChange={(e) => chooseModel(e.target.value)}
@@ -294,6 +295,7 @@ function DefaultsForm({ view, onSaved }: { view: LlmSettingsView; onSaved: (view
         <Field>
           <label htmlFor="defaults-reasoning">Reasoning</label>
           <NativeSelect
+            className="w-full"
             id="defaults-reasoning"
             value={reasoning}
             onChange={(e) => setReasoning(e.target.value as ReasoningLevel)}
