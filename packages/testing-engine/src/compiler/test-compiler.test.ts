@@ -289,6 +289,16 @@ describe("compilePlaywrightTest: the discovered flow (snapshot)", () => {
     expect(dataOf(out.dataJson).inputs.input1).toBe("42");
   });
 
+  it("a custom dropdown's choice (fillMethod choose, KI-097) replays with the helpers' chooseOption", () => {
+    const steps = shopFlow({ fill: { plannedStepId: "PS-8", element: byRole("combobox", "Month"), inputRef: { source: "literal", key: "December" }, fillMethod: "choose" } });
+    const selectPlan = { ...plan, scenarios: [{ ...plan.scenarios[0]!, steps: [...plan.scenarios[0]!.steps, planned("PS-8", "select", { inputRef: { source: "literal", key: "December" } })] }] };
+    const out = compile({ steps, plan: selectPlan, testData: {} });
+    expect(out.source).toMatch(/await chooseOption\(page\.getByRole\("combobox", \{ name: data\.locators\.loc\d+\.name, exact: true \}\), data\.inputs\.input1\);/);
+    expect(out.source).toMatch(/import \{[^}]*\bchooseOption\b[^}]*\} from "\.\/helpers";/);
+    expect(out.source).not.toContain("selectOption");
+    expect(checkGeneratedSource(out.source)).toEqual([]);
+  });
+
   it.each([
     ["select", { inputRef: { source: "testData", key: "country" }, generatedValue: "de" }, /\.selectOption\(data\.inputs\.input1\);/],
     ["check", { inputRef: { source: "literal", key: "on" } }, /getByRole\("combobox", \{ name: data\.locators\.loc\d+\.name, exact: true \}\)\.check\(\);/],

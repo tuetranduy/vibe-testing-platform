@@ -159,6 +159,8 @@ interface FakeRecorderOptions {
   unique?: (selector: string) => boolean;
   /** DOM readings per located element's selector (ahead of `dom`). */
   readings?: Record<string, unknown>;
+  /** How the recorder chose an option (default: a native select). */
+  selectMethod?: "select" | "choose";
 }
 
 function fakeRecorder(opts: FakeRecorderOptions = {}) {
@@ -179,6 +181,7 @@ function fakeRecorder(opts: FakeRecorderOptions = {}) {
     },
     async select(_page, selector, value) {
       selects.push({ selector, value });
+      return opts.selectMethod;
     },
     async captureFact(_page, input) {
       captures.push(input);
@@ -2193,6 +2196,16 @@ describe("runExploration (fake explorer)", () => {
     expect(selects).toEqual([{ selector: "xpath=/html[1]/body[1]/select[1]", value: "M" }]);
     expect(session.ops()).not.toContain("actOn");
     expect(outcome.steps.at(-1)).toMatchObject({ kind: "fill", onGoldenPath: true, inputRef: { source: "testData", key: "size" } });
+  });
+
+  it("a custom dropdown's choice (KI-097) is recorded as `choose`, so the generated test replays it with chooseOption", async () => {
+    const { ctx } = fakeCtx({ testData: { month: "December" } });
+    const session = new FakeSession({ observe: () => [{ selector: "xpath=/html[1]/body[1]/ng-select[1]/input[1]", description: "month", method: "click", arguments: [] }] });
+    const { recorder, selects } = fakeRecorder({ describe: () => ({ role: "combobox", name: "PurchaseDateMonth", text: null }), selectMethod: "choose" });
+    const plan = planOf(step("navigate", "Open"), step("select", "Select December as the purchase month", { inputRef: { source: "testData", key: "month" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(selects).toEqual([{ selector: "xpath=/html[1]/body[1]/ng-select[1]/input[1]", value: "December" }]);
+    expect(outcome.steps.at(-1)).toMatchObject({ kind: "fill", outcome: "SUCCESS", onGoldenPath: true, fillMethod: "choose" });
   });
 
   it("boolean facts (R24): read as `visible` only when a visible outcome references them; otherwise MODEL_EXTRACTED without a DOM read", async () => {

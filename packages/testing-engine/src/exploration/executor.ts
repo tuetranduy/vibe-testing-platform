@@ -203,7 +203,8 @@ export interface RecorderPort {
   /** What the element does (elementAction); used to check a cached lookup (KI-032). Absent: never checked. */
   action?(page: Page, selector: string): Promise<string>;
   fill(page: Page, selector: string, value: string): Promise<void>;
-  select(page: Page, selector: string, value: string): Promise<void>;
+  /** `choose`: the field was a custom dropdown, not a `<select>` (KI-097); nothing or `select`: a native select. */
+  select(page: Page, selector: string, value: string): Promise<"select" | "choose" | void>;
   captureFact(page: Page, input: FactCaptureInput): Promise<ObservedFact>;
   /** `before`: the notifications shown before the action (notificationTexts), when they were read (KI-059). */
   captureEarlyFact?(page: Page, request: FactRequest, criteria: readonly AcceptanceCriterion[], stepId: string, before?: readonly string[] | null): Promise<ObservedFact | null>;
@@ -1489,15 +1490,16 @@ class ExplorationRun {
       startedAt,
       ...(generated ? { generatedValue: generated.value, llm: generated.llm } : {}),
     };
+    let chose: "select" | "choose" | void = undefined;
     try {
       if (how === "fill") await this.recorder.fill(this.page, located.element.selector, value);
-      else await this.recorder.select(this.page, located.element.selector, value);
+      else chose = await this.recorder.select(this.page, located.element.selector, value);
     } catch (err) {
       this.rethrowIfFatal(err);
       await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
       return "failed";
     }
-    await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true });
+    await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true, ...(chose === "choose" ? { fillMethod: "choose" as const } : {}) });
     if (how === "fill") this.typed.push({ step, located, value, ...(generated ? { generatedValue: generated.value } : {}) });
     return "ok";
   }
