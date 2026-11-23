@@ -10,6 +10,7 @@ export * from "./requirement";
 export * from "./assumptions";
 export * from "./describe-outcome";
 export * from "./suggestions";
+export * from "./discovery";
 export * from "./site-analysis";
 export * from "./test-data-generator";
 export * from "./inline-inputs";

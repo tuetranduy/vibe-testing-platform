@@ -1,0 +1,18 @@
+[project]
+name = "browser-use-discovery"
+version = "0.1.0"
+description = "Fixture-only Browser Use discovery runner (one-shot stdin/stdout launcher + isolated container)."
+requires-python = ">=3.12,<3.13"
+# Exact pin: Browser Use 1.0 APIs changed across patch releases; upgrade deliberately (see README).
+dependencies = ["browser-use==1.0.6"]
+
+[dependency-groups]
+dev = ["pytest==8.4.2"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = ["docker: needs the Docker daemon and the built discovery image"]

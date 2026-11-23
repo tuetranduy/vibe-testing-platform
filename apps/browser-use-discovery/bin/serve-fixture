@@ -1,0 +1,5 @@
+#!/bin/sh
+# Serve the bundled fixture on the host for the normal Node survey: bin/serve-fixture [--port 4599] [--host 127.0.0.1]
+set -eu
+APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+PYTHONPATH="$APP_DIR/src" PYTHONDONTWRITEBYTECODE=1 exec "$APP_DIR/.venv/bin/python" -P -m discovery_service.fixture_server "$@"

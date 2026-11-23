@@ -9,7 +9,9 @@ import { createRunRedactor } from "@platform/security";
 import { createSurveyStage, type EventDraft, type StageContext } from "@platform/testing-engine";
 import { chromium } from "playwright-core";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { createBrowserUseDiscoveryClient } from "../../apps/worker/src/discovery-client";
 import { openRunSandbox } from "../../apps/worker/src/sandbox/run-sandbox";
+import { withAutonomousDiscovery } from "../../packages/testing-engine/src/survey/autonomous-survey";
 
 /**
  * The survey against real Chromium (spec "Testing"): the worker's sandbox — egress proxy, Chromium
@@ -20,6 +22,8 @@ import { openRunSandbox } from "../../apps/worker/src/sandbox/run-sandbox";
 
 const silent = { info() {}, warn() {}, error() {} };
 const SECRET = "hunter2-Survey-Secret";
+const discoveryLauncher = process.env.BROWSER_USE_DISCOVERY_LAUNCHER;
+const discoveryFixture = process.env.BROWSER_USE_DISCOVERY_FIXTURE_URL;
 
 /** Ends the exploration on its first choice, answers the survey's call with three suggestions, and keeps what it was sent. */
 class SuggestionTransport implements LlmTransport {
@@ -89,11 +93,11 @@ describe("the survey through the real sandbox (demo shop, scripted model)", () =
   const lastSeq = () => shop.server.demoShop.requests.at(-1)?.seq ?? 0;
   const requestsSince = (seq: number) => shop.server.demoShop.requests.filter((r) => r.seq > seq);
 
-  function setup(targetPath: string) {
+  function setup(targetPath: string, targetUrl = `http://shop.test:${shop.port}${targetPath}`) {
     const runId = `run_survey_${runIds.length + 1}_${Date.now().toString(36)}`;
     runIds.push(runId);
     const request: StoredTestRunRequest = {
-      targetUrl: `http://shop.test:${shop.port}${targetPath}`,
+      targetUrl,
       requirement: "",
       environment: "staging",
       browser: "chromium",
@@ -132,12 +136,13 @@ describe("the survey through the real sandbox (demo shop, scripted model)", () =
       now: () => new Date(),
       llm: new LlmClient({ transport, model: "claude-sonnet-5", logger: silent, retry: { maxRetries: 0 } }),
     };
+    const fixture = new URL(targetUrl);
     const resolver = async (host: string) => {
-      if (host === "shop.test") return ["127.0.0.1"];
+      if (host === fixture.hostname) return ["127.0.0.1"];
       throw Object.assign(new Error(`ENOTFOUND ${host}`), { code: "ENOTFOUND" });
     };
     const survey = createSurveyStage({
-      openSandbox: (c) => openRunSandbox(c, { resolve: resolver, privateAllowlist: [`shop.test:${shop.port}`], logger: silent }),
+      openSandbox: (c) => openRunSandbox(c, { resolve: resolver, privateAllowlist: [fixture.host], logger: silent }),
       store: () => ({
         saveScreenshot: async ({ png }) => {
           shots.push(png);
@@ -147,6 +152,23 @@ describe("the survey through the real sandbox (demo shop, scripted model)", () =
     });
     return { ctx, events, shots, transport, survey };
   }
+
+  // Opt in with the built discovery image, its launcher, and the host copy of the bundled fixture.
+  it.runIf(Boolean(discoveryLauncher && discoveryFixture))("merges isolated Browser Use candidates into the real survey", async () => {
+    const fixtureUrl = new URL(discoveryFixture!).href;
+    const { ctx, survey } = setup("/", fixtureUrl);
+    const baseline = await survey(ctx);
+    const enrich = withAutonomousDiscovery(survey, {
+      fixtureUrl,
+      port: createBrowserUseDiscoveryClient(discoveryLauncher!),
+      logger: console,
+    });
+    const enriched = await enrich(ctx);
+    expect(enriched.suggestions.slice(0, 2)).toEqual(baseline.suggestions.slice(0, 2));
+    expect(enriched.suggestions.some(({ title }) => !baseline.suggestions.some((original) => original.title === title))).toBe(true);
+    expect(enriched.suggestions.length).toBeLessThanOrEqual(8);
+    expect(enriched.pages).toEqual(baseline.pages);
+  }, 180_000);
 
   it(
     "reads /sitemap and 5 same-site links by URL — never a destructive, sign-out, download or off-site one; the off-host redirect is SKIPPED; nothing is clicked",
