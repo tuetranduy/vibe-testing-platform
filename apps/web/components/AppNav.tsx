@@ -161,28 +161,28 @@ export function AppNav({ navigate = (url: string) => window.location.assign(url)
             <div key={n.href} onClick={() => closeDrawer(false)}>
               <a className="nav-link" href={n.href} aria-current={current(n.href)} title={n.label}>
                 <Icon name={n.icon} />
-                <span className="nav-label">{n.label}</span>
+                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis">{n.label}</span>
               </a>
 
             </div>
           ))}
         </nav>
 
-        <div className="sidebar-foot">
+        <div className="flex flex-col gap-2.5 border-t border-border pt-3">
           <ThemeToggle />
           {me && (
-            <div className="nav-user">
+            <div className="nav-user flex min-w-0 items-center gap-1">
               <a className="user-link" href="/account" aria-current={pathname === "/account" ? "page" : undefined} title={me.email}>
                 <span className="avatar" aria-hidden="true">
                   {initials(me.name)}
                 </span>
-                <span className="user-text">
-                  <span className="user-name">{me.name}</span>
-                  <span className="user-email" aria-hidden="true">
+                <span className="flex min-w-0 flex-col leading-tight">
+                  <span className="truncate text-[0.8125rem] font-semibold">{me.name}</span>
+                  <span className="truncate text-xs text-(--text-subtle)" aria-hidden="true">
                     {me.email}
                   </span>
                 </span>{" "}
-                <span className="visually-hidden">(your account)</span>
+                <span className="sr-only">(your account)</span>
               </a>
               <Button variant="plain"
                 type="button"

@@ -17,18 +17,18 @@ export function LiveSiteSummary({ analysis }: { analysis: SiteAnalysis }) {
       </h3>
       {analysis.status === "READ" ? (
         <>
-          <p className="muted">
+          <p className="text-muted-foreground">
             {plural(read.length, "page")} explored before the checks were written. Screenshots are kept with the run.
           </p>
           {notFound > 0 && (
-            <p className="hint hint-warning">
+            <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5 text-(--warning)">
               <Icon name="warning" /> {plural(notFound, "criterion", "criteria")} {notFound === 1 ? "checks" : "check"} something the pages read
               don&apos;t show. It may be on a page that wasn&apos;t read — or the requirement may need a second look.
             </p>
           )}
           <ul className="site-pages">
             {analysis.pages.map((p) => (
-              <li key={p.url} className={p.status === "READ" ? undefined : "muted"}>
+              <li key={p.url} className={p.status === "READ" ? undefined : "text-muted-foreground"}>
                 <code>{new URL(p.url).pathname}</code>
                 {p.title && <span> — {p.title}</span>}
                 {p.status === "SKIPPED" && <span> (skipped)</span>}
@@ -37,7 +37,7 @@ export function LiveSiteSummary({ analysis }: { analysis: SiteAnalysis }) {
           </ul>
         </>
       ) : (
-        <p className="muted">
+        <p className="text-muted-foreground">
           {analysis.status === "SKIPPED" ? "The live site was not read for this run" : "The live site could not be read"}
           {analysis.reason ? `: ${analysis.reason}.` : "."} The criteria come from the requirement alone.
         </p>

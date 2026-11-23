@@ -1,5 +1,7 @@
 "use client";
 
+import { Field } from "@/components/ui/field";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
@@ -37,6 +39,8 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const [autoConfirm, setAutoConfirm] = useState(false);
   const [rerun, setRerun] = useState(true);
   const [hosts, setHosts] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const pendingFocus = useRef<string | null>(null);
   const [errors, setErrors] = useState<Errors>({});
   const [banner, setBanner] = useState<{ message: string; settings?: boolean } | null>(null);
   const [pending, setPending] = useState(false);
@@ -75,15 +79,23 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const effectiveModel = catalog?.models.find((m) => m.id === (model || catalog.defaults.model));
   const levels = effectiveModel?.reasoningLevels.filter((l) => l !== "default") ?? [];
   const host = HttpUrlSchema.safeParse(targetUrl.trim()).success ? new URL(targetUrl.trim()).host : null;
-  const errorFor = (id: string) => errors[id] ? <p id={`${id}-error`} className="field-error"><Icon name="error" /> {errors[id]}</p> : null;
+  const errorFor = (id: string) => errors[id] ? <p id={`${id}-error`} className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px"><Icon name="error" /> {errors[id]}</p> : null;
   const invalid = (id: string) => ({ "aria-invalid": errors[id] ? true as const : undefined, "aria-describedby": errors[id] ? `${id}-error` : undefined });
 
+  useEffect(() => {
+    if (!pendingFocus.current) return;
+    const field = form.current?.elements.namedItem(pendingFocus.current);
+    if (field instanceof HTMLElement) {
+      field.focus();
+      pendingFocus.current = null;
+    }
+  }, [errors, settingsOpen]);
+
   function showErrors(next: Errors) {
+    const first = ["targetUrl", "requirement", "model", "reasoning", "maxRunSeconds", "maxExplorationSteps", "additionalAllowedHosts"].find((id) => id in next);
+    pendingFocus.current = first ?? null;
+    if (first && first !== "targetUrl" && first !== "requirement") setSettingsOpen(true);
     setErrors(next);
-    const first = Array.from(form.current?.elements ?? []).find((el) => (el as HTMLElement).id in next) as HTMLElement | undefined;
-    const details = first?.closest("details");
-    if (details) details.open = true;
-    first?.focus();
   }
 
   async function submit(event: FormEvent) {
@@ -137,42 +149,47 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
         {prefill === "ready" && <p role="status" className="note note-info">Website and instructions copied from your earlier run.</p>}
         {prefill === "error" && <p role="status" className="note note-warning">Couldn’t load the earlier run. You can start a new test below.</p>}
         {banner && <div role="alert" className="banner banner-error"><Icon name="warning" /><div><p>{banner.message}</p>{banner.settings && <a href="/settings">Choose an available model in Settings</a>}</div></div>}
-        <div className="field setup-field">
+        <Field className="setup-field">
           <label htmlFor="targetUrl"><span className="field-number">1</span> Which website?</label>
-          <div className="input-with-icon"><Icon name="globe" /><Input id="targetUrl" type="url" inputMode="url" autoComplete="url" placeholder="https://your-website.com" value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} {...invalid("targetUrl")} /></div>
+          <div className="relative block min-w-0 [&>.icon]:pointer-events-none [&>.icon]:absolute [&>.icon]:top-1/2 [&>.icon]:left-3.5 [&>.icon]:-translate-y-1/2 [&>.icon]:text-(--text-subtle) [&>input]:pl-[42px]"><Icon name="globe" /><Input id="targetUrl" type="url" inputMode="url" autoComplete="url" placeholder="https://your-website.com" value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} {...invalid("targetUrl")} /></div>
           {errorFor("targetUrl")}
-        </div>
+        </Field>
         <div className="setup-field">
           <p className="field-label"><span className="field-number">2</span> What would you like to test?</p>
           <div className="test-mode" role="group" aria-label="How to start">
             <Button variant="plain" type="button" aria-pressed={mode === "describe"} onClick={() => setMode("describe")}><Icon name="file" /><span>Describe a test</span></Button>
             <Button variant="plain" type="button" aria-pressed={mode === "explore"} onClick={() => setMode("explore")}><Icon name="sparkle" /><span>Find test ideas</span></Button>
           </div>
-          {mode === "describe" ? <div className="field">
-            <label className="visually-hidden" htmlFor="requirement">Test instructions</label>
+          {mode === "describe" ? <Field>
+            <label className="sr-only" htmlFor="requirement">Test instructions</label>
             <Textarea ref={prompt} id="requirement" rows={5} placeholder="For example: Search for a product, add it to the cart, and check that the total updates." value={requirement} onChange={(e) => setRequirement(e.target.value)} {...invalid("requirement")} />
             {errorFor("requirement")}
-            <div className="example-row" role="group" aria-label="Example tests"><span className="hint">Try an example</span>{EXAMPLES.map((ex) => <Button variant="plain" key={ex.label} type="button" className="example-chip" onClick={() => { setRequirement(ex.text); prompt.current?.focus(); }}><Icon name={ex.icon} />{ex.label}</Button>)}</div>
-          </div> : <div className="explore-intro"><Icon name="sparkle" /><div><strong>Let the agent find a starting point.</strong><p>It explores your website and suggests useful tests. Choose an idea, review the checks, and start when you’re ready.</p></div></div>}
+            <div className="example-row" role="group" aria-label="Example tests"><span className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Try an example</span>{EXAMPLES.map((ex) => <Button variant="plain" key={ex.label} type="button" className="example-chip" onClick={() => { setRequirement(ex.text); prompt.current?.focus(); }}><Icon name={ex.icon} />{ex.label}</Button>)}</div>
+          </Field> : <div className="explore-intro"><Icon name="sparkle" /><div><strong>Let the agent find a starting point.</strong><p>It explores your website and suggests useful tests. Choose an idea, review the checks, and start when you’re ready.</p></div></div>}
         </div>
       </div>
-      <details className="simple-options">
-        <summary><span><Icon name="sliders" /> Run settings <span className="muted">· optional</span></span><Icon name="chevron" /></summary>
-        <div className="stack">
-          <div className="field-pair">
-            <div className="field"><label htmlFor="model">AI model</label><NativeSelect id="model" value={model} disabled={!catalog} onChange={(e) => { setModel(e.target.value); setReasoning(""); }} {...invalid("model")}><option value="">{catalog ? `Default · ${catalog.defaults.label}` : "Default model"}</option>{catalog && modelGroups(catalog.models).map((group) => <optgroup key={group.label} label={group.label}>{group.models.map((m) => <option key={m.id} value={m.id} disabled={!m.available}>{m.label}{m.available ? "" : " · add a key in Settings"}</option>)}</optgroup>)}</NativeSelect>{errorFor("model")}{catalogFailed && <p className="hint">Model choices couldn’t be loaded. The default model will be used.</p>}</div>
-            <div className="field"><label htmlFor="reasoning">Thinking level</label><NativeSelect id="reasoning" value={reasoning} onChange={(e) => setReasoning(e.target.value as ReasoningLevel | "")} {...invalid("reasoning")}><option value="">Model default</option>{levels.map((level) => <option key={level} value={level}>{LEVEL_LABEL[level]}</option>)}</NativeSelect>{errorFor("reasoning")}</div>
+      <Collapsible open={settingsOpen} onOpenChange={setSettingsOpen} className="group border-t border-(--border-soft) px-[30px] max-[720px]:px-[22px]">
+        <CollapsibleTrigger asChild>
+          <Button variant="plain" className="flex w-full cursor-pointer items-center justify-between py-[18px] text-[0.8rem] text-muted-foreground">
+            <span className="flex items-center gap-2"><Icon name="sliders" /> Run settings <span>· optional</span></span>
+            <Icon name="chevron" className="transition-transform group-data-open:rotate-90" />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent forceMount hidden={!settingsOpen} className="flex min-w-0 flex-col gap-5 pt-1 pb-6">
+          <div className="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1">
+            <Field><label htmlFor="model">AI model</label><NativeSelect id="model" value={model} disabled={!catalog} onChange={(e) => { setModel(e.target.value); setReasoning(""); }} {...invalid("model")}><option value="">{catalog ? `Default · ${catalog.defaults.label}` : "Default model"}</option>{catalog && modelGroups(catalog.models).map((group) => <optgroup key={group.label} label={group.label}>{group.models.map((m) => <option key={m.id} value={m.id} disabled={!m.available}>{m.label}{m.available ? "" : " · add a key in Settings"}</option>)}</optgroup>)}</NativeSelect>{errorFor("model")}{catalogFailed && <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Model choices couldn’t be loaded. The default model will be used.</p>}</Field>
+            <Field><label htmlFor="reasoning">Thinking level</label><NativeSelect id="reasoning" value={reasoning} onChange={(e) => setReasoning(e.target.value as ReasoningLevel | "")} {...invalid("reasoning")}><option value="">Model default</option>{levels.map((level) => <option key={level} value={level}>{LEVEL_LABEL[level]}</option>)}</NativeSelect>{errorFor("reasoning")}</Field>
           </div>
-          <div className="field-pair">
-            <div className="field"><label htmlFor="maxRunSeconds">Time limit (seconds)</label><Input id="maxRunSeconds" type="number" min={60} max={1800} value={maxRunSeconds} onChange={(e) => setMaxRunSeconds(e.target.value)} {...invalid("maxRunSeconds")} />{errorFor("maxRunSeconds")}</div>
-            <div className="field"><label htmlFor="maxExplorationSteps">Step limit</label><Input id="maxExplorationSteps" type="number" min={1} max={100} value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} {...invalid("maxExplorationSteps")} /><p className="hint">Steps in the test plan.</p>{errorFor("maxExplorationSteps")}</div>
+          <div className="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1">
+            <Field><label htmlFor="maxRunSeconds">Time limit (seconds)</label><Input id="maxRunSeconds" type="number" min={60} max={1800} value={maxRunSeconds} onChange={(e) => setMaxRunSeconds(e.target.value)} {...invalid("maxRunSeconds")} />{errorFor("maxRunSeconds")}</Field>
+            <Field><label htmlFor="maxExplorationSteps">Step limit</label><Input id="maxExplorationSteps" type="number" min={1} max={100} value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} {...invalid("maxExplorationSteps")} /><p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Steps in the test plan.</p>{errorFor("maxExplorationSteps")}</Field>
           </div>
-          <label className="choice"><Checkbox checked={rerun} onCheckedChange={(checked) => setRerun(checked === true)} />Verify results by rerunning the saved test</label>
-          <label className="choice"><Checkbox checked={autoConfirm} onCheckedChange={(checked) => setAutoConfirm(checked === true)} />Start immediately after planning (skip review)</label>
-          <div className="field"><label htmlFor="additionalAllowedHosts">Other website hosts</label><Input id="additionalAllowedHosts" placeholder="login.example.com, help.example.com" value={hosts} onChange={(e) => setHosts(e.target.value)} {...invalid("additionalAllowedHosts")} /><p className="hint">Only needed if the test moves to another host.</p>{errorFor("additionalAllowedHosts")}</div>
-        </div>
-      </details>
-      <div className="composer-footer"><p className="composer-note"><Icon name="shield" />{autoConfirm ? "The test starts after planning." : "Review the checks before the test runs."}</p><Button size="lg"  type="submit" disabled={pending || prefill === "loading"}>{pending ? "Starting…" : mode === "explore" ? "Explore website" : "Create test"}<Icon name="arrow" /></Button></div>
+          <label className="flex min-h-8 cursor-pointer items-center gap-2.5 text-[0.9375rem] has-disabled:cursor-not-allowed has-disabled:text-muted-foreground"><Checkbox checked={rerun} onCheckedChange={(checked) => setRerun(checked === true)} />Verify results by rerunning the saved test</label>
+          <label className="flex min-h-8 cursor-pointer items-center gap-2.5 text-[0.9375rem] has-disabled:cursor-not-allowed has-disabled:text-muted-foreground"><Checkbox checked={autoConfirm} onCheckedChange={(checked) => setAutoConfirm(checked === true)} />Start immediately after planning (skip review)</label>
+          <Field><label htmlFor="additionalAllowedHosts">Other website hosts</label><Input id="additionalAllowedHosts" placeholder="login.example.com, help.example.com" value={hosts} onChange={(e) => setHosts(e.target.value)} {...invalid("additionalAllowedHosts")} /><p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Only needed if the test moves to another host.</p>{errorFor("additionalAllowedHosts")}</Field>
+        </CollapsibleContent>
+      </Collapsible>
+      <div className="composer-footer"><p className="composer-note"><Icon name="shield" />{autoConfirm ? "The test starts after planning." : "Review the checks before the test runs."}</p><Button size="lg" type="submit" disabled={pending || prefill === "loading"}>{pending ? "Starting…" : mode === "explore" ? "Explore website" : "Create test"}<Icon name="arrow" /></Button></div>
     </form>
   );
 }

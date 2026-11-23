@@ -333,12 +333,9 @@ describe("RunView", () => {
     expect(await screen.findByRole("heading", { name: /run errored/i })).toBeInTheDocument();
     const headline = screen.getByRole("region", { name: /run errored/i });
     expect(within(headline).getByText("Browser error")).toBeInTheDocument();
-    const details = within(headline).getByText(/technical details/i).closest("details")!;
-    expect(details).not.toHaveAttribute("open");
-    // The raw error text is nowhere but in that collapsed disclosure.
-    const outside = headline.cloneNode(true) as HTMLElement;
-    outside.querySelector("details")!.remove();
-    expect(outside.textContent).not.toContain("No usable sandbox");
+    const details = within(headline).getByRole("button", { name: /technical details/i });
+    expect(details).toHaveAttribute("aria-expanded", "false");
+    expect(headline).not.toHaveTextContent("No usable sandbox");
 
     // The run's activity (stages + template-only timeline) stays available.
     await user.click(screen.getByRole("button", { name: /run activity/i }));
@@ -366,7 +363,7 @@ describe("RunView", () => {
     });
     const { unmount } = render(<RunView runId="run_1" />);
     await screen.findByRole("heading", { name: /verdict: failed/i });
-    expect(screen.getByText("Claude Sonnet 5 · medium reasoning", { selector: ".run-meta .meta-chip" })).toHaveTextContent(/Model:/);
+    expect(screen.getByText("Claude Sonnet 5 · medium reasoning", { selector: '[data-slot="run-meta"] .meta-chip' })).toHaveTextContent(/Model:/);
     expect(screen.getByRole("group", { name: /estimated model cost/i })).toHaveTextContent("Claude Sonnet 5 · medium reasoning");
     unmount();
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { Field } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { describeExpectedOutcome, type AcceptanceCriterion, type CriterionProposalResponse } from "@platform/contracts";
@@ -58,8 +59,8 @@ export function CheckRewrite({ criterionId, currentPreconditions, busy, onRevise
   }
 
   return (
-    <div className="check-rewrite stack">
-      <div className="field">
+    <div className="check-rewrite flex min-w-0 flex-col gap-5">
+      <Field>
         <label htmlFor={`${uid}-words`}>Describe the check in your own words</label>
         <Textarea
           id={`${uid}-words`}
@@ -70,17 +71,17 @@ export function CheckRewrite({ criterionId, currentPreconditions, busy, onRevise
           onChange={(e) => setWords(e.target.value)}
           aria-describedby={`${uid}-hint`}
         />
-        <p id={`${uid}-hint`} className="hint">
+        <p id={`${uid}-hint`} className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
           AI turns this into a check. You see it before anything changes.
         </p>
-      </div>
+      </Field>
       {error && (
-        <p role="alert" className="field-error">
+        <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
           <Icon name="error" /> {error}
         </p>
       )}
-      <div className="actions">
-        <Button variant="outline" type="button"  onClick={() => void rewrite()} disabled={busy || working !== null}>
+      <div className="actions flex flex-wrap items-center gap-2">
+        <Button variant="outline" type="button" onClick={() => void rewrite()} disabled={busy || working !== null}>
           {working === "rewriting" ? "Rewriting…" : "Rewrite with AI"}
         </Button>
       </div>
@@ -109,15 +110,15 @@ export function CheckRewrite({ criterionId, currentPreconditions, busy, onRevise
             </>
           )}
           {proposed.ambiguity && (
-            <p className="hint">
+            <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
               <Icon name="warning" /> {proposed.ambiguity.reason}
             </p>
           )}
-          <div className="actions">
-            <Button type="button"  onClick={() => void accept()} disabled={busy || working !== null}>
+          <div className="actions flex flex-wrap items-center gap-2">
+            <Button type="button" onClick={() => void accept()} disabled={busy || working !== null}>
               {working === "saving" ? "Saving…" : "Use this check"}
             </Button>
-            <Button variant="ghost" type="button"  onClick={() => setProposal(null)} disabled={working !== null}>
+            <Button variant="ghost" type="button" onClick={() => setProposal(null)} disabled={working !== null}>
               Discard
             </Button>
           </div>

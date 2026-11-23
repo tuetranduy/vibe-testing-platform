@@ -1,5 +1,6 @@
 "use client";
 
+import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -134,7 +135,7 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
 
   // Numbers use the default (text) keyboard: iOS's "decimal" keypad has no minus key.
   const input = (field: Field, label: string, value: string, onChange: (v: string) => void) => (
-    <div className="field">
+    <Field>
       <label htmlFor={id(field)}>{label}</label>
       <Input
         id={id(field)}
@@ -144,51 +145,51 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
         aria-describedby={shown[field] ? id(`${field}-error`) : undefined}
       />
       {shown[field] && (
-        <p id={id(`${field}-error`)} className="field-error">
+        <p id={id(`${field}-error`)} className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
           <Icon name="error" /> {shown[field]}
         </p>
       )}
-    </div>
+    </Field>
   );
   const numberField = (label: string) => input("number", label, draft.number, (v) => set({ number: v }));
   const textField = (label: string) => input("text", label, draft.text, (v) => set({ text: v }));
 
   return (
-    <div ref={root} className="check-editor stack" role="group" aria-label={`Edit the check of ${criterionId}`}>
+    <div ref={root} className="check-editor flex min-w-0 flex-col gap-5" role="group" aria-label={`Edit the check of ${criterionId}`}>
       {outcome.kind === "visible" && (
-        <fieldset className="field">
+        <Field as="fieldset">
           <legend>The element should be</legend>
-          <div className="choice-row">
-            <label className="choice">
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            <label className="flex min-h-8 cursor-pointer items-center gap-2.5 text-[0.9375rem] has-disabled:cursor-not-allowed has-disabled:text-muted-foreground">
               <input type="radio" name={id("visible")} checked={draft.expected} onChange={() => set({ expected: true })} />
               Shown
             </label>
-            <label className="choice">
+            <label className="flex min-h-8 cursor-pointer items-center gap-2.5 text-[0.9375rem] has-disabled:cursor-not-allowed has-disabled:text-muted-foreground">
               <input type="radio" name={id("visible")} checked={!draft.expected} onChange={() => set({ expected: false })} />
               Not shown
             </label>
           </div>
-        </fieldset>
+        </Field>
       )}
 
       {outcome.kind === "text_matches" && (
         <>
-          <div className="field">
+          <Field>
             <label htmlFor={id("mode")}>How it matches</label>
             <NativeSelect id={id("mode")} value={draft.mode} onChange={(e) => set({ mode: e.target.value as Draft["mode"] })}>
               <option value="contains">Contains</option>
               <option value="equals">Is exactly</option>
               {outcome.match.testDataKey === undefined && <option value="regex">Matches the pattern</option>}
             </NativeSelect>
-          </div>
+          </Field>
           {outcome.match.testDataKey === undefined ? (
             textField(draft.mode === "regex" ? "Pattern" : "Text")
           ) : (
-            <p className="hint">
+            <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
               Uses the value entered for <strong>{outcome.match.testDataKey}</strong>
             </p>
           )}
-          <label className="choice">
+          <label className="flex min-h-8 cursor-pointer items-center gap-2.5 text-[0.9375rem] has-disabled:cursor-not-allowed has-disabled:text-muted-foreground">
             <Checkbox checked={draft.caseSensitive} onCheckedChange={(checked) => set({ caseSensitive: checked === true })} />
             Match case
           </label>
@@ -197,7 +198,7 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
 
       {outcome.kind === "numeric_compare" && (
         <>
-          <div className="field">
+          <Field>
             <label htmlFor={id("operator")}>Comparison</label>
             <NativeSelect id={id("operator")} value={draft.operator} onChange={(e) => set({ operator: e.target.value as Compare })}>
               {OPERATORS.map(([value, words]) => (
@@ -206,7 +207,7 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
                 </option>
               ))}
             </NativeSelect>
-          </div>
+          </Field>
           {typeof outcome.right === "number" && numberField("Compared with")}
         </>
       )}
@@ -215,13 +216,13 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
 
       {outcome.kind === "collection_contains" && (
         <>
-          <div className="field">
+          <Field>
             <label htmlFor={id("match")}>How it matches</label>
             <NativeSelect id={id("match")} value={draft.match} onChange={(e) => set({ match: e.target.value as Draft["match"] })}>
               <option value="contains">Contains</option>
               <option value="equals">Is exactly</option>
             </NativeSelect>
-          </div>
+          </Field>
           {typeof outcome.item === "string" && textField("Item")}
         </>
       )}
@@ -232,16 +233,16 @@ export function CheckEditor({ criterionId, outcome, facts, busy, serverError, on
       </div>
 
       {serverError && (
-        <p role="alert" className="field-error">
+        <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
           <Icon name="error" /> {serverError}
         </p>
       )}
 
-      <div className="actions">
-        <Button type="button"  onClick={save} disabled={busy}>
+      <div className="actions flex flex-wrap items-center gap-2">
+        <Button type="button" onClick={save} disabled={busy}>
           {busy ? "Saving…" : "Save check"}
         </Button>
-        <Button variant="ghost" type="button"  onClick={onDiscard} disabled={busy}>
+        <Button variant="ghost" type="button" onClick={onDiscard} disabled={busy}>
           Discard
         </Button>
       </div>

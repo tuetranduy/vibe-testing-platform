@@ -10,9 +10,9 @@ import { listRuns } from "../lib/api";
 import { isAdminUser, useMe } from "../lib/me";
 import { PROGRESS_STAGES, STAGE_LABELS, type ProgressStage } from "../lib/progress-reducer";
 import { Icon, type IconName } from "./Icon";
-import { ERROR_CATEGORY_LABEL, LIFECYCLE_LABEL } from "./format";
+import { ERROR_CATEGORY_LABEL } from "./format";
 import { durationBetween, formatDuration, formatWhen, hostOf, plural, runTitle } from "./report-format";
-import { VerdictBadge } from "./StatusBadge";
+import { LifecycleBadge, VerdictBadge } from "./StatusBadge";
 
 type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready" };
 
@@ -132,15 +132,15 @@ export function RunHistory() {
 
   const hasRuns = load.status === "ready" && items.length > 0;
   const head = (
-    <div className="page-head">
-      <div className="title-block">
+    <div className="page-head flex flex-wrap items-center justify-between gap-[18px]">
+      <div className="title-block flex min-w-0 flex-col gap-2">
         <p className="eyebrow">Workspace overview</p>
         <h1 className="page-title">Test runs</h1>
-        <p className="page-lede">
+        <p className="max-w-[650px] text-[0.95rem] leading-[1.7] text-muted-foreground">
           {me && !isAdmin ? "Your runs, their verdicts, and the evidence behind them." : "Every run, its verdict, and the evidence behind it."}
         </p>
         {isAdmin && (
-          <div className="filter-chips" role="group" aria-label="Whose runs">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Whose runs">
             {(
               [
                 ["all", "Everyone's runs"],
@@ -154,9 +154,9 @@ export function RunHistory() {
           </div>
         )}
       </div>
-      <div className="history-header-actions actions">
-        {hasRuns && <Button variant="outline" type="button"  onClick={() => setAttempt((n) => n + 1)}><Icon name="restart" />Refresh</Button>}
-        {hasRuns && <Button asChild><a  href="/runs/new"><Icon name="plus" />New test</a></Button>}
+      <div className="history-header-actions actions flex flex-wrap items-center gap-2">
+        {hasRuns && <Button variant="outline" type="button" onClick={() => setAttempt((n) => n + 1)}><Icon name="restart" />Refresh</Button>}
+        {hasRuns && <Button asChild><a href="/runs/new"><Icon name="plus" />New test</a></Button>}
       </div>
     </div>
   );
@@ -165,7 +165,7 @@ export function RunHistory() {
   if (load.status === "loading") {
     body = (
       <div className="history-loading" role="status">
-        <span className="visually-hidden">Loading test runs…</span>
+        <span className="sr-only">Loading test runs…</span>
         <div className="summary-grid" aria-hidden="true">{[0, 1, 2, 3].map((n) => <div className="skeleton skeleton-stat" key={n} />)}</div>
         <Card className="skeleton-table" aria-hidden="true">{[0, 1, 2, 3].map((n) => <div className="skeleton skeleton-row" key={n} />)}</Card>
       </div>
@@ -177,8 +177,8 @@ export function RunHistory() {
         <div>
           <p className="banner-title">We couldn&apos;t load the test runs</p>
           <p>{load.message}</p>
-          <div className="actions">
-            <Button variant="outline" type="button"  onClick={() => setAttempt((n) => n + 1)}>
+          <div className="actions flex flex-wrap items-center gap-2">
+            <Button variant="outline" type="button" onClick={() => setAttempt((n) => n + 1)}>
               Try again
             </Button>
           </div>
@@ -190,14 +190,14 @@ export function RunHistory() {
       <Card as="section" className="empty-state" aria-labelledby="empty-title">
         <Icon name="file" />
         <h2 id="empty-title">No test runs yet</h2>
-        <p className="muted">Turn a user flow into a browser test. Your results and evidence will appear here.</p>
+        <p className="text-muted-foreground">Turn a user flow into a browser test. Your results and evidence will appear here.</p>
         <ol className="empty-steps">
           <li><span>1</span>Enter your website</li>
           <li><span>2</span>Describe what should work</li>
           <li><span>3</span>Review the evidence</li>
         </ol>
         <Button asChild>
-          <a  href="/runs/new">
+          <a href="/runs/new">
             <Icon name="plus" />
             New test
           </a>
@@ -220,13 +220,13 @@ export function RunHistory() {
         </div>
 
         <Card as="section" className="table-card" aria-labelledby="runs-title">
-          <h2 id="runs-title" className="visually-hidden">
+          <h2 id="runs-title" className="sr-only">
             All runs
           </h2>
           <div className="history-list-head">
-            <div><h2 className="panel-title">Run history</h2><p className="hint">Find a test and open its report.</p></div>
-            <div className="input-with-icon search-field">
-              <label htmlFor={searchId} className="visually-hidden">
+            <div><h2 className="panel-title">Run history</h2><p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Find a test and open its report.</p></div>
+            <div className="relative block min-w-0 [&>.icon]:pointer-events-none [&>.icon]:absolute [&>.icon]:top-1/2 [&>.icon]:left-3.5 [&>.icon]:-translate-y-1/2 [&>.icon]:text-(--text-subtle) [&>input]:pl-[42px] search-field">
+              <label htmlFor={searchId} className="sr-only">
                 Filter runs by website or requirement
               </label>
               <Icon name="search" />
@@ -242,14 +242,14 @@ export function RunHistory() {
             </div>
           </div>
           <div className="table-toolbar">
-            <div role="group" aria-label="Show" className="filter-chips">
+            <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5">
               {chips.map((f) => (
                 <Button variant="plain" key={f.id} type="button" className="chip" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
-                  {f.label} <span className="chip-count">{f.count}</span>
+                  {f.label} <span className="chip-count text-(--text-subtle) tabular-nums">{f.count}</span>
                 </Button>
               ))}
             </div>
-            <p className="toolbar-note" role="status">
+            <p className="text-[0.8125rem] text-(--text-subtle)" role="status">
               {filtering
                 ? `${visible.length} of ${plural(items.length, "run")}${nextCursor ? " loaded so far" : ""}`
                 : "Newest first"}
@@ -275,13 +275,13 @@ export function RunHistory() {
         </Card>
 
         {moreError && (
-          <p role="alert" className="field-error">
+          <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
             <Icon name="warning" /> We couldn&apos;t load more runs. {moreError}
           </p>
         )}
         {nextCursor && (
           <div className="history-more">
-            <Button variant="outline" type="button"  onClick={loadMore} disabled={loadingMore}>
+            <Button variant="outline" type="button" onClick={loadMore} disabled={loadingMore}>
               {loadingMore ? "Loading…" : "Load more"}
             </Button>
           </div>
@@ -291,7 +291,7 @@ export function RunHistory() {
   }
 
   return (
-    <div className="stack-lg">
+    <div className="flex min-w-0 flex-col gap-7">
       {head}
       {body}
     </div>
@@ -320,7 +320,7 @@ function RunSummary({ runs }: { runs: TestRunSummary[] }) {
 function RunTable({ runs }: { runs: TestRunSummary[] }) {
   return (
     <Table className="history" role="table">
-      <TableCaption className="visually-hidden">Test runs</TableCaption>
+      <TableCaption className="sr-only">Test runs</TableCaption>
       <TableHeader role="rowgroup">
         <TableRow role="row">
           <TableHead role="columnheader" scope="col">
@@ -349,8 +349,8 @@ function RunTable({ runs }: { runs: TestRunSummary[] }) {
               </a>
               <span className="history-host">{hostOf(r.targetUrl)}</span>
               {r.environment === "production" && r.allowDestructiveActions && <span className="history-tag">Changes site data</span>}
-              {r.kind === "rerun" && <span className="history-kind">Rerun</span>}
-              {r.owner && <span className="history-owner">by {r.owner.name}</span>}
+              {r.kind === "rerun" && <span className="mt-1 ml-2 inline-block rounded-full border border-input px-[7px] text-xs font-[560] text-muted-foreground">Rerun</span>}
+              {r.owner && <span className="mt-1 ml-2 inline-block text-xs text-(--text-subtle)">by {r.owner.name}</span>}
             </TableCell>
             <TableCell role="cell" className="history-created">
               <time dateTime={r.createdAt}>{formatWhen(r.createdAt)}</time>
@@ -382,17 +382,15 @@ function RunResult({ run }: { run: TestRunSummary }) {
   if (run.lifecycle === "COMPLETED" && run.verdict) return <VerdictBadge verdict={run.verdict} />;
   return (
     <span className="lifecycle-cell">
-      <span className={`lstatus lstatus-${run.lifecycle.toLowerCase()}`}>
-        <Icon name={LIFECYCLE_ICON(run)} /> {LIFECYCLE_LABEL[run.lifecycle]}
-      </span>
-      {run.lifecycle === "ERRORED" && run.errorCategory && <span className="muted">{ERROR_CATEGORY_LABEL[run.errorCategory]}</span>}
+      <LifecycleBadge lifecycle={run.lifecycle} icon={LIFECYCLE_ICON(run)} />
+      {run.lifecycle === "ERRORED" && run.errorCategory && <span className="text-muted-foreground">{ERROR_CATEGORY_LABEL[run.errorCategory]}</span>}
     </span>
   );
 }
 
 function RunDuration({ run }: { run: TestRunSummary }) {
   if (!isTerminalLifecycle(run.lifecycle)) return <span>{run.startedAt ? "Running…" : "Not started"}</span>;
-  return <span className="mono">{formatDuration(durationBetween(run.startedAt, run.finishedAt))}</span>;
+  return <span className="font-mono">{formatDuration(durationBetween(run.startedAt, run.finishedAt))}</span>;
 }
 
 /** How the loaded runs ended: passed out of those with a verdict, and a bar of every result. */
@@ -469,7 +467,7 @@ function RunningNow({ runs }: { runs: TestRunSummary[] }) {
         </h2>
         <p className="running-idle-text">Describe what should work, then follow a real browser as it checks it.</p>
         <Button asChild variant="on-ink">
-          <a  href="/runs/new">
+          <a href="/runs/new">
             <Icon name="plus" />
             New test
           </a>

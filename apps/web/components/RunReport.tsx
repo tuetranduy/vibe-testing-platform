@@ -62,7 +62,7 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
 
   if (state.status === "loading") {
     return (
-      <p className="muted" role="status">
+      <p className="text-muted-foreground" role="status">
         Loading report…
       </p>
     );
@@ -75,8 +75,8 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
           <div>
             <p className="banner-title">The report couldn&apos;t be loaded</p>
             <p>{state.message}</p>
-            <div className="actions">
-              <Button variant="outline" type="button"  onClick={() => setAttempt((n) => n + 1)}>
+            <div className="actions flex flex-wrap items-center gap-2">
+              <Button variant="outline" type="button" onClick={() => setAttempt((n) => n + 1)}>
                 Try again
               </Button>
             </div>
@@ -93,15 +93,15 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
     <>
       <ReportSummary report={report} cancelReason={cancelReason} llm={llm} />
       <Assumptions requirement={report.requirement} />
-      <div className="actions report-actions">
+      <div className="actions flex flex-wrap items-center gap-2">
         <Button asChild variant="outline">
-          <a  href={reportMarkdownPath(runId)} download>
+          <a href={reportMarkdownPath(runId)} download>
             <Icon name="download" />
             Download Markdown
           </a>
         </Button>
         <Button asChild variant="outline">
-          <a  href={`/runs/${encodeURIComponent(runId)}/print`} target="_blank" rel="noopener">
+          <a href={`/runs/${encodeURIComponent(runId)}/print`} target="_blank" rel="noopener">
             <Icon name="print" />
             Print or save as PDF
           </a>
@@ -121,8 +121,8 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
         <ArtifactList runId={runId} artifactIds={artifacts.map((a) => a.artifactId)} artifacts={artifactMap} />
       </Disclosure>
       {general.length > 0 && (
-        <Card as="section"  aria-labelledby="diagnostics-title">
-          <h2 id="diagnostics-title" className="card-title">
+        <Card as="section" aria-labelledby="diagnostics-title">
+          <h2 id="diagnostics-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
             Diagnostics
           </h2>
           <FailureDiagnostics findings={general} />
@@ -131,7 +131,7 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
       {report.generatedTest && <Disclosure title="Saved test code" hint="View the reusable Playwright test and verification details."><GeneratedTestViewer test={report.generatedTest} playwright={report.playwright} requirement={report.requirement} /></Disclosure>}
       {secretNames && report.generatedTest && report.generatedTest.compiledCriteria.length > 0 && (
         <Disclosure title="Reuse this test" hint="Replay the saved test or add it to a suite.">
-          <div className="stack">
+          <div className="flex min-w-0 flex-col gap-5">
             <RerunPanel
               runId={runId}
               secretNames={secretNames}

@@ -50,7 +50,7 @@ export function LiveEvidence({ runId, screenshot }: Props) {
             <p>{state.message}</p>
           </div>
         ) : (
-          <p className="muted" role="status">
+          <p className="text-muted-foreground" role="status">
             Loading screenshot…
           </p>
         )}

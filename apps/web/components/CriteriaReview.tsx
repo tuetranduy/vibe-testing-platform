@@ -144,7 +144,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
   }
   if (!requirement) {
     return (
-      <p className="muted" role="status">
+      <p className="text-muted-foreground" role="status">
         Loading criteria…
       </p>
     );
@@ -194,10 +194,10 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
     <section className="review" aria-labelledby="review-title">
       <div className="review-main">
         <div className="review-head">
-          <h2 id="review-title" className="section-title">
+          <h2 id="review-title" className="font-heading text-2xl leading-[1.2] font-semibold tracking-[-0.015em]">
             Review your test
           </h2>
-          <p className="muted">
+          <p className="text-muted-foreground">
             Check that these match your instructions. You can edit a check or remove anything you don’t need.
           </p>
         </div>
@@ -215,7 +215,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
         {analysis && <LiveSiteSummary analysis={analysis} />}
 
         {requirement.intent && (
-          <p className="review-understood">
+          <p className="m-0 flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="note-title">What I understood</span> <span>{requirement.intent.goal}</span>
           </p>
         )}
@@ -223,16 +223,16 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
         <div className="criteria-list">{stated.map(card)}</div>
 
         {(added.length > 0 || notes.length > 0) && (
-          <div className="criteria-added" role="group" aria-labelledby="added-title">
-            <h3 id="added-title" className="criteria-added-title">
+          <div className="mt-5 grid gap-3 border-t border-border pt-5 [&>.text-muted-foreground]:m-0" role="group" aria-labelledby="added-title">
+            <h3 id="added-title" className="m-0 text-base">
               {ADDED_BY_PLATFORM}
             </h3>
-            <p className="muted">
+            <p className="text-muted-foreground">
               Your instructions were short, so these checks were added from what the site shows. Remove any that you did not mean.
             </p>
             <div className="criteria-list">{added.map(card)}</div>
             {notes.length > 0 && (
-              <ul className="assumption-list">
+              <ul className="m-0 grid gap-[0.4rem] pl-[1.1rem] text-[0.9rem]">
                 {notes.map((n, i) => (
                   <li key={`${i}-${n}`}>{n}</li>
                 ))}
@@ -249,7 +249,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
           <h3 id="confirm-title" className="confirm-title">
             Do these checks match what you meant?
           </h3>
-          <p className="muted">Nothing runs until you confirm.</p>
+          <p className="text-muted-foreground">Nothing runs until you confirm.</p>
           <dl className="confirm-counts">
             <div>
               <dt>Criteria</dt>
@@ -284,12 +284,12 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
             <Icon name="arrow" />
           </Button>
           {openEdits.length > 0 && (
-            <p id="confirm-blocked" className="hint">
+            <p id="confirm-blocked" className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
               <Icon name="info" /> Save or discard your {openEdits.length === 1 ? "edit" : "edits"} to {listIds(openEdits)} first.
             </p>
           )}
           {(unclear > 0 || aiJudged > 0) && (
-            <p className="hint">
+            <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
               <Icon name="info" /> Model-judged criteria are judged by AI from what the page shows; unclear checks may be reported as
               Inconclusive.
             </p>
@@ -309,8 +309,8 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
                 Start over?
               </p>
               <p>This cancels the current run. You can edit the requirement and start a new one.</p>
-              <div className="actions">
-                <Button variant="destructive" type="button"  onClick={startOver} disabled={startingOver === "working"}>
+              <div className="actions flex flex-wrap items-center gap-2">
+                <Button variant="destructive" type="button" onClick={startOver} disabled={startingOver === "working"}>
                   {startingOver === "working" ? "Cancelling…" : "Yes, start over"}
                 </Button>
                 <Button variant="outline"

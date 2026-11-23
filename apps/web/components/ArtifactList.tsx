@@ -45,9 +45,9 @@ interface Props {
  * traces and other files as downloads. Signed URLs come from the shared helper (lib/artifacts.ts).
  */
 export function ArtifactList({ runId, artifactIds, artifacts, emptyText = "No evidence was captured." }: Props) {
-  if (artifactIds.length === 0) return <p className="muted">{emptyText}</p>;
+  if (artifactIds.length === 0) return <p className="text-muted-foreground">{emptyText}</p>;
   return (
-    <ul className="artifact-list" aria-label="Evidence">
+    <ul className="grid list-none grid-cols-[repeat(auto-fill,minmax(min(100%,260px),1fr))] gap-3 p-0" aria-label="Evidence">
       {artifactIds.map((id) => (
         <ArtifactItem key={id} runId={runId} artifactId={id} info={artifacts.get(id) ?? null} />
       ))}
@@ -102,14 +102,14 @@ function ArtifactItem({ runId, artifactId, info }: { runId: string; artifactId: 
     );
   } else if (state.status === "ready") {
     body = (
-      <div className="artifact-file">
+      <div className="artifact-file flex flex-col items-start gap-1.5">
         <Button asChild variant="outline">
-          <a  href={state.url} download onClick={guardExpiry}>
+          <a href={state.url} download onClick={guardExpiry}>
             <Icon name="download" /> Download {label.toLowerCase()}
           </a>
         </Button>
         {info?.type === "TRACE" && (
-          <p className="hint">
+          <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
             Open it with <code>npx playwright show-trace trace.zip</code>, or drop it on trace.playwright.dev.
           </p>
         )}
@@ -117,7 +117,7 @@ function ArtifactItem({ runId, artifactId, info }: { runId: string; artifactId: 
     );
   } else {
     body = (
-      <p className="muted" role="status">
+      <p className="text-muted-foreground" role="status">
         Loading {label.toLowerCase()}…
       </p>
     );
@@ -130,7 +130,7 @@ function ArtifactItem({ runId, artifactId, info }: { runId: string; artifactId: 
         <span className="artifact-type">{label}</span>
       </div>
       {body}
-      <p className="artifact-caption">
+      <p className="text-xs wrap-anywhere text-(--text-subtle)">
         {caption}
         {info && (
           <>
@@ -140,7 +140,7 @@ function ArtifactItem({ runId, artifactId, info }: { runId: string; artifactId: 
         )}
       </p>
       {refreshed && state.status === "ready" && (
-        <p className="hint" role="status">
+        <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5" role="status">
           The link expired and was refreshed. Select it again.
         </p>
       )}

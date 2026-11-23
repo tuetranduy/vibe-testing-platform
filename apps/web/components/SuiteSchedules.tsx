@@ -1,5 +1,6 @@
 "use client";
 
+import { Field } from "@/components/ui/field";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -77,26 +78,26 @@ export function SuiteSchedules({ suite }: { suite: SuiteDetail }) {
   const blocked = suite.secretNames.length > 0;
 
   return (
-    <Card as="section" className="stack" aria-labelledby="schedules-title">
-      <div className="section-head">
-        <h2 id="schedules-title" className="card-title">
+    <Card as="section" className="flex min-w-0 flex-col gap-5" aria-labelledby="schedules-title">
+      <div className="flex flex-col gap-1.5 [&>.text-muted-foreground]:max-w-[68ch]">
+        <h2 id="schedules-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
           <Icon name="clock" /> Schedules
         </h2>
-        <p className="muted">The suite runs by itself at these times, as the person who added the schedule.</p>
+        <p className="text-muted-foreground">The suite runs by itself at these times, as the person who added the schedule.</p>
       </div>
       {blocked && (
-        <p className="hint">
+        <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
           Some tests use an older setup. Replace them with fresh tests before adding a schedule.
         </p>
       )}
       {loadError && (
-        <p role="alert" className="field-error">
+        <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
           <Icon name="error" /> Schedules couldn&apos;t be loaded: {loadError}
         </p>
       )}
-      {schedules && schedules.length === 0 && !adding && <p className="muted">No schedules.</p>}
+      {schedules && schedules.length === 0 && !adding && <p className="text-muted-foreground">No schedules.</p>}
       {schedules && schedules.length > 0 && (
-        <ul className="suite-run-list" aria-label="Schedules">
+        <ul className="m-0 grid list-none gap-2.5 p-0 [&>li]:flex [&>li]:flex-wrap [&>li]:items-center [&>li]:gap-x-3.5 [&>li]:gap-y-2" aria-label="Schedules">
           {schedules.map((s) => (
             <ScheduleRow key={s.id} schedule={s} blocked={blocked} onChange={replace} onDeleted={() => setSchedules((all) => (all ?? []).filter((x) => x.id !== s.id))} />
           ))}
@@ -112,8 +113,8 @@ export function SuiteSchedules({ suite }: { suite: SuiteDetail }) {
           }}
         />
       ) : (
-        <div className="actions">
-          <Button variant="outline" type="button"  onClick={() => setAdding(true)} disabled={blocked || suite.entryCount === 0}>
+        <div className="actions flex flex-wrap items-center gap-2">
+          <Button variant="outline" type="button" onClick={() => setAdding(true)} disabled={blocked || suite.entryCount === 0}>
             <Icon name="plus" />
             Add a schedule
           </Button>
@@ -150,12 +151,12 @@ function ScheduleRow({
   }
 
   return (
-    <li className="schedule-row">
-      <div className="stack-tight">
+    <li className="justify-between border-t border-(--border-soft) py-2.5 first:border-t-0">
+      <div className="stack-tight flex min-w-0 flex-col gap-3">
         <span>
-          <strong>{describeCron(s.cron)}</strong> <span className="muted">({s.timezone})</span>
+          <strong>{describeCron(s.cron)}</strong> <span className="text-muted-foreground">({s.timezone})</span>
         </span>
-        <span className="muted">
+        <span className="text-muted-foreground">
           {s.enabled && s.nextRunAt ? (
             <>
               Next run <time dateTime={s.nextRunAt}>{formatWhen(s.nextRunAt)}</time>
@@ -177,12 +178,12 @@ function ScheduleRow({
           {s.createdBy ? ` · runs as ${s.createdBy.name}` : ""}
         </span>
         {error && (
-          <span role="alert" className="field-error">
+          <span role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
             <Icon name="error" /> {error}
           </span>
         )}
       </div>
-      <div className="actions">
+      <div className="actions flex flex-wrap items-center gap-2">
         <Button variant="ghost"
           type="button"
           disabled={busy || (!s.enabled && blocked)}
@@ -230,8 +231,8 @@ function NewSchedule({ suiteId, onCancel, onCreated }: { suiteId: string; onCanc
   }
 
   return (
-    <form className="stack" onSubmit={submit} noValidate aria-busy={pending} aria-label="New schedule">
-      <div className="field">
+    <form className="flex min-w-0 flex-col gap-5" onSubmit={submit} noValidate aria-busy={pending} aria-label="New schedule">
+      <Field>
         <label htmlFor="schedule-preset">When</label>
         <NativeSelect id="schedule-preset" value={preset} onChange={(e) => setPreset(e.target.value as Preset)}>
           {(Object.keys(PRESET_LABEL) as Preset[]).map((p) => (
@@ -240,34 +241,34 @@ function NewSchedule({ suiteId, onCancel, onCreated }: { suiteId: string; onCanc
             </option>
           ))}
         </NativeSelect>
-      </div>
+      </Field>
       {(preset === "daily" || preset === "weekdays") && (
-        <div className="field">
+        <Field>
           <label htmlFor="schedule-time">Time</label>
           <Input id="schedule-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
-        </div>
+        </Field>
       )}
       {preset === "custom" && (
-        <div className="field">
+        <Field>
           <label htmlFor="schedule-cron">Cron expression</label>
-          <Input id="schedule-cron" className="mono" value={cron} onChange={(e) => setCron(e.target.value)} />
-          <p className="hint">Five fields: minute hour day-of-month month day-of-week.</p>
-        </div>
+          <Input id="schedule-cron" className="font-mono" value={cron} onChange={(e) => setCron(e.target.value)} />
+          <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Five fields: minute hour day-of-month month day-of-week.</p>
+        </Field>
       )}
-      <div className="field">
+      <Field>
         <label htmlFor="schedule-timezone">Time zone</label>
         <Input id="schedule-timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} />
-      </div>
+      </Field>
       {error && (
-        <p role="alert" className="field-error">
+        <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
           <Icon name="error" /> {error}
         </p>
       )}
-      <div className="actions">
-        <Button type="submit"  disabled={pending}>
+      <div className="actions flex flex-wrap items-center gap-2">
+        <Button type="submit" disabled={pending}>
           {pending ? "Adding…" : "Add schedule"}
         </Button>
-        <Button variant="outline" type="button"  onClick={onCancel} disabled={pending}>
+        <Button variant="outline" type="button" onClick={onCancel} disabled={pending}>
           Cancel
         </Button>
       </div>

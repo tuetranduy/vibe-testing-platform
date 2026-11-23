@@ -11,9 +11,11 @@ if (!globalThis.ResizeObserver) {
     disconnect() {}
   };
 }
-HTMLElement.prototype.scrollIntoView ??= function () {};
-HTMLElement.prototype.hasPointerCapture ??= function () { return false; };
-HTMLElement.prototype.releasePointerCapture ??= function () {};
+if (typeof HTMLElement !== "undefined") {
+  HTMLElement.prototype.scrollIntoView ??= function () {};
+  HTMLElement.prototype.hasPointerCapture ??= function () { return false; };
+  HTMLElement.prototype.releasePointerCapture ??= function () {};
+}
 
 // The signed-in user comes from test/me.ts instead of a fetch of /api/v1/auth/me.
 vi.mock("./lib/me", async (importOriginal) => {

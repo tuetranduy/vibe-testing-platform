@@ -109,9 +109,12 @@ describe("RunReport", () => {
     expect(screen.getByText("Browser error")).toBeInTheDocument();
     expect(screen.getByText(/infrastructure errors never count as a failed criterion/i)).toBeInTheDocument();
     // The technical message is available, but secondary: inside a collapsed disclosure.
-    const details = screen.getByText(/technical details/i).closest("details")!;
-    expect(details).not.toHaveAttribute("open");
-    expect(within(details).getByText("chromium: No usable sandbox!")).toBeInTheDocument();
+    const details = screen.getByRole("button", { name: /technical details/i });
+    expect(details).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("chromium: No usable sandbox!")).not.toBeInTheDocument();
+    await userEvent.click(details);
+    expect(details).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("chromium: No usable sandbox!")).toBeVisible();
     expect(screen.queryByRole("heading", { name: /verdict/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^AC-1\b/ })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /generated playwright test/i })).not.toBeInTheDocument();

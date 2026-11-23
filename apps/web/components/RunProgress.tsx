@@ -30,7 +30,7 @@ export function RunProgress({ progress, lifecycle, survey = false }: Props) {
   const now = outcome ? null : currentStage ? STAGE_LABELS[currentStage] : null;
   return (
     <Card as="section" className="progress-card" aria-labelledby="progress-title">
-      <h2 id="progress-title" className="visually-hidden">
+      <h2 id="progress-title" className="sr-only">
         Progress
       </h2>
       <div className="progress-head">

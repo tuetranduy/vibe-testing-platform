@@ -43,14 +43,14 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
 
   if (state.status === "loading") {
     return (
-      <p className="muted" role="status">
+      <p className="text-muted-foreground" role="status">
         Preparing the report…
       </p>
     );
   }
   if (state.status === "error") {
     return (
-      <p role="alert" className="field-error">
+      <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
         {state.message}
       </p>
     );
@@ -63,11 +63,11 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
   return (
     <article className="print-report theme-light">
       <div className="print-toolbar no-print">
-        <Button type="button"  onClick={() => window.print()}>
+        <Button type="button" onClick={() => window.print()}>
           Print or save as PDF
         </Button>
         <Button asChild variant="outline">
-          <a  href={`/runs/${encodeURIComponent(runId)}`}>
+          <a href={`/runs/${encodeURIComponent(runId)}`}>
             Back to the run
           </a>
         </Button>
@@ -91,7 +91,7 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
           </div>
           <div>
             <dt>Run</dt>
-            <dd className="mono">
+            <dd className="font-mono">
               {report.runId}
               {report.rerunOf ? ` (rerun of ${report.rerunOf})` : ""}
             </dd>

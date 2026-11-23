@@ -1,5 +1,6 @@
 "use client";
 
+import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,7 +45,7 @@ export function AccountSettings({ navigate = (url: string) => window.location.as
   }
 
   const input = (f: Field, label: string, autoComplete: string) => (
-    <div className="field">
+    <Field>
       <label htmlFor={`account-${f}`}>{label}</label>
       <Input
         id={`account-${f}`}
@@ -56,24 +57,24 @@ export function AccountSettings({ navigate = (url: string) => window.location.as
         aria-describedby={errors[f] ? `account-${f}-error` : undefined}
       />
       {errors[f] && (
-        <p id={`account-${f}-error`} className="field-error">
+        <p id={`account-${f}-error`} className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
           <Icon name="error" /> {errors[f]}
         </p>
       )}
-    </div>
+    </Field>
   );
 
   return (
-    <div className="stack-lg">
+    <div className="flex min-w-0 flex-col gap-7">
       {me && (
-        <Card as="section" className="stack-tight" aria-labelledby="account-who">
-          <h2 id="account-who" className="card-title">
+        <Card as="section" className="stack-tight flex min-w-0 flex-col gap-3" aria-labelledby="account-who">
+          <h2 id="account-who" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
             Signed in as
           </h2>
           <p>
             <strong>{me.name}</strong> · {me.email} · {me.role === "admin" ? "Administrator" : "Member"}
           </p>
-          <div className="actions">
+          <div className="actions flex flex-wrap items-center gap-2">
             <Button variant="outline"
               type="button"
               onClick={async () => {
@@ -87,19 +88,19 @@ export function AccountSettings({ navigate = (url: string) => window.location.as
           </div>
         </Card>
       )}
-      <Card as="form" className="stack" aria-labelledby="account-password" onSubmit={onSubmit} noValidate>
-        <h2 id="account-password" className="card-title">
+      <Card as="form" className="flex min-w-0 flex-col gap-5" aria-labelledby="account-password" onSubmit={onSubmit} noValidate>
+        <h2 id="account-password" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
           Change password
         </h2>
         {input("currentPassword", "Current password", "current-password")}
         {input("newPassword", "New password", "new-password")}
         {input("confirm", "New password again", "new-password")}
-        <div className="actions">
-          <Button type="submit"  disabled={pending}>
+        <div className="actions flex flex-wrap items-center gap-2">
+          <Button type="submit" disabled={pending}>
             Change password
           </Button>
           {notice && (
-            <p role="status" className="hint">
+            <p role="status" className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
               {notice}
             </p>
           )}

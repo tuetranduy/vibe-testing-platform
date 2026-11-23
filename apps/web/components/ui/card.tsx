@@ -11,7 +11,7 @@ function Card<T extends CardElement = "div">({
   return React.createElement(as ?? "div", {
     ...props,
     "data-slot": "card",
-    className: cn("min-w-0 rounded-xl border border-border bg-card text-card-foreground p-6 shadow-[var(--highlight),var(--shadow-xs)] max-[560px]:p-4", className),
+    className: cn("min-w-0 rounded-xl border border-border bg-card text-card-foreground p-6 shadow-[var(--shadow)] max-[560px]:px-4 max-[560px]:py-[18px]", className),
   });
 }
 

@@ -1,7 +1,9 @@
 "use client";
 
+import { Field } from "@/components/ui/field";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Suggestion, SuggestionSetResponse, TestRunSummary } from "@platform/contracts";
 import { useEffect, useState } from "react";
@@ -90,7 +92,7 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
   }
   if (!set) {
     return (
-      <p className="muted" role="status">
+      <p className="text-muted-foreground" role="status">
         Loading suggested tests…
       </p>
     );
@@ -100,10 +102,10 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
     <section className="review" aria-labelledby="choose-title">
       <div className="review-main">
         <div className="review-head">
-          <h2 id="choose-title" className="section-title">
+          <h2 id="choose-title" className="font-heading text-2xl leading-[1.2] font-semibold tracking-[-0.015em]">
             Choose what to test
           </h2>
-          <p className="muted">
+          <p className="text-muted-foreground">
             The agent read the website and suggests these tests. Pick one to run now — you can edit its wording first — or start any
             other as a separate test.
           </p>
@@ -120,13 +122,13 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
                     {s.title}
                   </h3>
                   {s.destructive && (
-                    <span className="badge badge-warning">
+                    <Badge variant="outline" className="min-h-6 gap-1.5 border-transparent bg-(--warning-bg) text-(--warning)">
                       <Icon name="warning" /> Changes data
-                    </span>
+                    </Badge>
                   )}
                 </div>
                 {editing ? (
-                  <div className="field">
+                  <Field>
                     <label htmlFor={textId}>The test to run</label>
                     <Textarea
                       id={textId}
@@ -138,17 +140,17 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
                       aria-describedby={fieldError ? `${textId}-error` : undefined}
                     />
                     {fieldError && (
-                      <p id={`${textId}-error`} className="field-error">
+                      <p id={`${textId}-error`} className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
                         <Icon name="error" /> {fieldError}
                       </p>
                     )}
-                  </div>
+                  </Field>
                 ) : (
                   <p className="suggestion-text">{s.requirement}</p>
                 )}
-                {s.why && <p className="muted">Why: {s.why}</p>}
+                {s.why && <p className="text-muted-foreground">Why: {s.why}</p>}
                 {s.destructive && !set.run.destructiveActionsAllowed && (
-                  <p className="hint">
+                  <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
                     <Icon name="info" /> Will be blocked: this run doesn&apos;t allow destructive actions
                   </p>
                 )}
@@ -161,25 +163,25 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
                     </div>
                   </div>
                 )}
-                <div className="actions">
+                <div className="actions flex flex-wrap items-center gap-2">
                   {editing ? (
                     <>
-                      <Button type="button"  onClick={() => void choose(s, editing.text)} disabled={pending}>
+                      <Button type="button" onClick={() => void choose(s, editing.text)} disabled={pending}>
                         {pending ? "Starting…" : "Continue with this test"}
                         <Icon name="arrow" />
                       </Button>
-                      <Button variant="outline" type="button"  onClick={() => setDraft(null)} disabled={pending}>
+                      <Button variant="outline" type="button" onClick={() => setDraft(null)} disabled={pending}>
                         Back
                       </Button>
                     </>
                   ) : (
-                    <Button type="button"  onClick={() => open(s)} disabled={pending}>
-                      Test this<span className="visually-hidden">: {s.title}</span>
+                    <Button type="button" onClick={() => open(s)} disabled={pending}>
+                      Test this<span className="sr-only">: {s.title}</span>
                     </Button>
                   )}
                   <Button asChild variant="outline">
-                    <a  href={`/runs/new?from=${encodeURIComponent(runId)}&suggestion=${encodeURIComponent(s.id)}`}>
-                      Start as a separate test<span className="visually-hidden">: {s.title}</span>
+                    <a href={`/runs/new?from=${encodeURIComponent(runId)}&suggestion=${encodeURIComponent(s.id)}`}>
+                      Start as a separate test<span className="sr-only">: {s.title}</span>
                     </a>
                   </Button>
                 </div>
@@ -188,8 +190,8 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
           })}
         </div>
 
-        <div className="actions">
-          <Button variant="danger-outline" type="button"  onClick={onCancel} disabled={pending}>
+        <div className="actions flex flex-wrap items-center gap-2">
+          <Button variant="danger-outline" type="button" onClick={onCancel} disabled={pending}>
             <Icon name="stop" />
             None of these — cancel run
           </Button>

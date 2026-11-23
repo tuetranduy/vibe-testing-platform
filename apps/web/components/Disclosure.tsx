@@ -1,37 +1,27 @@
 "use client";
 
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useId, useState, type ReactNode } from "react";
+import { Card } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import type { ReactNode } from "react";
 import { Icon } from "./Icon";
 
-/**
- * A collapsible card section. Its content is mounted only while open, so anything expensive inside
- * (signed artifact URLs, images) loads only when the user asks for it.
- */
+/** Signed artifact URLs and images load only after the disclosure opens. */
 export function Disclosure({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const id = useId();
   return (
-    <Card as="section" className="disclosure">
-      <h2 className="disclosure-heading">
-        <Button variant="plain"
-          type="button"
-          className="disclosure-toggle"
-          aria-expanded={open}
-          aria-controls={open ? id : undefined}
-          onClick={() => setOpen((o) => !o)}
-        >
-          <span>{title}</span>
-          <Icon name="chevron" className="disclosure-chevron" />
-        </Button>
-      </h2>
-      {hint && !open && <p className="muted disclosure-hint">{hint}</p>}
-      {open && (
-        <div id={id} className="disclosure-body">
-          {children}
-        </div>
-      )}
-    </Card>
+    <Collapsible asChild>
+      <Card as="section" className="group overflow-hidden p-0 max-[560px]:p-0">
+        <h2>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" className="w-full justify-between rounded-none px-5 py-4 text-base text-foreground">
+              {title}
+              <Icon name="chevron" className="text-muted-foreground transition-transform group-data-open:rotate-90" />
+            </Button>
+          </CollapsibleTrigger>
+        </h2>
+        {hint && <p className="px-5 pb-4 text-sm text-muted-foreground group-data-open:hidden">{hint}</p>}
+        <CollapsibleContent className="border-t border-border px-5 py-4">{children}</CollapsibleContent>
+      </Card>
+    </Collapsible>
   );
 }

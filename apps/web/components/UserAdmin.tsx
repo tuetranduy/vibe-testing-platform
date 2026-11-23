@@ -1,5 +1,6 @@
 "use client";
 
+import { Field } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
@@ -41,7 +42,7 @@ export function UserAdmin() {
 
   if (state.status === "loading") {
     return (
-      <p className="muted" role="status">
+      <p className="text-muted-foreground" role="status">
         Loading users…
       </p>
     );
@@ -53,8 +54,8 @@ export function UserAdmin() {
         <div>
           <p className="banner-title">Users couldn&apos;t be loaded</p>
           <p>{state.message}</p>
-          <div className="actions">
-            <Button variant="outline" type="button"  onClick={() => setAttempt((n) => n + 1)}>
+          <div className="actions flex flex-wrap items-center gap-2">
+            <Button variant="outline" type="button" onClick={() => setAttempt((n) => n + 1)}>
               Try again
             </Button>
           </div>
@@ -71,14 +72,14 @@ export function UserAdmin() {
     );
 
   return (
-    <div className="stack-lg">
+    <div className="flex min-w-0 flex-col gap-7">
       <Card as="section" className="table-card" aria-labelledby="users-title">
         <div className="table-toolbar">
-          <h2 id="users-title" className="card-title">
+          <h2 id="users-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
             People ({state.users.length})
           </h2>
         </div>
-        <div className="data-table-wrap">
+        <div className="relative overflow-x-auto">
           <Table className="data-table">
             <TableHeader>
               <TableRow>
@@ -88,7 +89,7 @@ export function UserAdmin() {
                 <TableHead scope="col">Status</TableHead>
                 <TableHead scope="col">Added</TableHead>
                 <TableHead scope="col">
-                  <span className="visually-hidden">Actions</span>
+                  <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -129,11 +130,11 @@ function UserRow({ user, isSelf, onChanged }: { user: UserView; isSelf: boolean;
     <TableRow className={user.disabled ? "row-disabled" : undefined}>
       <TableCell>
         {user.name}
-        {isSelf && <span className="muted"> (you)</span>}
+        {isSelf && <span className="text-muted-foreground"> (you)</span>}
       </TableCell>
-      <TableCell className="mono">{user.email}</TableCell>
+      <TableCell className="font-mono">{user.email}</TableCell>
       <TableCell>
-        <label className="visually-hidden" htmlFor={`role-${user.id}`}>
+        <label className="sr-only" htmlFor={`role-${user.id}`}>
           Role of {user.name}
         </label>
         <NativeSelect
@@ -149,8 +150,8 @@ function UserRow({ user, isSelf, onChanged }: { user: UserView; isSelf: boolean;
       <TableCell>{user.disabled ? "Disabled" : "Active"}</TableCell>
       <TableCell>{formatWhen(user.createdAt)}</TableCell>
       <TableCell>
-        <div className="actions actions-tight">
-          <Button variant="ghost" type="button"  disabled={pending} onClick={() => setResetting((v) => !v)}>
+        <div className="actions flex flex-wrap items-center gap-2 gap-1.5">
+          <Button variant="ghost" type="button" disabled={pending} onClick={() => setResetting((v) => !v)}>
             Reset password
           </Button>
           <Button variant="ghost"
@@ -163,7 +164,7 @@ function UserRow({ user, isSelf, onChanged }: { user: UserView; isSelf: boolean;
         </div>
         {resetting && (
           <form
-            className="inline-form"
+            className="mt-2 flex flex-wrap items-end gap-2 [&>input]:flex-[1_1_180px] [&>label]:basis-full [&>label]:text-[0.8125rem] [&>label]:text-muted-foreground"
             onSubmit={(e) => {
               e.preventDefault();
               if (password.length < 10) setError("A password has at least 10 characters.");
@@ -178,13 +179,13 @@ function UserRow({ user, isSelf, onChanged }: { user: UserView; isSelf: boolean;
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
-            <Button variant="outline" type="submit"  disabled={pending}>
+            <Button variant="outline" type="submit" disabled={pending}>
               Set password
             </Button>
           </form>
         )}
         {error && (
-          <p role="alert" className="field-error">
+          <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
             <Icon name="error" /> {error}
           </p>
         )}
@@ -226,7 +227,7 @@ function AddUserForm({ onCreated }: { onCreated: (u: UserView) => void }) {
   }
 
   const field = (f: "name" | "email" | "password", label: string, type: string, autoComplete: string) => (
-    <div className="field">
+    <Field>
       <label htmlFor={`new-user-${f}`}>{label}</label>
       <Input
         id={`new-user-${f}`}
@@ -238,38 +239,38 @@ function AddUserForm({ onCreated }: { onCreated: (u: UserView) => void }) {
         aria-describedby={errors[f] ? `new-user-${f}-error` : undefined}
       />
       {errors[f] && (
-        <p id={`new-user-${f}-error`} className="field-error">
+        <p id={`new-user-${f}-error`} className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
           <Icon name="error" /> {errors[f]}
         </p>
       )}
-    </div>
+    </Field>
   );
 
   return (
-    <Card as="form" className="stack" aria-labelledby="add-user-title" onSubmit={onSubmit} noValidate>
-      <h2 id="add-user-title" className="card-title">
+    <Card as="form" className="flex min-w-0 flex-col gap-5" aria-labelledby="add-user-title" onSubmit={onSubmit} noValidate>
+      <h2 id="add-user-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
         Add a person
       </h2>
-      <div className="field-pair">
+      <div className="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1">
         {field("name", "Name", "text", "off")}
         {field("email", "E-mail address", "email", "off")}
       </div>
-      <div className="field-pair">
+      <div className="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1">
         {field("password", "First password", "password", "new-password")}
-        <div className="field">
+        <Field>
           <label htmlFor="new-user-role">Role</label>
           <NativeSelect id="new-user-role" value={values.role} onChange={(e) => setValues((v) => ({ ...v, role: e.target.value as UserRole }))}>
             <option value="member">{ROLE_LABEL.member} — their own test runs</option>
             <option value="admin">{ROLE_LABEL.admin} — everyone&apos;s runs, users and settings</option>
           </NativeSelect>
-        </div>
+        </Field>
       </div>
-      <div className="actions">
-        <Button type="submit"  disabled={pending}>
+      <div className="actions flex flex-wrap items-center gap-2">
+        <Button type="submit" disabled={pending}>
           Add person
         </Button>
         {notice && (
-          <p role="status" className="hint">
+          <p role="status" className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
             {notice}
           </p>
         )}

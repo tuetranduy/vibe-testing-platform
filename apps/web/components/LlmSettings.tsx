@@ -1,5 +1,6 @@
 "use client";
 
+import { Field } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -44,7 +45,7 @@ export function LlmSettings() {
 
   if (state.status === "loading") {
     return (
-      <p className="muted" role="status">
+      <p className="text-muted-foreground" role="status">
         Loading settings…
       </p>
     );
@@ -56,8 +57,8 @@ export function LlmSettings() {
         <div>
           <p className="banner-title">Settings couldn&apos;t be loaded</p>
           <p>{state.message}</p>
-          <div className="actions">
-            <Button variant="outline" type="button"  onClick={() => setAttempt((n) => n + 1)}>
+          <div className="actions flex flex-wrap items-center gap-2">
+            <Button variant="outline" type="button" onClick={() => setAttempt((n) => n + 1)}>
               Try again
             </Button>
           </div>
@@ -69,15 +70,15 @@ export function LlmSettings() {
   const { view } = state;
   const show = (next: LlmSettingsView) => setState({ status: "ready", view: next });
   return (
-    <div className="stack-lg">
-      <section className="stack" aria-labelledby="providers-title">
-        <div className="section-head">
-          <h2 id="providers-title" className="section-title">
+    <div className="flex min-w-0 flex-col gap-7">
+      <section className="flex min-w-0 flex-col gap-5" aria-labelledby="providers-title">
+        <div className="flex flex-col gap-1.5 [&>.text-muted-foreground]:max-w-[68ch]">
+          <h2 id="providers-title" className="font-heading text-2xl leading-[1.2] font-semibold tracking-[-0.015em]">
             AI providers
           </h2>
-          <p className="muted">Keys are stored encrypted and never shown again. A key saved here is used instead of the server&apos;s.</p>
+          <p className="text-muted-foreground">Keys are stored encrypted and never shown again. A key saved here is used instead of the server&apos;s.</p>
         </div>
-        <div className="settings-grid">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] gap-4">
           {view.providers.map((p) => (
             <ProviderKeyCard key={p.provider} provider={p} onSaved={show} />
           ))}
@@ -125,8 +126,8 @@ function ProviderKeyCard({ provider, onSaved }: { provider: ProviderView; onSave
 
   const { key } = provider;
   return (
-    <Card as="form" className="stack-tight" aria-labelledby={`${id}-title`} onSubmit={onSubmit} noValidate>
-      <h3 id={`${id}-title`} className="card-title">
+    <Card as="form" className="stack-tight flex min-w-0 flex-col gap-3" aria-labelledby={`${id}-title`} onSubmit={onSubmit} noValidate>
+      <h3 id={`${id}-title`} className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
         {provider.label}
       </h3>
       <p className="key-status">
@@ -144,9 +145,9 @@ function ProviderKeyCard({ provider, onSaved }: { provider: ProviderView; onSave
           </>
         )}
       </p>
-      <div className="field">
+      <Field>
         <label htmlFor={id}>
-          API key<span className="visually-hidden"> for {provider.label}</span>
+          API key<span className="sr-only"> for {provider.label}</span>
         </label>
         <Input
           id={id}
@@ -159,17 +160,17 @@ function ProviderKeyCard({ provider, onSaved }: { provider: ProviderView; onSave
           aria-describedby={error ? `${id}-error` : undefined}
         />
         {error && (
-          <p id={`${id}-error`} className="field-error">
+          <p id={`${id}-error`} className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
             <Icon name="error" /> {error}
           </p>
         )}
-      </div>
-      <div className="actions">
-        <Button type="submit"  disabled={pending}>
+      </Field>
+      <div className="actions flex flex-wrap items-center gap-2">
+        <Button type="submit" disabled={pending}>
           Save key
         </Button>
         {key.source === "settings" && !confirming && (
-          <Button variant="ghost" type="button"  onClick={() => setConfirming(true)} disabled={pending}>
+          <Button variant="ghost" type="button" onClick={() => setConfirming(true)} disabled={pending}>
             Remove saved key
           </Button>
         )}
@@ -182,11 +183,11 @@ function ProviderKeyCard({ provider, onSaved }: { provider: ProviderView; onSave
               Remove the saved {provider.label} key?
             </p>
             <p>Tests then use the server&apos;s key, if it has one; without any key, tests on {provider.label} models are refused.</p>
-            <div className="actions">
-              <Button variant="destructive" type="button"  onClick={() => void send(null)} disabled={pending}>
+            <div className="actions flex flex-wrap items-center gap-2">
+              <Button variant="destructive" type="button" onClick={() => void send(null)} disabled={pending}>
                 Yes, remove key
               </Button>
-              <Button variant="outline" type="button"  onClick={() => setConfirming(false)}>
+              <Button variant="outline" type="button" onClick={() => setConfirming(false)}>
                 Keep key
               </Button>
             </div>
@@ -194,7 +195,7 @@ function ProviderKeyCard({ provider, onSaved }: { provider: ProviderView; onSave
         </div>
       )}
       {notice && (
-        <p role="status" className="hint">
+        <p role="status" className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
           {notice}
         </p>
       )}
@@ -242,15 +243,15 @@ function DefaultsForm({ view, onSaved }: { view: LlmSettingsView; onSaved: (view
   }
 
   return (
-    <Card as="form" className="stack" aria-labelledby="defaults-title" onSubmit={onSubmit} noValidate>
-      <div className="section-head">
-        <h2 id="defaults-title" className="section-title">
+    <Card as="form" className="flex min-w-0 flex-col gap-5" aria-labelledby="defaults-title" onSubmit={onSubmit} noValidate>
+      <div className="flex flex-col gap-1.5 [&>.text-muted-foreground]:max-w-[68ch]">
+        <h2 id="defaults-title" className="font-heading text-2xl leading-[1.2] font-semibold tracking-[-0.015em]">
           Defaults for new tests
         </h2>
-        <p className="muted">The new-test form can pick another model or level for one test.</p>
+        <p className="text-muted-foreground">The new-test form can pick another model or level for one test.</p>
       </div>
       {view.defaults.source === "environment" && (
-        <p className="hint">
+        <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
           <Icon name="info" /> These defaults come from the server&apos;s environment (<code>LLM_PROVIDER</code>, <code>LLM_MODEL</code>) until you
           save your own.
         </p>
@@ -264,8 +265,8 @@ function DefaultsForm({ view, onSaved }: { view: LlmSettingsView; onSaved: (view
           </div>
         </div>
       )}
-      <div className="field-pair">
-        <div className="field">
+      <div className="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1">
+        <Field>
           <label htmlFor="defaults-model">Model</label>
           <NativeSelect
             id="defaults-model"
@@ -281,16 +282,16 @@ function DefaultsForm({ view, onSaved }: { view: LlmSettingsView; onSaved: (view
             )}
             <ModelOptions models={view.models} />
           </NativeSelect>
-          <p id="defaults-model-price" className="hint">
+          <p id="defaults-model-price" className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
             {selected ? priceText(selected.price) : `The server's default model (${view.defaults.label}) is not offered here.`}
           </p>
           {errors.model && (
-            <p id="defaults-model-error" className="field-error">
+            <p id="defaults-model-error" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
               <Icon name="error" /> {errors.model}
             </p>
           )}
-        </div>
-        <div className="field">
+        </Field>
+        <Field>
           <label htmlFor="defaults-reasoning">Reasoning</label>
           <NativeSelect
             id="defaults-reasoning"
@@ -307,18 +308,18 @@ function DefaultsForm({ view, onSaved }: { view: LlmSettingsView; onSaved: (view
             ))}
           </NativeSelect>
           {errors.reasoning && (
-            <p id="defaults-reasoning-error" className="field-error">
+            <p id="defaults-reasoning-error" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
               <Icon name="error" /> {errors.reasoning}
             </p>
           )}
-        </div>
+        </Field>
       </div>
-      <div className="actions">
-        <Button type="submit"  disabled={pending}>
+      <div className="actions flex flex-wrap items-center gap-2">
+        <Button type="submit" disabled={pending}>
           Save defaults
         </Button>
         {notice && (
-          <p role="status" className="hint">
+          <p role="status" className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
             {notice}
           </p>
         )}

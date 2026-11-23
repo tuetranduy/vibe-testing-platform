@@ -9,10 +9,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const { next, org } = await searchParams;
   const tenant = typeof org === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(org) ? org : null;
   return (
-    <div className="login-page">
-      <div className="login-brand">
+    <div className="login-page relative isolate grid min-h-[calc(100dvh-140px)] content-center place-items-center gap-7">
+      <div className="flex flex-col items-center gap-3.5 text-center [&_.brand-mark]:size-12 [&_.brand-mark]:rounded-xl">
         <BrandMark size={48} />
-        <span className="login-brand-name">AI Testing Platform</span>
+        <span className="text-sm font-medium tracking-[-0.01em] text-muted-foreground">AI Testing Platform</span>
       </div>
       <LoginForm next={typeof next === "string" ? next : null} tenant={tenant} />
     </div>

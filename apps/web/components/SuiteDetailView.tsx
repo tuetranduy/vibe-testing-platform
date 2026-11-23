@@ -1,5 +1,6 @@
 "use client";
 
+import { Field } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -17,9 +18,8 @@ import {
 } from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
 import { Icon } from "./Icon";
-import { LIFECYCLE_LABEL } from "./format";
 import { displayUrl, formatWhen, plural } from "./report-format";
-import { VerdictBadge } from "./StatusBadge";
+import { LifecycleBadge, VerdictBadge } from "./StatusBadge";
 import { SuiteSchedules } from "./SuiteSchedules";
 import { SuiteRunOutcome, TRIGGER_LABEL, messageOf } from "./Suites";
 
@@ -51,7 +51,7 @@ export function SuiteDetailView({ suiteId, navigate = (url) => window.location.a
 
   if (state.status === "loading") {
     return (
-      <p className="muted" role="status">
+      <p className="text-muted-foreground" role="status">
         Loading the suite…
       </p>
     );
@@ -63,8 +63,8 @@ export function SuiteDetailView({ suiteId, navigate = (url) => window.location.a
         <div>
           <p className="banner-title">The suite couldn&apos;t be loaded</p>
           <p>{state.message}</p>
-          <div className="actions">
-            <Button variant="outline" type="button"  onClick={() => setAttempt((n) => n + 1)}>
+          <div className="actions flex flex-wrap items-center gap-2">
+            <Button variant="outline" type="button" onClick={() => setAttempt((n) => n + 1)}>
               Try again
             </Button>
           </div>
@@ -77,8 +77,8 @@ export function SuiteDetailView({ suiteId, navigate = (url) => window.location.a
   const changed = (next: SuiteDetail) => setState((s) => (s.status === "ready" ? { ...s, suite: next } : s));
 
   return (
-    <div className="stack-lg">
-      <header className="stack-tight">
+    <div className="flex min-w-0 flex-col gap-7">
+      <header className="stack-tight flex min-w-0 flex-col gap-3">
         <nav aria-label="Breadcrumb" className="breadcrumb">
           <ol>
             <li>
@@ -88,8 +88,8 @@ export function SuiteDetailView({ suiteId, navigate = (url) => window.location.a
           </ol>
         </nav>
         <h1 className="page-title">{suite.name}</h1>
-        {suite.description && <p className="page-lede">{suite.description}</p>}
-        <p className="muted">
+        {suite.description && <p className="max-w-[650px] text-[0.95rem] leading-[1.7] text-muted-foreground">{suite.description}</p>}
+        <p className="text-muted-foreground">
           {plural(suite.entryCount, "test")}
           {suite.owner ? ` · ${suite.owner.name}` : ""}
         </p>
@@ -122,21 +122,21 @@ function RunSuiteCard({ suite, navigate }: { suite: SuiteDetail; navigate: (url:
       setPending(false);
     }
   }
-  return <Card as="section" className="stack" aria-labelledby="run-suite-title">
-    <div className="section-head"><h2 id="run-suite-title" className="card-title">Run this suite</h2><p className="muted">Replay all {plural(suite.entryCount, "saved test")} in order.</p></div>
+  return <Card as="section" className="flex min-w-0 flex-col gap-5" aria-labelledby="run-suite-title">
+    <div className="flex flex-col gap-1.5 [&>.text-muted-foreground]:max-w-[68ch]"><h2 id="run-suite-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">Run this suite</h2><p className="text-muted-foreground">Replay all {plural(suite.entryCount, "saved test")} in order.</p></div>
     {legacy && <p className="note note-warning">Some saved tests use an older setup. Replace them with fresh tests before running this suite.</p>}
-    {error && <p role="alert" className="field-error">{error}</p>}
-    <div className="actions"><Button type="button"  onClick={() => void start()} disabled={pending || legacy || suite.entryCount === 0}><Icon name="arrow" />{pending ? "Starting…" : "Run suite"}</Button>{suite.entryCount === 0 && <p className="muted">Add a test first.</p>}</div>
+    {error && <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">{error}</p>}
+    <div className="actions flex flex-wrap items-center gap-2"><Button type="button" onClick={() => void start()} disabled={pending || legacy || suite.entryCount === 0}><Icon name="arrow" />{pending ? "Starting…" : "Run suite"}</Button>{suite.entryCount === 0 && <p className="text-muted-foreground">Add a test first.</p>}</div>
   </Card>;
 }
 
 function EntryResult({ entry }: { entry: SuiteEntryView }) {
   const r = entry.lastResult;
-  if (!r) return <span className="muted">Not run in this suite yet</span>;
+  if (!r) return <span className="text-muted-foreground">Not run in this suite yet</span>;
   return (
-    <a href={`/runs/${encodeURIComponent(r.runId)}`} className="entry-result">
-      {r.verdict ? <VerdictBadge verdict={r.verdict} /> : <span className="status">{LIFECYCLE_LABEL[r.lifecycle]}</span>}
-      <span className="visually-hidden"> (open the last run)</span>
+    <a href={`/runs/${encodeURIComponent(r.runId)}`} className="no-underline">
+      {r.verdict ? <VerdictBadge verdict={r.verdict} /> : <LifecycleBadge lifecycle={r.lifecycle} />}
+      <span className="sr-only"> (open the last run)</span>
     </a>
   );
 }
@@ -170,24 +170,24 @@ function EntriesCard({ suite, onChange }: { suite: SuiteDetail; onChange: (s: Su
     });
 
   return (
-    <Card as="section" className="stack" aria-labelledby="entries-title" aria-busy={busy}>
-      <div className="section-head">
-        <h2 id="entries-title" className="card-title">
+    <Card as="section" className="flex min-w-0 flex-col gap-5" aria-labelledby="entries-title" aria-busy={busy}>
+      <div className="flex flex-col gap-1.5 [&>.text-muted-foreground]:max-w-[68ch]">
+        <h2 id="entries-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
           <Icon name="layers" /> Tests
         </h2>
-        <p className="muted">They run in this order. Add a test from a finished run&apos;s report (&ldquo;Add to suite&rdquo;).</p>
+        <p className="text-muted-foreground">They run in this order. Add a test from a finished run&apos;s report (&ldquo;Add to suite&rdquo;).</p>
       </div>
       {suite.entries.length === 0 ? (
-        <p className="muted">No tests yet.</p>
+        <p className="text-muted-foreground">No tests yet.</p>
       ) : (
-        <ol className="suite-entries" aria-label="Tests in run order">
+        <ol className="m-0 grid list-none p-0" aria-label="Tests in run order">
           {suite.entries.map((e, i) => (
-            <li key={e.sourceRunId} className="suite-entry">
-              <div className="suite-entry-main">
-                <a href={`/runs/${encodeURIComponent(e.sourceRunId)}`} className="suite-entry-title">
+            <li key={e.sourceRunId} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-4 gap-y-2 border-t border-(--border-soft) py-3.5 first:border-t-0 max-[720px]:grid-cols-1">
+              <div className="grid min-w-0 gap-1">
+                <a href={`/runs/${encodeURIComponent(e.sourceRunId)}`} className="font-[560] wrap-anywhere text-foreground no-underline hover:text-accent-foreground hover:underline">
                   {e.title || displayUrl(e.targetUrl)}
                 </a>
-                <p className="muted">
+                <p className="text-muted-foreground">
                   {displayUrl(e.targetUrl)} · {plural(e.compiledCriteria, "criterion", "criteria")} checked
                 </p>
                 {e.destructive && (
@@ -197,7 +197,7 @@ function EntriesCard({ suite, onChange }: { suite: SuiteDetail; onChange: (s: Su
                 )}
               </div>
               <EntryResult entry={e} />
-              <div className="actions suite-entry-actions">
+              <div className="actions flex flex-wrap items-center gap-2 gap-1">
                 <Button variant="ghost"
                   type="button"
                   onClick={() => void move(i, i - 1)}
@@ -229,7 +229,7 @@ function EntriesCard({ suite, onChange }: { suite: SuiteDetail; onChange: (s: Su
         </ol>
       )}
       {error && (
-        <p role="alert" className="field-error">
+        <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
           <Icon name="error" /> {error}
         </p>
       )}
@@ -239,21 +239,21 @@ function EntriesCard({ suite, onChange }: { suite: SuiteDetail; onChange: (s: Su
 
 function RecentRuns({ runs }: { runs: SuiteRunBrief[] }) {
   return (
-    <Card as="section" className="stack" aria-labelledby="suite-runs-title">
-      <h2 id="suite-runs-title" className="card-title">
+    <Card as="section" className="flex min-w-0 flex-col gap-5" aria-labelledby="suite-runs-title">
+      <h2 id="suite-runs-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
         Recent runs
       </h2>
       {runs.length === 0 ? (
-        <p className="muted">This suite hasn&apos;t run yet.</p>
+        <p className="text-muted-foreground">This suite hasn&apos;t run yet.</p>
       ) : (
-        <ul className="suite-run-list">
+        <ul className="m-0 grid list-none gap-2.5 p-0 [&>li]:flex [&>li]:flex-wrap [&>li]:items-center [&>li]:gap-x-3.5 [&>li]:gap-y-2">
           {runs.map((r) => (
             <li key={r.id}>
               <a href={`/suite-runs/${encodeURIComponent(r.id)}`}>
                 <time dateTime={r.createdAt}>{formatWhen(r.createdAt)}</time>
               </a>
               <SuiteRunOutcome run={r} />
-              <span className="muted">{TRIGGER_LABEL[r.trigger]}</span>
+              <span className="text-muted-foreground">{TRIGGER_LABEL[r.trigger]}</span>
             </li>
           ))}
         </ul>
@@ -307,45 +307,45 @@ function SuiteSettings({
   }
 
   return (
-    <Card as="form" className="stack" onSubmit={save} noValidate aria-labelledby="suite-settings-title" aria-busy={pending}>
-      <h2 id="suite-settings-title" className="card-title">
+    <Card as="form" className="flex min-w-0 flex-col gap-5" onSubmit={save} noValidate aria-labelledby="suite-settings-title" aria-busy={pending}>
+      <h2 id="suite-settings-title" className="card-title mb-3.5 text-sm font-semibold text-muted-foreground">
         <Icon name="sliders" /> Suite settings
       </h2>
-      <div className="field">
+      <Field>
         <label htmlFor="suite-edit-name">Name</label>
         <Input id="suite-edit-name" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
-      </div>
-      <div className="field">
+      </Field>
+      <Field>
         <label htmlFor="suite-edit-description">
-          Description <span className="muted">(optional)</span>
+          Description <span className="text-muted-foreground">(optional)</span>
         </label>
         <Textarea id="suite-edit-description" rows={2} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
-      </div>
+      </Field>
       {message && (
-        <p role={message.kind === "error" ? "alert" : "status"} className={message.kind === "error" ? "field-error" : "muted"}>
+        <p role={message.kind === "error" ? "alert" : "status"} className={message.kind === "error" ? "flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px" : "text-muted-foreground"}>
           {message.kind === "error" && <Icon name="error" />} {message.text}
         </p>
       )}
-      <div className="actions">
-        <Button type="submit"  disabled={pending}>
+      <div className="actions flex flex-wrap items-center gap-2">
+        <Button type="submit" disabled={pending}>
           Save settings
         </Button>
         {confirmingDelete ? (
           <>
-            <Button variant="destructive" type="button"  onClick={() => void remove()} disabled={pending}>
+            <Button variant="destructive" type="button" onClick={() => void remove()} disabled={pending}>
               Delete “{suite.name}”
             </Button>
-            <Button variant="outline" type="button"  onClick={() => setConfirmingDelete(false)} disabled={pending}>
+            <Button variant="outline" type="button" onClick={() => setConfirmingDelete(false)} disabled={pending}>
               Keep it
             </Button>
           </>
         ) : (
-          <Button variant="danger-outline" type="button" className="actions-end" onClick={() => setConfirmingDelete(true)} disabled={pending}>
+          <Button variant="danger-outline" type="button" className="ml-auto" onClick={() => setConfirmingDelete(true)} disabled={pending}>
             Delete suite
           </Button>
         )}
       </div>
-      {confirmingDelete && <p className="muted">Its schedules are deleted too; its past runs stay in the history.</p>}
+      {confirmingDelete && <p className="text-muted-foreground">Its schedules are deleted too; its past runs stay in the history.</p>}
     </Card>
   );
 }

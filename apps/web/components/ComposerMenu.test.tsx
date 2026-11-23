@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -29,16 +29,17 @@ function Harness({ onChange = () => {} }: { onChange?: (v: string) => void }) {
   );
 }
 
-const chip = () => screen.getByRole("button", { name: /^Model:/ });
+const chip = () => screen.getByRole("combobox", { name: /^Model:/ });
 
 describe("ComposerMenu", () => {
-  it("is a button named by its label and value; it opens a listbox of options grouped as given", async () => {
+  it("is a combobox named by its label and value; it opens a listbox of options grouped as given", async () => {
     const user = userEvent.setup();
     render(<Harness />);
     expect(chip()).toHaveAccessibleName("Model: Default");
     expect(chip()).toHaveAttribute("aria-expanded", "false");
-    await user.click(chip());
-    expect(chip()).toHaveAttribute("aria-expanded", "true");
+    const trigger = chip();
+    await user.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
     const list = screen.getByRole("listbox", { name: "Model" });
     expect(within(list).getAllByRole("group").map((g) => g.getAttribute("aria-label"))).toEqual(["Anthropic", "Google Gemini", "DeepSeek"]);
     expect(within(list).getByRole("option", { name: "Default" })).toHaveAttribute("aria-selected", "true");
@@ -58,7 +59,7 @@ describe("ComposerMenu", () => {
     expect(onChange).toHaveBeenCalledWith("opus");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(chip()).toHaveAccessibleName("Model: Claude Opus 5.5");
-    expect(chip()).toHaveFocus();
+    await waitFor(() => expect(chip()).toHaveFocus());
   });
 
   it("works from the keyboard: arrows skip disabled options, Enter chooses, Escape closes without choosing", async () => {
@@ -67,16 +68,13 @@ describe("ComposerMenu", () => {
     render(<Harness onChange={onChange} />);
     chip().focus();
     await user.keyboard("{ArrowDown}");
-    const list = screen.getByRole("listbox");
-    expect(list).toHaveFocus();
-    const active = () => list.getAttribute("aria-activedescendant") && document.getElementById(list.getAttribute("aria-activedescendant")!);
-    expect(active()).toHaveTextContent("Default"); // the selected option first
-    await user.keyboard("{ArrowDown}{ArrowDown}"); // Opus, then past the disabled Gemini to Flash
-    expect(active()).toHaveTextContent("DeepSeek Flash");
+    expect(screen.getByRole("option", { name: "Default" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+    expect(screen.getByRole("option", { name: "DeepSeek Flash" })).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
-    expect(chip()).toHaveFocus();
+    await waitFor(() => expect(chip()).toHaveFocus());
     await user.keyboard("{Enter}");
     await user.keyboard("{End}{Enter}");
     expect(onChange).toHaveBeenCalledWith("flash");
@@ -86,13 +84,13 @@ describe("ComposerMenu", () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(chip());
-    await user.click(screen.getByRole("button", { name: "elsewhere" }));
+    fireEvent.pointerDown(screen.getByText("elsewhere"));
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
   it("can be disabled, and marked invalid with a description", () => {
     render(<ComposerMenu id="x" label="Reasoning" icon="gauge" value="" display="Default" options={OPTIONS} onChange={() => {}} disabled invalid describedBy="x-error" />);
-    const button = screen.getByRole("button", { name: "Reasoning: Default" });
+    const button = screen.getByRole("combobox", { name: "Reasoning: Default" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("aria-invalid", "true");
     expect(button).toHaveAttribute("aria-describedby", "x-error");

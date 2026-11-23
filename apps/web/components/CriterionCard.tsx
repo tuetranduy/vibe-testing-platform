@@ -2,6 +2,7 @@
 
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { describeExpectedOutcome, isInferred, type AcceptanceCriterion, type CriterionProposalResponse, type ExpectedOutcome, type FactRequest, type SiteCheck } from "@platform/contracts";
 import { useEffect, useRef, useState } from "react";
@@ -110,27 +111,27 @@ export function CriterionCard({
       </h3>
       <div className="criterion-body">
         {(c.ambiguity || aiJudged) && (
-          <div className="badges">
+          <div className="flex flex-wrap gap-1.5">
             {c.ambiguity && (
-              <span className="badge badge-warning">
+              <Badge variant="outline" className="min-h-6 gap-1.5 border-transparent bg-(--warning-bg) text-(--warning)">
                 <Icon name="warning" /> Needs clarification
-              </span>
+              </Badge>
             )}
             {aiJudged && (
-              <span className="badge badge-info">
+              <Badge variant="outline" className="min-h-6 gap-1.5 border-transparent bg-(--info-bg) text-(--info)">
                 <Icon name="info" /> AI-judged
-              </span>
+              </Badge>
             )}
           </div>
         )}
 
         <p className="criterion-statement">{c.statement}</p>
         {isInferred(c) && c.rationale && (
-          <p className="criterion-rationale">
+          <p className="mt-[0.35rem] text-sm text-muted-foreground">
             <span className="note-title">Why it was added</span> <span>{c.rationale}</span>
           </p>
         )}
-        {c.assumption && <p className="criterion-assumption">Assumed: {c.assumption}</p>}
+        {c.assumption && <p className="mt-[0.35rem] text-sm text-muted-foreground">Assumed: {c.assumption}</p>}
 
         <div className="criterion-check" role="group" aria-labelledby={`${c.id}-check`}>
           <p id={`${c.id}-check`} className="criterion-check-title">
@@ -175,8 +176,8 @@ export function CriterionCard({
 
         {editing && onRevise && onAccept && <CheckRewrite criterionId={c.id} currentPreconditions={c.preconditions} busy={busy} onRevise={onRevise} onAccept={onAccept} />}
         {editing && aiJudged && (
-          <div className="actions">
-            <Button variant="ghost" type="button"  onClick={() => setEditing(false)}>
+          <div className="actions flex flex-wrap items-center gap-2">
+            <Button variant="ghost" type="button" onClick={() => setEditing(false)}>
               Close
             </Button>
           </div>
@@ -187,8 +188,8 @@ export function CriterionCard({
         </p>
 
         {onCriticalChange && (
-          <div className="weight-field">
-            <label className="choice">
+          <div className="grid gap-1 [&_.hint]:m-0">
+            <label className="flex min-h-8 cursor-pointer items-center gap-2.5 text-[0.9375rem] has-disabled:cursor-not-allowed has-disabled:text-muted-foreground">
               <Checkbox
                 checked={c.critical}
                 disabled={busy || (c.critical && !canMakeNonCritical)}
@@ -197,7 +198,7 @@ export function CriterionCard({
               />
               <span>Critical</span>
             </label>
-            <p id={`${c.id}-weight-hint`} className="hint">
+            <p id={`${c.id}-weight-hint`} className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
               {c.critical
                 ? canMakeNonCritical
                   ? "Decides the verdict. Untick for a nice-to-have that is reported but never fails the run."
@@ -205,7 +206,7 @@ export function CriterionCard({
                 : "Non-critical: reported with its result, but the verdict ignores it."}
             </p>
             {weightError && (
-              <p role="alert" className="field-error">
+              <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px">
                 <Icon name="error" /> {weightError}
               </p>
             )}
@@ -256,7 +257,7 @@ export function CriterionCard({
               Remove {c.id}?
             </p>
             <p>It won&apos;t be checked in this run.</p>
-            <div className="actions">
+            <div className="actions flex flex-wrap items-center gap-2">
               <Button variant="destructive"
                 type="button"
                 onClick={() => {
@@ -267,7 +268,7 @@ export function CriterionCard({
               >
                 Yes, remove
               </Button>
-              <Button variant="outline" type="button"  onClick={() => setRemoving(false)} autoFocus>
+              <Button variant="outline" type="button" onClick={() => setRemoving(false)} autoFocus>
                 Keep it
               </Button>
             </div>
@@ -275,7 +276,7 @@ export function CriterionCard({
         )}
 
         {!editing && !removing && (
-          <div className="actions">
+          <div className="actions flex flex-wrap items-center gap-2">
             {(!aiJudged || onRevise) && (
               <Button variant="outline"
                 ref={editButton}
