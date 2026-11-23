@@ -10,6 +10,8 @@ export interface LlmTransportRequest {
   jsonSchema: JsonSchema;
   schemaName: string;
   maxTokens: number;
+  /** This request's HTTP timeout instead of the transport's default (a long answer with reasoning on takes minutes). */
+  timeoutMs?: number;
   /** `default`: no reasoning parameter (the model's own level). */
   reasoning: ReasoningLevel;
   signal: AbortSignal;

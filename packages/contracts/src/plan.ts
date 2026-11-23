@@ -38,14 +38,17 @@ export type PlannedStep = z.infer<typeof PlannedStepSchema>;
 /** A scenario's id: SC-1 … SC-5 (V1.1 F9, D12 amended). */
 export const ScenarioIdSchema = z.string().regex(/^SC-[1-5]$/);
 export const MAX_SCENARIOS = 5;
-/** Planned steps across every scenario of a plan. */
+/**
+ * Planned steps across every scenario of a plan, and so in one scenario too: a long form flow (a quote of about 70
+ * actions) is one continuous flow that cannot be split across scenarios, each of which starts a fresh session.
+ */
 export const MAX_PLAN_STEPS = 100;
 
 export const TestScenarioSchema = z.object({
   id: ScenarioIdSchema,
   title: z.string().max(200),
   criterionIds: z.array(CriterionIdSchema).min(1),
-  steps: z.array(PlannedStepSchema).min(1).max(50),
+  steps: z.array(PlannedStepSchema).min(1).max(MAX_PLAN_STEPS),
 });
 export type TestScenario = z.infer<typeof TestScenarioSchema>;
 

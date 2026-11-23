@@ -979,7 +979,7 @@ class ExplorationRun {
     const firstId = Math.max(0, ...ids) + 1;
     const others = this.input.plan.scenarios.filter((s) => s.id !== scenario.id).reduce((n, s) => n + (this.revised.get(s.id) ?? s.steps).length, 0);
     const retained = arrived ? at : at + 1;
-    const room = Math.min(50 - retained, MAX_PLAN_STEPS - others - retained, 999 - firstId + 1);
+    const room = Math.min(MAX_PLAN_STEPS - others - retained, 999 - firstId + 1);
     if (room <= 0) return rejected("no_room");
     const result = await (async () => this.replanner!.replan(
       {

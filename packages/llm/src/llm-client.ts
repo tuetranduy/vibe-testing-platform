@@ -46,6 +46,8 @@ export interface LlmCallInput {
   /** Backoff never sleeps past this instant; the call gives up instead. */
   deadlineAt?: Date | null;
   maxTokens?: number;
+  /** This call's HTTP timeout per request, instead of the transport's default. */
+  timeoutMs?: number;
   /** Identifies the call to the provider (e.g. Stagehand's "Act", "Observation"). */
   schemaName?: string;
   /** This call's reasoning level instead of the client's (the Stagehand bridge always sends "default"). */
@@ -215,6 +217,7 @@ export class LlmClient {
             jsonSchema,
             schemaName: input.schemaName ?? "output",
             maxTokens: input.maxTokens ?? this.opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+            ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
             reasoning: input.reasoning ?? this.reasoning,
             signal,
           }),

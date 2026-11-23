@@ -460,15 +460,46 @@ describe("planTest — model contract (one correction round, then ContractError)
     expect(lastCorrection(transport)).toMatch(/to log in again .*start a new scenario/i);
   });
 
-  it("more than 50 steps → correction → ContractError", async () => {
-    const long = () => {
-      const out = cartPlan();
-      out.steps.splice(1, 0, ...Array.from({ length: 50 }, (_, i) => step("wait_for", `Wait for the page ${i}`)));
-      return out;
-    };
-    const { llm, transport } = setup({ json: long() }, { json: long() });
+  /** The cart plan (8 steps) with `extra` wait steps after its navigate step. */
+  const padded = (extra: number) => {
+    const out = cartPlan();
+    out.steps.splice(1, 0, ...Array.from({ length: extra }, (_, i) => step("wait_for", `Wait for the page ${i}`)));
+    return out;
+  };
+
+  it("one scenario of up to 100 steps is accepted: a long form flow cannot be split across fresh sessions (run_0mwsywc5i4ea89000d0fac718)", async () => {
+    const { llm, transport } = setup({ json: padded(92) });
+    const plan = await planTest(llm, input(cartRequirement()));
+    expect(transport.requests).toHaveLength(1);
+    expect(plan.scenarios[0]!.steps).toHaveLength(100);
+    expect(TestPlanSchema.parse(plan)).toEqual(plan);
+  });
+
+  it("more than 100 steps in one scenario → correction → ContractError", async () => {
+    const { llm, transport } = setup({ json: padded(93) }, { json: padded(93) });
     await expect(planTest(llm, input(cartRequirement()))).rejects.toBeInstanceOf(ContractError);
     expect(transport.requests).toHaveLength(2);
+  });
+
+  it("more than 100 steps across scenarios → correction that says so → ContractError", async () => {
+    const tooMany = () => ({
+      scenarios: [
+        cartPlanAsScenarios().scenarios[0]!,
+        { title: "Browse", steps: [step("navigate", "Open the shop"), ...Array.from({ length: 92 }, (_, i) => step("wait_for", `Wait for the page ${i}`)), step("click", "Open the cart", { criterionIds: ["AC-4"] })] },
+      ],
+      stopConditions: [],
+    });
+    const { llm, transport } = setup({ json: tooMany() }, { json: tooMany() });
+    await expect(planTest(llm, input(cartRequirement()))).rejects.toBeInstanceOf(ContractError);
+    expect(transport.requests).toHaveLength(2);
+    expect(lastCorrection(transport)).toMatch(/102 steps in all scenarios.*at most 100/);
+  });
+
+  it("asks for an output budget and a request timeout that fit a long plan with reasoning on (run_0mwsywc5i4ea89000d0fac718)", async () => {
+    const { llm, transport } = setup({ json: cartPlan() });
+    await planTest(llm, input(cartRequirement()));
+    expect(transport.requests[0]!.maxTokens).toBe(32_000);
+    expect(transport.requests[0]!.timeoutMs).toBe(300_000);
   });
 });
 
