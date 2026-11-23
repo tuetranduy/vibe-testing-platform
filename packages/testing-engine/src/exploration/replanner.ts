@@ -13,6 +13,7 @@ import { z } from "zod";
 import { applyBlocking } from "../planner/blocking";
 import { PlannerStepOutputSchema, type PlannerStepOutput } from "../planner/model-output";
 import { checkpointOrder, neededCheckpoints } from "../planner/post-validate";
+import { plannedDestructive } from "../shared/action-policy";
 
 /**
  * Bounded replanning (2026-11-19, WS3.3 of the 2026-11-06 plan): a planned step that still fails after its retry used to
@@ -141,7 +142,7 @@ export function validateReplan(output: { steps: PlannerStepOutput[] }, input: Re
         ...(s.inputRef ? { inputRef: s.inputRef } : {}),
         ...(isCapture ? { checkpoint: s.checkpoint! } : {}),
         criterionIds: input.scenario.criterionIds.filter((id) => ids.has(id)),
-        destructive: s.destructive,
+        destructive: plannedDestructive(s.kind, s.destructive),
       };
     }),
   };

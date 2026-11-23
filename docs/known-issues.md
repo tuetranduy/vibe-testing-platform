@@ -1566,6 +1566,23 @@ replanner and way-there prompts (KI-078).
   allowed) planned 73 steps in one scenario, nothing blocked, in 41 s and 10,024 output tokens. Not yet validated by
   a live run.
 - **Not handled:** whether every offered model accepts 32,000 output tokens was not checked against each provider's
-  documentation. In the replay the model left out the requirement's conditional "If address not found, …" steps, and
-  flagged "Select the purchased date" destructive: with destructive actions denied, that cut the plan after 7 steps
-  and blocked AC-2 to AC-6.
+  documentation. In the replay the model left out the requirement's conditional "If address not found, …" steps. It
+  also flagged "Select the purchased date" destructive (KI-093).
+
+## KI-093 — A "Purchased date" field was treated as a purchase, cutting a quote flow after 7 steps
+- **Severity:** High (with destructive actions denied, every criterion after the field was blocked; with them allowed,
+  a step not flagged destructive could not use a field labelled "Purchased date").
+- **Where:** `packages/security/src/action-policy.ts` (`purchase` terms), `packages/testing-engine/src/shared/action-policy.ts`
+  (`plannedDestructive`), `planner/post-validate.ts`, `exploration/replanner.ts`.
+- **What:** replaying `run_0mwsywc5i4ea89000d0fac718`'s planning (KI-092) with destructive actions denied, the plan
+  stopped at "Select the purchased date" and AC-2 to AC-6 were `DESTRUCTIVE_ACTION_NOT_AUTHORIZED`, for two reasons:
+  "purchased" is a destructive term, so the wording matched (as would the field's own label at execution), and
+  DeepSeek Flash had flagged the select step `destructive: true`.
+- **Resolved (2026-11-23, working tree):** a purchase word followed by a field noun (date, price, value, history, …)
+  or after "<noun> of" ("date of purchase") is not a match; "Purchase now", "Click Purchase" and "Complete the
+  purchase" still are. The model's flag is dropped on fill, select and search steps, in the plan and in replans: entering
+  a value commits nothing, the click or submit after it does and is still checked; their wording still is too. Two
+  replays with destructive actions denied planned all 73 steps with nothing flagged or blocked (55 s, 12,904 and
+  14,349 output tokens). Not yet validated by a live run.
+- **Not handled:** a select whose option commits by itself (an "Actions" menu that deletes on choice) is now caught
+  only by its wording, not by the model's flag. Other terms used as field labels ("Payment day") still match.

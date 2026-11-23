@@ -562,6 +562,18 @@ describe("planTest — deterministic blocking", () => {
     expect(plan.blockedCriteria[0]!.detail).toMatch(/marked destructive/);
   });
 
+  it("the model's destructive flag on a step that only enters a value (fill, select, search) is dropped: entering a value commits nothing (KI-093)", async () => {
+    const out = cartPlan();
+    out.steps.splice(1, 0,
+      step("select", "Select the purchased date", { inputRef: { source: "literal", key: "01/12/2022" }, destructive: true }),
+      step("fill", "Enter the estimated value", { inputRef: { source: "literal", key: "3122" }, destructive: true }));
+    out.steps[3] = { ...out.steps[3]!, destructive: true }; // the search step
+    const { llm } = setup({ json: out });
+    const plan = await planTest(llm, input(cartRequirement()));
+    expect(plan.blockedCriteria).toEqual([]);
+    expect(plan.scenarios[0]!.steps.filter((s) => s.destructive)).toEqual([]);
+  });
+
   it("the model saying destructive=false never un-blocks a step the policy denies", async () => {
     const { llm } = setup({ json: deletePlan(step("click", "Click Delete account", { destructive: false })) });
     const plan = await planTest(llm, input(deleteRequirement()));

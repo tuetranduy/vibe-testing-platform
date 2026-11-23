@@ -169,6 +169,13 @@ describe("createReplanner", () => {
     expect(await createReplanner(invalid.llm)!.replan(input(), call)).toMatchObject({ steps: null, reason: "validation_failed", issues: [expect.stringContaining("never captured")] });
   });
 
+  it("a value-entry step the model flagged destructive is kept, unflagged (KI-093)", async () => {
+    const flagged = { ...out("select", "Select the purchased date", { inputRef: { source: "literal", key: "01/12/2022" } }), destructive: true };
+    const { llm } = setup({ json: { steps: [flagged, ...good] } });
+    const result = await createReplanner(llm)!.replan(input(), call);
+    expect(result.steps?.map((s) => [s.kind, s.destructive])).toEqual([["select", false], ["navigate", false], ["click", false], ["click", false], ["capture_checkpoint", false]]);
+  });
+
   it("reports a failed model call separately from validation", async () => {
     const { llm } = setup();
     expect(await createReplanner(llm)!.replan(input(), call)).toEqual({ steps: null, reason: "model_failed" });

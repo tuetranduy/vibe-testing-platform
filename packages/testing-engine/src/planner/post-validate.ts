@@ -4,6 +4,7 @@
  * ContractError. The model is never trusted with step ids, criterion ids or checkpoint coverage.
  */
 import { factRefsOf, type AcceptanceCriterion, type FactRequest, type PlannedStep } from "@platform/contracts";
+import { plannedDestructive } from "../shared/action-policy";
 import { MAX_PLANNED_STEPS, type PlannerOutput } from "./model-output";
 
 /** A validated scenario: its title, its steps (ids unique across the plan) and the criteria it serves. */
@@ -153,7 +154,7 @@ export function validatePlanOutput(
         ...(step.inputRef ? { inputRef: step.inputRef } : {}),
         ...(isCapture ? { checkpoint: step.checkpoint! } : {}),
         criterionIds: criterionIds.filter((id) => ids.has(id)),
-        destructive: step.destructive,
+        destructive: plannedDestructive(step.kind, step.destructive),
       };
     }),
   }));
