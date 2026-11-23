@@ -1622,3 +1622,25 @@ replanner and way-there prompts (KI-078).
   limit is in each request's message instead of the system prompt. Replans use the planner's 32,000-token budget and
   300 s timeout. Not yet validated by a live run.
 - **Not handled:** no eval scores the replanner; the prompt's limit wording changed without a model run.
+
+## KI-096 — An accordion opened only by an unnamed icon was never expanded: the text beside it was refused as "not clickable"
+- **Severity:** High (the scenario stopped at the first such section and asked for help).
+- **Where:** `packages/testing-engine/src/exploration/recorder.ts` (`nearbyControl`), `executor.ts` (the KI-001 branch).
+- **What:** `run_0mwt3bb8h3d0fe017dedf6c9f` (qa-bike-quote.bewiser.co.uk, the quote of KI-092, DeepSeek Flash) got past
+  the statement checkbox (KI-094, validated) and the purchase date's custom dropdown (replanned, KI-095, validated), then
+  stopped at "Expand the Modification section 'Wheels / Tyres / Brakes'". The header is
+  `<div><p><p>Wheels / Tyres / Brakes</p></p><i tabindex="0" class="icon-mod-plus"></i></div>`: only the icon, which
+  has no role or name (so it is not in the accessibility tree observe reads) and an Angular click handler, expands it;
+  clicking the text or the header does nothing (checked on the live page). Observe found the paragraph, the KI-001 rule
+  refused it as not clickable and asked once more, observe found the paragraph again, and the step failed; the help
+  request timed out after 10 minutes and AC-2 to AC-6 ended INCONCLUSIVE. Each modification's "Add" is built the same
+  way (`<span tabindex="0"><p>Add</p></span>`).
+- **Resolved (2026-11-23, working tree):** when the second look also finds text, the one control next to it is clicked:
+  the nearest ancestor within three levels that is a control (a link around a status badge, the span around "Add"), or
+  the one visible control (focusable, or with a control's role) the first level with any holds; never one of several.
+  It must be hittable, is checked by the action policy, and is recorded, so the generated test clicks it too (by XPath:
+  the icon has no other locator). On the live page the header text leads to the plus icon, which opens the section,
+  and the "Add" text to its span, which adds "Uprated Brakes" (the row then offers "Remove"). Not yet validated by a
+  live run.
+- **Not handled:** the icon is replayed by a positional XPath only, which breaks if the page's structure before it
+  changes. A header whose row holds two controls (an icon and an info link) is still refused.

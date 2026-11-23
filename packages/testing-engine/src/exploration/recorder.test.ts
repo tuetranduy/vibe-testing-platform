@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LOCATOR_STRATEGY_ORDER } from "../shared/locator-policy";
 import { captureCheckpoint, captureFact, modeForValueType, readFact } from "./fact-reader";
 import { captureNamedFact, namedFactSubject } from "./named-facts";
-import { checkElement, describeElement, describeField, elementAction, fieldValue, fillElement, exactNamedControl, hittableAlternative, hittableLabel, isHittable, reachableNamedControl, recordElement, requiredEmptyFields, selectElementOption } from "./recorder";
+import { checkElement, describeElement, describeField, elementAction, fieldValue, fillElement, exactNamedControl, hittableAlternative, hittableLabel, isHittable, nearbyControl, reachableNamedControl, recordElement, requiredEmptyFields, selectElementOption } from "./recorder";
 
 /**
  * Real Chromium (Playwright's build, launched headless without a proxy) on a static fixture
@@ -606,6 +606,35 @@ describe("hittableLabel (KI-094: a custom checkbox whose input is hidden behind 
   it("anything but a checkbox or radio input: null", async () => {
     await page.setContent(CUSTOM);
     expect(await hittableLabel(page, "#plain")).toBeNull();
+  });
+});
+
+describe("nearbyControl (KI-096: the control next to the text observe found)", () => {
+  // As on qa-bike-quote.bewiser.co.uk's modifications: the header's text is a paragraph; only the unnamed plus icon
+  // (tabindex 0, an Angular click handler) expands the section. "Add" is a span with tabindex around a paragraph.
+  const PAGE = `<div class="header"><p><span>Wheels / Tyres / Brakes</span></p><i tabindex="0" class="plus" style="display:inline-block;width:16px;height:16px" onclick="this.className='minus'"></i></div>
+  <div class="item"><p>Uprated Brakes</p><div><span tabindex="0" id="add"><p>Add</p></span></div></div>
+  <a href="/cart"><span role="status">Cart (1)</span></a>
+  <div class="two"><p>Choose</p><button>One</button><button>Two</button></div>
+  <section><div><div><div><p>Far away</p></div></div></div><button>Unrelated</button></section>`;
+
+  it("the one focusable control beside the text, a few levels up", async () => {
+    await page.setContent(PAGE);
+    expect(await nearbyControl(page, "xpath=/html[1]/body[1]/div[1]/p[1]/span[1]")).toBe("xpath=/html[1]/body[1]/div[1]/i[1]");
+    await page.locator("xpath=/html[1]/body[1]/div[1]/i[1]").click();
+    expect(await page.locator(".minus").count()).toBe(1);
+  });
+
+  it("a control around the text: that control", async () => {
+    await page.setContent(PAGE);
+    expect(await nearbyControl(page, "#add >> p")).toBe("xpath=/html[1]/body[1]/div[2]/div[1]/span[1]");
+    expect(await nearbyControl(page, "[role=status]")).toBe("xpath=/html[1]/body[1]/a[1]");
+  });
+
+  it("two controls at the first level that has any, or none within three levels: null", async () => {
+    await page.setContent(PAGE);
+    expect(await nearbyControl(page, ".two >> p")).toBeNull();
+    expect(await nearbyControl(page, "text=Far away")).toBeNull();
   });
 });
 

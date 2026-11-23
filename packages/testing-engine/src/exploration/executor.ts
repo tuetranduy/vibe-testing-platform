@@ -59,6 +59,7 @@ import {
   exactNamedControl,
   hittableAlternative,
   hittableLabel,
+  nearbyControl,
   isHittable,
   reachableNamedControl,
   recordElement,
@@ -223,6 +224,8 @@ export interface RecorderPort {
   hittable?(page: Page, selector: string): Promise<boolean>;
   /** For a checkbox or radio input a click cannot land on, its label a click lands on (hittableLabel, KI-094). */
   hittableLabel?(page: Page, selector: string): Promise<string | null>;
+  /** The one control next to text a click located (nearbyControl, KI-096). Absent: such a click fails. */
+  nearbyControl?(page: Page, selector: string): Promise<string | null>;
   /** A reachable element the ref's role / test id / label / text candidates match (hittableAlternative, R2). */
   hittableAlternative?(page: Page, ref: ElementRef): Promise<string | null>;
   /** The first reachable element of these roles whose accessible name contains the name (reachableNamedControl, KI-072). */
@@ -256,6 +259,7 @@ export const playwrightRecorder: RecorderPort = {
   check: (page, selector) => checkElement(page, selector),
   hittable: (page, selector) => isHittable(page, selector),
   hittableLabel: (page, selector) => hittableLabel(page, selector),
+  nearbyControl: (page, selector) => nearbyControl(page, selector),
   hittableAlternative: (page, ref) => hittableAlternative(page, ref),
   namedControl: (page, name, roles) => reachableNamedControl(page, name, roles),
   exactControl: (page, name, roles) => exactNamedControl(page, name, roles),
@@ -1298,11 +1302,16 @@ class ExplorationRun {
     }
     if (!located) return "failed";
     // An element that cannot be clicked (e.g. the "Cart (1)" status badge for "Open the cart page", KI-001): ask once
-    // for the link or button itself.
+    // for the link or button itself. Text again (an accordion header whose control is an unnamed icon, KI-096): the
+    // one control next to that text.
     if (located.info.role !== null && NOT_CLICKABLE.has(located.info.role)) {
       const target = await this.locate(step, `Find the link or button to click, not text, a heading or a status: ${step.description}`);
-      if (!target || (target.info.role !== null && NOT_CLICKABLE.has(target.info.role))) return "failed";
-      located = target;
+      if (target && !(target.info.role !== null && NOT_CLICKABLE.has(target.info.role))) located = target;
+      else {
+        const near = await this.nearbyControl(target ?? located);
+        if (!near) return "failed";
+        located = near;
+      }
     }
     const instruction = observeInstruction;
     // A submit or click step that resolves to the text field the run just typed into ("Submit the search", "Press
@@ -1570,6 +1579,21 @@ class ExplorationRun {
         value: input!.value,
         ...(input!.generatedValue !== undefined ? { generatedValue: input!.generatedValue } : {}),
       });
+    }
+  }
+
+  /** The one control next to located text (KI-096), recorded so the generated test clicks it too; null when none. */
+  private async nearbyControl(text: Located): Promise<Located | null> {
+    const recorder = this.recorder;
+    if (!recorder.nearbyControl) return null;
+    try {
+      const selector = await recorder.nearbyControl(this.page, text.element.selector);
+      if (!selector) return null;
+      const [ref, info] = await Promise.all([recorder.record(this.page, selector), recorder.describe(this.page, selector)]);
+      return { element: { ...text.element, selector }, ref, info };
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      return null;
     }
   }
 
