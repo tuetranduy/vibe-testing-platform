@@ -90,7 +90,7 @@ export class AnthropicTransport implements LlmTransport {
       messages: req.messages.map(toMessageParam),
       output_config: { format: { type: "json_schema" as const, schema }, ...effortOf(req.reasoning) },
     };
-    const options = { signal: req.signal, timeout: this.timeoutMs, maxRetries: 0 };
+    const options = { signal: req.signal, timeout: req.timeoutMs ?? this.timeoutMs, maxRetries: 0 };
     let message: MessageLike;
     try {
       message = catalogModel(req.model)?.refusalFallback

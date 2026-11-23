@@ -388,6 +388,16 @@ describe("LlmClient.generateJson (JSON-Schema level, for the Stagehand bridge)",
   });
 });
 
+describe("LlmClient request timeout", () => {
+  it("passes a call's timeout to the transport, on the correction round too, and none when the call names none", async () => {
+    const { client, transport } = setup();
+    transport.enqueue({ json: { answer: "" } }, { json: { answer: "ok", count: 1 } }, { json: { answer: "b", count: 2 } });
+    await client.generateStructured({ ...base(), schema: Answer, timeoutMs: 300_000 });
+    await client.generateStructured({ ...base(), schema: Answer });
+    expect(transport.requests.map((r) => r.timeoutMs)).toEqual([300_000, 300_000, undefined]);
+  });
+});
+
 describe("LlmClient reasoning", () => {
   it("sends the client's level with every request, and a call's own level when it names one", async () => {
     const { client, transport } = setup({ reasoning: "high" });

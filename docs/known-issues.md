@@ -1546,3 +1546,22 @@ replanner and way-there prompts (KI-078).
 - **Not handled:** runs created before the change, saved tests, suites and reruns copy their stored limit (300 s for
   most). The per-action review's cost is unchanged: skipping it after steps that cannot change the page (fills, waits)
   would shorten every run.
+
+## KI-092 — A long quote flow could not be planned: DeepSeek spent the whole output budget reasoning about it
+- **Severity:** High (any requirement of more than about 45 actions errored in planning, before the browser opened).
+- **Where:** `packages/testing-engine/src/planner/` (`model-output.ts`, `post-validate.ts`, `planner.ts`),
+  `packages/contracts/src/plan.ts`, `packages/llm/src/` (per-request `timeoutMs`), `exploration/executor.ts` (replan room).
+- **What:** `run_0mwsywc5i4ea89000d0fac718` (qa-bike-quote.bewiser.co.uk, a motorcycle quote through the vehicle, rider
+  and additional-rider pages, DeepSeek Flash, reasoning "default" = thinking on) ended `ERRORED / MODEL_PROVIDER` 77 s
+  into PLANNING: "The model used its whole output budget on reasoning and returned no answer (length)". The requirement
+  has 67 actions and 6 page checks, so the plan needs about 74 steps in one scenario (each scenario starts a fresh
+  session, and every check depends on the form filled before it), but a scenario allowed at most 50 and the prompt
+  forbids dropping or merging steps. With no valid answer the model reasoned through the client's 16,000-token budget;
+  a 74-step answer would have failed the schema anyway.
+- **Resolved (2026-11-23, working tree):** a scenario may have up to 100 steps, the existing limit for the whole plan
+  (`MAX_PLAN_STEPS`); a plan over 100 in all scenarios gets a correction that says so. The planner asks for 32,000
+  output tokens and a 300 s request timeout (an LLM call may now set its own; the transports' default stays 120 s).
+  A replan may grow a scenario to the same 100-step limit. Not yet validated by a live run.
+- **Not handled:** the prompt changed (the step limit's wording) without `pnpm eval planner`. Whether every offered
+  model accepts 32,000 output tokens was not checked against each provider's documentation. The requirement's
+  conditional step ("If address not found, …") still contradicts the rule against conditional steps.

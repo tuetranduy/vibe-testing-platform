@@ -216,6 +216,11 @@ describe("DeepSeekTransport", () => {
     expect((err as Error).message).toMatch(/fetch failed.*ECONNRESET/);
   });
 
+  it("a request's own timeoutMs replaces the transport's (a long plan needs longer than the default)", async () => {
+    const timedOut = await failure(new DeepSeekTransport({ apiKey: "sk-ds-test", timeoutMs: 60_000, fetch: hangingFetch }), request({ timeoutMs: 20 }));
+    expect((timedOut as Error).message).toMatch(/timed out after 20 ms/);
+  });
+
   it("a request slower than timeoutMs is a retryable timeout; the caller's abort is not retryable", async () => {
     const timedOut = await failure(new DeepSeekTransport({ apiKey: "sk-ds-test", timeoutMs: 20, fetch: hangingFetch }));
     expect(timedOut).toMatchObject({ retryable: true });

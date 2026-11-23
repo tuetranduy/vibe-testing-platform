@@ -1,7 +1,12 @@
-import { CheckpointSchema, CriterionIdSchema, InputRefSchema, PlannedStepSchema } from "@platform/contracts";
+import { CheckpointSchema, CriterionIdSchema, InputRefSchema, MAX_PLAN_STEPS, PlannedStepSchema } from "@platform/contracts";
 import { z } from "zod";
 
-export const MAX_PLANNED_STEPS = 50;
+/**
+ * Steps in one scenario, and in all of them together (post-validate.ts). It was 50 per scenario: a quote flow of
+ * about 74 steps could not be planned, and DeepSeek Flash spent its whole output budget reasoning about it
+ * (run_0mwsywc5i4ea89000d0fac718).
+ */
+export const MAX_PLANNED_STEPS = MAX_PLAN_STEPS;
 
 /**
  * One step as the model returns it. Every field is required (explicit nulls) so the structured-output

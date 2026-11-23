@@ -85,7 +85,8 @@ export class GeminiTransport implements LlmTransport {
     }
     const doFetch = this.opts.fetch ?? fetch;
     const timeout = new AbortController();
-    const timer = setTimeout(() => timeout.abort(), this.timeoutMs);
+    const timeoutMs = req.timeoutMs ?? this.timeoutMs;
+    const timer = setTimeout(() => timeout.abort(), timeoutMs);
     let res: Response;
     let text: string;
     try {
@@ -98,7 +99,7 @@ export class GeminiTransport implements LlmTransport {
       text = await res.text();
     } catch (err) {
       if (req.signal.aborted) throw new LlmTransportError("Request aborted", { retryable: false, cause: err });
-      if (timeout.signal.aborted) throw new LlmTransportError(`Request timed out after ${this.timeoutMs} ms`, { retryable: true, cause: err });
+      if (timeout.signal.aborted) throw new LlmTransportError(`Request timed out after ${timeoutMs} ms`, { retryable: true, cause: err });
       if (err instanceof TypeError) throw new LlmTransportError(`Connection error: ${messageWithCause(err)}`, { retryable: true, cause: err });
       throw new LlmTransportError(`Unexpected error: ${messageWithCause(err)}`, { retryable: false, cause: err });
     } finally {

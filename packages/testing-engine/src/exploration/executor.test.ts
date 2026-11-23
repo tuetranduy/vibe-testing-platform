@@ -1728,7 +1728,8 @@ describe("runExploration (fake explorer)", () => {
       const { ctx, events } = fakeCtx();
       const session = lost();
       const controller = new AbortController();
-      const many = Array.from({ length: 49 }, (_, i): PlannedStep => ({ id: `PS-${i + 4}`, kind: "navigate", description: "Open", criterionIds: [], destructive: false }));
+      // Two steps kept: room for 98 more within the 100-step limit.
+      const many = Array.from({ length: 99 }, (_, i): PlannedStep => ({ id: `PS-${i + 4}`, kind: "navigate", description: "Open", criterionIds: [], destructive: false }));
       const planned = plan();
       if (reason === "no_room") planned.scenarios[0]!.steps[2]!.id = "PS-999";
       const r: Replanner = { async replan() {

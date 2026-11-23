@@ -73,6 +73,16 @@ describe("AnthropicTransport", () => {
     ]);
   });
 
+  it("a request's own timeoutMs replaces the transport's (a long plan needs longer than the default)", async () => {
+    const hanging = (async (_input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))))) as typeof fetch;
+    const err = await new AnthropicTransport({ apiKey: "sk-test", timeoutMs: 60_000, fetch: hanging })
+      .complete(request({ timeoutMs: 20 }))
+      .then(() => expect.unreachable("expected a timeout"), (e: unknown) => e);
+    expect(err).toBeInstanceOf(LlmTransportError);
+    expect(err).toMatchObject({ retryable: true });
+  });
+
   it("omits an empty system prompt", async () => {
     const { fn, seen } = fakeFetch(() => json(200, okMessage("{}")));
     await new AnthropicTransport({ apiKey: "sk-test", fetch: fn }).complete(request({ system: "" }));

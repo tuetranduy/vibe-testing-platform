@@ -4,7 +4,7 @@
  * ContractError. The model is never trusted with step ids, criterion ids or checkpoint coverage.
  */
 import { factRefsOf, type AcceptanceCriterion, type FactRequest, type PlannedStep } from "@platform/contracts";
-import type { PlannerOutput } from "./model-output";
+import { MAX_PLANNED_STEPS, type PlannerOutput } from "./model-output";
 
 /** A validated scenario: its title, its steps (ids unique across the plan) and the criteria it serves. */
 export interface ValidatedScenario {
@@ -89,6 +89,11 @@ export function validatePlanOutput(
       );
     }
   });
+
+  const total = output.scenarios.reduce((n, s) => n + s.steps.length, 0);
+  if (total > MAX_PLANNED_STEPS) {
+    issues.push(`${total} steps in all scenarios: at most ${MAX_PLANNED_STEPS} in all; shorten the scenarios or merge them`);
+  }
 
   for (const [cp, where] of captures) {
     if (where.length > 1) {
