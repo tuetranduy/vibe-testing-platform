@@ -47,7 +47,6 @@ export const TOKEN_ROUTES: Readonly<Record<string, readonly ApiTokenScope[]>> = 
   "GET /v1/test-runs/:runId": ["results:read"],
   "GET /v1/test-runs/:runId/report": ["results:read"],
   "GET /v1/test-runs/:runId/report.md": ["results:read"],
-  "GET /v1/test-runs/:runId/comparison": ["results:read"],
 };
 
 /** Requests an API token may make per minute and per hour (V1.2 F4, KI-040); above either, `429`. */

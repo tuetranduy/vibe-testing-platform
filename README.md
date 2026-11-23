@@ -137,9 +137,6 @@ before the V1 live gate passed (it still applies). Nothing here calls a model:
   suite" reruns each as its own run and settles one verdict for all; it asks only for the secrets the suite's saved
   credentials don't provide. A running suite run takes one active-run slot; its tests are queued behind single runs,
   taking turns with other suites' tests.
-- **Compared with the previous run** — a completed run's report shows how each criterion changed since the previous
-  run of the same test (same URL and requirement, or a rerun of it), or since a chosen run; the Markdown report too.
-  Suite runs mark each test regressed, fixed, changed, unchanged or first run.
 - **Schedules** — a suite can run by itself (presets or cron, in a time zone), as whoever scheduled it, with the
   suite's saved credentials.
 - **API tokens** (Account → API tokens) — for CI and scripts, scoped to running suites and reading results, used
@@ -554,7 +551,5 @@ worker must share the `LLM_*` variables (see [`docs/operations.md`](docs/operati
   - **Schedules fire in the API** (the plan's jobs run in workers): a firing creates its suite run exactly like the
     endpoint, as the schedule's creator (KI-037). A schedule needs a signed-in creator; the service token cannot
     create one.
-  - **Comparison keys** hash the target URL and requirement text: runs are "the same test" only when both match
-    exactly (whitespace aside); another run can always be chosen as the baseline.
   - **The GitHub Action lives in this repository** (`.github/actions/run-suite`) and has not run on GitHub yet
     (KI-036).

@@ -3,7 +3,6 @@ export * from "./llm";
 export * from "./users";
 export * from "./saved-data";
 export * from "./suites";
-export * from "./comparison";
 export * from "./api-tokens";
 export * from "./usage";
 export * from "./run";

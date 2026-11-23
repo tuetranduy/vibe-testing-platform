@@ -73,7 +73,7 @@ try {
           if (await repo.countActive(parent.tenantId) >= Number(process.env.MAX_ACTIVE_RUNS_PER_TENANT || 3)) return null;
           const created = await repo.create({
             id: newId('run'), tenantId: parent.tenantId, targetUrl: parent.targetUrl,
-            ownerUserId: parent.ownerUserId, comparisonKey: parent.comparisonKey,
+            ownerUserId: parent.ownerUserId,
             idempotencyKey: key, requestHash: sha256,
             request: { ...parent.request, rerunOf: parent.id, options: { ...parent.request.options, maxRunSeconds: 300 } },
           });

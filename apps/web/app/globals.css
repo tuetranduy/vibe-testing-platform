@@ -4913,55 +4913,6 @@ fieldset.stack-tight {
   }
 }
 
-/* V1.2: a run compared with its previous run */
-.comparison-verdicts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 14px;
-}
-.comparison-side {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.comparison-list {
-  display: grid;
-  /* One set of columns for every row, so the badges and the before → after statuses line up. */
-  grid-template-columns: max-content minmax(0, 1fr) max-content;
-  gap: 12px 14px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.comparison-row {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: subgrid;
-  align-items: center;
-}
-.comparison-row > .sbadge {
-  justify-self: start;
-}
-.comparison-baseline select {
-  max-width: 420px;
-}
-.comparison-text {
-  overflow-wrap: anywhere;
-}
-.comparison-statuses {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-@media (max-width: 720px) {
-  .comparison-list {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .comparison-row {
-    gap: 6px;
-  }
-}
 .schedule-row {
   justify-content: space-between;
   padding: 10px 0;

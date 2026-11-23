@@ -40,7 +40,7 @@ site, provider or production deployment has been certified.
 | Manual saved-test reruns | Implemented | Rerun API/worker tests; previous reviewed helper template remains accepted |
 | Markdown and printable reports | Implemented | Report API, Markdown renderer and printable UI tests; PDF uses the browser print dialog by design |
 | Usage dashboard, lookup cache, multiple scenarios | Implemented | Usage/cache routes and tests; planner/executor/compiler scenario coverage |
-| Suites, comparison, scheduled execution | Implemented; retry defects fixed | Suite/schedule/comparison tests; see fixes 2–3 |
+| Suites, scheduled execution | Implemented; retry defects fixed | Suite/schedule tests; see fixes 2–3 |
 | API tokens, CLI, GitHub Action, JUnit | Implemented | Scope/proxy/client/reporting tests; GitHub execution was not verified in this review |
 | Deadlines, lost workers, retention, isolation | Implemented | Orchestrator, reaper, sandbox, runner and integration tests |
 

@@ -127,6 +127,13 @@
       "when": 1794203712612,
       "tag": "0017_enable_row_level_security",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795431033343,
+      "tag": "0018_drop_run_comparison_key",
+      "breakpoints": true
     }
   ]
 }

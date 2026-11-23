@@ -60,37 +60,6 @@ describe("V1.2 F1 — suites", () => {
   }, LIVE_MULTI_RUN_TIMEOUT);
 });
 
-describe("V1.2 F2 — compare with the previous run", () => {
-  it("a rerun is compared with its test's previous run; a broken cart regresses against a chosen passing run", async () => {
-    const passing = await passingRun({ requirement: REQUIREMENTS.cart });
-    const rerun = await service.call("POST", `/v1/test-runs/${passing}/rerun`, {});
-    expect(await service.finished(rerun.json.runId)).toMatchObject({ verdict: "PASSED" });
-    const same = await service.call("GET", `/v1/test-runs/${rerun.json.runId}/comparison`);
-    expect(same.json).toMatchObject({ baseline: { runId: passing }, verdict: { before: "PASSED", after: "PASSED" }, counts: { regressed: 0 } });
-
-    const broken = await service.create({
-      targetUrl: `${stack.targetUrl}/?bug=empty_cart`,
-      requirement: REQUIREMENTS.cart,
-      options: { autoConfirmCriteria: true },
-    });
-    expect(await service.finished(broken)).toMatchObject({ verdict: "FAILED" });
-    const compared = await service.call("GET", `/v1/test-runs/${broken}/comparison?baseline=${passing}`);
-    expect(compared.json).toMatchObject({ chosenBaseline: true, verdict: { before: "PASSED", after: "FAILED" } });
-    if (stack.mode === "ci") {
-      // The same scripted wording: the cart check is matched with the passing run's and regresses.
-      expect(compared.json.counts.regressed).toBeGreaterThan(0);
-    } else {
-      // A real model words a fresh analysis of the requirement its own way, and criteria are matched by wording; the
-      // failing check is listed either way.
-      const failing = (compared.json.criteria as { after: string | null; change: string }[]).filter((c) => c.after === "FAIL");
-      expect(failing.length).toBeGreaterThan(0);
-      for (const c of failing) expect(["regressed", "added", "changed"]).toContain(c.change);
-    }
-    const md = await fetch(`${stack.apiUrl}/v1/test-runs/${rerun.json.runId}/report.md`, { headers: { authorization: `Bearer ${stack.apiToken}` } });
-    expect(await md.text()).toContain("## Compared with the previous run");
-  }, LIVE_MULTI_RUN_TIMEOUT);
-});
-
 describe("V1.2 F3 — scheduled suite runs", () => {
   it("a schedule fires on its own and runs the suite as its creator", async () => {
     const admin = await signIn(stack.admin.email, stack.admin.password);

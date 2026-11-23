@@ -60,7 +60,6 @@ makes KI-028's reveal audit moot (no artifact needs a reveal).
 | KI-036 | Medium | CI | The GitHub Action has never run on GitHub | Open (the remote and a deployed web app now exist) |
 | KI-037 | Low | Schedules | Schedules fire only while an API process is up; a missed firing runs late, once | Resolved `ad47ad2` |
 | KI-038 | Low | Admission | A suite run takes one slot but queues all of its tests at once | Resolved `f41b0d6` |
-| KI-039 | Low | Performance | Suite-run views compare every child with its previous run on each read | Resolved `c0c9e09` |
 | KI-040 | Low | Tokens | The web app's per-minute token limit is per instance and in memory | Resolved `4287733` |
 | KI-041 | Medium | LLM quality | The requirement compiler's prompt changed without an eval run | Resolved (2026-09-30, `af80be5`) |
 | KI-042 | Low | Recordings | Exploration video and trace have not been recorded in a live run | Resolved (2026-09-30, live DeepSeek run) |
@@ -133,7 +132,7 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
   plan.
 - **2026-09-30, DeepSeek (the provider chosen in place of Gemini, KI-018):** the gate ran on `deepseek-flash`:
   run 1 of 3 failed: 14 of 27 live cases passed, 13 failed (the prompt-injection case among them). Most failures are the happy-path run ending `INCONCLUSIVE`
-  instead of `PASSED`, which the suite, rerun, comparison, schedule, token and CI cases build on. Diagnosed on
+  instead of `PASSED`, which the suite, rerun, schedule, token and CI cases build on. Diagnosed on
   `platform-pass` with `E2E_KEEP_LOGS=1`:
   1. The planner wrote a `wait_for` step naming no element ("Wait until the search results page has loaded"), so
      exploration stopped. Fixed (`58f19ba`: the prompt now requires `wait_for` to name an element); the flow then
@@ -190,7 +189,7 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
     a fact read where it is picked, and a list is read where the requirement sees it; login only when stated; no
     conditional plan steps; a second login is a new scenario.
   - **Specs:** live mode no longer pins model wording (an optional cart-count check, the failing list check, a
-    comparison by wording, a literal item to edit) and gives tests that wait for several live runs 7 minutes.
+    literal item to edit) and gives tests that wait for several live runs 7 minutes.
   The gate has not run on Claude or Gemini (KI-026).
 
 ## KI-002 — Chromium's sandbox cannot start in the compose worker
@@ -629,17 +628,6 @@ KI-058–KI-061: [frontends-demo cart → checkout investigation](reviews/run_0m
 - **Resolved (`f41b0d6`):** a suite run's children are queued with a BullMQ priority (child n: n + 1). Jobs without
   one — single runs, reruns, analyses — go first, and several suites' children take turns, so a 50-test suite no
   longer holds up what is queued after it.
-
-## KI-039 — Suite-run views compare every child with its previous run on each read
-- **Severity:** Low (V1.2 F2).
-- **Where:** `apps/api/src/services/comparison-service.ts` (`changesOf`).
-- **What:** `GET /v1/suite-runs/:id` compares each completed child with its previous run from the stored results
-  (about four queries per child), and the suite-run page polls every 3 s while it runs: a 50-test suite costs ~200 small
-  queries per poll.
-- **To close:** store each child's change when it completes (the worker knows), or cache per settled child.
-- **Resolved (`c0c9e09`):** a completed child's change is cached per caller scope and child (10 minutes, at most
-  10,000 entries per API instance) and computed in parallel; a poll of a settled suite run makes no comparison
-  queries.
 
 ## KI-040 — The web app's per-minute token limit is per instance and in memory
 - **Severity:** Low (V1.2 F4).

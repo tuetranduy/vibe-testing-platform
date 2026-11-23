@@ -50,8 +50,7 @@ jobs:
 | `fail-on` | `FAILED` | Verdicts that fail the step |
 | `junit-path` | — | Where to write the JUnit XML |
 
-Outputs: `suite-run-id`, `verdict`, `url`. The job summary shows the verdict, each test with a link and how it
-changed since its previous run. The suite run records the repository, ref, commit and a link back to the job.
+Outputs: `suite-run-id`, `verdict`, `url`. The job summary shows the verdict, each test’s result and a link to its run. The suite run records the repository, ref, commit and a link back to the job.
 
 ## 3. Anywhere else: the CLI
 
@@ -72,7 +71,7 @@ With `Authorization: Bearer tap_…` on `https://<web host>/api/ext`:
 | `POST /v1/suites/:suiteId/runs` `{ secrets?, credentialProfileId?, context? }` (Idempotency-Key) | Run suites |
 | `POST /v1/suite-runs/:suiteRunId/cancel` | Run suites |
 | `GET /v1/suite-runs/:suiteRunId`, `…/junit.xml` | Read results |
-| `GET /v1/test-runs/:runId`, `…/report`, `…/report.md`, `…/comparison` | Read results |
+| `GET /v1/test-runs/:runId`, `…/report`, `…/report.md` | Read results |
 
 Anything else answers `403 TOKEN_SCOPE`. A token makes at most 600 requests an hour (120 a minute per web
 instance).

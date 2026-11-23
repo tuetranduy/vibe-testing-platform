@@ -19,8 +19,6 @@ import {
   TestRunListResponseSchema,
   TestRunSummarySchema,
   RunSuiteResponseSchema,
-  RunComparisonSchema,
-  type RunComparison,
   SuiteDetailSchema,
   SuiteListSchema,
   SuiteRunListSchema,
@@ -157,9 +155,6 @@ export const listRuns = (cursor: string | null = null, limit = 50, owner?: "me" 
 export const reportMarkdownPath = (runId: string) => `${runPath(runId)}/report.md`;
 
 /** How a completed run changed since an earlier run of the same test (V1.2): the previous one, or `baseline`. */
-export const getComparison = (runId: string, baseline?: string): Promise<RunComparison> =>
-  request(RunComparisonSchema, `${runPath(runId)}/comparison${baseline ? `?baseline=${seg(baseline)}` : ""}`);
-
 /** The final report (COMPLETED) or a partial one (ERRORED / CANCELLED); 409 while the run is still going. */
 export const getReport = (runId: string): Promise<TestReport> => request(TestReportSchema, `${runPath(runId)}/report`);
 

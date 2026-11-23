@@ -16,7 +16,6 @@ import {
   SuiteRunRepository,
   UserRepository,
   newId,
-  type RunScope,
   type SuiteRunRow,
   type TestRun,
 } from "@platform/db";
@@ -27,7 +26,6 @@ import { renderJunit, type JunitChild } from "@platform/testing-engine/reporting
 import { actorId, runScope, type Principal } from "../auth/principal";
 import type { ApiDeps } from "../deps";
 import { HttpError } from "../errors";
-import { ComparisonService } from "./comparison-service";
 import { CredentialProfileService } from "./credential-profile-service";
 import { RerunService, secretsRequired, type CreatedRun, type SavedTest } from "./rerun-service";
 import { parseBody, suiteRunBrief, SuiteService } from "./suite-service";
@@ -190,12 +188,11 @@ export class SuiteRunService {
     let row = await this.require(p, suiteRunId);
     // Settled on read too, so a result is never shown RUNNING after its last child ended.
     if (row.status === "RUNNING") row = (await this.suiteRuns.settle(row.id)) ?? row;
-    return this.view(row, runScope(p));
+    return this.view(row);
   }
 
-  async view(row: SuiteRunRow, scope: RunScope = { tenantId: row.tenantId }): Promise<SuiteRunView> {
+  private async view(row: SuiteRunRow): Promise<SuiteRunView> {
     const children = await this.suiteRuns.children(row.id);
-    const changes = await new ComparisonService(this.deps).changesOf(scope, children);
     const owner = row.ownerUserId ? await new UserRepository(this.deps.db).namesById(row.tenantId, [row.ownerUserId]) : new Map<string, string>();
     return {
       ...suiteRunBrief(row),
@@ -205,13 +202,7 @@ export class SuiteRunService {
       ci: CiContextSchema.nullable().catch(null).parse(row.context.ci ?? null),
       startedWithToken: z.object({ id: z.string(), name: z.string() }).nullable().catch(null).parse(row.context.token ?? null),
       counts: suiteRunCounts(children),
-      changes: {
-        regressed: [...changes.values()].filter((c) => c.change === "regressed").length,
-        fixed: [...changes.values()].filter((c) => c.change === "fixed").length,
-      },
       children: children.map((c) => ({
-        change: changes.get(c.id)?.change ?? null,
-        baselineRunId: changes.get(c.id)?.baselineRunId ?? null,
         runId: c.id,
         sourceRunId: c.request.rerunOf ?? c.id,
         title: c.request.title ?? c.request.requirement.slice(0, 200),
