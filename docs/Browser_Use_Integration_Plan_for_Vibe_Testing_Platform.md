@@ -815,7 +815,7 @@ Add a clearly separate **Discovery** section containing pages/journeys mapped an
     - `discovery_blocked_destinations_total{reason}` is in place, with alerts for forbidden addresses and for repeated off-allowlist attempts.
     - A scripted crawl's own baseline is about 2 off-allowlist and 4 CONNECT refusals per job. Chromium makes these even with background networking disabled.
   - [ ] **Open — needs authorization, a real target environment and its evidence:**
-    - Arbitrary and external targets stay disabled. Proxy mode only joins internal `vtp-discovery-targets*` networks, and the production guard still refuses every pilot variable.
+    - Arbitrary and external targets stay disabled. Proxy mode only joins internal `vtp-discovery-targets*` networks. The production pilot accepts only its configured disposable fixture.
     - The platform's own survey of a proxy-mode target is not wired.
     - An approved external staging target would need a target network with a controlled route out, its own boundary tests (redirects, DNS rebinding against a real resolver), and the §8.2 review.
   - [x] **Fair multi-tenant admission (worker side, Redis).**
@@ -833,10 +833,12 @@ Add a clearly separate **Discovery** section containing pages/journeys mapped an
       - recovery from a crashed holder and from a crashed waiter.
     - Rollback during the wait, a wait that exhausts the budget, and cancellation are unit-tested in the survey stage.
     - The broker's own one-slot `429` remains as a backstop.
-  - [ ] **Open — needs the deployed topology:**
+  - [x] **Deployed topology recorded:** [deploy run 45345023139](https://github.com/tuetranduy/vibe-testing-platform/actions/runs/45345023139)
+    reports one Valkey, one worker and one Browser Use broker healthy, with the fixture and runner also healthy.
+  - [ ] **Open — live admission on the deployed topology:**
     - The scheduler assumes one Redis. Its scripts read keys they don't declare, so Redis Cluster is not supported.
     - It also assumes one broker replica whose slots equal the configured capacity. Several broker replicas would need request routing and shared job and nonce state, which this pilot doesn't have.
-    - Verify on the deployed worker topology.
+    - Exercise admission and cleanup on the deployed topology.
   - [x] **First GitHub CI run (approved, 2026-11-24):** branch `ci/browser-use-discovery-m5` (push-only trigger for `ci/browser-use-discovery-**`; `deploy.yml` runs on `main` alone and did not run).
     - The first run (`2d9a9fe`) failed only in the scripted smoke: Ubuntu 24.04 blocks the unprivileged user namespaces that Chromium's sandbox needs.
     - The workflow now sets `kernel.apparmor_restrict_unprivileged_userns=0`, as production already does.
