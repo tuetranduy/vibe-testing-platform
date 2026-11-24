@@ -12,21 +12,30 @@ import { race } from "./site-reader";
 import { suggestTests } from "./suggest";
 
 const MAX_HTML_BYTES = 512 * 1024;
+const MAX_RESPONSE_HEADER_BYTES = 32 * 1024;
+const MAX_PAGE_REDIRECTS = 3;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 type HtmlNode = DefaultTreeAdapterMap["node"];
 type Element = DefaultTreeAdapterMap["element"];
 type Snapshot = NonNullable<DiscoveryInput["snapshot"]>;
 
-function readHtml(url: URL, address: string, signal: AbortSignal): Promise<string> {
+function readHtml(url: URL, address: string, signal: AbortSignal): Promise<{ html: string } | { location: string }> {
   return new Promise((resolve, reject) => {
     const req = request({
       hostname: address, port: 443, servername: url.hostname, path: url.pathname,
-      method: "GET", agent: false, signal,
+      method: "GET", agent: false, signal, maxHeaderSize: MAX_RESPONSE_HEADER_BYTES,
       headers: { host: url.hostname, accept: "text/html", "accept-encoding": "identity" },
     }, (response) => {
-      const contentType = response.headers["content-type"] ?? "";
-      if (response.statusCode !== 200 || !/^text\/html(?:\s*;|$)/i.test(contentType) ||
-          ![undefined, "identity"].includes(response.headers["content-encoding"]) ||
-          Number(response.headers["content-length"]) > MAX_HTML_BYTES) {
+      const { statusCode, headers } = response;
+      if (statusCode !== undefined && REDIRECT_STATUSES.has(statusCode) && headers.location) {
+        response.destroy();
+        resolve({ location: headers.location });
+        return;
+      }
+      const contentType = headers["content-type"] ?? "";
+      if (statusCode !== 200 || !/^text\/html(?:\s*;|$)/i.test(contentType) ||
+          ![undefined, "identity"].includes(headers["content-encoding"]) ||
+          Number(headers["content-length"]) > MAX_HTML_BYTES) {
         response.destroy();
         reject(new Error("The page did not return a supported HTML document"));
         return;
@@ -43,7 +52,7 @@ function readHtml(url: URL, address: string, signal: AbortSignal): Promise<strin
       });
       response.once("error", reject);
       response.once("aborted", () => reject(new Error("The page response ended early")));
-      response.once("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      response.once("end", () => resolve({ html: Buffer.concat(chunks).toString("utf8") }));
     });
     req.once("error", reject);
     req.end();
@@ -118,31 +127,44 @@ export async function readVerifiedSite(ctx: StageContext): Promise<{ pages: Site
   const pages: SitePage[] = [];
   const visited = new Set<string>();
 
-  const read = async (url: URL) => {
+  const read = async (start: URL) => {
     await ctx.boundary();
-    if (url.origin !== target.origin || visited.has(url.pathname) ||
-        !assertActionAllowed({ instruction: url.pathname.replace(/[-_/]/g, " ") }, { allowDestructive: false }).allowed) {
-      return null;
-    }
-    visited.add(url.pathname);
     const pageSignal = AbortSignal.any([signal, AbortSignal.timeout(8000)]);
+    let url = start;
     try {
-      const policy = await race(validateTargetUrl(url.href, { resolve: defaultResolver, privateAllowlist: [] }), pageSignal);
-      if (!policy.allowed || policy.addresses.length === 0) return null;
-      const raw = inventoryOfVerifiedHtml(await readHtml(url, policy.addresses[0]!, pageSignal), url);
-      const inventory = toPageInventory(raw, ctx.redact);
-      pages.push({ url: url.href, inventory });
-      await ctx.publish({ type: "page.surveyed", message: `Read ${url.pathname.slice(0, 180)}`,
-        payload: { path: url.pathname, title: inventory.title, status: "READ" } });
-      return raw;
+      for (let redirects = 0; redirects <= MAX_PAGE_REDIRECTS; redirects++) {
+        if (url.origin !== target.origin || visited.has(url.href) ||
+            !assertActionAllowed({ instruction: url.pathname.replace(/[-_/]/g, " ") }, { allowDestructive: false }).allowed) {
+          return null;
+        }
+        visited.add(url.href);
+        const policy = await race(validateTargetUrl(url.href, { resolve: defaultResolver, privateAllowlist: [] }), pageSignal);
+        if (!policy.allowed || policy.addresses.length === 0) return null;
+        const result = await readHtml(url, policy.addresses[0]!, pageSignal);
+        if ("location" in result) {
+          const next = DiscoveryLiveUrlSchema.safeParse(new URL(result.location, url).href);
+          if (!next.success) return null;
+          url = next.data;
+          continue;
+        }
+        const raw = inventoryOfVerifiedHtml(result.html, url);
+        const inventory = toPageInventory(raw, ctx.redact);
+        pages.push({ url: url.href, inventory });
+        await ctx.publish({ type: "page.surveyed", message: `Read ${url.pathname.slice(0, 180)}`,
+          payload: { path: url.pathname, title: inventory.title, status: "READ" } });
+        return { url, raw };
+      }
     } catch {
       ctx.signal.throwIfAborted();
-      return null;
     }
+    return null;
   };
   const first = await read(target);
   if (!first) throw new BrowserProviderError("The site did not serve a readable HTTPS page. Use its final page URL.");
-  for (const link of chooseSurveyLinks({ startUrl: target.href, links: first.links, additionalAllowedHosts: [], max: MAX_SURVEY_LINKS })) {
+  const links = chooseSurveyLinks({
+    startUrl: first.url.href, startAliases: [...visited], links: first.raw.links, additionalAllowedHosts: [], max: MAX_SURVEY_LINKS,
+  });
+  for (const link of links) {
     if (signal.aborted) break;
     await read(link);
   }

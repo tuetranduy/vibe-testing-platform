@@ -11,3 +11,4 @@ spikes/**/node_modules/
 .sync/
 *.tsbuildinfo
 .env.production
+.env.backup-*
