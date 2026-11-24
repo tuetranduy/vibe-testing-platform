@@ -13,7 +13,13 @@
   "vars": {
     "WEB_ALLOWED_HOSTS": "testing.tuetran.dev",
     "S3_ENDPOINT": "https://0aa33be34354cada10bebf66ea994e23.r2.cloudflarestorage.com",
-    "ARTIFACT_BUCKET": "vibe-testing-artifacts"
+    "ARTIFACT_BUCKET": "vibe-testing-artifacts",
+    // Browser Use fixture pilot admission (docs/deployment.md). The fixture lives on the worker server's internal
+    // network: the API only checks the exact URL and never fetches it.
+    "BROWSER_USE_DISCOVERY_PRODUCTION": "fixture-pilot",
+    "BROWSER_USE_DISCOVERY_FIXTURE_URL": "http://browser-use-fixture:4599/",
+    "BROWSER_USE_DISCOVERY_TENANTS": "t_default",
+    "TARGET_PRIVATE_ALLOWLIST": "browser-use-fixture:4599"
   },
   // __IMAGE_TAG__ is replaced with the commit SHA by .github/workflows/deploy.yml.
   "containers": [

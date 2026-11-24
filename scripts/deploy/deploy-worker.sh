@@ -14,6 +14,10 @@ printf '%s\n' "$KNOWN_HOSTS" >"$hosts"
 ssh_opts=(-i "$key" -o UserKnownHostsFile="$hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes)
 target="deploy@$HOST"
 image="$WORKER_IMAGE_NAME:$SHA"
+agent_image="$BROWSER_USE_AGENT_IMAGE_NAME:$SHA"
+broker_image="$BROWSER_USE_BROKER_IMAGE_NAME:$SHA"
+# A fresh signing token per deploy: only the worker and the job service, both restarted below, ever hold it.
+discovery_token=$(openssl rand -hex 32)
 for name in REDIS_API_PASSWORD REDIS_WORKER_PASSWORD REDIS_TLS_CERT REDIS_TLS_KEY; do
   [ -n "${!name:-}" ] || { echo "$name is not set: run scripts/deploy/set-github-secrets.sh" >&2; exit 1; }
 done
@@ -35,7 +39,23 @@ LOG_LEVEL=info
 WORKER_IMAGE=$image
 # Valkey on this server, over the compose network (docker-compose.prod.yml). The API's REDIS_URL is the TLS port.
 REDIS_URL=redis://worker:$REDIS_WORKER_PASSWORD@valkey:6379
+# Browser Use fixture pilot: images and the job service's settings (docker-compose.prod.yml).
+BROWSER_USE_AGENT_IMAGE=$agent_image
+BROWSER_USE_BROKER_IMAGE=$broker_image
+BROWSER_USE_DISCOVERY_MODEL=${BROWSER_USE_DISCOVERY_MODEL:-deepseek:deepseek-flash}
+BROWSER_USE_DISCOVERY_SERVICE_TOKEN=$discovery_token
 EOF
+  # The worker's side of the pilot. BROWSER_USE_DISCOVERY=off (a repository variable) leaves the worker without it on
+  # the next deploy: opted-in runs then record BLOCKED / not_configured and get standard suggestions.
+  if [ "${BROWSER_USE_DISCOVERY:-on}" != "off" ]; then
+    cat <<EOF
+BROWSER_USE_DISCOVERY_PRODUCTION=fixture-pilot
+BROWSER_USE_DISCOVERY_FIXTURE_URL=http://browser-use-fixture:4599/
+BROWSER_USE_DISCOVERY_TENANTS=t_default
+BROWSER_USE_DISCOVERY_SERVICE_URL=http://browser-use-discovery:4600
+TARGET_PRIVATE_ALLOWLIST=browser-use-fixture:4599
+EOF
+  fi
   for name in DATABASE_URL S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY API_TOKEN SECRETS_ENCRYPTION_KEY \
     RUNNER_TOKEN LLM_PROVIDER LLM_MODEL ANTHROPIC_API_KEY GEMINI_API_KEY DEEPSEEK_API_KEY; do
     if [ -n "${!name:-}" ]; then printf '%s=%s\n' "$name" "${!name}"; fi
@@ -70,5 +90,7 @@ printf '%s' "$GHCR_TOKEN" | ssh "${ssh_opts[@]}" "$target" bash -c "'
   docker compose pull
   docker compose up -d --wait --remove-orphans
   # Only this app\x27s older images: the server is shared and short of disk.
-  docker images --format \"{{.Repository}}:{{.Tag}}\" \"$WORKER_IMAGE_NAME\" | grep -v \":$SHA\$\" | xargs -r docker rmi || true
+  for name in \"$WORKER_IMAGE_NAME\" \"$BROWSER_USE_AGENT_IMAGE_NAME\" \"$BROWSER_USE_BROKER_IMAGE_NAME\"; do
+    docker images --format \"{{.Repository}}:{{.Tag}}\" \"\$name\" | grep -v \":$SHA\$\" | xargs -r docker rmi || true
+  done
 '"

@@ -792,6 +792,11 @@ Add a clearly separate **Discovery** section containing pages/journeys mapped an
     - Queued rollback: with the queue paused, the run records `BLOCKED`/`tenant_disabled`.
     - In-flight rollback: a disable after `discovery.started` records `CANCELLED`/`tenant_disabled`. No Browser Use ideas are offered, broker `activeJobs` is 0, `cleanupFailures` is 0, and no agent containers are left.
     - Prometheus: the target is up, every rule evaluates with health `ok`, discovery series are scraped, and no Browser Use alert fires.
+  - [x] **Production fixture pilot (owner's decision, 2026-11-24, without staging).**
+    - Production runs the fixture-only pilot behind an explicit `BROWSER_USE_DISCOVERY_PRODUCTION=fixture-pilot` opt-in, with the broker and fixture as services on the worker server (`docs/deployment.md`).
+    - Before deploying, a local rehearsal of the production compose services showed: the worker-like probe reached the fixture and completed a signed job; a container on the fixture network could not reach the broker; and the fixture had no external DNS.
+    - A dry run of `deploy-worker.sh` produced a worker configuration that validates as production.
+    - Admission still needs an administrator to enable the tenant in Settings.
   - [ ] **Open — needs a deployed staging environment:** no non-production staging target is documented or confirmed; only production is deployed, on push to `main`. Repeat the rehearsal there with its own monitoring.
   - [x] **Target-site egress split — local controlled fixtures only (proxy mode, development and test).**
     - With `DISCOVERY_TARGET_MODE=proxy`, each job gets its own `--internal` Docker network whose only peer is a per-job egress proxy.

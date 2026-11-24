@@ -3,7 +3,7 @@
 # The image holds no credentials; model calls leave only through the launcher's broker (container stdin/stdout).
 #
 #   docker build -t vtp-browser-use-discovery:1.0.6 apps/browser-use-discovery
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm AS agent
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -40,3 +40,17 @@ USER 10001:10001
 # channel). A wrapper such as docker-init or timeout(1) would keep those pipes open in a dumpable process that agent
 # code could reach through /proc/1/fd. The runner bounds its own lifetime (210 s self-kill, and exit on stdin EOF).
 ENTRYPOINT ["python", "-P", "-m", "discovery_service.runner"]
+
+# The trusted job service (broker) for a container deployment: the same code and dependencies plus the Docker CLI,
+# which it uses to start each job's agent container on the host's Docker (mounted socket). It holds the model key and
+# the signing token; agent containers never see either.
+FROM docker@sha256:34507eb5069d8be82c95dd3b6987d4250fd5fee49b82e2509b7d7a7030740d6d AS docker-cli
+
+FROM agent AS broker
+USER root
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+ENV DISCOVERY_SERVICE_HOST=0.0.0.0
+ENTRYPOINT ["python", "-P", "-m", "discovery_service.service"]
+
+# The default target stays the agent image (docker build -t vtp-browser-use-discovery:1.0.6 apps/browser-use-discovery).
+FROM agent

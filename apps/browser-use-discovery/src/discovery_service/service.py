@@ -232,5 +232,10 @@ if __name__ == '__main__':
     import uvicorn
 
     app = create_app(Config.from_env(), os.environ.get('DISCOVERY_SERVICE_TOKEN', ''))
-    uvicorn.run(app, host='127.0.0.1', port=int(os.environ.get('DISCOVERY_SERVICE_PORT', '4600')),
+    # Loopback by default. A container deployment binds its private network (DISCOVERY_SERVICE_HOST=0.0.0.0) and
+    # relies on that network admitting only the worker; every request is still signed.
+    host = os.environ.get('DISCOVERY_SERVICE_HOST', '127.0.0.1')
+    if host not in ('127.0.0.1', '::1', '0.0.0.0'):
+        raise SystemExit('DISCOVERY_SERVICE_HOST must be 127.0.0.1, ::1 or 0.0.0.0')
+    uvicorn.run(app, host=host, port=int(os.environ.get('DISCOVERY_SERVICE_PORT', '4600')),
                 access_log=False, proxy_headers=False, limit_concurrency=32)

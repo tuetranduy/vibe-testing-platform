@@ -194,3 +194,16 @@ def test_the_task_names_the_fixture_scope():
     assert path_scope('/benchmark/museum/index.html') == '/benchmark/museum/' and path_scope('/') == '/'
     task = build_task('http://127.0.0.1:4599', 'http://127.0.0.1:4599/benchmark/museum/index.html', '/benchmark/museum/')
     assert 'pages under http://127.0.0.1:4599/benchmark/museum/' in task and 'out of scope' in task
+
+
+def test_agent_memory_is_configurable_within_fixed_choices():
+    import pytest
+    from discovery_service.launcher import agent_memory
+
+    cfg = Config.from_env({'DISCOVERY_FIXTURE_URL': 'http://127.0.0.1:4599/', 'DISCOVERY_MODEL': 'scripted', 'DISCOVERY_AGENT_MEMORY': '1g'})
+    args = docker_args(cfg, match_target(cfg.fixture_url, cfg.fixture_url), 'n', 0)
+    assert args[args.index('--memory') + 1] == '1g' and args[args.index('--memory-swap') + 1] == '1g'
+    assert Config.from_env({'DISCOVERY_FIXTURE_URL': 'x', 'DISCOVERY_MODEL': 'scripted'}).agent_memory == '2g'
+    for bad in ('4g', '64m', 'unlimited', '-1'):
+        with pytest.raises(ValueError):
+            agent_memory(bad)

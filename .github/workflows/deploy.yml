@@ -20,6 +20,9 @@ permissions:
 env:
   SHA: ${{ github.sha }}
   WORKER_IMAGE_NAME: ghcr.io/tuetranduy/vibe-testing-worker
+  # The Browser Use fixture pilot: the network-less agent image and its signed job service (docs/deployment.md).
+  BROWSER_USE_AGENT_IMAGE_NAME: ghcr.io/tuetranduy/vibe-testing-browser-use-agent
+  BROWSER_USE_BROKER_IMAGE_NAME: ghcr.io/tuetranduy/vibe-testing-browser-use-broker
 
 jobs:
   deploy:
@@ -60,6 +63,23 @@ jobs:
           cache-from: type=gha,scope=worker
           cache-to: type=gha,scope=worker,mode=max
 
+      - name: Build and push the Browser Use agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/browser-use-discovery
+          target: agent
+          push: true
+          tags: ${{ env.BROWSER_USE_AGENT_IMAGE_NAME }}:${{ env.SHA }}
+          cache-from: type=gha,scope=browser-use-agent
+          cache-to: type=gha,scope=browser-use-agent,mode=max
+      - name: Build and push the Browser Use job service image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/browser-use-discovery
+          target: broker
+          push: true
+          tags: ${{ env.BROWSER_USE_BROKER_IMAGE_NAME }}:${{ env.SHA }}
+          cache-from: type=gha,scope=browser-use-agent
       - name: Deploy the worker server
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -81,6 +101,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          # Repository variables: BROWSER_USE_DISCOVERY=off removes the worker's pilot settings on the next deploy.
+          BROWSER_USE_DISCOVERY: ${{ vars.BROWSER_USE_DISCOVERY }}
+          BROWSER_USE_DISCOVERY_MODEL: ${{ vars.BROWSER_USE_DISCOVERY_MODEL }}
         run: scripts/deploy/deploy-worker.sh
 
       - name: Build and push the API and web images to Cloudflare

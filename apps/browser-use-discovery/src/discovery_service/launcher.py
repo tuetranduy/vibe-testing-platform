@@ -77,6 +77,8 @@ class Config:
     # on an internal network; target_network names the pre-created internal network that holds approved targets.
     target_mode: str = 'bundled'
     target_network: str = ''
+    # The agent container's memory and swap limit (docker --memory); lower on a small shared host.
+    agent_memory: str = '2g'
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Config:
@@ -88,7 +90,17 @@ class Config:
             docker=env.get('DISCOVERY_DOCKER') or 'docker',
             target_mode=env.get('DISCOVERY_TARGET_MODE') or 'bundled',
             target_network=env.get('DISCOVERY_TARGET_NETWORK', ''),
+            agent_memory=agent_memory(env.get('DISCOVERY_AGENT_MEMORY') or '2g'),
         )
+
+
+AGENT_MEMORY = ('768m', '1g', '1536m', '2g')
+
+
+def agent_memory(value: str) -> str:
+    if value not in AGENT_MEMORY:
+        raise ValueError(f'DISCOVERY_AGENT_MEMORY must be one of {", ".join(AGENT_MEMORY)}')
+    return value
 
 
 TARGET_NETWORK = re.compile(r'vtp-discovery-targets(-[a-z0-9]{1,32})?')
@@ -143,7 +155,7 @@ def docker_args(cfg: Config, target: FixtureTarget, name: str, deadline_epoch: i
         '--user', '10001:10001',
         # no --init: the runner must be PID 1 and the sole holder of the stdio channel (see Dockerfile)
         '--pids-limit', '512',
-        '--memory', '2g', '--memory-swap', '2g',
+        '--memory', cfg.agent_memory, '--memory-swap', cfg.agent_memory,
         '--cpus', '2',
         '--shm-size', '256m',
         '--ulimit', 'nofile=4096:4096',
