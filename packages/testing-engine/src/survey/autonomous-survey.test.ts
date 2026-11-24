@@ -118,9 +118,9 @@ describe("fixture discovery in the existing survey", () => {
     const ctx = context();
     const observe = vi.fn();
     const result = await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, observe })(ctx);
-    // The deadline leaves 175 s; the 120 s default stage budget gives the broker 115 s for its whole job.
+    // The deadline leaves 175 s, so the broker gets 170 s before the result grace period.
     expect(discover).toHaveBeenCalledWith({
-      schemaVersion: "discovery.v1", runId: "run_fixture", targetUrl: fixtureUrl, timeoutSeconds: 115,
+      schemaVersion: "discovery.v1", runId: "run_fixture", targetUrl: fixtureUrl, timeoutSeconds: 170, maxAgentSteps: 40,
     }, { signal: expect.any(AbortSignal), onProgress: expect.any(Function) });
     expect(result.pages).toBe(baseline.pages);
     expect(result.suggestions.slice(0, 2)).toEqual(baseline.suggestions.slice(0, 2));
@@ -277,10 +277,10 @@ describe("fixture discovery in the existing survey", () => {
       const admit = vi.fn(async () => ({ granted: true as const, waitedMs: 20_000, release }));
       const discover = vi.fn(completeWith([candidate]));
       await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, admit })(ctx);
-      // 120 s stage budget: wait up to 115 - 10 s; the lease outlives the job's budget by a grace period.
-      expect(admit).toHaveBeenCalledWith(expect.objectContaining({ tenantId: "t_default", runId: "run_fixture", maxWaitMs: 105_000, leaseMs: 145_000 }));
-      // 20 s spent waiting: the broker's job budget shrinks to 95 s.
-      expect(discover.mock.calls[0]?.[0].timeoutSeconds).toBe(95);
+      // The deadline leaves 175 s: wait up to 170 - 10 s, and lease for 170 s plus cleanup time.
+      expect(admit).toHaveBeenCalledWith(expect.objectContaining({ tenantId: "t_default", runId: "run_fixture", maxWaitMs: 160_000, leaseMs: 200_000 }));
+      // 20 s spent waiting: the broker's job budget shrinks to 150 s.
+      expect(discover.mock.calls[0]?.[0].timeoutSeconds).toBe(150);
       expect(release).toHaveBeenCalledTimes(1);
       expect(outcome(ctx)?.payload).toMatchObject({ status: "COMPLETED" });
     });
@@ -316,7 +316,7 @@ describe("fixture discovery in the existing survey", () => {
     it("ends without a job when the wait used up the budget", async () => {
       const ctx = context();
       const release = vi.fn(async () => {});
-      const admit = vi.fn(async () => ({ granted: true as const, waitedMs: 106_000, release }));
+      const admit = vi.fn(async () => ({ granted: true as const, waitedMs: 161_000, release }));
       const discover = vi.fn(completeWith([candidate]));
       await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, admit })(ctx);
       expect(discover).not.toHaveBeenCalled();
@@ -375,10 +375,11 @@ describe("multi-agent exploration (Phase C)", () => {
   it("runs one more agent per free slot, focused on another page, and merges what they found", async () => {
     const ctx = context();
     ctx.request.options.discoveryAgents = 2;
+    ctx.request.options.discoveryMaxSteps = 60;
     const second = { ...candidate, title: "Filter the catalog", goal: "Filter the catalog by colour and see fewer products." };
     const discover = vi.fn<AutonomousDiscoveryPort["discover"]>(async ({ schemaVersion, runId }) => ({
       schemaVersion, runId, status: "COMPLETED", candidates: [runId.endsWith("-a2") ? second : candidate],
-      statistics: { agentSteps: 4, modelRequests: 4, durationMs: 1000, inputTokens: 10, outputTokens: 5, modelCostUsd: 0.01 },
+      statistics: { agentSteps: 59, modelRequests: 60, durationMs: 1000, inputTokens: 10, outputTokens: 5, modelCostUsd: 0.01 },
     }));
     const admit = admitAll(true);
     const reserve = vi.fn(async () => true);
@@ -388,7 +389,7 @@ describe("multi-agent exploration (Phase C)", () => {
     expect(reserve).toHaveBeenCalledTimes(2);
     expect(draft.suggestions.map((s) => s.title)).toEqual(expect.arrayContaining([candidate.title, second.title]));
     expect(outcome(ctx)?.payload).toMatchObject({ status: "COMPLETED", agents: 2, candidateCount: 2,
-      statistics: { agentSteps: 8, modelRequests: 8, modelCostUsd: 0.02 } });
+      statistics: { agentSteps: 118, modelRequests: 120, modelCostUsd: 0.02 } });
   });
 
   it("starts no extra agent without a free slot, and refunds its quota attempt", async () => {

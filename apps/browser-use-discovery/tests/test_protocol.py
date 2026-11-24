@@ -35,6 +35,15 @@ def test_parse_request_accepts_exact_shape():
     assert r.runId == 'run_1-A'
 
 
+def test_discovery_limits_accept_extended_job_budget():
+    base = {'schemaVersion': 'discovery.v1', 'runId': 'r', 'targetUrl': 'http://x/'}
+    request = parse_request(json.dumps(dict(base, timeoutSeconds=360, maxAgentSteps=60)).encode())
+    assert (request.timeoutSeconds, request.maxAgentSteps) == (360, 60)
+    for field, value in [('timeoutSeconds', 361), ('maxAgentSteps', 61)]:
+        with pytest.raises(ValueError):
+            parse_request(json.dumps(dict(base, **{field: value})).encode())
+
+
 @pytest.mark.parametrize('raw', [
     b'',
     b'not json',
@@ -108,6 +117,12 @@ def test_live_discovery_can_report_observed_payment_steps():
     assert sanitize_candidates([payment], KNOWN) == []
     assert [item.title for item in sanitize_candidates([payment], KNOWN, live=True)] == ['Payment step opens']
     assert sanitize_candidates([cand(title='Delete the payment profile')], KNOWN, live=True) == []
+
+
+def test_live_discovery_preserves_observed_routes_without_query_state():
+    paths = frozenset({'/mc/bike-summary', '/mc/your-bike'})
+    route = cand(relevant_paths=['/mc/bike-summary', '/mc/your-bike?index=0', '//other.example/mc/your-bike'])
+    assert sanitize_candidates([route], paths, live=True)[0].relevantPaths == ['/mc/bike-summary', '/mc/your-bike']
 
 
 def test_sanitize_caps_count_and_dedupes():

@@ -31,9 +31,12 @@ from typing import Any, Callable
 from discovery_service.broker import Broker, BrokerRefused, is_zero_cost, make_model, make_run_model
 from discovery_service.policy import FixtureTarget, LiveTarget, PolicyError, fixture_paths, match_request
 from discovery_service.protocol import (
-    AGENT_TIMEOUT_S,
+    DEFAULT_JOB_SECONDS,
+    DEFAULT_MODEL_CALLS,
     MAX_AGENT_STEPS,
     MAX_FRAME_BYTES,
+    MAX_JOB_DURATION_MS,
+    MAX_JOB_SECONDS,
     MAX_STDIN_BYTES,
     DiscoveryRequest,
     DiscoveryResponse,
@@ -51,7 +54,6 @@ APP_DIR = Path(__file__).resolve().parents[2]
 SITE_DIR = APP_DIR / 'fixture' / 'site'
 DEFAULT_IMAGE = 'vtp-browser-use-discovery:1.0.6'
 STARTUP_BUDGET_S = 45  # container start + Chromium launch
-HARD_DEADLINE_S = AGENT_TIMEOUT_S + STARTUP_BUDGET_S + 15  # 180 s: the launcher never runs longer
 # With a caller budget: reserved for container start and for the runner's teardown plus result delivery.
 STARTUP_RESERVE_S = 5.0
 DELIVERY_MARGIN_S = 5.0
@@ -428,9 +430,9 @@ class Session:
 
     def agent_timeout(self) -> float:
         if self.deadline is None:
-            return float(AGENT_TIMEOUT_S)
+            return float(DEFAULT_JOB_SECONDS)
         left = self.deadline - time.monotonic() - STARTUP_RESERVE_S - DELIVERY_MARGIN_S
-        return max(MIN_AGENT_TIMEOUT_S, min(float(AGENT_TIMEOUT_S), left))
+        return max(MIN_AGENT_TIMEOUT_S, min(float(MAX_JOB_SECONDS), left))
 
     async def _serve(self) -> dict[str, Any] | None:
         assert self.proc and self.proc.stdout
@@ -514,7 +516,8 @@ class Session:
         return out.decode(errors='replace')[:2_000_000]
 
     async def run(self) -> dict[str, Any] | None:
-        deadline_epoch = int(time.time()) + HARD_DEADLINE_S + 30
+        remaining = DEFAULT_JOB_SECONDS if self.deadline is None else max(0, self.deadline - time.monotonic())
+        deadline_epoch = int(time.time() + remaining + 30)
         if self.proxy_mode:
             try:
                 await self._start_egress(deadline_epoch)
@@ -615,17 +618,17 @@ async def discover(request: DiscoveryRequest, cfg: Config, model: Any = None,
         return DiscoveryResponse(runId=request.runId, status='BLOCKED', reason='target_not_allowed'), {'reason': 'target_mode'}
     try:
         chosen = model if model is not None else make_run_model(request.model) if request.model else make_model(cfg.model)
-        broker = Broker(chosen, max_requests=request.maxAgentSteps or 20)
+        broker = Broker(chosen, max_requests=request.maxAgentSteps or DEFAULT_MODEL_CALLS)
     # RuntimeError: Pydantic AI's UserError for a provider whose key is not set (e.g. DEEPSEEK_API_KEY). Without it
     # here, a missing key escaped to the job service and was reported as an agent crash (FAILED / agent_error).
     except (ValueError, ImportError, RuntimeError) as e:
         diag('discovery.config_error', code=type(e).__name__)
         return DiscoveryResponse(runId=request.runId, status='BLOCKED', reason='model_not_configured'), {'reason': 'model_not_configured'}
     # The caller's budget is measured from receipt and includes the reaper, container start and delivery.
-    limit = float(request.timeoutSeconds) if request.timeoutSeconds else float(HARD_DEADLINE_S)
+    limit = float(request.timeoutSeconds or DEFAULT_JOB_SECONDS)
     deadline = started + limit
     await asyncio.to_thread(reap_orphans, cfg)
-    session = Session(cfg, request, target, broker, on_progress, deadline if request.timeoutSeconds else None)
+    session = Session(cfg, request, target, broker, on_progress, deadline)
     deadline_hit = False
     try:
         outcome = await asyncio.wait_for(session.run(), max(1.0, deadline - time.monotonic()))
@@ -650,7 +653,7 @@ async def discover(request: DiscoveryRequest, cfg: Config, model: Any = None,
     statistics = DiscoveryStatistics(
         agentSteps=steps, modelRequests=broker.requests,
         inputTokens=min(broker.usage['input'], 100_000_000), outputTokens=min(broker.usage['output'], 1_000_000),
-        durationMs=min(int((time.monotonic() - started) * 1000), 240_000),
+        durationMs=min(int((time.monotonic() - started) * 1000), MAX_JOB_DURATION_MS),
         modelCostUsd=0 if model is None and not request.model and is_zero_cost(cfg.model) else broker.estimated_cost_usd,
         protocolViolations=min(session.violations, 1000),
         blockedDestinations=None if session.blocked is None else min(session.blocked[0], 100_000),

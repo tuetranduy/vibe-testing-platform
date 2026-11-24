@@ -52,9 +52,9 @@ describe("CreateTestRunRequestSchema", () => {
   it("applies nested option defaults when options are omitted", () => {
     // Guards against Zod 4 .default() short-circuit: must use .prefault({})
     const r = CreateTestRunRequestSchema.parse(baseReq);
-    expect(r.options.maxExplorationSteps).toBe(40);
+    expect(r.options.maxExplorationSteps).toBe(100);
     expect(r.options.autoConfirmCriteria).toBe(false);
-    expect(r.options.maxRunSeconds).toBe(600);
+    expect(r.options.maxRunSeconds).toBe(1800);
     expect(r.options.additionalAllowedHosts).toEqual([]);
     expect(r.environment).toBe("staging");
     expect(r.browser).toBe("chromium");

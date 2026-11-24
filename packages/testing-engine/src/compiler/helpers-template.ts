@@ -286,11 +286,11 @@ export function refreshEmails(data: unknown): void {
 `;
 
 /**
- * The current template: ACTION_HELPERS_V4_SOURCE and `chooseOption` for a custom dropdown (KI-097). Tests saved with
+ * The initial `chooseOption` template for a custom dropdown (KI-097). Tests saved with
  * ACTION_HELPERS_V4_SOURCE, ACTION_HELPERS_V3_SOURCE, ACTION_HELPERS_V2_SOURCE, ACTION_HELPERS_V1_SOURCE or
  * PRE_ACTION_HELPERS_SOURCE stay accepted.
  */
-export const HELPERS_SOURCE = `${ACTION_HELPERS_V4_SOURCE}
+export const CHOOSE_OPTION_HELPERS_SOURCE = `${ACTION_HELPERS_V4_SOURCE}
 /**
  * The option of a dropdown whose text is the value (else the one whose text starts with it, else the one that contains
  * it; case and spacing ignored), among the visible, enabled role="option" elements of the field's list: the one its
@@ -387,6 +387,36 @@ export async function chooseOption(field: Locator, value: string, timeoutMs = 5_
   }
 }
 `;
+
+/** Open an ng-select through its widget even if its internal input is hidden. */
+export const HELPERS_SOURCE = CHOOSE_OPTION_HELPERS_SOURCE.replace(
+  '  await field.click({ timeout: timeoutMs });',
+  `  const widget = field.locator("xpath=ancestor-or-self::ng-select[1]");
+  await ((await widget.count()) === 1 ? widget : field).click({ timeout: timeoutMs });`,
+).replace(
+  'const SHOWS_CHOICE = (el: Element, label: string): boolean => {',
+  'const SHOWS_CHOICE = (el: Element, label: string): boolean => {\n  if (!el.isConnected) return true;',
+).replace(
+  `  await option.click({ timeout: timeoutMs });
+  await page.waitForTimeout(300);
+  if ((await field.evaluate(SHOWS_CHOICE, label).catch(() => null)) === false) {
+    throw new Error("chooseOption: the page did not keep the option " + JSON.stringify(label));
+  }`,
+  `  const selectedField = await field.elementHandle({ timeout: timeoutMs });
+  if (!selectedField) throw new Error("chooseOption: the field disappeared before the selection");
+  try {
+    await option.click({ timeout: timeoutMs });
+    await page.waitForTimeout(300);
+    const deadline = Date.now() + Math.min(timeoutMs, 2_000);
+    do {
+      if ((await selectedField.evaluate(SHOWS_CHOICE, label).catch(() => null)) !== false) return;
+      await page.waitForTimeout(100);
+    } while (Date.now() < deadline);
+    throw new Error("chooseOption: the page did not keep the option " + JSON.stringify(label));
+  } finally {
+    await selectedField.dispose().catch(() => {});
+  }`,
+);
 
 /** The names helpers.ts exports: the only ones a generated test may import from it (AST guard). */
 export const HELPER_EXPORTS = [

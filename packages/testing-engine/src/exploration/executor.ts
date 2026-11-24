@@ -52,6 +52,7 @@ import { createInputGenerator, type FieldFacts, type InputGenerator } from "./in
 import { JUDGE_TEXT_MAX_CHARS, createCriterionJudge, type CriterionJudge } from "./judge";
 import {
   checkElement,
+  controlBesideLabel,
   describeElement,
   describeField,
   elementAction,
@@ -229,12 +230,13 @@ export interface RecorderPort {
   hittableLabel?(page: Page, selector: string): Promise<string | null>;
   /** The one control next to text a click located (nearbyControl, KI-096). Absent: such a click fails. */
   nearbyControl?(page: Page, selector: string): Promise<string | null>;
+  controlBesideLabel?(page: Page, label: string, names?: string[]): Promise<string | null>;
   /** A reachable element the ref's role / test id / label / text candidates match (hittableAlternative, R2). */
   hittableAlternative?(page: Page, ref: ElementRef): Promise<string | null>;
   /** The first reachable element of these roles whose accessible name contains the name (reachableNamedControl, KI-072). */
   namedControl?(page: Page, name: string, roles: readonly string[]): Promise<string | null>;
   /** The one reachable element of these roles whose accessible name is exactly the name (exactNamedControl, 2026-11-19). */
-  exactControl?(page: Page, name: string, roles: readonly string[]): Promise<string | null>;
+  exactControl?(page: Page, name: string | RegExp, roles: readonly string[]): Promise<string | null>;
 }
 
 export const playwrightRecorder: RecorderPort = {
@@ -263,6 +265,7 @@ export const playwrightRecorder: RecorderPort = {
   hittable: (page, selector) => isHittable(page, selector),
   hittableLabel: (page, selector) => hittableLabel(page, selector),
   nearbyControl: (page, selector) => nearbyControl(page, selector),
+  controlBesideLabel,
   hittableAlternative: (page, ref) => hittableAlternative(page, ref),
   namedControl: (page, name, roles) => reachableNamedControl(page, name, roles),
   exactControl: (page, name, roles) => exactNamedControl(page, name, roles),
@@ -513,6 +516,7 @@ const sameUrl = (a: string, b: string): boolean => {
 
 /** Lower case, punctuation as spaces, whitespace collapsed: for comparing a control's name with a step's. */
 const normalizeName = (text: string): string => text.normalize("NFKC").toLowerCase().replace(/[\p{P}\p{S}]+/gu, " ").replace(/\s+/g, " ").trim();
+const CONTROL_COUNT = /^(.+\S)\s+\d+\s*\/\s*\d+$/u;
 
 /** The roles a control word names; the words that name no one role (icon, menu, option, control) mean a button or a link. */
 const CONTROL_ROLES: Record<string, readonly string[]> = {
@@ -561,6 +565,27 @@ export function quotedNames(description: string): string[] {
     if (name !== "") names.push(name);
   }
   return names;
+}
+
+const unquoteLabel = (label: string) => label.trim().replace(/^['"‘“]|['"’”]$/g, "");
+
+function scopedAction(description: string): { name: string; label: string } | null {
+  const pair = /^(?:click|press|tap|hit|select|choose|use)\s+(?:the\s+)?(.+?)\s+(?:for|next to|beside)\s+(.+?)\.?$/iu.exec(description.trim());
+  if (!pair) return null;
+  const name = unquoteLabel(pair[1]!.replace(/\s+(?:button|link|icon|option|control)$/iu, ""));
+  const label = /^['"‘“]([^'"‘’“”]+)['"’”]/u.exec(pair[2]!)?.[1]?.trim() ?? unquoteLabel(pair[2]!);
+  return name && label && label.length <= 180 ? { name, label } : null;
+}
+
+function expandableSection(description: string): string | null {
+  const action = /^expand\s+(?:the\s+)?(.+)$/iu.exec(description)
+    ?? /^click\s+(?:the\s+)?(.+?)\s+to\s+expand\b/iu.exec(description);
+  if (!action || !/\bsection\b/iu.test(action[1]!)) return null;
+  const named = quotedNames(action[1]!)[0];
+  if (named) return named;
+  const section = action[1]!.replace(/\s+by\s+clicking\b.*$/iu, "");
+  const prefixed = /^(?:\p{L}+\s+){0,3}section\s+(?!header\b)(.+)$/iu.exec(section);
+  return (prefixed?.[1] ?? section.replace(/\s+(?:modification\s+)?section(?:\s+header)?$/iu, "")).trim();
 }
 
 /**
@@ -680,6 +705,7 @@ class ExplorationRun {
   private readonly wayThere: WayThere | null;
   /** Planned steps that already tried a Browser Use route (Phase C): one route page per step at most. */
   private readonly routeTried = new Set<string>();
+  private readonly wayTried = new Map<string, Set<string>>();
   /** Routes Browser Use found during this exploration (one live request per run). */
   private liveRoutes: DiscoveryRoute[] = [];
   private liveRoutesAsked = false;
@@ -1298,7 +1324,7 @@ class ExplorationRun {
     }
     // Another control than the one the step names (the header's "wishlist" link for "the Add to wishlist button",
     // KI-072): the named one, or none (then the recoveries below run as for nothing found).
-    if (located && searchField === undefined) located = await this.namedTarget(step, located);
+    if (located && !direct && searchField === undefined) located = await this.namedTarget(step, located);
     // A search with no submit button (R1): the model finds the field itself, or nothing. Enter in the field submits it.
     if (searchField !== undefined && (!located || located.element.selector === searchField)) {
       const field = this.typed.findLast((t) => t.located.element.selector === searchField)?.located ?? located;
@@ -2223,7 +2249,10 @@ class ExplorationRun {
     }
     const parsed = z.array(CandidateSchema).max(100).safeParse(raw);
     if (!parsed.success) return undefined;
-    const candidates = wayThereCandidates(parsed.data, this.ctx);
+    const available = wayThereCandidates(parsed.data, this.ctx);
+    const view = JSON.stringify([step.id, this.url(), parsed.data.map(({ label, selector, kind }) => [label, selector, kind])]);
+    const tried = this.wayTried.get(view) ?? new Set<string>();
+    const candidates = available.filter(({ selector }) => !tried.has(selector));
     if (candidates.length === 0) return null;
     await this.reserve();
     const instruction = `By index: the way to: ${step.description}`;
@@ -2252,6 +2281,8 @@ class ExplorationRun {
     }
     try {
       const [ref, info] = await Promise.all([this.recorder.record(this.page, picked.selector), this.recorder.describe(this.page, picked.selector)]);
+      tried.add(picked.selector);
+      this.wayTried.set(view, tried);
       await this.record({ ...base, element: ref, outcome: "SUCCESS", llm: choice.llm });
       return { located: { element: { selector: picked.selector, description: picked.label, method: "click", arguments: [] }, ref, info }, instruction };
     } catch (err) {
@@ -2267,16 +2298,28 @@ class ExplorationRun {
    */
   private async byExactName(step: PlannedStep): Promise<Located | null> {
     const named = namedControl(step.description);
-    if (!named || !this.recorder.exactControl) return null;
+    const scoped = scopedAction(step.description);
+    const section = expandableSection(step.description);
     const startedAt = this.ctx.now();
     const urlBefore = this.url();
     try {
-      const selector = await this.recorder.exactControl(this.page, named.name, named.roles);
-      if (!selector) return null;
-      const [ref, info] = await Promise.all([this.recorder.record(this.page, selector), this.recorder.describe(this.page, selector)]);
+      let located: Located | null = null;
+      if (scoped || section) {
+        located = scoped ? await this.byScopedName(scoped.label, scoped.name) : await this.byScopedName(section!);
+      } else if (named && this.recorder.exactControl) {
+        const literal = await this.recorder.exactControl(this.page, named.name, named.roles);
+        const counted = CONTROL_COUNT.exec(named.name)?.[1];
+        const selector = literal ?? (counted ? await this.recorder.exactControl(this.page,
+          new RegExp(`^${counted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+\\d+\\s*/\\s*\\d+$`, "iu"), named.roles) : null);
+        if (selector) {
+          const [ref, info] = await Promise.all([this.recorder.record(this.page, selector), this.recorder.describe(this.page, selector)]);
+          located = { element: { selector, description: named.name, method: "click", arguments: [] }, ref, info };
+        }
+      }
+      if (!located) return null;
       await this.reserve();
-      await this.record({ plannedStepId: step.id, kind: "observe", instruction: `By name: ${step.description}`, element: ref, urlBefore, outcome: "SUCCESS", startedAt, llm: null });
-      return { element: { selector, description: named.name, method: "click", arguments: [] }, ref, info };
+      await this.record({ plannedStepId: step.id, kind: "observe", instruction: `By name: ${step.description}`, element: located.ref, urlBefore, outcome: "SUCCESS", startedAt, llm: null });
+      return located;
     } catch (err) {
       this.rethrowIfFatal(err);
       return null;
@@ -2286,13 +2329,35 @@ class ExplorationRun {
   /** The reachable control of the role and name the step names (namedControl), or null (KI-072). */
   private async byName(step: PlannedStep): Promise<Located | null> {
     const recorder = this.recorder;
+    const scoped = scopedAction(step.description);
+    if (scoped && recorder.controlBesideLabel) return this.byScopedName(scoped.label, scoped.name);
     const named = namedControl(step.description);
     if (!named || !recorder.namedControl) return null;
     try {
-      const selector = await recorder.namedControl(this.page, named.name, named.roles);
+      const confirm = /^confirm\s+(?:the\s+)?(\S+\s+.+)$/i.exec(named.name)?.[1];
+      const exact = await recorder.namedControl(this.page, named.name, named.roles);
+      const selector = exact ?? (confirm ? await recorder.namedControl(this.page, confirm, named.roles) : null);
       if (!selector) return null;
       const [ref, info] = await Promise.all([recorder.record(this.page, selector), recorder.describe(this.page, selector)]);
+      if (!exact && confirm) {
+        const prefix = normalizeName(confirm);
+        const labels = [info.name, info.text].map((label) => normalizeName(label ?? ""));
+        if (!labels.some((label) => label === prefix || label.startsWith(`${prefix} `))) return null;
+      }
       return { element: { selector, description: named.name, method: "click", arguments: [] }, ref, info };
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      return null;
+    }
+  }
+
+  private async byScopedName(label: string, name?: string): Promise<Located | null> {
+    try {
+      const action = name && normalizeName(name);
+      const selector = await this.recorder.controlBesideLabel?.(this.page, label, action ? [action, action.split(" ")[0]!] : undefined);
+      if (!selector) return null;
+      const [ref, info] = await Promise.all([this.recorder.record(this.page, selector), this.recorder.describe(this.page, selector)]);
+      return { element: { selector, description: name ?? label, method: "click", arguments: [] }, ref, info };
     } catch (err) {
       this.rethrowIfFatal(err);
       return null;
@@ -2309,6 +2374,18 @@ class ExplorationRun {
    * name or text at all (an unlabelled icon button) cannot be told apart and is kept.
    */
   private async namedTarget(step: PlannedStep, located: Located): Promise<Located | null> {
+    const scoped = scopedAction(step.description);
+    if (scoped && this.recorder.controlBesideLabel) {
+      const match = await this.byScopedName(scoped.label, scoped.name);
+      if (match) return match;
+      const want = normalizeName(scoped.name);
+      return [located.info.name, located.info.text].some((value) => normalizeName(value ?? "") === want) ? located : null;
+    }
+    const section = expandableSection(step.description);
+    if (section && this.recorder.controlBesideLabel) {
+      const match = await this.byScopedName(section);
+      if (match) return match;
+    }
     const named = namedControl(step.description);
     if (!named) return located;
     const names = [located.info.name, located.info.text].map((t) => normalizeName(t ?? "")).filter((t) => t !== "");

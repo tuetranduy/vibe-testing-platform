@@ -28,6 +28,8 @@ export interface ElementDescription {
   id: string | null;
   /** The `name` attribute. */
   nameAttr: string | null;
+  /** Stable host ID for a custom dropdown's internal combobox. */
+  comboboxHostId?: string | null;
   /** Absolute positional XPath, without the `xpath=` prefix. */
   xpath: string;
 }
@@ -122,6 +124,9 @@ export function candidatesFromDescription(d: ElementDescription): LocatorCandida
   if (d.testId && d.testId.trim()) out.push({ strategy: "testId", value: d.testId });
   if (d.id && d.id.trim()) out.push({ strategy: "css", selector: idSelector(d.id) });
   else if (isField && d.nameAttr) out.push({ strategy: "css", selector: `${d.tag}[name=${cssString(d.nameAttr)}]` });
+  if (d.comboboxHostId?.trim()) {
+    out.push({ strategy: "css", selector: `ng-select${idSelector(d.comboboxHostId)} input[role="combobox"]` });
+  }
   out.push({ strategy: "xpath", selector: d.xpath });
   return rankLocatorCandidates(out);
 }

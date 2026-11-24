@@ -120,7 +120,7 @@ def test_job_returns_a_typed_final_response_and_rejects_unbounded_input():
     with TestClient(create_app(Config(FIXTURE, 'scripted'), SECRET, runner=runner)) as client:
         big = b'x' * 20000
         assert client.post(BASE, content=big, headers=headers('POST', BASE, big)).status_code == 413
-        assert post(client, {**INPUT, 'maxAgentSteps': 21}).status_code == 422
+        assert post(client, {**INPUT, 'maxAgentSteps': 61}).status_code == 422
         assert post(client, {**INPUT, 'timeoutSeconds': 9}).status_code == 422
         assert post(client, INPUT).status_code == 202
         path = BASE + '/run_fixture'

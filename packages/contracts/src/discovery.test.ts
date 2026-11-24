@@ -4,11 +4,13 @@ import { DiscoveryInputSchema, DiscoveryResultSchema, DiscoverySummarySchema } f
 const base = { schemaVersion: "discovery.v1", runId: "run_1" } as const;
 
 describe("discovery.v1 contracts", () => {
-  it("bounds a broker job's whole budget at 10–120 seconds", () => {
+  it("accepts up to 360 seconds and 60 model calls for one broker job", () => {
     const input = { ...base, targetUrl: "http://127.0.0.1:4599/" };
     expect(DiscoveryInputSchema.parse({ ...input, timeoutSeconds: 10 }).timeoutSeconds).toBe(10);
     expect(DiscoveryInputSchema.safeParse({ ...input, timeoutSeconds: 9 }).success).toBe(false);
-    expect(DiscoveryInputSchema.safeParse({ ...input, timeoutSeconds: 121 }).success).toBe(false);
+    expect(DiscoveryInputSchema.parse({ ...input, timeoutSeconds: 360, maxAgentSteps: 60 })).toMatchObject({ timeoutSeconds: 360, maxAgentSteps: 60 });
+    expect(DiscoveryInputSchema.safeParse({ ...input, timeoutSeconds: 361 }).success).toBe(false);
+    expect(DiscoveryInputSchema.safeParse({ ...input, maxAgentSteps: 61 }).success).toBe(false);
   });
 
   it("accepts the broker's reason codes and violation count, and nothing that is not a code", () => {

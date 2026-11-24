@@ -3,7 +3,7 @@ import path from "node:path";
 import type { GeneratedTest, RerunOutcome, RerunResult } from "@platform/contracts";
 import { redactByKey } from "@platform/security";
 import { checkGeneratedSource } from "../compiler/ast-guard";
-import { ACTION_HELPERS_V1_SOURCE, ACTION_HELPERS_V2_SOURCE, ACTION_HELPERS_V3_SOURCE, ACTION_HELPERS_V4_SOURCE, HELPERS_SOURCE, PRE_ACTION_HELPERS_SOURCE } from "../compiler/helpers-template";
+import { ACTION_HELPERS_V1_SOURCE, ACTION_HELPERS_V2_SOURCE, ACTION_HELPERS_V3_SOURCE, ACTION_HELPERS_V4_SOURCE, CHOOSE_OPTION_HELPERS_SOURCE, HELPERS_SOURCE, PRE_ACTION_HELPERS_SOURCE } from "../compiler/helpers-template";
 import { secretEnvName } from "../compiler/test-compiler";
 import type { LocalArtifact } from "../evidence/collector";
 import { redactedCause, type FailureLogger } from "../shared/log-cause";
@@ -147,7 +147,7 @@ const isHttpUrl = (value: unknown): boolean => {
  */
 export function checkGeneratedTest(test: Pick<GeneratedTest, "source" | "helpersSource" | "dataJson">): string[] {
   const issues = [...checkGeneratedSource(test.source)];
-  if (![HELPERS_SOURCE, ACTION_HELPERS_V4_SOURCE, ACTION_HELPERS_V3_SOURCE, ACTION_HELPERS_V2_SOURCE, ACTION_HELPERS_V1_SOURCE, PRE_ACTION_HELPERS_SOURCE].includes(test.helpersSource)) {
+  if (![HELPERS_SOURCE, CHOOSE_OPTION_HELPERS_SOURCE, ACTION_HELPERS_V4_SOURCE, ACTION_HELPERS_V3_SOURCE, ACTION_HELPERS_V2_SOURCE, ACTION_HELPERS_V1_SOURCE, PRE_ACTION_HELPERS_SOURCE].includes(test.helpersSource)) {
     issues.push("helpers.ts is not the fixed helpers template");
   }
   let data: unknown;

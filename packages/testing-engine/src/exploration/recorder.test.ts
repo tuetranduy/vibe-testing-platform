@@ -5,7 +5,7 @@ import { LOCATOR_STRATEGY_ORDER } from "../shared/locator-policy";
 import { captureCheckpoint, captureFact, modeForValueType, readFact } from "./fact-reader";
 import { captureNamedFact, namedFactSubject } from "./named-facts";
 import { CUSTOM_DROPDOWN, MONTHS } from "./custom-dropdown.fixture";
-import { checkElement, describeElement, describeField, elementAction, fieldValue, fillElement, exactNamedControl, hittableAlternative, hittableLabel, isHittable, nearbyControl, reachableNamedControl, recordElement, requiredEmptyFields, selectElementOption } from "./recorder";
+import { checkElement, controlBesideLabel, describeElement, describeField, elementAction, fieldValue, fillElement, exactNamedControl, hittableAlternative, hittableLabel, isHittable, nearbyControl, reachableNamedControl, recordElement, requiredEmptyFields, selectElementOption } from "./recorder";
 
 /**
  * Real Chromium (Playwright's build, launched headless without a proxy) on a static fixture
@@ -212,6 +212,16 @@ describe("recordElement (acted element → ranked locator candidates)", () => {
       { strategy: "xpath", selector: "/html[1]/body[1]/div[1]" },
     ]);
     expect(ref.chosenIndex).toBe(0);
+  });
+
+  it("records a custom combobox by its host ID so it survives a wrapper change", async () => {
+    await page.setContent('<ng-select id="address"><div><input role="combobox" hidden></div></ng-select>');
+    const ref = await recordElement(page, "input");
+    const candidate = chosen(ref);
+    expect(candidate).toEqual({ strategy: "css", selector: 'ng-select#address input[role="combobox"]' });
+    await page.locator("ng-select").evaluate((el) => el.insertAdjacentHTML("afterbegin", "<div></div>"));
+    if (candidate.strategy !== "css") throw new Error("Expected a CSS locator");
+    expect(await page.locator(candidate.selector).count()).toBe(1);
   });
 
   it("rejects selectors that do not match exactly one element", async () => {
@@ -683,6 +693,16 @@ describe("nearbyControl (KI-096: the control next to the text observe found)", (
     await page.setContent(PAGE);
     expect(await nearbyControl(page, ".two >> p")).toBeNull();
     expect(await nearbyControl(page, "text=Far away")).toBeNull();
+  });
+
+  it("finds the matching action beside an exact row label even when other rows repeat it", async () => {
+    await page.setContent(`<button>Add modifications</button>
+      <div><p>Uprated Brakes</p><span tabindex="0" id="brakes">Add</span><button>Details</button></div>
+      <div><p>Other modification</p><span tabindex="0" id="other">Add</span></div>`);
+    const control = await controlBesideLabel(page, "Uprated Brakes", ["add modification", "add"]);
+    expect(control).toBeTruthy();
+    expect(await page.locator(control!).getAttribute("id")).toBe("brakes");
+    expect(await controlBesideLabel(page, "Missing row", ["add"])).toBeNull();
   });
 });
 

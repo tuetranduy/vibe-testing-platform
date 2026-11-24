@@ -1,3 +1,4 @@
+import { DEFAULT_DISCOVERY_SECONDS } from "@platform/contracts";
 import { RequirementRepository, RunRepository, SuggestionRepository, type TestRun } from "@platform/db";
 import { runAnalysis, runSurvey } from "@platform/testing-engine";
 import type { WorkerDeps } from "../deps";
@@ -46,15 +47,16 @@ export async function analyzeRunJob(deps: WorkerDeps, runId: string): Promise<vo
   }
   deps.metrics?.activeRuns.inc();
   try {
-    // The survey's hard deadline is SURVEY_TIMEOUT_SECONDS; its page loading gets 60 % of it
-    // (createRunContext's budgets.explorationMs), the rest is for the model call.
+    // Give discovery its own time so site inspection and criteria compilation retain their budget.
     const seconds = mode === "survey" ? deps.config.surveyTimeoutSeconds : deps.config.analysisTimeoutSeconds;
-    const budgetMs = seconds * 1000 * deps.config.timeScale;
+    const { autonomousDiscovery, discoveryMaxSeconds } = run.request.options;
+    const discoverySeconds = mode !== "selected" && autonomousDiscovery ? discoveryMaxSeconds ?? DEFAULT_DISCOVERY_SECONDS : 0;
+    const scale = 1000 * deps.config.timeScale;
     let handle: RunContextHandle;
     try {
       handle = await createRunContext(deps, run, {
-        deadlineAt: new Date(now().getTime() + budgetMs),
-        totalBudgetMs: budgetMs,
+        deadlineAt: new Date(now().getTime() + (seconds + discoverySeconds) * scale),
+        totalBudgetMs: seconds * scale,
       });
     } catch (err) {
       await failBeforeContext(deps, run, err);

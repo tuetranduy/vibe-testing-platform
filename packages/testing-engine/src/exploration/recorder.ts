@@ -25,6 +25,7 @@ interface DomFacts {
   tag: string;
   id: string | null;
   nameAttr: string | null;
+  comboboxHostId: string | null;
   placeholder: string | null;
   testId: string | null;
   labels: string[];
@@ -68,6 +69,7 @@ function readDom(el: Element): DomFacts {
     tag: el.localName,
     id: el.getAttribute("id"),
     nameAttr: el.getAttribute("name"),
+    comboboxHostId: el.matches('input[role="combobox"]') ? el.closest("ng-select[id]")?.id ?? null : null,
     placeholder: el.getAttribute("placeholder"),
     testId: el.getAttribute("data-testid"),
     labels,
@@ -193,6 +195,7 @@ export async function describeElement(page: Page, target: ElementTarget, opts: R
     testId: dom.testId,
     id: dom.id,
     nameAttr: dom.nameAttr,
+    comboboxHostId: dom.comboboxHostId,
     xpath: dom.xpath,
   };
 }
@@ -304,17 +307,21 @@ const NEARBY_LEVELS = 3;
  * holds exactly one visible control besides the text; the XPath of that control, or null (none, or two or more at the
  * first level that has any). No named inner functions (see readDom).
  */
-const NEARBY_CONTROL = (start: Element, args: { selector: string; levels: number }): string | null => {
+const NEARBY_CONTROL = (start: Element, args: { selector: string; levels: number; names?: string[] }): string | null => {
   let found: Element | null = null;
   let level = 0;
   for (let n: Element | null = start; n && level <= args.levels; n = n.parentElement, level++) {
-    if (n.matches(args.selector)) {
+    if (!args.names && n.matches(args.selector)) {
       found = n;
       break;
     }
-    const inside = Array.from(n.querySelectorAll(args.selector)).filter((c) => {
+    const controls = Array.from(n.querySelectorAll(args.selector));
+    if (args.names && n.matches(args.selector)) controls.unshift(n);
+    const inside = controls.filter((c) => {
       const r = c.getBoundingClientRect();
-      return c !== start && r.width > 0 && r.height > 0;
+      return (c !== start || args.names !== undefined) && r.width > 0 && r.height > 0 &&
+        (!args.names || [c.getAttribute("aria-label"), c.textContent].some((name) =>
+          name !== null && args.names!.includes(name.normalize("NFKC").toLowerCase().replace(/[\p{P}\p{S}]+/gu, " ").replace(/\s+/g, " ").trim())));
     });
     if (inside.length > 1) return null;
     if (inside.length === 1) {
@@ -348,6 +355,14 @@ export async function nearbyControl(page: Page, selector: string): Promise<strin
   return (await isHittable(page, xpath)) ? xpath : null;
 }
 
+/** Finds the control beside a uniquely visible label, even when the control itself only says "Add". */
+export async function controlBesideLabel(page: Page, label: string, names?: string[]): Promise<string | null> {
+  const anchor = page.getByText(label, { exact: true }).filter({ visible: true });
+  if (await countOf(anchor) !== 1) return null;
+  const xpath = await anchor.evaluate(NEARBY_CONTROL, { selector: CONTROL_SELECTOR, levels: NEARBY_LEVELS, ...(names && { names }) }, { timeout: 2_000 }).catch(() => null);
+  return xpath && (await isHittable(page, xpath)) ? xpath : null;
+}
+
 /** The XPath of the first of a locator's elements (at most MAX_ALTERNATIVES) a click would land on, or null. */
 async function firstHittable(locator: Locator): Promise<string | null> {
   const n = Math.min(await countOf(locator), MAX_ALTERNATIVES);
@@ -378,7 +393,7 @@ export async function reachableNamedControl(page: Page, name: string, roles: rea
  * the explorer is asked, so a step that names its control ("Click the 'New User' button") needs no model call. Its XPath
  * selector, or null when no element or more than one matches, or the one that does cannot be clicked.
  */
-export async function exactNamedControl(page: Page, name: string, roles: readonly string[]): Promise<string | null> {
+export async function exactNamedControl(page: Page, name: string | RegExp, roles: readonly string[]): Promise<string | null> {
   const found: string[] = [];
   for (const role of roles) {
     const locator = page.getByRole(role as Parameters<Page["getByRole"]>[0], { name, exact: true });
@@ -594,10 +609,14 @@ export async function selectElementOption(page: Page, target: ElementTarget, val
 async function chooseCustomOption(page: Page, handle: ElementHandle, value: string, opts: RecorderOptions): Promise<void> {
   const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const fail = (why: string) => new Error(`recorder: select failed: ${why}`);
+  // ng-select can hide the internal input on non-searchable fields. The widget still opens on click.
+  const widget = (await handle.evaluateHandle((el) => (el as Element).closest("ng-select"))).asElement();
   try {
-    await handle.click({ timeout });
+    await (widget ?? handle).click({ timeout });
   } catch (err) {
     throw fail(`the dropdown did not open: ${(err instanceof Error ? err.message : String(err)).split("\n")[0]!.slice(0, 200)}`);
+  } finally {
+    await widget?.dispose().catch(() => {});
   }
   let option = await waitForOption(page, handle, value, Math.min(timeout, OPTION_WAIT_MS));
   if (!option && (await handle.isEditable().catch(() => false))) {
@@ -617,8 +636,12 @@ async function chooseCustomOption(page: Page, handle: ElementHandle, value: stri
     throw fail(`the option "${label}" could not be clicked: ${(err instanceof Error ? err.message : String(err)).split("\n")[0]!.slice(0, 200)}`);
   }
   await page.waitForTimeout(SELECT_SETTLE_MS);
-  const kept = await handle.evaluate(showsChoice, label).catch(() => null);
-  if (kept === false) throw fail(`the page did not keep the option "${label}"`);
+  const deadline = Date.now() + Math.min(timeout, OPTION_WAIT_MS);
+  do {
+    if ((await handle.evaluate(showsChoice, label).catch(() => null)) !== false) return;
+    await page.waitForTimeout(100);
+  } while (Date.now() < deadline);
+  throw fail(`the page did not keep the option "${label}"`);
 }
 
 /** How long an opened (or narrowed) dropdown may take to show the option. */
@@ -677,6 +700,8 @@ function dropdownOption(el: Element, value: string | null): HTMLElement | string
  * to three levels, ng-select's value container) outside any open list.
  */
 function showsChoice(el: Element, label: string): boolean {
+  // Some selections advance the form and remove the widget, such as choosing a looked-up address.
+  if (!el.isConnected) return true;
   const want = label.replace(/\s+/g, " ").trim().toLowerCase();
   if (((el as HTMLInputElement).value ?? "").replace(/\s+/g, " ").trim().toLowerCase() === want) return true;
   let root: Element = el;

@@ -19,10 +19,11 @@ from pydantic_ai.messages import BinaryContent, FilePart, FileUrl, ModelMessages
 from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.settings import ToolOrOutput
 
+from discovery_service.protocol import DEFAULT_MODEL_CALLS
+
 
 PARAMS = TypeAdapter(ModelRequestParameters)
 RESPONSE = TypeAdapter(ModelResponse)
-MAX_REQUESTS = 20  # every model call of a run, delivery repairs and compaction summaries included
 MAX_TOKENS = 12_000
 REQUEST_TIMEOUT_S = 60.0
 
@@ -144,7 +145,7 @@ def _tool_choice(value: Any, params: ModelRequestParameters) -> Any:
 @dataclass
 class Broker:
     model: Model
-    max_requests: int = MAX_REQUESTS
+    max_requests: int = DEFAULT_MODEL_CALLS
     requests: int = 0
     usage: dict[str, int] = field(default_factory=lambda: {'input': 0, 'output': 0})
     priced_requests: int = 0

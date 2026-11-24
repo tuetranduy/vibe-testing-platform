@@ -29,13 +29,13 @@ Reason = Literal[
     'target_not_allowed', 'model_not_configured', 'docker_unavailable', 'invalid_request',
 ]
 
-# Hard budgets for this slice. Not caller-configurable.
-MAX_AGENT_STEPS = 19  # Browser Use max_steps; +1 possible delivery repair = the broker's 20-call cap
-AGENT_TIMEOUT_S = 120
+# Mirrors packages/contracts/src/discovery.ts. One model call can be used to repair the final output.
+DEFAULT_MODEL_CALLS, MAX_MODEL_CALLS = 40, 60
+MAX_AGENT_STEPS = MAX_MODEL_CALLS - 1
+DEFAULT_JOB_SECONDS, MAX_JOB_SECONDS = 240, 360
+MIN_JOB_SECONDS = 10
+MAX_JOB_DURATION_MS = (MAX_JOB_SECONDS + 60) * 1000
 MAX_CANDIDATES = 12
-
-# A caller's total job budget (timeoutSeconds) covers container start, the agent and result delivery.
-MIN_JOB_SECONDS, MAX_JOB_SECONDS = 10, 120
 
 MAX_STDIN_BYTES = 16 * 1024
 MAX_FRAME_BYTES = 4 * 1024 * 1024  # one IPC line (a model request with history; screenshots are off)
@@ -95,7 +95,7 @@ class DiscoveryRequest(BaseModel):
     runId: str = Field(pattern=RUN_ID.pattern)
     targetUrl: str = Field(min_length=1, max_length=2048)
     timeoutSeconds: int | None = Field(default=None, strict=True, ge=MIN_JOB_SECONDS, le=MAX_JOB_SECONDS)
-    maxAgentSteps: int | None = Field(default=None, strict=True, ge=2, le=20)
+    maxAgentSteps: int | None = Field(default=None, strict=True, ge=2, le=MAX_MODEL_CALLS)
     snapshot: list[SnapshotPage] | None = Field(default=None, min_length=1, max_length=6)
     focus: str | None = Field(default=None, min_length=FOCUS_MIN, max_length=FOCUS_MAX)
     # Live interaction: targetUrl is a public HTTPS page reached through the job's inspecting egress proxy.
@@ -112,9 +112,9 @@ class DiscoveryRequest(BaseModel):
 
 class DiscoveryStatistics(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    agentSteps: int = Field(ge=0, le=20)
-    modelRequests: int = Field(ge=0, le=20)
-    durationMs: int = Field(ge=0, le=240_000)
+    agentSteps: int = Field(ge=0, le=MAX_MODEL_CALLS)
+    modelRequests: int = Field(ge=0, le=MAX_MODEL_CALLS)
+    durationMs: int = Field(ge=0, le=MAX_JOB_DURATION_MS)
     inputTokens: int = Field(ge=0, le=100_000_000)
     outputTokens: int = Field(ge=0, le=1_000_000)
     modelCostUsd: float | None = Field(default=None, ge=0)
@@ -248,12 +248,14 @@ def clean_list(values: Any, count: int, limit: int = ITEM_MAX) -> list[str]:
     return out
 
 
-def clean_path(value: Any, known_paths: frozenset[str]) -> str | None:
+def clean_path(value: Any, known_paths: frozenset[str], *, live: bool = False) -> str | None:
     """A relevant path must be a bare path (no scheme, host, query or fragment) of a page that exists in the fixture."""
     if not isinstance(value, str):
         return None
     path = value.strip()
-    # bare paths only: an absolute URL (any origin), protocol-relative //host, query or fragment is rejected
+    # Live navigations can have query state. Keep only the path, and ground it in the proxy's observed paths.
+    if live:
+        path = re.split(r'[?#]', path, maxsplit=1)[0]
     if path == '/index.html':
         path = '/'
     if not _PATH.match(path) or path.startswith('//') or '..' in path:
@@ -280,7 +282,7 @@ def sanitize_candidates(raw: Any, known_paths: frozenset[str], limit: int = MAX_
         paths: list[str] = []
         raw_paths = item.get('relevant_paths', item.get('relevantPaths'))
         for p in raw_paths if isinstance(raw_paths, list) else []:
-            cp = clean_path(p, known_paths)
+            cp = clean_path(p, known_paths, live=live)
             if cp and cp not in paths:
                 paths.append(cp)
             if len(paths) >= PATHS_MAX:
@@ -323,7 +325,7 @@ def sanitize_findings(raw: Any, known_paths: frozenset[str], limit: int = MAX_FI
         title = clean_text(item.get('title'), TITLE_MAX)
         observation = clean_text(item.get('observation'), OBSERVATION_MAX)
         expected = clean_text(item.get('expected'), ITEM_MAX)
-        path = clean_path(item.get('path'), known_paths)
+        path = clean_path(item.get('path'), known_paths, live=live)
         steps = clean_list(item.get('reproduction'), REPRODUCTION_MAX)
         severity = item.get('severity') if item.get('severity') in ('low', 'medium', 'high') else 'low'
         if (len(title) < TITLE_MIN or len(observation) < OBSERVATION_MIN or len(expected) < FINDING_EXPECTED_MIN

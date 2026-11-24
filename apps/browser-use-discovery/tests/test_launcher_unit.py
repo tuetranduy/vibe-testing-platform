@@ -109,7 +109,9 @@ def test_caller_budget_bounds_the_agent_and_the_whole_job(tmp_path):
     session = Session(cfg, request, target, Broker(make_model('scripted')), deadline=time.monotonic() + 60)
     assert 60 - STARTUP_RESERVE_S - DELIVERY_MARGIN_S - 1 <= session.agent_timeout() <= 60 - STARTUP_RESERVE_S - DELIVERY_MARGIN_S
     assert Session(cfg, request, target, Broker(make_model('scripted')), deadline=time.monotonic() + 3).agent_timeout() == 5
-    assert Session(cfg, request, target, Broker(make_model('scripted'))).agent_timeout() == 120
+    assert Session(cfg, request, target, Broker(make_model('scripted'))).agent_timeout() == 240
+    extended = Session(cfg, request, target, Broker(make_model('scripted')), deadline=time.monotonic() + 360)
+    assert 349 <= extended.agent_timeout() <= 350
 
 
 def test_a_hung_container_ends_at_the_caller_budget_as_a_hard_deadline(tmp_path):

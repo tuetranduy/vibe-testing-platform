@@ -46,7 +46,7 @@ describe("simple test setup", () => {
   it("creates a test with destructive actions already authorized and no manual input fields", async () => {
     const fetch = api(); render(<NewTestForm />);
     const user = await fill(); await user.click(create());
-    expect(payload(fetch)).toMatchObject({ targetUrl: "https://shop.example.com", requirement: "Search for a product and verify the results.", environment: "production", options: { allowDestructiveActions: true, confirmProductionHost: "shop.example.com", maxRunSeconds: 600, maxExplorationSteps: 40 } });
+    expect(payload(fetch)).toMatchObject({ targetUrl: "https://shop.example.com", requirement: "Search for a product and verify the results.", environment: "production", options: { allowDestructiveActions: true, confirmProductionHost: "shop.example.com", maxRunSeconds: 1800, maxExplorationSteps: 100 } });
     for (const field of ["testData", "secrets", "testDataSetId", "credentialProfileId"]) expect(payload(fetch)).not.toHaveProperty(field);
     expect(push).toHaveBeenCalledWith("/runs/run_new");
   });
@@ -141,7 +141,7 @@ describe("simple test setup", () => {
     await user.click(screen.getByRole("button", { name: "Explore website" }));
     expect(payload(fetch)).toMatchObject({
       targetUrl, requirement: "", environment: "staging",
-      options: { autonomousDiscovery: true, discoveryMaxSeconds: 60, discoveryMaxSteps: 20, discoveryAgents: 2, autoConfirmCriteria: false, allowDestructiveActions: false },
+      options: { autonomousDiscovery: true, discoveryMaxSeconds: 60, discoveryMaxSteps: 40, discoveryAgents: 2, autoConfirmCriteria: false, allowDestructiveActions: false },
     });
   });
   it("opts written instructions into Browser Use route discovery with manual review (Phase B)", async () => {
@@ -158,7 +158,7 @@ describe("simple test setup", () => {
     await user.click(create());
     expect(payload(fetch)).toMatchObject({
       targetUrl, requirement: "Add a product to the cart and check the total.", environment: "staging",
-      options: { autonomousDiscovery: true, autoConfirmCriteria: false, allowDestructiveActions: false },
+      options: { autonomousDiscovery: true, discoveryMaxSeconds: 240, discoveryMaxSteps: 40, autoConfirmCriteria: false, allowDestructiveActions: false },
     });
     expect(CreateTestRunRequestSchema.safeParse(payload(fetch)).success).toBe(true);
   });
@@ -181,7 +181,7 @@ describe("simple test setup", () => {
   it("opens settings with an invalid limit and blocks submission", async () => {
     const fetch = api(); render(<NewTestForm />);
     const user = await fill();
-    fireEvent.change(screen.getByLabelText("Step limit"), { target: { value: "101" } });
+    fireEvent.change(screen.getByLabelText("Step limit"), { target: { value: "201" } });
     await user.click(create());
     expect(screen.getByRole("button", { name: /Run settings/ })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByLabelText("Step limit")).toHaveFocus();

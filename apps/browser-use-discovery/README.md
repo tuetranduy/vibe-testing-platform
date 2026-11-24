@@ -20,20 +20,19 @@ exit   : 0 (a response was written), 143 (CANCELLED by a signal), 2 (invalid req
 - Only `COMPLETED` carries candidates (1 to 12). Bounds: title 3-80, goal 10-500, rationale 1-300, relevantPaths
   1-8 bare fixture paths (each ≤180 characters), expectedBehavior 1-5, negativeCases 0-5, items 1-180 characters.
   Unicode control and format characters are removed.
-- Hard limits (not caller-configurable): Browser Use `max_steps=19`, `timeout=120`, at most 20 model calls per run
-  (delivery repairs included), `judge=False`, `web_search=False`, `use_vision=False`, no `sensitive_data`.
+- Browser Use runs with `judge=False`, `web_search=False`, `use_vision=False` and no `sensitive_data`.
 - `reason` is a code, never text from a page or provider: `ok`, `no_valid_candidates`, `timeout`, `max_steps`,
   `hard_deadline`, `cancelled`, `agent_error`, `no_result`, `target_not_allowed`, `model_not_configured`,
   `docker_unavailable`, `invalid_request`.
-- A request may lower the budget with `timeoutSeconds` (10–120) and `maxAgentSteps` (2–20 model calls).
+- A request can set `timeoutSeconds` (10–360, default 240) and `maxAgentSteps` (2–60 model calls, default 40,
+  including any delivery repair).
   `timeoutSeconds` is the **whole job's** wall-clock budget from receipt: the orphan reaper, container start, the
   agent and result delivery. The agent gets what remains after a 5 s start reserve and a 5 s delivery margin (at
   least 5 s). At the budget the launcher stops and removes the container and answers `FAILED`/`hard_deadline`, so a
   caller that waits a few seconds longer always receives a typed reply. The agent's own timeout answers
   `PARTIAL`/`timeout`.
-- Without `timeoutSeconds`, the launcher bounds itself at 180 s (up to 45 s container/Chromium start + the 120 s
-  agent budget + 15 s grace). The caller may stop it sooner at any time with SIGTERM (→ `CANCELLED`, container
-  removed). The platform always sends `timeoutSeconds`: its stage budget minus a 5 s result grace.
+- The caller may stop the launcher sooner at any time with SIGTERM (→ `CANCELLED`, container removed).
+  The platform reserves 5 s of its discovery budget to receive the broker's result.
 - Container removal is asynchronous and verified: `docker rm -f`, and when Docker's own `--rm` is already removing
   it, polling until Docker no longer knows the container (within 15 s). A failure is logged as
   `discovery.cleanup_error` and counted by the job service's health endpoint.
@@ -102,7 +101,7 @@ reason code and whether a broker job was attempted, including on a worker that c
 | `FAILED` | The broker or transport failed (`broker_unavailable`, `invalid_result`, `agent_error`, `no_result`, …) | yes |
 | `CANCELLED` | The broker stopped an active job, or the tenant disabled discovery while it was running (`tenant_disabled`) | yes |
 
-The discovery budget is independent of Stagehand execution and capped by the remaining survey time. An administrator
+Discovery gets its own time allowance during the survey or requirement analysis, independent of Stagehand execution. An administrator
 can select **Disable Browser Use** for the current tenant. New opted-in requests are refused. Queued runs that have
 yet to start Browser Use continue with standard suggestions. During discovery, the worker checks the flag every
 two seconds and again before using the broker result. A disabled or unreadable flag aborts the discovery call and
@@ -210,7 +209,7 @@ Browser Use can submit forms with synthetic data and continue through checkout a
 
 ```
 Node ──stdin/stdout──▶ launcher (host; holds model key) ──docker run -i──▶ container (untrusted)
-                          │  broker: ≤20 model calls,                     runner + Browser Use agent
+                          │  broker: ≤60 model calls,                     runner + Browser Use agent
                           │  no media/native tools,                        + REPL (model-authored Python)
                           │  clamped settings                              + Chromium + fixture copy on loopback
                           └─ validates + sanitizes the result              --network none: only `lo` exists
@@ -236,7 +235,7 @@ Node ──stdin/stdout──▶ launcher (host; holds model key) ──docker r
   - If the launcher is SIGKILLed, the heartbeat stops. The launcher sends an `hb` frame every 2 s, separate from
     model calls, and the runner exits after 10 s of host silence (this also applies before the start frame). Docker
     attach does not reliably close stdin when the parent dies.
-  - As a backup, the runner kills itself after 210 s.
+  - As a backup, the runner kills itself after 450 s.
   - Each launch removes orphaned containers that are past their deadline label (`vtp.browser-use-discovery`).
 - **Grounding:** bundled jobs only keep candidates backed by fixture pages. Scenarios about logins, deletion or
   security testing are dropped. Live jobs can also report payment steps on observed pages.

@@ -1421,7 +1421,7 @@ describe("runExploration (fake explorer)", () => {
     const { recorder } = fakeRecorder({
       describe: (selector) => (selector === card ? { role: "button", name: "Add to wishlist", text: null } : { role: "link", name: "wishlist", text: null }),
     });
-    const asked: [string, readonly string[]][] = [];
+    const asked: [string | RegExp, readonly string[]][] = [];
     recorder.namedControl = async (_page, name, roles) => {
       asked.push([name, roles]);
       return card;
@@ -1512,7 +1512,7 @@ describe("runExploration (fake explorer)", () => {
     const button = "xpath=/html[1]/body[1]/main[1]/button[2]";
     const session = new FakeSession();
     const { recorder } = fakeRecorder({ describe: () => ({ role: "button", name: "New User", text: "New User" }) });
-    const asked: [string, readonly string[]][] = [];
+    const asked: [string | RegExp, readonly string[]][] = [];
     recorder.exactControl = async (_page, name, roles) => {
       asked.push([name, roles]);
       return button;
@@ -1619,7 +1619,10 @@ describe("runExploration (fake explorer)", () => {
       return {};
     } });
     Object.assign(session.page, { evaluate: async (script: unknown) => script === CANDIDATES
-      ? [{ selector: next, label: "Continue", kind: "click", type: "button", href: "", submit: false, form: "" }] : [] });
+      ? [
+        { selector: next, label: "Continue", kind: "click", type: "button", href: "", submit: false, form: "" },
+        { selector: "xpath=/html[1]/body[1]/input[2]", label: `Field on section ${advanced}`, kind: "fill", type: "text", href: "", submit: false, form: "" },
+      ] : [] });
     const { recorder } = fakeRecorder({ describe: (sel) => ({ role: "button", name: sel === next ? "Continue" : "Review", text: null }) });
     const wayThere: WayThere = { choose: async () => ({ index: 0, llm: USAGE }) };
     const plan = planOf(step("navigate", "Open"), step("click", "Click the Review button"));
@@ -1642,9 +1645,37 @@ describe("runExploration (fake explorer)", () => {
     const plan = planOf(step("navigate", "Open"), step("click", "Click the Review button"));
     const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) },
       { store: memoryStore().store, recorder, wayThere });
-    // Three per attempt, with the executor's one existing retry.
-    expect(session.calls.filter((c) => c.op === "actOn")).toHaveLength(6);
-    expect(outcome.steps.filter((s) => s.kind === "observe" && s.instruction.startsWith("By index:"))).toHaveLength(6);
+    // The control stays on the same view and cannot advance the step on a retry.
+    expect(session.calls.filter((c) => c.op === "actOn")).toHaveLength(1);
+    expect(outcome.steps.filter((s) => s.kind === "observe" && s.instruction.startsWith("By index:"))).toHaveLength(1);
+  });
+
+  it.each([
+    "Click the 'Add Modification' control for 'Uprated Brakes'",
+    "Click Add Modification for Uprated Brakes",
+    "Click the 'Add Modification' control for 'Uprated Brakes' in the Wheels section",
+  ])("uses the item-specific Add control for %s", async (description) => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({ observe: () => [{ selector: "#global", description: "Add modifications", method: "click", arguments: [] }] });
+    const { recorder } = fakeRecorder({ describe: () => ({ role: "generic", name: null, text: "Add" }) });
+    recorder.controlBesideLabel = vi.fn(async (_page, label) => label === "Uprated Brakes" ? "#add-brakes" : null);
+    const action = step("click", description);
+    const plan = planOf(step("navigate", "Open"), action);
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) },
+      { store: memoryStore().store, recorder });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(session.calls.filter((call) => call.op === "actOn").map((call) => (call.arg as ObservedElement).selector)).toEqual(["#add-brakes"]);
+    expect(recorder.controlBesideLabel).toHaveBeenCalledWith(session.page, "Uprated Brakes", ["add modification", "add"]);
+  });
+
+  it("keeps using the named button when its selection count changes", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession();
+    const { recorder } = fakeRecorder({ describe: () => ({ role: "button", name: "Add modifications 2/5", text: null }) });
+    recorder.exactControl = async (_page, name) => name instanceof RegExp && name.test("Add modifications 2/5") ? "#save" : null;
+    const plan = planOf(step("navigate", "Open"), step("click", "Click the 'Add modifications 1/5' button"));
+    await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(session.calls.filter((call) => call.op === "actOn").map((call) => (call.arg as ObservedElement).selector)).toEqual(["#save"]);
   });
 
   it("never lets recovery inherit a destructive goal's permission (KI-088)", async () => {

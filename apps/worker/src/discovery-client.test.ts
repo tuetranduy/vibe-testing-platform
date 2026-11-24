@@ -100,6 +100,18 @@ it("signs the body, idempotency key and nonce exactly as the job service verifie
   )).toBe("428bee0cd490a7181fa39d355cd20400df9d0d9064d22a3d44f23f3ec1fcdbba");
 });
 
+it("accepts progress and results above the former 20-call and 120-second limits", async () => {
+  const statistics = { agentSteps: 59, modelRequests: 60, durationMs: 345_000, inputTokens: 10, outputTokens: 5, modelCostUsd: null };
+  const result = { ...response, statistics };
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ jobId: input.runId, agentSteps: 59, result }, { status: 202 })));
+  const remote = createDiscoveryServiceClient("http://127.0.0.1:4600", "local-test-token-for-remote-progress");
+  const onProgress = vi.fn(async () => {});
+  await expect(remote.discover({ ...input, timeoutSeconds: 355, maxAgentSteps: 60 }, {
+    signal: AbortSignal.timeout(5000), onProgress,
+  })).resolves.toEqual(result);
+  expect(onProgress).toHaveBeenCalledWith(59);
+});
+
 it("reports a failed cancellation of an accepted job, but not of a job the broker never accepted", async () => {
   const onCleanupError = vi.fn();
   vi.stubGlobal("fetch", vi.fn(async (_url: URL, init: RequestInit) => init.method === "POST"

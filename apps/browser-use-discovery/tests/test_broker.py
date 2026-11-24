@@ -6,7 +6,7 @@ from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.tools import ToolDefinition
 
-from discovery_service.broker import MAX_REQUESTS, Broker, BrokerRefused, make_model
+from discovery_service.broker import Broker, BrokerRefused, make_model
 from discovery_service.brokered_model import encode_request
 
 
@@ -27,16 +27,17 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def test_roundtrip_and_budget_is_20():
-    assert MAX_REQUESTS == 20
+@pytest.mark.parametrize(('override', 'limit'), [(None, 40), (60, 60)])
+def test_roundtrip_respects_model_call_budget(override, limit):
     seen = []
-    b = Broker(echo_model(seen))
-    for _ in range(20):
+    model = echo_model(seen)
+    b = Broker(model) if override is None else Broker(model, max_requests=override)
+    for _ in range(limit):
         out = run(b.handle(payload()))
         assert out['parts'][0]['content'] == 'ok'
     with pytest.raises(BrokerRefused):
         run(b.handle(payload()))
-    assert len(seen) == 20
+    assert len(seen) == limit
 
 
 @pytest.mark.parametrize('content', [

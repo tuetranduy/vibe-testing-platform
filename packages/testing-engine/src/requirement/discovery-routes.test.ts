@@ -35,6 +35,14 @@ describe("Browser Use routes for a written requirement (Phase B)", () => {
     expect(discoveryFocus({ redact, request: { requirement: "Add a product\n\tto the cart" } as StoredTestRunRequest })).toBe("Add a product to the cart");
     expect(discoveryFocus({ redact, request: { requirement: "short" } as StoredTestRunRequest })).toBeUndefined();
   });
+
+  it("keeps later checkpoints in a long written workflow", () => {
+    const requirement = `When User opens the Vehicle page\n${"And User enters vehicle information\n".repeat(35)}Then Rider Summary Page is displayed`;
+    const focus = discoveryFocus({ redact: (value) => value, request: { requirement } as StoredTestRunRequest });
+    expect(focus).toContain("When User opens the Vehicle page");
+    expect(focus).toContain("Then Rider Summary Page is displayed");
+    expect(focus!.length).toBeLessThanOrEqual(1000);
+  });
 });
 
 const compiled = {
@@ -92,7 +100,7 @@ describe("the analysis of an opted-in written requirement (Phase B)", () => {
     const h = setup(async ({ schemaVersion, runId }) => ({ schemaVersion, runId, status: "COMPLETED", candidates: [SEARCH, CART] }));
     const result = await h.stage(h.ctx);
 
-    expect(h.discover.mock.calls[0]![0]).toMatchObject({ targetUrl: FIXTURE, focus: TEXT });
+    expect(h.discover.mock.calls[0]![0]).toMatchObject({ targetUrl: FIXTURE, focus: TEXT, timeoutSeconds: 235, maxAgentSteps: 40 });
     const prompt = h.transport.requests[0]!.messages[0]!.content as string;
     expect(prompt).toContain("<<<ROUTES");
     expect(prompt).toContain("Add tea to the cart");
@@ -146,8 +154,7 @@ describe("routes for one step during exploration (Phase C)", () => {
     const h = setup(async ({ schemaVersion, runId }) => ({ schemaVersion, runId, status: "COMPLETED", candidates: [SEARCH, CART] }));
     const routes = await discoverStepRoutes(h.ctx, { fixtureUrl: FIXTURE, port: { discover: h.discover }, allowsTenant: () => true }, "Click Add to cart for Assam tea");
     expect(routes.map((r) => r.title)).toEqual(["Add tea to the cart"]);
-    expect(h.discover.mock.calls[0]![0]).toMatchObject({ runId: "run_1-r1", maxAgentSteps: 8, focus: expect.stringContaining("Add to cart for Assam tea") });
-    expect(h.discover.mock.calls[0]![0].timeoutSeconds).toBeLessThanOrEqual(40);
+    expect(h.discover.mock.calls[0]![0]).toMatchObject({ runId: "run_1-r1", maxAgentSteps: 16, timeoutSeconds: 85, focus: expect.stringContaining("Add to cart for Assam tea") });
     expect(h.events).toEqual([]);
   });
 

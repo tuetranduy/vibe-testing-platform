@@ -38,7 +38,7 @@ RUN python -m compileall -q /app/src \
 USER 10001:10001
 # The runner is PID 1 on purpose: it must be the ONLY process holding the container's stdin/stdout (the broker
 # channel). A wrapper such as docker-init or timeout(1) would keep those pipes open in a dumpable process that agent
-# code could reach through /proc/1/fd. The runner bounds its own lifetime (210 s self-kill, and exit on stdin EOF).
+# code could reach through /proc/1/fd. The runner has its own lifetime watchdog and exits on stdin EOF.
 ENTRYPOINT ["python", "-P", "-m", "discovery_service.runner"]
 
 # The trusted job service (broker) for a container deployment: the same code and dependencies plus the Docker CLI,

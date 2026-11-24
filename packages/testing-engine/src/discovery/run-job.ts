@@ -1,8 +1,13 @@
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  DEFAULT_DISCOVERY_MODEL_CALLS,
+  DEFAULT_DISCOVERY_SECONDS,
   DiscoveryFixtureUrlSchema,
   DiscoveryLiveUrlSchema,
+  MAX_DISCOVERY_AGENTS,
   MAX_DISCOVERY_FINDINGS,
+  MAX_DISCOVERY_SECONDS,
+  MAX_DISCOVERY_TOTAL_CALLS,
   type DiscoveryCandidate,
   type DiscoveryFindingCandidate,
   type DiscoveryInput,
@@ -20,7 +25,6 @@ import { DiscoveryPortError, type AutonomousDiscoveryPort } from "./port";
 /** Three agents' candidates together (each returns at most 12). */
 const MAX_MERGED_CANDIDATES = 36;
 
-const MAX_DISCOVERY_MS = 120_000;
 // Leave time for the existing orchestrator to save and publish its result after a timeout.
 const STAGE_COMPLETION_MS = 5_000;
 /**
@@ -199,10 +203,10 @@ export async function runDiscoveryJob<T>(
       return skip("BLOCKED", "model_not_configured");
     }
   }
-  const budgetMs = options.maxSeconds ? options.maxSeconds * 1000 : runOptions.discoveryMaxSeconds ? runOptions.discoveryMaxSeconds * 1000 : MAX_DISCOVERY_MS;
+  const budgetMs = (options.maxSeconds ?? runOptions.discoveryMaxSeconds ?? DEFAULT_DISCOVERY_SECONDS) * 1000;
   const remaining = ctx.deadlineAt ? ctx.deadlineAt.getTime() - started - STAGE_COMPLETION_MS : budgetMs;
   let stageMs = Math.min(remaining, budgetMs);
-  let jobSeconds = Math.min(120, Math.floor(stageMs / 1000) - DISCOVERY_RESULT_GRACE_S);
+  let jobSeconds = Math.min(MAX_DISCOVERY_SECONDS, Math.floor(stageMs / 1000) - DISCOVERY_RESULT_GRACE_S);
   if (jobSeconds < MIN_JOB_SECONDS) return skip("TIMED_OUT", "no_budget");
   if (!options.reserved && discovery.reserve && !(await discovery.reserve(ctx.tenantId))) return skip("BUSY", "tenant_quota");
 
@@ -230,7 +234,7 @@ export async function runDiscoveryJob<T>(
     }
     admission = granted;
     stageMs -= granted.waitedMs;
-    jobSeconds = Math.min(120, Math.floor(stageMs / 1000) - DISCOVERY_RESULT_GRACE_S);
+    jobSeconds = Math.min(MAX_DISCOVERY_SECONDS, Math.floor(stageMs / 1000) - DISCOVERY_RESULT_GRACE_S);
     // A rollback while the run waited, or a wait that left too little time, ends here without a job.
     const blocked = !(await isEnabled()) ? "tenant_disabled" : jobSeconds < MIN_JOB_SECONDS ? "no_budget" : null;
     if (blocked) {
@@ -243,7 +247,7 @@ export async function runDiscoveryJob<T>(
   // Extra agents (Phase C): each takes a free slot at once and its own quota attempt, or is not started.
   const extras: { runId: string; focus: string; release?: () => Promise<void> }[] = [];
   const areas = options.areas ?? [];
-  const wanted = Math.min(3, Math.max(1, options.agents ?? 1), 1 + areas.length);
+  const wanted = Math.min(MAX_DISCOVERY_AGENTS, Math.max(1, options.agents ?? 1), 1 + areas.length);
   for (let i = 1; i < wanted && discovery.admit; i++) {
     const runId = `${baseRunId}-a${i + 1}`;
     if (discovery.reserve && !(await discovery.reserve(ctx.tenantId))) break;
@@ -275,12 +279,12 @@ export async function runDiscoveryJob<T>(
     }
     let steps = 0;
     const agentSteps = new Map<string, number>();
-    const maxSteps = options.maxSteps ?? runOptions.discoveryMaxSteps;
+    const maxSteps = options.maxSteps ?? runOptions.discoveryMaxSteps ?? DEFAULT_DISCOVERY_MODEL_CALLS;
     const agents = [{ runId: baseRunId, focus }, ...extras];
     const job = (agent: { runId: string; focus?: string }) => port.discover(
       {
         schemaVersion: "discovery.v1", runId: agent.runId, targetUrl, timeoutSeconds: jobSeconds,
-        ...(maxSteps === undefined ? {} : { maxAgentSteps: maxSteps }),
+        maxAgentSteps: maxSteps,
         ...(live ? { live: true as const } : snapshot && { snapshot }),
         ...(agent.focus && { focus: agent.focus }),
         ...(model && { model }),
@@ -288,7 +292,7 @@ export async function runDiscoveryJob<T>(
       { signal, onProgress: async (reached) => {
         if (signal.aborted) return;
         agentSteps.set(agent.runId, Math.max(agentSteps.get(agent.runId) ?? 0, reached));
-        const total = Math.min(60, [...agentSteps.values()].reduce((a, b) => a + b, 0));
+        const total = Math.min(MAX_DISCOVERY_TOTAL_CALLS, [...agentSteps.values()].reduce((a, b) => a + b, 0));
         if (total <= steps) return;
         steps = total;
         await publish({
@@ -391,8 +395,8 @@ export function mergeAgentResults(runId: string, settled: PromiseSettledResult<D
     ...(findings.length > 0 && { findings }),
     ...(stats.length > 0 && {
       statistics: {
-        agentSteps: Math.min(60, sum(stats.map((s) => s.agentSteps))),
-        modelRequests: Math.min(60, sum(stats.map((s) => s.modelRequests))),
+        agentSteps: Math.min(MAX_DISCOVERY_TOTAL_CALLS, sum(stats.map((s) => s.agentSteps))),
+        modelRequests: Math.min(MAX_DISCOVERY_TOTAL_CALLS, sum(stats.map((s) => s.modelRequests))),
         durationMs: Math.max(...stats.map((s) => s.durationMs)),
         inputTokens: sum(stats.map((s) => s.inputTokens)),
         outputTokens: Math.min(1_000_000, sum(stats.map((s) => s.outputTokens))),

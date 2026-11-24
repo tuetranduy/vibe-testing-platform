@@ -124,6 +124,14 @@ describe("analyze-run", () => {
     expect(after.lifecycle).toBe("ERRORED");
     expect(after.errorCategory).toBe("TIMEOUT");
   });
+
+  it("allows criteria compilation after discovery uses more than the base analysis timeout", async () => {
+    const run = await seedRun(h, { options: { autonomousDiscovery: true, discoveryMaxSeconds: 60 } });
+    const deps = h.deps(createFakeStages({ analyzeDelayMs: 250 }));
+    deps.config.analysisTimeoutSeconds = 10; // 100 ms for analysis plus 600 ms for discovery at test scale.
+    await analyzeRunJob(deps, run.id);
+    expect(await new RunRepository(h.tdb.db).getById(run.id)).toMatchObject({ lifecycle: "AWAITING_CONFIRMATION" });
+  });
 });
 
 describe("analyze-run: the survey and the selection", () => {

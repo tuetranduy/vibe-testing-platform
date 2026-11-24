@@ -65,23 +65,32 @@ export function routesForRequirement(candidates: readonly DiscoveryCandidate[], 
 
 /** The requirement as the agent may see it: redacted, one line, bounded. Null when too short to focus on. */
 export function discoveryFocus(ctx: Pick<StageContext, "redact" | "request">): string | undefined {
-  const text = String(ctx.redact(ctx.request.requirement)).replace(/[\p{Cc}\p{Cf}\s]+/gu, " ").trim().slice(0, 1000);
+  const requirement = String(ctx.redact(ctx.request.requirement));
+  const oneLine = (text: string) => text.replace(/[\p{Cc}\p{Cf}\s]+/gu, " ").trim();
+  let text = oneLine(requirement);
+  if (text.length > 1000) {
+    const checkpoints = requirement.split(/\r?\n/).filter((line) => /^\s*Then\s+/i.test(line)).map(oneLine);
+    const outcomes = checkpoints.length > 0 ? ` Expected checkpoints: ${checkpoints.join(" ")}`.slice(0, 450) : "";
+    text = `${text.slice(0, 1000 - outcomes.length).trimEnd()}${outcomes}`;
+  }
   return text.length >= 10 ? text : undefined;
 }
 
 /**
- * Phase C, exploration-time recovery: routes Browser Use finds for one planned step, from a short quiet job (45 s,
- * 8 model calls, its own broker job id). The run's quota, rollout flag and fair admission apply; no discovery
+ * Phase C, exploration-time recovery: routes Browser Use finds for one planned step, from a quiet job (up to 90 s and
+ * 16 model calls, its own broker job id). The run's quota, rollout flag and fair admission apply; no discovery
  * event is published, so the run's discovery outcome stays the survey's or the analysis'. Live-site runs use the
  * real site when live interaction is on; a snapshot-only live-site run gets none (its snapshot is not kept).
  */
 export async function discoverStepRoutes(ctx: StageContext, discovery: AutonomousSurveyDeps | undefined, goal: string): Promise<DiscoveryRoute[]> {
-  const verified = ctx.request.options.verifiedSiteDiscovery === true;
-  const live = verified && ctx.request.options.discoveryLiveInteraction === true && discovery?.liveInteraction === true;
-  if (!ctx.request.options.autonomousDiscovery || (verified && !live)) return [];
+  const { autonomousDiscovery, verifiedSiteDiscovery, discoveryLiveInteraction, discoveryMaxSeconds, discoveryMaxSteps } = ctx.request.options;
+  const verified = verifiedSiteDiscovery === true;
+  const live = verified && discoveryLiveInteraction === true && discovery?.liveInteraction === true;
+  if (!autonomousDiscovery || (verified && !live)) return [];
   const focus = `Find where a visitor can do this step and the pages on the way: ${goal}`.replace(/[\p{Cc}\p{Cf}\s]+/gu, " ").slice(0, 1000);
   const { value } = await runDiscoveryJob(ctx, discovery, {
-    verified, live, focus, quiet: true, jobId: "r1", maxSeconds: 45, maxSteps: 8,
+    verified, live, focus, quiet: true, jobId: "r1",
+    maxSeconds: Math.min(90, discoveryMaxSeconds ?? 90), maxSteps: Math.min(16, discoveryMaxSteps ?? 16),
     fallbackLabel: "Exploration continues without it.",
     accept: (candidates) => {
       const routes = routesForRequirement(candidates, goal);

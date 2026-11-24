@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DiscoverySecondsSchema, DiscoveryStepsSchema } from "./discovery";
+import { DiscoverySecondsSchema, DiscoveryStepsSchema, MAX_DISCOVERY_AGENTS } from "./discovery";
 import { DataKeySchema, HostnameSchema, HttpUrlSchema, IsoDateTime, SecretNameSchema } from "./common";
 import { LlmOverrideSchema, LlmProviderSchema, ReasoningLevelSchema, type LlmChoice } from "./llm";
 import { RunOwnerSchema } from "./users";
@@ -109,13 +109,17 @@ export const SecretRecordSchema = z
 export const EnvironmentSchema = z.enum(["staging", "production"]);
 export type Environment = z.infer<typeof EnvironmentSchema>;
 
+export const DEFAULT_RUN_SECONDS = 1800;
+export const MAX_RUN_SECONDS = 3600;
+export const DEFAULT_EXPLORATION_STEPS = 100;
+export const MAX_EXPLORATION_STEPS = 200;
+
 export const RunOptionsSchema = z
   .object({
     /** Planned steps exploration may start, of every scenario together (not the steps each one records). */
-    maxExplorationSteps: z.number().int().min(1).max(100).default(40),
-    // 600 s (2026-11-23, KI-091): exploration gets 60% of it, and a checkout with a review after each action and a
-    // plan for each unseen page needs about 180 s, all of the old 300 s default's exploration budget.
-    maxRunSeconds: z.number().int().min(60).max(1800).default(600),
+    maxExplorationSteps: z.number().int().min(1).max(MAX_EXPLORATION_STEPS).default(DEFAULT_EXPLORATION_STEPS),
+    /** Execution wall-clock budget. Exploration gets 60% and the generated test replay gets up to 25%. */
+    maxRunSeconds: z.number().int().min(60).max(MAX_RUN_SECONDS).default(DEFAULT_RUN_SECONDS),
     generatePlaywright: z.boolean().default(true),
     /** Omitted: off when destructive actions are allowed (the rerun repeats every action), on otherwise. */
     rerunGeneratedTest: z.boolean().optional(),
@@ -127,7 +131,7 @@ export const RunOptionsSchema = z
     discoveryMaxSeconds: DiscoverySecondsSchema.optional(),
     discoveryMaxSteps: DiscoveryStepsSchema.optional(),
     /** Phase C: Browser Use agents exploring in parallel, each in its own container and broker slot (1–3; absent: 1). */
-    discoveryAgents: z.number().int().min(1).max(3).optional(),
+    discoveryAgents: z.number().int().min(1).max(MAX_DISCOVERY_AGENTS).optional(),
     allowDestructiveActions: z.boolean().default(false),
     /** Production only: the target URL's host, typed as the confirmation that destructive actions may run there. */
     confirmProductionHost: z.string().trim().min(1).max(255).optional(),

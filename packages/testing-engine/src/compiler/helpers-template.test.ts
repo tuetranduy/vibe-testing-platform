@@ -330,6 +330,7 @@ describe("chooseOption (KI-097) chooses as the recorder's selectElementOption do
     ["an option inside the widget", {}, "December", "December"],
     ["an option the value starts, in a list appended to the body", { portal: true }, "sept", "September"],
     ["an option shown only once the value is typed", { onlyWhenTyped: true }, "December", "December"],
+    ["a widget with a hidden combobox input", { hiddenInput: true }, "December", "December"],
   ] as const)("%s", async (_what, opts, value, expected) => {
     await tab.setContent(CUSTOM_DROPDOWN(MONTHS, opts));
     await helpers.chooseOption(tab.locator("#month-input"), value);
@@ -338,6 +339,17 @@ describe("chooseOption (KI-097) chooses as the recorder's selectElementOption do
     await selectElementOption(tab, "#month-input", value);
     expect(replayed).toBe(expected);
     expect(await tab.locator("#month .ng-value").textContent()).toBe(replayed);
+  });
+
+  it("accepts a selection that replaces the combobox with the chosen value", async () => {
+    for (const choose of [
+      () => helpers.chooseOption(tab.locator("#month-input"), "December"),
+      () => selectElementOption(tab, "#month-input", "December"),
+    ]) {
+      await tab.setContent(CUSTOM_DROPDOWN(MONTHS, { hiddenInput: true, replacesWidget: true }));
+      await choose();
+      expect(await tab.locator("#month-input").count()).toBe(0);
+    }
   });
 
   it("fails, like the recorder, on an option the list lacks and on a choice the page drops", async () => {

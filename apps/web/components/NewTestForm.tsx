@@ -7,7 +7,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/ui/native-select";
-import { CreateTestRunRequestSchema, DiscoveryFixtureUrlSchema, DiscoveryLiveUrlSchema, HttpUrlSchema, type CreateTestRunRequestInput, type LlmSettingsView, type ReasoningLevel } from "@platform/contracts";
+import {
+  CreateTestRunRequestSchema, DEFAULT_DISCOVERY_MODEL_CALLS, DEFAULT_DISCOVERY_SECONDS, DEFAULT_EXPLORATION_STEPS,
+  DEFAULT_RUN_SECONDS, DiscoveryFixtureUrlSchema, DiscoveryLiveUrlSchema, HttpUrlSchema, MAX_DISCOVERY_AGENTS,
+  MAX_DISCOVERY_MODEL_CALLS, MAX_DISCOVERY_SECONDS, MAX_EXPLORATION_STEPS, MAX_RUN_SECONDS,
+  type CreateTestRunRequestInput, type LlmSettingsView, type ReasoningLevel,
+} from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiRequestError, createRun, getCriteria, getDiscoveryCapability, getLlmSettings, getRun, getSuggestions } from "../lib/api";
@@ -34,14 +39,14 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const [catalogFailed, setCatalogFailed] = useState(false);
   const [model, setModel] = useState("");
   const [reasoning, setReasoning] = useState<ReasoningLevel | "">("");
-  const [maxRunSeconds, setMaxRunSeconds] = useState("600");
-  const [maxSteps, setMaxSteps] = useState("40");
+  const [maxRunSeconds, setMaxRunSeconds] = useState(String(DEFAULT_RUN_SECONDS));
+  const [maxSteps, setMaxSteps] = useState(String(DEFAULT_EXPLORATION_STEPS));
   const [autoConfirm, setAutoConfirm] = useState(false);
   const [discoveryFixture, setDiscoveryFixture] = useState<string | null>(null);
   const [liveSites, setLiveSites] = useState(false);
   const [discover, setDiscover] = useState(false);
-  const [discoverySeconds, setDiscoverySeconds] = useState("120");
-  const [discoverySteps, setDiscoverySteps] = useState("20");
+  const [discoverySeconds, setDiscoverySeconds] = useState(String(DEFAULT_DISCOVERY_SECONDS));
+  const [discoverySteps, setDiscoverySteps] = useState(String(DEFAULT_DISCOVERY_MODEL_CALLS));
   const [discoveryAgents, setDiscoveryAgents] = useState("1");
   // Live sites: let the agent interact with the real site (on by default where the deployment offers it).
   const [canInteract, setCanInteract] = useState(false);
@@ -222,9 +227,9 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
               </p>
             </div>}
             {usingDiscovery && <div className="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1">
-              <Field><label htmlFor="discoveryMaxSeconds">Discovery time (seconds)</label><Input id="discoveryMaxSeconds" name="discoveryMaxSeconds" type="number" min={15} max={120} value={discoverySeconds} onChange={(e) => setDiscoverySeconds(e.target.value)} {...invalid("discoveryMaxSeconds")} />{errorFor("discoveryMaxSeconds")}</Field>
-              <Field><label htmlFor="discoveryMaxSteps">Discovery model calls</label><Input id="discoveryMaxSteps" name="discoveryMaxSteps" type="number" min={2} max={20} value={discoverySteps} onChange={(e) => setDiscoverySteps(e.target.value)} {...invalid("discoveryMaxSteps")} />{errorFor("discoveryMaxSteps")}</Field>
-              <Field><label htmlFor="discoveryAgents">Browser Use agents</label><Input id="discoveryAgents" name="discoveryAgents" type="number" min={1} max={3} value={discoveryAgents} onChange={(e) => setDiscoveryAgents(e.target.value)} {...invalid("discoveryAgents")} aria-describedby={errors.discoveryAgents ? "discoveryAgents-error agents-hint" : "agents-hint"} /><p id="agents-hint" className="text-sm text-muted-foreground">Each extra agent explores another page in parallel when a slot is free, with the same limits.</p>{errorFor("discoveryAgents")}</Field>
+              <Field><label htmlFor="discoveryMaxSeconds">Discovery time (seconds)</label><Input id="discoveryMaxSeconds" name="discoveryMaxSeconds" type="number" min={15} max={MAX_DISCOVERY_SECONDS} value={discoverySeconds} onChange={(e) => setDiscoverySeconds(e.target.value)} {...invalid("discoveryMaxSeconds")} />{errorFor("discoveryMaxSeconds")}</Field>
+              <Field><label htmlFor="discoveryMaxSteps">Discovery model calls</label><Input id="discoveryMaxSteps" name="discoveryMaxSteps" type="number" min={2} max={MAX_DISCOVERY_MODEL_CALLS} value={discoverySteps} onChange={(e) => setDiscoverySteps(e.target.value)} {...invalid("discoveryMaxSteps")} />{errorFor("discoveryMaxSteps")}</Field>
+              <Field><label htmlFor="discoveryAgents">Browser Use agents</label><Input id="discoveryAgents" name="discoveryAgents" type="number" min={1} max={MAX_DISCOVERY_AGENTS} value={discoveryAgents} onChange={(e) => setDiscoveryAgents(e.target.value)} {...invalid("discoveryAgents")} aria-describedby={errors.discoveryAgents ? "discoveryAgents-error agents-hint" : "agents-hint"} /><p id="agents-hint" className="text-sm text-muted-foreground">Each extra agent explores another page in parallel when a slot is free, with the same limits.</p>{errorFor("discoveryAgents")}</Field>
             </div>}
           </Field>}
         </div>
@@ -242,8 +247,8 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
             <Field><label htmlFor="reasoning">Thinking level</label><NativeSelect className="w-full" id="reasoning" value={reasoning} onChange={(e) => setReasoning(e.target.value as ReasoningLevel | "")} {...invalid("reasoning")}><option value="">Model default</option>{levels.map((level) => <option key={level} value={level}>{LEVEL_LABEL[level]}</option>)}</NativeSelect>{errorFor("reasoning")}</Field>
           </div>
           <div className="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1">
-            <Field><label htmlFor="maxRunSeconds">Time limit (seconds)</label><Input id="maxRunSeconds" type="number" min={60} max={1800} value={maxRunSeconds} onChange={(e) => setMaxRunSeconds(e.target.value)} {...invalid("maxRunSeconds")} />{errorFor("maxRunSeconds")}</Field>
-            <Field><label htmlFor="maxExplorationSteps">Step limit</label><Input id="maxExplorationSteps" type="number" min={1} max={100} value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} {...invalid("maxExplorationSteps")} /><p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Steps in the test plan.</p>{errorFor("maxExplorationSteps")}</Field>
+            <Field><label htmlFor="maxRunSeconds">Time limit (seconds)</label><Input id="maxRunSeconds" type="number" min={60} max={MAX_RUN_SECONDS} value={maxRunSeconds} onChange={(e) => setMaxRunSeconds(e.target.value)} {...invalid("maxRunSeconds")} />{errorFor("maxRunSeconds")}</Field>
+            <Field><label htmlFor="maxExplorationSteps">Step limit</label><Input id="maxExplorationSteps" type="number" min={1} max={MAX_EXPLORATION_STEPS} value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} {...invalid("maxExplorationSteps")} /><p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Planned steps the test can attempt, including replans.</p>{errorFor("maxExplorationSteps")}</Field>
           </div>
           <label className="flex min-h-8 cursor-pointer items-center gap-2.5 text-[0.9375rem] has-disabled:cursor-not-allowed has-disabled:text-muted-foreground"><Checkbox checked={rerun} onCheckedChange={(checked) => setRerun(checked === true)} />Verify results by rerunning the saved test</label>
           <label className="flex min-h-8 cursor-pointer items-center gap-2.5 text-[0.9375rem] has-disabled:cursor-not-allowed has-disabled:text-muted-foreground"><Checkbox disabled={usingDiscovery} checked={!usingDiscovery && autoConfirm} onCheckedChange={(checked) => setAutoConfirm(checked === true)} />Start immediately after planning (skip review)</label>

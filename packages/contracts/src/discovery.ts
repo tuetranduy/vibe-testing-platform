@@ -3,10 +3,19 @@ import { HttpUrlSchema } from "./common";
 
 const version = z.literal("discovery.v1");
 const runId = z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/);
-export const DiscoverySecondsSchema = z.number().int().min(15).max(120);
+export const DEFAULT_DISCOVERY_SECONDS = 240;
+export const MAX_DISCOVERY_SECONDS = 360;
+export const DEFAULT_DISCOVERY_MODEL_CALLS = 40;
+export const MAX_DISCOVERY_MODEL_CALLS = 60;
+export const MAX_DISCOVERY_AGENTS = 3;
+export const MAX_DISCOVERY_TOTAL_CALLS = MAX_DISCOVERY_MODEL_CALLS * MAX_DISCOVERY_AGENTS;
+// The broker can still be cleaning up after its job deadline.
+const MAX_DISCOVERY_DURATION_MS = (MAX_DISCOVERY_SECONDS + 60) * 1000;
+
+export const DiscoverySecondsSchema = z.number().int().min(15).max(MAX_DISCOVERY_SECONDS);
 /** A broker job's whole wall-clock budget: container start, the agent and result delivery. */
-export const DiscoveryJobSecondsSchema = z.number().int().min(10).max(120);
-export const DiscoveryStepsSchema = z.number().int().min(2).max(20);
+export const DiscoveryJobSecondsSchema = z.number().int().min(10).max(MAX_DISCOVERY_SECONDS);
+export const DiscoveryStepsSchema = z.number().int().min(2).max(MAX_DISCOVERY_MODEL_CALLS);
 export const DiscoveryCapabilitySchema = z.object({
   fixtureUrl: z.string().nullable(), verifiedSites: z.boolean().optional(),
   /** Live sites: the agent can interact with the site and submit forms with test data. */
@@ -132,10 +141,10 @@ export const DiscoveryOutcomeReasonSchema = z.enum([
 ]);
 export type DiscoveryOutcomeReason = z.infer<typeof DiscoveryOutcomeReasonSchema>;
 export const DiscoveryStatisticsSchema = z.strictObject({
-  // Per broker job at most 20; a multi-agent run (Phase C, up to 3 agents) adds its agents' up.
-  agentSteps: z.number().int().min(0).max(60),
-  modelRequests: z.number().int().min(0).max(60),
-  durationMs: z.number().int().min(0).max(240_000),
+  // A multi-agent run adds the agents' steps and model calls together.
+  agentSteps: z.number().int().min(0).max(MAX_DISCOVERY_TOTAL_CALLS),
+  modelRequests: z.number().int().min(0).max(MAX_DISCOVERY_TOTAL_CALLS),
+  durationMs: z.number().int().min(0).max(MAX_DISCOVERY_DURATION_MS),
   inputTokens: z.number().int().min(0).max(100_000_000),
   outputTokens: z.number().int().min(0).max(1_000_000),
   modelCostUsd: z.number().min(0).nullable(),
@@ -157,13 +166,13 @@ export const DiscoverySummarySchema = z.strictObject({
   /** Phase C: the unverified findings stored for review. Absent: none were reported or stored. */
   findingCount: z.number().int().min(0).max(MAX_DISCOVERY_FINDINGS).optional(),
   /** Phase C: how many agents explored in parallel; absent: one. */
-  agents: z.number().int().min(2).max(3).optional(),
+  agents: z.number().int().min(2).max(MAX_DISCOVERY_AGENTS).optional(),
   pageCount: z.number().int().min(0).max(96),
   fallbackUsed: z.boolean(),
   statistics: DiscoveryStatisticsSchema.optional(),
 });
 export type DiscoverySummary = z.infer<typeof DiscoverySummarySchema>;
-export const DiscoveryProgressSchema = z.strictObject({ agentSteps: z.number().int().min(1).max(60) });
+export const DiscoveryProgressSchema = z.strictObject({ agentSteps: z.number().int().min(1).max(MAX_DISCOVERY_TOTAL_CALLS) });
 const responseFields = {
   schemaVersion: version, runId, reason: DiscoveryResultReasonSchema.optional(), statistics: DiscoveryStatisticsSchema.optional(),
 };

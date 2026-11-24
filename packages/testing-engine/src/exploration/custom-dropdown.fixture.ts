@@ -3,13 +3,13 @@
  * Like ng-select on qa-bike-quote.bewiser.co.uk (KI-097): the field is `<input role="combobox">`, a click opens a
  * listbox of `role="option"` divs inside the widget, typing narrows it, and the choice shows beside the input.
  */
-export const CUSTOM_DROPDOWN = (options: string[], opts: { portal?: boolean; onlyWhenTyped?: boolean; dropsChoice?: boolean } = {}) => `
+export const CUSTOM_DROPDOWN = (options: string[], opts: { portal?: boolean; onlyWhenTyped?: boolean; dropsChoice?: boolean; hiddenInput?: boolean; replacesWidget?: boolean } = {}) => `
   <label>When did you buy it?</label>
-  <div class="ng-select" id="month">
+  <${opts.hiddenInput ? "ng-select style='display:block;width:200px;min-height:30px'" : "div"} class="ng-select" id="month">
     <div class="ng-value-container"><div class="ng-placeholder">Month</div>
-      <div class="ng-input"><input id="month-input" role="combobox" aria-autocomplete="list" aria-expanded="false" type="text" autocomplete="off"></div>
+      <div class="ng-input"><input id="month-input" role="combobox" aria-autocomplete="list" aria-expanded="false" type="text" autocomplete="off" ${opts.hiddenInput ? 'style="display:none"' : ''}></div>
     </div>
-  </div>
+  </${opts.hiddenInput ? "ng-select" : "div"}>
   <script>(() => {
     const OPTIONS = ${JSON.stringify(options)};
     const root = document.getElementById("month");
@@ -47,8 +47,9 @@ export const CUSTOM_DROPDOWN = (options: string[], opts: { portal?: boolean; onl
       let value = values.querySelector(".ng-value");
       if (!value) { value = document.createElement("div"); value.className = "ng-value"; values.prepend(value); }
       value.textContent = label;
+      ${opts.replacesWidget ? 'setTimeout(() => input.remove(), 500); value.textContent = ""; setTimeout(() => { value.textContent = label; }, 600);' : ''}
     }
-    input.addEventListener("click", render);
+    ${opts.hiddenInput ? 'root.addEventListener("click", (e) => { if (!e.target.closest("[role=option]")) render(); });' : 'input.addEventListener("click", render);'}
     input.addEventListener("input", render);
   })();</script>`;
 

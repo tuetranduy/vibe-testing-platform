@@ -2,16 +2,17 @@ import { execFile } from "node:child_process";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
-import { DiscoveryInputSchema, DiscoveryProgressSchema, DiscoveryResultSchema } from "@platform/contracts";
+import { DiscoveryInputSchema, DiscoveryResultSchema, MAX_DISCOVERY_MODEL_CALLS } from "@platform/contracts";
 import { DiscoveryPortError, type AutonomousDiscoveryPort } from "@platform/testing-engine";
 import { z } from "zod";
 
 const MAX_OUTPUT_BYTES = 256 * 1024;
 const JOBS = "/internal/v1/discoveries";
 const BROKER_COOLDOWN_MS = 15_000;
+const AgentStepsSchema = z.number().int().min(0).max(MAX_DISCOVERY_MODEL_CALLS);
 const JobSchema = z.strictObject({
   jobId: z.string(),
-  agentSteps: z.number().int().min(0).max(20),
+  agentSteps: AgentStepsSchema,
   result: DiscoveryResultSchema.optional(),
 });
 
@@ -59,8 +60,8 @@ export function createBrowserUseDiscoveryClient(launcher: string): AutonomousDis
             let value: Record<string, unknown>;
             try { value = JSON.parse(line); } catch { return; }
             if (value?.event !== "discovery.progress" || value.runId !== request.runId) return;
-            const progress = DiscoveryProgressSchema.safeParse({ agentSteps: value.agentSteps });
-            if (progress.success) publishing = publishing.then(() => onProgress(progress.data.agentSteps)).catch(() => {});
+            const progress = AgentStepsSchema.safeParse(value.agentSteps);
+            if (progress.success && progress.data > 0) publishing = publishing.then(() => onProgress(progress.data)).catch(() => {});
           });
         }
         child.stdin?.on("error", () => {

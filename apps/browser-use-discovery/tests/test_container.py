@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 import pytest
+from pydantic_ai.messages import ModelResponse, ToolCallPart
 
 from discovery_service.launcher import APP_DIR, DEFAULT_IMAGE, LABEL, Config, discover
 from discovery_service.protocol import DiscoveryRequest, DiscoveryResponse, SnapshotPage
@@ -80,6 +81,22 @@ def test_scripted_discovery_completes():
         assert all(p.startswith('/') and '://' not in p for p in c.relevantPaths)
     assert 1 <= stats['agentSteps'] <= 19 and stats['modelRequests'] <= 20
     DiscoveryResponse.model_validate_json(resp.line())
+    assert leftover_containers() == []
+
+
+def test_browser_use_can_finish_after_twenty_model_calls():
+    class LongerDiscovery(ScriptedModel):
+        def _respond(self, messages, info):
+            if 1 <= self.requests <= 21:
+                self.requests += 1
+                return ModelResponse(parts=[ToolCallPart('python', {'code': f'print({self.requests})'})])
+            return super()._respond(messages, info)
+
+    model = LongerDiscovery()
+    request = req('it-longer-budget').model_copy(update={'timeoutSeconds': 240, 'maxAgentSteps': 40})
+    response, stats = asyncio.run(discover(request, cfg(), model=model))
+    assert response.status == 'COMPLETED', stats
+    assert response.statistics is not None and 20 < response.statistics.modelRequests <= 40
     assert leftover_containers() == []
 
 
