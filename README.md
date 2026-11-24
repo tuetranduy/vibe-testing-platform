@@ -247,6 +247,21 @@ curl -N localhost:3001/v1/test-runs/<runId>/events -H "authorization: Bearer $TO
 Requires **Node ≥ 22.18** (Stagehand v4's minimum; `engines.node` in `package.json` enforces it), pnpm 10
 (`corepack enable`), and Docker for Postgres / Redis / MinIO.
 
+**First time on a clone**, one command does the setup below (safe to re-run):
+
+```bash
+pnpm dev:setup   # or: bash scripts/dev-setup.sh [--skip-browser] [--skip-browser-use] [--skip-infra]
+```
+
+It checks Node, pnpm and Docker, runs `pnpm install --frozen-lockfile`, creates `.env` from `.env.example` with a
+generated `SECRETS_ENCRYPTION_KEY`, installs Playwright's Chromium, runs `pnpm infra:up` and `pnpm db:migrate` (which
+also seeds the default tenant), then prints how to start the apps. With [uv](https://docs.astral.sh/uv/) installed it
+also sets up **Browser Use discovery** ([`apps/browser-use-discovery`](apps/browser-use-discovery/README.md)): the
+Python venv, the agent image, `discovery.env` with the scripted model (no key, no cost) and the
+`BROWSER_USE_DISCOVERY_*` keys in `.env` (the one-shot launcher, the fixture URL, live sites on), then smoke-tests the
+launcher. An existing `.env` is changed only to add those keys, once, after a copy to `.env.backup-<time>`. The
+steps by hand:
+
 The real engine's browser sandbox (Task 13) launches Playwright's own Chromium directly (not via
 `npx playwright test`), so install it once per machine:
 
