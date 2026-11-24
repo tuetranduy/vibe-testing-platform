@@ -31,6 +31,24 @@ class BrokerRefused(Exception):
     pass
 
 
+def make_run_model(run_model: Any) -> Model:
+    """The run's own model with the key from its Settings, passed to the provider explicitly (never through the
+    environment, which every other job shares)."""
+    from pydantic_ai.models import infer_model
+    from pydantic_ai.providers import infer_provider_class
+
+    key = run_model.apiKey.get_secret_value()
+
+    def provider(name: str):  # noqa: ANN202 - a Pydantic AI provider
+        if name.startswith('google'):
+            from pydantic_ai.providers.google import GoogleProvider
+
+            return GoogleProvider(api_key=key)
+        return infer_provider_class(name)(api_key=key)
+
+    return infer_model(run_model.spec, provider_factory=provider)
+
+
 def make_model(spec: str) -> Model:
     """DISCOVERY_MODEL: 'scripted' (local, free, deterministic) or a Pydantic AI model string such as
     'anthropic:claude-sonnet-5-5' (its key must be in this host process's environment, never the container's)."""

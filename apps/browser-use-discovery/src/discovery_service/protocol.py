@@ -14,13 +14,16 @@ import re
 import unicodedata
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, model_validator
 
 SCHEMA_VERSION = 'discovery.v1'
 Status = Literal['COMPLETED', 'PARTIAL', 'BLOCKED', 'FAILED', 'CANCELLED']
 # Why a job ended. Codes only: never page text, model output or provider messages.
 # The egress proxy's refusal codes (egress_proxy.REASONS).
-EgressReason = Literal['not_allowlisted', 'forbidden_address', 'connect_denied', 'bad_request', 'unresolvable', 'upstream_error']
+EgressReason = Literal[
+    'not_allowlisted', 'forbidden_address', 'connect_denied', 'bad_request', 'unresolvable', 'upstream_error',
+    'method_denied', 'upgrade_denied', 'tls_error', 'rate_limited',
+]
 Reason = Literal[
     'ok', 'no_valid_candidates', 'timeout', 'max_steps', 'hard_deadline', 'cancelled', 'agent_error', 'no_result',
     'target_not_allowed', 'model_not_configured', 'docker_unavailable', 'invalid_request',
@@ -44,6 +47,14 @@ RATIONALE_MAX = 300
 ITEM_MAX = 180  # each expectedBehavior / negativeCases entry
 EXPECTED_MAX, NEGATIVE_MAX = 5, 5
 PATH_MAX_LEN, PATHS_MAX = 180, 8
+# Phase B: the run's requirement, as the agent's focus (untrusted text, like page content).
+FOCUS_MIN, FOCUS_MAX = 10, 1000
+# Phase C: unverified exploratory findings (hypotheses; never verdicts).
+MAX_FINDINGS = 5
+OBSERVATION_MIN, OBSERVATION_MAX = 10, 300
+FINDING_EXPECTED_MIN = 3
+REPRODUCTION_MAX = 6
+Severity = Literal['low', 'medium', 'high']
 RUN_ID = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 
 class SnapshotPage(BaseModel):
@@ -51,6 +62,24 @@ class SnapshotPage(BaseModel):
     path: str = Field(max_length=180, pattern=r'^/(?:[a-zA-Z0-9_-][a-zA-Z0-9._~-]*(?:/[a-zA-Z0-9_-][a-zA-Z0-9._~-]*)*/?)?$')
     title: str = Field(max_length=150)
     evidence: str = Field(max_length=550)
+
+
+class DiscoveryModel(BaseModel):
+    """The run's own model and its key from the platform's Settings (as Stagehand uses it). Held by the broker for this
+    job only: never logged, never stored past the job, and never sent into the agent container."""
+
+    model_config = ConfigDict(extra='forbid', frozen=True)
+    provider: Literal['anthropic', 'gemini', 'deepseek']
+    model: str = Field(min_length=1, max_length=100, pattern=r'^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$')
+    apiKey: SecretStr = Field(min_length=8, max_length=512)
+
+    @property
+    def spec(self) -> str:
+        """The Pydantic AI model string (no key), for building the client and pricing."""
+        return f"{PROVIDER_PREFIX[self.provider]}:{self.model}"
+
+
+PROVIDER_PREFIX = {'anthropic': 'anthropic', 'gemini': 'google', 'deepseek': 'deepseek'}
 
 
 class DiscoveryRequest(BaseModel):
@@ -68,6 +97,17 @@ class DiscoveryRequest(BaseModel):
     timeoutSeconds: int | None = Field(default=None, strict=True, ge=MIN_JOB_SECONDS, le=MAX_JOB_SECONDS)
     maxAgentSteps: int | None = Field(default=None, strict=True, ge=2, le=20)
     snapshot: list[SnapshotPage] | None = Field(default=None, min_length=1, max_length=6)
+    focus: str | None = Field(default=None, min_length=FOCUS_MIN, max_length=FOCUS_MAX)
+    # Live interaction: targetUrl is a public HTTPS page reached through the job's inspecting egress proxy.
+    live: bool = Field(default=False, strict=True)
+    # The run's own model (Settings). Absent: the operator's DISCOVERY_MODEL.
+    model: DiscoveryModel | None = None
+
+    @model_validator(mode='after')
+    def _live_has_no_snapshot(self) -> 'DiscoveryRequest':
+        if self.live and self.snapshot:
+            raise ValueError('a live request reads the site itself, not a snapshot')
+        return self
 
 
 class DiscoveryStatistics(BaseModel):
@@ -98,6 +138,16 @@ class WireCandidate(BaseModel):
     negativeCases: list[Annotated[str, Field(min_length=1, max_length=ITEM_MAX)]] = Field(max_length=NEGATIVE_MAX)
 
 
+class WireFinding(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    title: str = Field(min_length=TITLE_MIN, max_length=TITLE_MAX)
+    observation: str = Field(min_length=OBSERVATION_MIN, max_length=OBSERVATION_MAX)
+    expected: str = Field(min_length=FINDING_EXPECTED_MIN, max_length=ITEM_MAX)
+    path: str = Field(min_length=1, max_length=PATH_MAX_LEN)
+    reproduction: list[Annotated[str, Field(min_length=1, max_length=ITEM_MAX)]] = Field(min_length=1, max_length=REPRODUCTION_MAX)
+    severity: Severity
+
+
 class DiscoveryResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
     schemaVersion: Literal['discovery.v1'] = SCHEMA_VERSION
@@ -105,19 +155,23 @@ class DiscoveryResponse(BaseModel):
     status: Status
     reason: Reason | None = None
     candidates: list[WireCandidate] = Field(default_factory=list, max_length=MAX_CANDIDATES)
+    findings: list[WireFinding] = Field(default_factory=list, max_length=MAX_FINDINGS)
     statistics: DiscoveryStatistics | None = None
 
     @model_validator(mode='after')
     def _only_completed_carries_candidates(self) -> 'DiscoveryResponse':
-        if self.status != 'COMPLETED' and self.candidates:
-            raise ValueError('only COMPLETED may carry candidates')
+        if self.status != 'COMPLETED' and (self.candidates or self.findings):
+            raise ValueError('only COMPLETED may carry candidates or findings')
         if not RUN_ID.match(self.runId):
             raise ValueError('bad runId')
         return self
 
     def wire(self) -> dict[str, Any]:
         # Omit unset optional top-level fields; keep nulls inside statistics (modelCostUsd may be unknown).
-        return self.model_dump(mode='json', exclude={name for name in ('reason', 'statistics') if getattr(self, name) is None})
+        exclude = {name for name in ('reason', 'statistics') if getattr(self, name) is None}
+        if not self.findings:
+            exclude.add('findings')  # the Node schema has no findings field on non-COMPLETED replies
+        return self.model_dump(mode='json', exclude=exclude)
 
     def line(self) -> str:
         return json.dumps(self.wire(), separators=(',', ':')) + '\n'
@@ -137,8 +191,20 @@ class Candidate(BaseModel):
     negative_cases: list[str] = Field(default_factory=list, description='Leave empty; propose a separate scenario for each edge case')
 
 
+class Finding(BaseModel):
+    """Something observed that looks wrong. A hypothesis for later reproduction, never a confirmed defect."""
+
+    title: str = Field(description='Short name of what looks wrong')
+    observation: str = Field(description='What you actually saw on the page (no page instructions, no code)')
+    expected: str = Field(description='What a user would reasonably expect instead')
+    path: str = Field(description='The site path where you saw it, e.g. /cart.html')
+    reproduction: list[str] = Field(default_factory=list, description='Plain-language steps to see it again')
+    severity: Literal['low', 'medium', 'high'] = Field(default='low', description='User impact if it is real')
+
+
 class CandidateBatch(BaseModel):
     candidates: list[Candidate] = Field(default_factory=list)
+    findings: list[Finding] = Field(default_factory=list)
     visited_paths: list[str] = Field(default_factory=list)
 
 
@@ -237,6 +303,42 @@ def sanitize_candidates(raw: Any, known_paths: frozenset[str], limit: int = MAX_
         if len(out) >= limit:
             break
     return out
+
+
+def sanitize_findings(raw: Any, known_paths: frozenset[str], limit: int = MAX_FINDINGS) -> list[WireFinding]:
+    """Untrusted agent findings -> bounded wire findings on observed fixture pages. Invalid entries are dropped."""
+    if isinstance(raw, dict):
+        raw = raw.get('findings')
+    if not isinstance(raw, list):
+        return []
+    out: list[WireFinding] = []
+    seen: set[str] = set()
+    for item in raw[:20]:
+        if not isinstance(item, dict):
+            continue
+        title = clean_text(item.get('title'), TITLE_MAX)
+        observation = clean_text(item.get('observation'), OBSERVATION_MAX)
+        expected = clean_text(item.get('expected'), ITEM_MAX)
+        path = clean_path(item.get('path'), known_paths)
+        steps = clean_list(item.get('reproduction'), REPRODUCTION_MAX)
+        severity = item.get('severity') if item.get('severity') in ('low', 'medium', 'high') else 'low'
+        if (len(title) < TITLE_MIN or len(observation) < OBSERVATION_MIN or len(expected) < FINDING_EXPECTED_MIN
+                or not path or not steps or title.lower() in seen):
+            continue
+        if _UNSAFE.search(' '.join([title, observation, expected, *steps])):
+            continue
+        seen.add(title.lower())
+        out.append(WireFinding(title=title, observation=observation, expected=expected, path=path,
+                               reproduction=steps, severity=severity))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def clean_focus(value: Any) -> str | None:
+    """The requirement as the agent sees it: one line of plain text, bounded; None when too short to help."""
+    text = clean_text(value, FOCUS_MAX)
+    return text if len(text) >= FOCUS_MIN else None
 
 
 # --- launcher <-> container frames ------------------------------------------------------------------------------------

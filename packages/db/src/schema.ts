@@ -309,6 +309,27 @@ export const runSiteAnalyses = pgTable("run_site_analyses", {
   updatedAt: ts("updated_at").notNull().defaultNow(),
 });
 
+/**
+ * Phase C: a run's exploratory findings from Browser Use, unverified hypotheses kept apart from every criterion
+ * result and verdict. `json` is a StoredFinding, validated on every write and read.
+ */
+export const runFindings = pgTable(
+  "run_findings",
+  {
+    runId: text("run_id")
+      .notNull()
+      .references(() => testRuns.id, { onDelete: "cascade" }),
+    tenantId: runTenantId(),
+    findingId: text("finding_id").notNull(),
+    /** The same problem on the same site across runs (Phase C dedupe): a hash of origin, path and title words. */
+    fingerprint: text("fingerprint").notNull(),
+    json: jsonb("json").notNull(),
+    createdAt: createdAt(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.findingId] }), index("run_findings_tenant_fingerprint_idx").on(t.tenantId, t.fingerprint)],
+);
+
 export const explorationSteps = pgTable(
   "exploration_steps",
   {

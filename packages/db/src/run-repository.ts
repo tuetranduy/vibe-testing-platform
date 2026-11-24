@@ -246,6 +246,18 @@ export class RunRepository {
     return { items, nextCursor };
   }
 
+  /** The scope's most recent runs on one site (`origin` = scheme://host[:port]), newest first. */
+  async listByOrigin(scope: string | RunScope, origin: string, limit: number): Promise<TestRun[]> {
+    const like = `${origin.replace(/[\\%_]/g, (c) => `\\${c}`)}/%`;
+    const rows = await this.db
+      .select()
+      .from(testRuns)
+      .where(and(scopeWhere(scope), or(eq(testRuns.targetUrl, origin), sql`${testRuns.targetUrl} LIKE ${like}`)))
+      .orderBy(desc(testRuns.createdAt), desc(testRuns.id))
+      .limit(Math.max(1, Math.min(limit, 100)));
+    return rows.map(toRun);
+  }
+
   /**
    * Compare-and-set lifecycle change. The only code path allowed to write `lifecycle`.
    * Throws IllegalRunTransitionError, RunInvariantError, NotFoundError, or StaleTransitionError.

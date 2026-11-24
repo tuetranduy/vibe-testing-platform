@@ -9,6 +9,8 @@ import { assertActionAllowed } from "@platform/security";
 import type { CompilerOutput } from "./model-output";
 
 export const LEFT_OUT = (statement: string, why: string): string => `Left out: ${statement} (${why})`.slice(0, 300);
+/** Phase B: at most this many inferred criteria may come from Browser Use routes (they count as inferred too). */
+export const MAX_DISCOVERY_CRITERIA = 3;
 export const WHOLE_REQUIREMENT_NOTE = "The requirement could not be split into checks; it is judged as a whole from what the pages show";
 
 export interface GroundingContext {
@@ -16,6 +18,14 @@ export interface GroundingContext {
   pagesRead: boolean;
   /** The secrets the run has (names only). */
   secretNames: readonly string[];
+  /** Phase B: how many Browser Use routes the prompt listed (1-based `discoveryRoute`); 0 or absent: none. */
+  routeCount?: number;
+}
+
+/** A criterion's valid route number, or undefined: only an inferred criterion may cite a route the prompt listed. */
+export function routeOf(c: CompilerOutput["criteria"][number], routeCount = 0): number | undefined {
+  const route = c.discoveryRoute;
+  return isInferred(c) && typeof route === "number" && route >= 1 && route <= routeCount ? route : undefined;
 }
 
 export interface Reduced {
@@ -24,29 +34,46 @@ export interface Reduced {
 }
 
 /** Why an inferred criterion cannot stay, or null when it can. `kept` counts the inferred criteria kept before it. */
-function whyNot(output: CompilerOutput, index: number, kept: number, ctx: GroundingContext): string | null {
+function whyNot(output: CompilerOutput, index: number, kept: number, keptRoutes: number, ctx: GroundingContext): string | null {
   const c = output.criteria[index]!;
-  if (output.intent === null || output.intent.clarity === "specific") return "the requirement already says what to check";
-  if (!ctx.pagesRead) return "no pages of the site were read";
-  const check = output.siteChecks.find((s) => s.criterion === index + 1);
-  if (check?.status !== "found") return "the pages read do not show it";
+  const route = routeOf(c, ctx.routeCount);
+  // A route Browser Use observed grounds a check on its own, and may extend even a specific requirement: the
+  // criterion starts non-critical and the person confirming the criteria decides.
+  if (route === undefined) {
+    if (output.intent === null || output.intent.clarity === "specific") return "the requirement already says what to check";
+    if (!ctx.pagesRead) return "no pages of the site were read";
+    const check = output.siteChecks.find((s) => s.criterion === index + 1);
+    if (check?.status !== "found") return "the pages read do not show it";
+  } else if (c.expectedOutcome.kind === "semantic") {
+    return "a discovered route needs an objective check";
+  }
   if (!assertActionAllowed({ instruction: c.statement }, { allowDestructive: false }).allowed) return "it would change or delete data";
   if (c.preconditions.some((p) => p.kind === "secret" && !(p.ref !== undefined && ctx.secretNames.includes(p.ref)))) {
     return "it needs a credential the run does not have";
   }
   if (kept >= MAX_INFERRED_CRITERIA) return `more than ${MAX_INFERRED_CRITERIA} checks were added`;
+  if (route !== undefined && keptRoutes >= MAX_DISCOVERY_CRITERIA) return `more than ${MAX_DISCOVERY_CRITERIA} checks came from discovery`;
   return null;
 }
 
 /** Drops the inferred criteria that are not grounded (spec 5.3). Stated criteria are never touched. */
-export function groundInferred(output: CompilerOutput, ctx: GroundingContext): Reduced {
+export function groundInferred(raw: CompilerOutput, ctx: GroundingContext): Reduced {
+  // A route number the prompt did not list, or one on a stated criterion, is not the model's to keep.
+  const output: CompilerOutput = { ...raw, criteria: raw.criteria.map((c): CompilerOutput["criteria"][number] => {
+    const { discoveryRoute: _route, ...rest } = c;
+    const route = routeOf(c, ctx.routeCount);
+    return route === undefined ? rest : { ...rest, discoveryRoute: route };
+  }) };
   const drop = new Map<number, string>();
   let kept = 0;
+  let keptRoutes = 0;
   output.criteria.forEach((c, i) => {
     if (!isInferred(c)) return;
-    const why = whyNot(output, i, kept, ctx);
-    if (why === null) kept++;
-    else drop.set(i, why);
+    const why = whyNot(output, i, kept, keptRoutes, ctx);
+    if (why === null) {
+      kept++;
+      if (c.discoveryRoute !== undefined) keptRoutes++;
+    } else drop.set(i, why);
   });
   return without(output, drop);
 }

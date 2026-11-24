@@ -122,8 +122,12 @@ export const RunOptionsSchema = z
     autoConfirmCriteria: z.boolean().default(false),
     autonomousDiscovery: z.boolean().optional(),
     verifiedSiteDiscovery: z.boolean().optional(),
+    /** Live sites: let Browser Use interact with the real site (nothing that sends data reaches it). */
+    discoveryLiveInteraction: z.boolean().optional(),
     discoveryMaxSeconds: DiscoverySecondsSchema.optional(),
     discoveryMaxSteps: DiscoveryStepsSchema.optional(),
+    /** Phase C: Browser Use agents exploring in parallel, each in its own container and broker slot (1–3; absent: 1). */
+    discoveryAgents: z.number().int().min(1).max(3).optional(),
     allowDestructiveActions: z.boolean().default(false),
     /** Production only: the target URL's host, typed as the confirmation that destructive actions may run there. */
     confirmProductionHost: z.string().trim().min(1).max(255).optional(),
@@ -192,11 +196,15 @@ export const CreateTestRunRequestSchema = z
       ctx.addIssue({ code: "custom", path: ["options", "verifiedSiteDiscovery"],
         message: "Verified site discovery uses one site and requires read-only settings without credentials or test data" });
     }
-    if (r.options.autonomousDiscovery && ((!r.options.verifiedSiteDiscovery && r.environment !== "staging") || r.requirement !== "" || r.options.autoConfirmCriteria)) {
+    if (r.options.discoveryLiveInteraction && !r.options.verifiedSiteDiscovery) {
+      ctx.addIssue({ code: "custom", path: ["options", "discoveryLiveInteraction"], message: "Live interaction is for live-site discovery" });
+    }
+    // Phase B: a written requirement may opt in too; what discovery adds is always reviewed by a person first.
+    if (r.options.autonomousDiscovery && ((!r.options.verifiedSiteDiscovery && r.environment !== "staging") || r.options.autoConfirmCriteria)) {
       ctx.addIssue({
         code: "custom",
         path: ["options", "autonomousDiscovery"],
-        message: "Autonomous Discovery requires blank instructions and manual criteria review. The fixture pilot uses staging.",
+        message: "Autonomous Discovery requires manual criteria review. The fixture pilot uses staging.",
       });
     }
     // D9, amended 2026-09-28: production allows destructive actions only with the target host typed as confirmation.
@@ -233,6 +241,8 @@ export type StoredTestRunRequest = Omit<CreateTestRunRequest, "secrets" | "llm" 
    * model call. Its requirement and generated test are copies of that run's.
    */
   rerunOf?: string;
+  /** Phase C: the exploratory finding this run independently reproduces (its verdict decides the finding's status). */
+  reproducesFinding?: { runId: string; findingId: string };
   /**
    * Credentials and test data taken from the requirement text itself (V1.3.1, extractInlineInputs): the test data
    * keys and secret names they are stored under. Absent: none (or a run created before it).

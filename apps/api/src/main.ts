@@ -61,6 +61,8 @@ const deps: ApiDeps = {
     privateAllowlist: env.TARGET_PRIVATE_ALLOWLIST,
     discovery: discoveryAdmission(env),
     verifiedDiscoverySites: env.BROWSER_USE_DISCOVERY_VERIFIED_SITES === "on" && Boolean(env.BROWSER_USE_DISCOVERY_FIXTURE_URL),
+    liveDiscoveryInteraction: env.BROWSER_USE_DISCOVERY_VERIFIED_SITES === "on" && env.BROWSER_USE_DISCOVERY_LIVE_INTERACTION === "on" &&
+      Boolean(env.BROWSER_USE_DISCOVERY_FIXTURE_URL),
     secretsKey: env.secretsKey,
     artifactUrlTtlSeconds: 300,
     sseHeartbeatMs: 20_000,

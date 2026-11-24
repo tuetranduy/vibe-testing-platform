@@ -347,3 +347,24 @@ def test_proxy_mode_refuses_unapproved_target_networks():
         resp, stats = asyncio.run(discover(request, proxy_cfg(network), model=ScriptedModel()))
         assert resp.status == 'BLOCKED' and stats['reason'] == 'target_mode', (network, stats)
     assert leftover_containers() == [] and leftover_networks() == []
+
+
+# --- Phase C: exploratory findings measured against known defects (evals/discovery/defects.json) ---------------------
+
+
+def test_findings_match_the_known_defects_and_spare_the_healthy_page():
+    manifest = json.loads((APP_DIR.parents[1] / 'evals' / 'discovery' / 'defects.json').read_text())
+    fixture = 'http://127.0.0.1:4611' + manifest['fixture']
+    request = DiscoveryRequest(schemaVersion='discovery.v1', runId='it-defects', targetUrl=fixture, timeoutSeconds=90)
+    resp, stats = asyncio.run(discover(request, Config(fixture_url=fixture, model='scripted', image=IMAGE), model=ScriptedModel()))
+    assert resp.status == 'COMPLETED', stats
+    findings = resp.findings
+    import re as _re
+
+    matched = {d['id'] for d in manifest['defects'] for f in findings
+               if f.path == d['path'] and _re.search(d['pattern'], f'{f.title} {f.observation}', _re.I)}
+    print(json.dumps([f.model_dump() for f in findings], indent=1))
+    assert matched == {d['id'] for d in manifest['defects']}  # recall 1.0
+    assert all(f.path not in manifest['healthy'] for f in findings)  # no false alarm on the healthy page
+    assert len(findings) == len(manifest['defects'])  # precision 1.0
+    assert leftover_containers() == []

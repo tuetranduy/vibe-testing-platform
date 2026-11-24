@@ -87,7 +87,11 @@ export class TestRunService {
     return { runId: run.id, lifecycle: "QUEUED", eventsUrl: `/v1/test-runs/${run.id}/events` };
   }
 
-  async create(principal: Principal, body: unknown, idempotencyKey: string | undefined): Promise<{ status: 202; body: CreateTestRunResponse }> {
+  /** `extra`: what only the platform records on a run it creates itself (Phase C: the finding it reproduces). */
+  async create(
+    principal: Principal, body: unknown, idempotencyKey: string | undefined,
+    extra: Pick<StoredTestRunRequest, "reproducesFinding"> = {},
+  ): Promise<{ status: 202; body: CreateTestRunResponse }> {
     const parsed = CreateTestRunRequestSchema.safeParse(body);
     if (!parsed.success) {
       throw new HttpError(400, "VALIDATION_FAILED", "Request validation failed", zodIssues(parsed.error));
@@ -129,6 +133,9 @@ export class TestRunService {
       const target = DiscoveryLiveUrlSchema.safeParse(req.targetUrl);
       if (!this.deps.config.verifiedDiscoverySites || !target.success || resolved.choice.provider === "fake") {
         throw new HttpError(422, "DISCOVERY_UNAVAILABLE", "Live discovery needs a public HTTPS page URL and a hosted model");
+      }
+      if (req.options.discoveryLiveInteraction && !this.deps.config.liveDiscoveryInteraction) {
+        throw new HttpError(422, "DISCOVERY_UNAVAILABLE", "Live interaction is not available on this deployment");
       }
     } else if (req.options.autonomousDiscovery) {
       const admission = this.deps.config.discovery;
@@ -192,6 +199,7 @@ export class TestRunService {
       ...(testDataSet ? { testDataSet } : {}),
       ...(credentialProfile ? { credentialProfile } : {}),
       ...(inline.found.length > 0 ? { inlineInputs: inline.found } : {}),
+      ...(extra.reproducesFinding ? { reproducesFinding: extra.reproducesFinding } : {}),
     };
     const publisher = this.publisher(redact);
     const runId = newId("run");

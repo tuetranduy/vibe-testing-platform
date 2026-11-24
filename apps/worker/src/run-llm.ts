@@ -1,5 +1,5 @@
 import { providerOfModel, resolveEnvLlmChoice, type Env } from "@platform/config";
-import { ModelProviderError, type LlmChoice, type LlmKeyProvider } from "@platform/contracts";
+import { ModelProviderError, type DiscoveryModel, type LlmChoice, type LlmKeyProvider, type StoredTestRunRequest } from "@platform/contracts";
 import { LlmCallRepository, ProviderKeyRepository, type Database, type TestRun } from "@platform/db";
 import { LlmClient, PROVIDER_LABELS, createTransport, type LlmTransport } from "@platform/llm";
 import { decryptProviderKey } from "@platform/security";
@@ -21,6 +21,11 @@ export interface RunLlmFactory {
   forRun(run: TestRun): Promise<RunLlm>;
   /** The run's recorded choice (or the environment's), without building a client. */
   choiceOf(run: TestRun): LlmChoice;
+  /**
+   * The run's model and its key (Settings, else the environment's) for its Browser Use job: the same credential
+   * its Stagehand and other stages use. Null for the fake engine. Throws ModelProviderError when there is no key.
+   */
+  discoveryModelFor(tenantId: string, request: Pick<StoredTestRunRequest, "llm">): Promise<DiscoveryModel | null>;
 }
 
 /** The LLM_* environment: the choice for runs that recorded none, and the server's provider keys. */
@@ -85,6 +90,11 @@ export function createRunLlmFactory(deps: RunLlmFactoryDeps): RunLlmFactory {
 
   return {
     choiceOf: (run) => run.request.llm ?? environment,
+    async discoveryModelFor(tenantId, request) {
+      const choice = request.llm ?? environment;
+      if (choice.provider === "fake") return null;
+      return { provider: choice.provider, model: choice.model, apiKey: await keyFor(tenantId, choice.provider) };
+    },
     async forRun(run) {
       const choice = run.request.llm ?? environment;
       if (choice.provider === "fake") return { choice, llm: null };

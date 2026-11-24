@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CriterionIdSchema, DataKeySchema } from "./common";
+import { RequirementDiscoverySchema } from "./discovery";
 import { SurveyedPageSchema } from "./suggestions";
 
 /**
@@ -96,6 +97,11 @@ export const SiteAnalysisSchema = z.object({
    * them (KI-048). Empty in an analysis stored before they were kept.
    */
   pageContents: z.array(SitePageSchema).max(6).default([]),
+  /**
+   * Phase B: an opted-in requirement run's Browser Use outcome and the routes it observed for the requirement
+   * (bounded, sanitized). The planner sees the routes as hints; absent when the run did not opt in.
+   */
+  discovery: RequirementDiscoverySchema.optional(),
 });
 export type SiteAnalysis = z.infer<typeof SiteAnalysisSchema>;
 export type SiteAnalysisDraft = z.input<typeof SiteAnalysisSchema>;

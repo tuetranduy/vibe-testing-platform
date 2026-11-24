@@ -34,6 +34,7 @@ export async function testRunRoutes(app: FastifyInstance, deps: ApiDeps): Promis
     return {
       fixtureUrl: enabled ? discovery?.fixtureUrl ?? null : null,
       ...(deps.config.verifiedDiscoverySites && { verifiedSites: true }),
+      ...(deps.config.verifiedDiscoverySites && deps.config.liveDiscoveryInteraction && { liveInteraction: true }),
     };
   });
 

@@ -103,6 +103,11 @@ export const ExplorationStepSchema = z.object({
   /** A `judge` step's judgment (2026-10-07); absent on every other step, and on a judge step that failed. */
   judgment: CriterionJudgmentSchema.optional(),
   review: StepReviewSchema.optional(),
+  /**
+   * Phase C route recovery: a `navigate` the executor took to a page on a route Browser Use discovery observed,
+   * after the step's control was not found. The step itself still runs, and is checked, through Stagehand.
+   */
+  discoveryRoute: z.literal(true).optional(),
 });
 export type ExplorationStep = z.infer<typeof ExplorationStepSchema>;
 

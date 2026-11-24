@@ -1,8 +1,10 @@
+import pytest
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import hmac
 import json
+from discovery_service.protocol import parse_request
 import secrets
 import time
 
@@ -136,7 +138,7 @@ def test_cleanup_failures_are_counted_for_health():
     with TestClient(create_app(Config(FIXTURE, 'scripted'), SECRET, runner=runner)) as client:
         assert post(client, INPUT).status_code == 202
         assert get(client, BASE + '/run_fixture').json()['result']['reason'] == 'no_result'
-        assert client.get('/internal/health').json() == {'status': 'ready', 'activeJobs': 0, 'jobSlots': 1, 'cleanupFailures': 1}
+        assert client.get('/internal/health').json() == {'status': 'ready', 'activeJobs': 0, 'jobSlots': 1, 'cleanupFailures': 1, 'defaultModel': 'ready'}
 
 
 def test_health_reports_the_single_slot_and_the_active_job():
@@ -147,7 +149,7 @@ def test_health_reports_the_single_slot_and_the_active_job():
         return DiscoveryResponse(runId=request.runId, status='PARTIAL'), {}
 
     with TestClient(create_app(Config(FIXTURE, 'scripted'), SECRET, runner=runner)) as client:
-        assert client.get('/internal/health').json() == {'status': 'ready', 'activeJobs': 0, 'jobSlots': 1, 'cleanupFailures': 0}
+        assert client.get('/internal/health').json() == {'status': 'ready', 'activeJobs': 0, 'jobSlots': 1, 'cleanupFailures': 0, 'defaultModel': 'ready'}
         assert post(client, INPUT).status_code == 202
         assert client.get('/internal/health').json()['activeJobs'] == 1
         assert delete(client, BASE + '/run_fixture').status_code == 200
@@ -196,3 +198,63 @@ def test_signature_golden_vector_matches_the_worker_client():
                              'run_fixture:discovery.v1', b'{"runId":"run_fixture"}')
     signature = hmac.new(b'golden-vector-token-of-32-characters!!', message, hashlib.sha256).hexdigest()
     assert signature == '428bee0cd490a7181fa39d355cd20400df9d0d9064d22a3d44f23f3ec1fcdbba'
+
+
+def test_job_slots_allow_parallel_agents_up_to_the_configured_limit():
+    from discovery_service.service import job_slots
+
+    async def runner(request, _config, on_progress):
+        await asyncio.Event().wait()
+
+    with TestClient(create_app(Config(FIXTURE, 'scripted'), SECRET, runner=runner, slots=2)) as client:
+        assert post(client, INPUT).status_code == 202
+        assert post(client, {**INPUT, 'runId': 'run_fixture-a2'}, run_id='run_fixture-a2').status_code == 202
+        assert post(client, {**INPUT, 'runId': 'run_fixture-a3'}, run_id='run_fixture-a3').status_code == 429
+        assert client.get('/internal/health').json()['jobSlots'] == 2
+    assert job_slots(None) == 1 and job_slots('3') == 3
+    for bad in ('0', '4', 'two'):
+        with pytest.raises(ValueError):
+            job_slots(bad)
+
+
+def test_a_missing_provider_key_is_not_configured_not_an_agent_crash(monkeypatch):
+    """Production 2026-11-24: DEEPSEEK_API_KEY was unset, Pydantic AI raised UserError (a RuntimeError), and the job
+    service reported FAILED / agent_error a second after the start. It is a configuration state, and health says so."""
+    from discovery_service.launcher import discover
+
+    monkeypatch.delenv('DEEPSEEK_API_KEY', raising=False)
+    request = parse_request(json.dumps(INPUT).encode())
+    resp, stats = asyncio.run(discover(request, Config(FIXTURE, 'deepseek:deepseek-flash')))
+    assert (resp.status, resp.reason, stats['reason']) == ('BLOCKED', 'model_not_configured', 'model_not_configured')
+    with TestClient(create_app(Config(FIXTURE, 'deepseek:deepseek-flash'), SECRET)) as client:
+        assert client.get('/internal/health').json()['defaultModel'] == 'not_configured'
+    monkeypatch.setenv('DEEPSEEK_API_KEY', 'sk-test-not-used')
+    with TestClient(create_app(Config(FIXTURE, 'deepseek:deepseek-flash'), SECRET)) as client:
+        assert client.get('/internal/health').json()['defaultModel'] == 'ready'
+
+
+
+def test_a_job_uses_the_runs_own_model_and_settings_key_not_the_environment(monkeypatch):
+    """The run's model and key (the platform's Settings, as Stagehand uses them) build this job's client; the key is
+    hidden in every representation and never reaches the agent container's start frame."""
+    from discovery_service import launcher
+    from discovery_service.protocol import DiscoveryModel
+
+    monkeypatch.delenv('DEEPSEEK_API_KEY', raising=False)
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    built = {}
+
+    def fake_run_model(run_model):
+        built['spec'], built['key'] = run_model.spec, run_model.apiKey.get_secret_value()
+        raise RuntimeError('stop before docker')  # classified like any model that cannot be built
+
+    monkeypatch.setattr(launcher, 'make_run_model', fake_run_model)
+    body = {**INPUT, 'model': {'provider': 'anthropic', 'model': 'claude-sonnet-5-5', 'apiKey': 'sk-ant-run-key-1234'}}
+    request = parse_request(json.dumps(body).encode())
+    assert 'sk-ant-run-key-1234' not in repr(request) and 'sk-ant-run-key-1234' not in request.model_dump_json()
+    resp, stats = asyncio.run(launcher.discover(request, Config(FIXTURE, 'deepseek:deepseek-flash')))
+    assert built == {'spec': 'anthropic:claude-sonnet-5-5', 'key': 'sk-ant-run-key-1234'}
+    assert (resp.status, resp.reason) == ('BLOCKED', 'model_not_configured')
+    assert 'sk-ant-run-key-1234' not in json.dumps(stats) and 'sk-ant-run-key-1234' not in resp.line()
+    with pytest.raises(ValueError):
+        parse_request(json.dumps({**INPUT, 'model': {'provider': 'openai', 'model': 'x', 'apiKey': 'sk-0123456789'}}).encode())

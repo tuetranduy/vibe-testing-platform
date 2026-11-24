@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-_START = re.compile(r'Start at (http://\S+?)\.?\s')
+_START = re.compile(r'Start at (https?://\S+?)\.?\s')
 
 CRAWL = r'''
 import json
@@ -27,9 +27,9 @@ from urllib.parse import urlsplit, urljoin
 start = START_URL
 origin = '{0.scheme}://{0.netloc}'.format(urlsplit(start))
 scope = urlsplit(start).path.rsplit('/', 1)[0] + '/'
-queue, seen, pages = [start], set(), []
+queue, seen, pages = [(start, None, None)], set(), []
 while queue and len(pages) < 12:
-    url = queue.pop(0)
+    url, came_from, link_text = queue.pop(0)
     path = urlsplit(url).path or '/'
     if path in seen:
         continue
@@ -40,6 +40,8 @@ while queue and len(pages) < 12:
       title: document.title,
       headings: [...document.querySelectorAll('h1,h2,h3')].map(e => e.textContent.trim()).slice(0, 8),
       links: [...document.querySelectorAll('a[href]')].map(a => a.href),
+      linkTexts: [...document.querySelectorAll('a[href]')].map(a => [a.href, a.textContent.trim().slice(0, 60)]),
+      listItems: document.querySelectorAll('main li').length,
       forms: [...document.querySelectorAll('form')].map(f => ({id: f.id, role: f.getAttribute('role'),
         fields: [...f.querySelectorAll('input,select,textarea')].map(i => ({name: i.name || i.id, type: i.type,
           required: i.required, min: i.min || i.getAttribute('minlength'), max: i.max || i.getAttribute('maxlength')}))})),
@@ -52,14 +54,15 @@ while queue and len(pages) < 12:
       nextPage: !!document.querySelector('a[rel="next"]'),
       statusRefresh: !!document.querySelector('#refresh') && !!document.querySelector('[role="status"]'),
     }""")
-    pages.append({'path': path, **info})
-    for link in info['links']:
+    pages.append({'path': path, 'from': came_from, 'linkText': link_text, **info})
+    for link, text in info['linkTexts']:
         u = urlsplit(urljoin(url, link))
         if ('{0.scheme}://{0.netloc}'.format(u) == origin and u.path not in seen
                 and u.path.startswith(scope)):
-            queue.append(origin + u.path)
+            queue.append((origin + u.path, path, text))
 for p in pages:
     p.pop('links', None)
+    p.pop('linkTexts', None)
 print(json.dumps(pages))
 '''
 
@@ -161,6 +164,18 @@ if px:  # it must refuse everything but the fixture's origin
     out['proxy'] = {u: proxied(u) for u in ['http://169.254.169.254/latest/meta-data/', 'http://example.com/',
                                             f'http://host.docker.internal:{CANARY}/', off_port]}
     out['proxy_allowed'] = proxied(start)
+    if start.startswith('https://'):  # live mode: the agent's own Python through the inspecting proxy
+        import ssl as _ssl
+        _ctx = _ssl.create_default_context(); _ctx.check_hostname = False; _ctx.verify_mode = _ssl.CERT_NONE
+        via_s = urllib.request.build_opener(urllib.request.ProxyHandler({'https': px}), urllib.request.HTTPSHandler(context=_ctx))
+        def sproxied(url, data=None, method=None):
+            try:
+                return 'FETCHED ' + str(via_s.open(urllib.request.Request(url, data=data, method=method), timeout=10).status)
+            except Exception as e:
+                return 'BLOCKED ' + type(e).__name__ + ': ' + str(e)[:60]
+        out['live'] = {'get': sproxied(start), 'post': sproxied(start, b'x=1', 'POST'), 'put': sproxied(start, b'x', 'PUT'),
+                       'delete': sproxied(start, None, 'DELETE'), 'off_site': sproxied('https://example.org/'),
+                       'metadata': sproxied('https://169.254.169.254/')}
 out['pid1'] = open('/proc/1/cmdline', 'rb').read().replace(b'\0', b' ').decode(errors='replace')[:120]
 out['env'] = {'readable_processes': readable, 'denied_processes': denied, 'names': sorted(names), 'suspicious': suspicious}
 print('PROBE ' + json.dumps(out))
@@ -255,6 +270,38 @@ def benchmark_candidates(pages: list[dict[str, Any]]) -> dict[str, Any]:
     return {'candidates': out[:8], 'visited_paths': paths}
 
 
+_COUNT = re.compile(r'^(\d+)\s+\w+')
+
+
+def benchmark_findings(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deterministic exploratory findings for the defects fixture: a link to a page that answers 404, and a count in a
+    heading that contradicts the list under it. Hypotheses, as a hosted model would report them."""
+    out = []
+    for page in pages:
+        headings = [h for h in page.get('headings', []) if isinstance(h, str)]
+        missing = page.get('title') == 'Error response' or any(re.search(r'\b404\b|not found', h, re.I) for h in headings)
+        if missing and isinstance(page.get('from'), str):
+            text = page.get('linkText') or page['path'].rsplit('/', 1)[-1]
+            out.append({
+                'title': f'{text} link opens a missing page', 'path': page['from'], 'severity': 'medium',
+                'observation': f'The "{text}" link on this page opened {page["path"]}, which answers 404 Not Found.',
+                'expected': f'The {text} page opens',
+                'reproduction': [f'Open {page["from"]}', f'Click the "{text}" link'],
+            })
+            continue
+        items = page.get('listItems')
+        for heading in headings:
+            match = _COUNT.match(heading)
+            if match and isinstance(items, int) and items and int(match.group(1)) != items:
+                out.append({
+                    'title': 'Item count contradicts the list', 'path': page['path'], 'severity': 'low',
+                    'observation': f'The heading says "{heading[:80]}" but the page lists {items} items.',
+                    'expected': f'The count in the heading matches the {items} listed items',
+                    'reproduction': [f'Open {page["path"]}', 'Compare the count in the heading with the list below it'],
+                })
+    return out[:5]
+
+
 def candidates_from_pages(pages: list[dict[str, Any]]) -> dict[str, Any]:
     """Observed page facts -> grounded scenario hypotheses."""
     by_path = {p['path']: p for p in pages if isinstance(p, dict) and isinstance(p.get('path'), str)}
@@ -346,5 +393,8 @@ class ScriptedModel(FunctionModel):
         self.observations['pages'] = [p.get('path') for p in pages if isinstance(p, dict)]
         names = {t.name for t in info.output_tools}
         tool = 'finish' if 'finish' in names else next(iter(names), 'finish')
-        result = benchmark_candidates(pages) if urlsplit(start).path.startswith('/benchmark/') else candidates_from_pages(pages)
+        if urlsplit(start).path.startswith('/benchmark/'):
+            result = {**benchmark_candidates(pages), 'findings': benchmark_findings(pages)}
+        else:
+            result = candidates_from_pages(pages)
         return ModelResponse(parts=[ToolCallPart(tool, {'result': result, 'success': True})])

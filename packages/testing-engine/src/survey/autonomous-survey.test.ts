@@ -72,6 +72,27 @@ describe("fixture discovery in the existing survey", () => {
     expect(discover).toHaveBeenCalledWith(expect.objectContaining({ targetUrl: fixtureUrl, snapshot }), expect.any(Object));
     expect(result.suggestions.some((suggestion) => suggestion.discovery?.relevantPaths.includes("/catalog"))).toBe(true);
   });
+  it("lets the agent interact with the live site itself when the run asks and the broker offers it", async () => {
+    const run = async (liveInteraction: boolean) => {
+      const ctx = context();
+      ctx.request.environment = "production";
+      ctx.request.targetUrl = "https://shop.example.com/catalog";
+      ctx.request.options.verifiedSiteDiscovery = true;
+      ctx.request.options.discoveryLiveInteraction = true;
+      const snapshot = [{ path: "/catalog", title: "Catalog", evidence: "Heading: Products" }];
+      const discover = vi.fn(completeWith([{ ...candidate, relevantPaths: ["/catalog"] }]));
+      await withAutonomousDiscovery(survey, {
+        fixtureUrl, prepareVerifiedSite: async () => ({ draft: baseline, snapshot }), port: { discover }, reserve: async () => true,
+        ...(liveInteraction && { liveInteraction: true }),
+      })(ctx);
+      return discover.mock.calls[0]![0];
+    };
+    const live = await run(true);
+    expect(live).toMatchObject({ targetUrl: "https://shop.example.com/catalog", live: true });
+    expect(live).not.toHaveProperty("snapshot");
+    // A worker whose broker cannot interact uses the offline snapshot instead.
+    expect(await run(false)).toMatchObject({ targetUrl: fixtureUrl, snapshot: [{ path: "/catalog" }] });
+  });
   it("leaves a run that did not opt in untouched: same suggestions, no discovery events, no adapter call", async () => {
     const ctx = context();
     delete ctx.request.options.autonomousDiscovery;
@@ -314,3 +335,103 @@ describe("fixture discovery in the existing survey", () => {
   });
 });
 
+
+describe("exploratory findings from a completed job (Phase C)", () => {
+  const found = {
+    title: "Help link opens a missing page", observation: "The footer Help link opened a page that says Not Found.",
+    expected: "The help page opens", path: "/help", reproduction: ["Click Help in the footer"], severity: "medium" as const,
+  };
+  it("stores them apart from the suggestions and counts them in the outcome", async () => {
+    const ctx = context();
+    const recordFindings = vi.fn(async () => 1);
+    const discover: AutonomousDiscoveryPort["discover"] = async ({ schemaVersion, runId }) =>
+      ({ schemaVersion, runId, status: "COMPLETED", candidates: [candidate], findings: [found] });
+    const draft = await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, recordFindings })(ctx);
+    expect(recordFindings).toHaveBeenCalledWith(ctx, [found]);
+    expect(draft.suggestions.some((s) => s.title === found.title)).toBe(false);
+    expect(outcome(ctx)).toMatchObject({ type: "discovery.completed", payload: { status: "COMPLETED", findingCount: 1 } });
+  });
+
+  it("a storage failure never changes the discovery outcome", async () => {
+    const ctx = context();
+    const discover: AutonomousDiscoveryPort["discover"] = async ({ schemaVersion, runId }) =>
+      ({ schemaVersion, runId, status: "COMPLETED", candidates: [candidate], findings: [found] });
+    const logger = { warn: vi.fn() };
+    await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, logger, recordFindings: async () => { throw new Error("db down"); } })(ctx);
+    expect(outcome(ctx)).toMatchObject({ type: "discovery.completed", payload: { status: "COMPLETED" } });
+    expect(outcome(ctx)?.payload).not.toHaveProperty("findingCount");
+    expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({ runId: "run_fixture" }), "Browser Use findings could not be stored");
+  });
+});
+
+describe("multi-agent exploration (Phase C)", () => {
+  const twoPages = SuggestionSetDraftSchema.parse({
+    ...baseline,
+    pages: [{ url: fixtureUrl, title: "Fixture", status: "READ" }, { url: `${fixtureUrl}catalog`, title: "Catalog", status: "READ" }],
+  });
+  const admitAll = (granted: boolean) => vi.fn(async () => (granted
+    ? { granted: true as const, waitedMs: 0, release: async () => {} } : { granted: false as const, waitedMs: 0 }));
+
+  it("runs one more agent per free slot, focused on another page, and merges what they found", async () => {
+    const ctx = context();
+    ctx.request.options.discoveryAgents = 2;
+    const second = { ...candidate, title: "Filter the catalog", goal: "Filter the catalog by colour and see fewer products." };
+    const discover = vi.fn<AutonomousDiscoveryPort["discover"]>(async ({ schemaVersion, runId }) => ({
+      schemaVersion, runId, status: "COMPLETED", candidates: [runId.endsWith("-a2") ? second : candidate],
+      statistics: { agentSteps: 4, modelRequests: 4, durationMs: 1000, inputTokens: 10, outputTokens: 5, modelCostUsd: 0.01 },
+    }));
+    const admit = admitAll(true);
+    const reserve = vi.fn(async () => true);
+    const draft = await withAutonomousDiscovery(async () => twoPages, { fixtureUrl, port: { discover }, admit, reserve })(ctx);
+    expect(discover.mock.calls.map(([input]) => input.runId)).toEqual(["run_fixture", "run_fixture-a2"]);
+    expect(discover.mock.calls[1]![0].focus).toContain('"Catalog" page (/catalog)');
+    expect(reserve).toHaveBeenCalledTimes(2);
+    expect(draft.suggestions.map((s) => s.title)).toEqual(expect.arrayContaining([candidate.title, second.title]));
+    expect(outcome(ctx)?.payload).toMatchObject({ status: "COMPLETED", agents: 2, candidateCount: 2,
+      statistics: { agentSteps: 8, modelRequests: 8, modelCostUsd: 0.02 } });
+  });
+
+  it("starts no extra agent without a free slot, and refunds its quota attempt", async () => {
+    const ctx = context();
+    ctx.request.options.discoveryAgents = 3;
+    const discover = vi.fn(completeWith([candidate]));
+    let calls = 0;
+    const admit = vi.fn(async () => (calls++ === 0
+      ? { granted: true as const, waitedMs: 0, release: async () => {} } : { granted: false as const, waitedMs: 0 }));
+    const refund = vi.fn();
+    await withAutonomousDiscovery(async () => twoPages, { fixtureUrl, port: { discover }, admit, reserve: async () => true, refund })(ctx);
+    expect(discover).toHaveBeenCalledTimes(1);
+    expect(refund).toHaveBeenCalledTimes(1);
+    expect(outcome(ctx)?.payload).not.toHaveProperty("agents");
+  });
+
+  it("keeps a completed extra agent's ideas when the first agent fails", async () => {
+    const ctx = context();
+    ctx.request.options.discoveryAgents = 2;
+    const discover = vi.fn<AutonomousDiscoveryPort["discover"]>(async ({ schemaVersion, runId }) => {
+      if (!runId.endsWith("-a2")) throw new DiscoveryPortError("unavailable", "down");
+      return { schemaVersion, runId, status: "COMPLETED", candidates: [candidate] };
+    });
+    const draft = await withAutonomousDiscovery(async () => twoPages, { fixtureUrl, port: { discover }, admit: admitAll(true), reserve: async () => true })(ctx);
+    expect(draft.suggestions.some((s) => s.discovery)).toBe(true);
+    expect(outcome(ctx)?.payload).toMatchObject({ status: "COMPLETED", agents: 2 });
+  });
+});
+
+describe("the run's own model (Settings, like Stagehand)", () => {
+  it("hands the broker the run's model and key, and blocks without a job when the run has no key", async () => {
+    const ctx = context();
+    const discover = vi.fn(completeWith([candidate]));
+    const model = { provider: "anthropic" as const, model: "claude-sonnet-5-5", apiKey: "sk-ant-settings-123" };
+    await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, modelFor: async () => model })(ctx);
+    expect(discover.mock.calls[0]![0]).toMatchObject({ model });
+    // Nothing the run publishes carries the key.
+    expect(JSON.stringify(published(ctx))).not.toContain("sk-ant-settings-123");
+
+    const noKey = context();
+    const blocked = vi.fn(completeWith([candidate]));
+    await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover: blocked }, modelFor: async () => { throw new Error("No API key") } })(noKey);
+    expect(blocked).not.toHaveBeenCalled();
+    expect(outcome(noKey)).toMatchObject({ type: "discovery.failed", payload: { status: "BLOCKED", reason: "model_not_configured", attempted: false } });
+  });
+});

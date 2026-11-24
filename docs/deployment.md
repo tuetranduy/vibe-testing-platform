@@ -54,6 +54,32 @@ the Deploy workflow; opted-in runs then record `BLOCKED`/`not_configured` and ke
 The worker's metrics port is closed in production, so the Browser Use alert rules (`infra/monitoring/`) are not
 evaluated there until a Prometheus scrapes the worker.
 
+**Model and key:** each Browser Use job runs on the run's own model with the key saved in **Settings → AI providers**,
+the same credential its Stagehand exploration uses. The worker decrypts it for the run and sends it to the job service
+over the signed internal channel. The service builds that job's model client in memory and never passes the key to the
+agent container, a log or a stored record. `BROWSER_USE_DISCOVERY_MODEL` (default `deepseek:deepseek-flash`, with a
+repository secret for its provider) is only a fallback for a job that brings no model. A run whose provider has no key
+in Settings records `BLOCKED`/`model_not_configured` and keeps the standard survey.
+
+**Written instructions (Phase B):** **Describe a test** offers the same toggle on the fixture or a public HTTPS page.
+Browser Use then looks for routes that exercise the instructions; checks it suggests appear in review as **Suggested by
+Browser Use** and do not decide the result until marked critical. It uses the same flag, quota and rollback.
+
+**Live interaction:** with `BROWSER_USE_DISCOVERY_LIVE_INTERACTION=on` (the default; a repository variable), live-site
+runs can let the agent work on the real site: **Interact with the live site** in the new-run form, on by default.
+Each job's egress proxy joins `vtp-discovery-live-egress`, a plain bridge the launcher creates on first use, and lets
+only `GET`, `HEAD` and `OPTIONS` without a body reach the site (plan §10, Milestone 5). Set the variable to `off` and
+redeploy to go back to snapshots only.
+
+**Parallel agents:** `BROWSER_USE_DISCOVERY_CAPACITY` (repository variable, 1–3, default 1) sets both the broker's job
+slots and the worker's fair-admission capacity. Each extra slot can hold another agent container (1 GiB each). Runs
+asking for more agents than there are free slots start fewer.
+
+**Exploratory findings (Phase C):** what the agent saw that looks wrong is stored in `run_findings` (migration 0019,
+applied by the deploy) and shown in the report as **Exploratory findings (unverified)**. **Reproduce** starts an
+ordinary run that a person reviews; only its verdict marks a finding reproduced. Disabling Browser Use stops new
+findings; stored ones stay with their run.
+
 ## First-time setup
 
 1. Copy `.env.production.example` to `.env.production` and fill it in.

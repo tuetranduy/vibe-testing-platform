@@ -16,3 +16,12 @@ describe("discoveryOutcomeText", () => {
       .toBe("3 of 5 candidate ideas were offered for review. The candidates referenced 4 pages.");
   });
 });
+
+describe("discoveryOutcomeText for a written requirement (Phase B)", () => {
+  const base = { status: "FAILED" as const, fallbackUsed: true, acceptedCount: 0, candidateCount: 0, pageCount: 0 };
+  it("says the analysis went on without Browser Use, never that survey suggestions were shown", () => {
+    expect(discoveryOutcomeText(base, "requirement")).toBe("Browser Use was unavailable. The requirement was analyzed without it.");
+    expect(discoveryOutcomeText({ ...base, status: "COMPLETED", fallbackUsed: false, acceptedCount: 2, candidateCount: 5, pageCount: 3 }, "requirement"))
+      .toMatch(/^2 of 5 observed routes were used/);
+  });
+});

@@ -27,7 +27,7 @@ const euros = {
 /** Every run on a real-model client over `transport`. */
 const withModel = (transport: FakeTransport): RunLlmFactory => {
   const choice = { provider: "deepseek" as const, model: "deepseek-flash", reasoning: "default" as const };
-  return { choiceOf: () => choice, forRun: async () => ({ choice, llm: new LlmClient({ transport, model: "deepseek-flash", sleep: async () => {} }) }) };
+  return { choiceOf: () => choice, discoveryModelFor: async () => null, forRun: async () => ({ choice, llm: new LlmClient({ transport, model: "deepseek-flash", sleep: async () => {} }) }) };
 };
 
 describe("reviseCriterionJob (2026-11-19)", () => {

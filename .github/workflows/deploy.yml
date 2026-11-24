@@ -105,6 +105,10 @@ jobs:
           BROWSER_USE_DISCOVERY: ${{ vars.BROWSER_USE_DISCOVERY }}
           BROWSER_USE_DISCOVERY_MODEL: ${{ vars.BROWSER_USE_DISCOVERY_MODEL }}
           BROWSER_USE_DISCOVERY_VERIFIED_SITES: ${{ vars.BROWSER_USE_DISCOVERY_VERIFIED_SITES || 'on' }}
+          # Live interaction (the agent on the real site, behind its job's inspecting egress proxy); off: snapshots only.
+          BROWSER_USE_DISCOVERY_LIVE_INTERACTION: ${{ vars.BROWSER_USE_DISCOVERY_LIVE_INTERACTION || 'on' }}
+          # Broker job slots = the worker's fair-admission capacity (1–3; each agent container takes 1 GiB).
+          BROWSER_USE_DISCOVERY_CAPACITY: ${{ vars.BROWSER_USE_DISCOVERY_CAPACITY || '1' }}
         run: scripts/deploy/deploy-worker.sh
 
       - name: Build and push the API and web images to Cloudflare
@@ -137,6 +141,7 @@ jobs:
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'anthropic' }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
           BROWSER_USE_DISCOVERY_VERIFIED_SITES: ${{ (vars.BROWSER_USE_DISCOVERY == 'off' && 'off') || vars.BROWSER_USE_DISCOVERY_VERIFIED_SITES || 'on' }}
+          BROWSER_USE_DISCOVERY_LIVE_INTERACTION: ${{ (vars.BROWSER_USE_DISCOVERY == 'off' && 'off') || vars.BROWSER_USE_DISCOVERY_LIVE_INTERACTION || 'on' }}
         run: |
           cd apps/edge
           sed -i "s/__IMAGE_TAG__/$SHA/g" wrangler.jsonc
@@ -146,7 +151,8 @@ jobs:
             const out = Object.fromEntries(names.filter((n) => process.env[n]).map((n) => [n, process.env[n]]));
             require("fs").writeFileSync("/tmp/worker-secrets.json", JSON.stringify(out));
           '
-          vars=(--var "LLM_PROVIDER:$LLM_PROVIDER" --var "BROWSER_USE_DISCOVERY_VERIFIED_SITES:$BROWSER_USE_DISCOVERY_VERIFIED_SITES")
+          vars=(--var "LLM_PROVIDER:$LLM_PROVIDER" --var "BROWSER_USE_DISCOVERY_VERIFIED_SITES:$BROWSER_USE_DISCOVERY_VERIFIED_SITES"
+            --var "BROWSER_USE_DISCOVERY_LIVE_INTERACTION:$BROWSER_USE_DISCOVERY_LIVE_INTERACTION")
           if [ -n "$LLM_MODEL" ]; then vars+=(--var "LLM_MODEL:$LLM_MODEL"); fi
           pnpm exec wrangler deploy --secrets-file /tmp/worker-secrets.json "${vars[@]}"
           rm -f /tmp/worker-secrets.json

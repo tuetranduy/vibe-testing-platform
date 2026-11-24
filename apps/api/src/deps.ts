@@ -17,6 +17,8 @@ export interface ApiConfig {
   privateAllowlist: string[];
   discovery?: DiscoveryAdmission;
   verifiedDiscoverySites?: boolean;
+  /** Live sites: Browser Use may interact with the real site (the broker's inspecting egress proxy). */
+  liveDiscoveryInteraction?: boolean;
   secretsKey: Buffer;
   /** Signed artifact URL lifetime; capped at 300 s. */
   artifactUrlTtlSeconds: number;

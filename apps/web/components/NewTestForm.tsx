@@ -42,6 +42,10 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const [discover, setDiscover] = useState(false);
   const [discoverySeconds, setDiscoverySeconds] = useState("120");
   const [discoverySteps, setDiscoverySteps] = useState("20");
+  const [discoveryAgents, setDiscoveryAgents] = useState("1");
+  // Live sites: let the agent interact with the real site (on by default where the deployment offers it).
+  const [canInteract, setCanInteract] = useState(false);
+  const [interact, setInteract] = useState(true);
   const [rerun, setRerun] = useState(true);
   const [hosts, setHosts] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -58,16 +62,17 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
     return () => { live = false; };
   }, []);
 
+  // Phase B: asked in both modes, since written instructions may opt in too. Once is enough.
   useEffect(() => {
-    if (mode !== "explore") return;
     let live = true;
-    getDiscoveryCapability().then(({ fixtureUrl, verifiedSites }) => {
+    getDiscoveryCapability().then(({ fixtureUrl, verifiedSites, liveInteraction }) => {
       if (!live) return;
       setDiscoveryFixture(fixtureUrl);
       setLiveSites(Boolean(verifiedSites));
+      setCanInteract(Boolean(verifiedSites && liveInteraction));
     }, () => {});
     return () => { live = false; };
-  }, [mode]);
+  }, []);
 
   useEffect(() => {
     if (!from) return;
@@ -100,7 +105,8 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const usingFixture = fixture.success && fixture.data === discoveryFixture;
   // Any public HTTPS page qualifies: the worker reads it with plain GETs, so no proof of ownership is asked for.
   const onLiveSite = !usingFixture && liveSites && liveSite.success;
-  const canDiscover = mode === "explore" && effectiveModel?.provider !== "fake" && (usingFixture || onLiveSite);
+  // Phase B: written instructions may opt in too; discovery then looks for routes that exercise them.
+  const canDiscover = effectiveModel?.provider !== "fake" && (usingFixture || onLiveSite);
   const usingDiscovery = canDiscover && discover;
   const usingVerifiedSite = usingDiscovery && onLiveSite;
 
@@ -117,7 +123,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   }, [errors, settingsOpen]);
 
   function showErrors(next: Errors) {
-    const first = ["targetUrl", "requirement", "autonomousDiscovery", "discoveryMaxSeconds", "discoveryMaxSteps", "model", "reasoning", "maxRunSeconds", "maxExplorationSteps", "additionalAllowedHosts"].find((id) => id in next);
+    const first = ["targetUrl", "requirement", "autonomousDiscovery", "discoveryMaxSeconds", "discoveryMaxSteps", "discoveryAgents", "model", "reasoning", "maxRunSeconds", "maxExplorationSteps", "additionalAllowedHosts"].find((id) => id in next);
     pendingFocus.current = first ?? null;
     if (first && first !== "targetUrl" && first !== "requirement") setSettingsOpen(true);
     setErrors(next);
@@ -137,7 +143,9 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
         allowDestructiveActions: !usingDiscovery,
         ...(host && !usingDiscovery ? { confirmProductionHost: host } : {}),
         ...(usingDiscovery ? { autonomousDiscovery: true, discoveryMaxSeconds: Number(discoverySeconds), discoveryMaxSteps: Number(discoverySteps) } : {}),
+        ...(usingDiscovery && Number(discoveryAgents) > 1 ? { discoveryAgents: Number(discoveryAgents) } : {}),
         ...(usingVerifiedSite ? { verifiedSiteDiscovery: true } : {}),
+        ...(usingVerifiedSite && canInteract && interact ? { discoveryLiveInteraction: true } : {}),
         additionalAllowedHosts: usingVerifiedSite ? [] : hosts.split(/[\s,]+/).filter(Boolean),
       },
       ...((model || reasoning) ? { llm: { ...(model ? { model } : {}), ...(reasoning ? { reasoning } : {}) } } : {}),
@@ -198,13 +206,25 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
               <Checkbox id="autonomousDiscovery" checked={discover} onCheckedChange={(checked) => setDiscover(checked === true)} aria-describedby="discovery-hint" />
               <label htmlFor="autonomousDiscovery">Autonomous Discovery (Browser Use)</label>
             </div>
-            <p id="discovery-hint" className="text-sm text-muted-foreground">{onLiveSite
-              ? "Suggest more tests from read-only snapshots of a few pages on this site. This uses extra AI calls and requires criteria review."
-              : "Explore the staging fixture for additional test ideas. This uses extra AI calls and requires criteria review."}</p>
+            <p id="discovery-hint" className="text-sm text-muted-foreground">{mode === "describe"
+              ? "Look for routes that exercise these instructions. Extra checks it suggests do not decide the result until you mark them critical. This uses extra AI calls and requires criteria review."
+              : onLiveSite
+                ? "Suggest more tests from read-only snapshots of a few pages on this site. This uses extra AI calls and requires criteria review."
+                : "Explore the staging fixture for additional test ideas. This uses extra AI calls and requires criteria review."}</p>
             {errorFor("autonomousDiscovery")}
+            {usingVerifiedSite && canInteract && <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <Checkbox id="discoveryLiveInteraction" checked={interact} onCheckedChange={(checked) => setInteract(checked === true)} aria-describedby="interaction-hint" />
+                <label htmlFor="discoveryLiveInteraction">Interact with the live site</label>
+              </div>
+              <p id="interaction-hint" className="text-sm text-muted-foreground">
+                Browser Use opens menus, tabs and dialogs, searches, pages through results and fills forms to see validation. Nothing is submitted: the network refuses every request that sends data. Off: it works from read-only snapshots.
+              </p>
+            </div>}
             {usingDiscovery && <div className="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1">
               <Field><label htmlFor="discoveryMaxSeconds">Discovery time (seconds)</label><Input id="discoveryMaxSeconds" name="discoveryMaxSeconds" type="number" min={15} max={120} value={discoverySeconds} onChange={(e) => setDiscoverySeconds(e.target.value)} {...invalid("discoveryMaxSeconds")} />{errorFor("discoveryMaxSeconds")}</Field>
               <Field><label htmlFor="discoveryMaxSteps">Discovery model calls</label><Input id="discoveryMaxSteps" name="discoveryMaxSteps" type="number" min={2} max={20} value={discoverySteps} onChange={(e) => setDiscoverySteps(e.target.value)} {...invalid("discoveryMaxSteps")} />{errorFor("discoveryMaxSteps")}</Field>
+              <Field><label htmlFor="discoveryAgents">Browser Use agents</label><Input id="discoveryAgents" name="discoveryAgents" type="number" min={1} max={3} value={discoveryAgents} onChange={(e) => setDiscoveryAgents(e.target.value)} {...invalid("discoveryAgents")} aria-describedby={errors.discoveryAgents ? "discoveryAgents-error agents-hint" : "agents-hint"} /><p id="agents-hint" className="text-sm text-muted-foreground">Each extra agent explores another page in parallel when a slot is free, with the same limits.</p>{errorFor("discoveryAgents")}</Field>
             </div>}
           </Field>}
         </div>

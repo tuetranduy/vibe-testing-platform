@@ -1,12 +1,18 @@
 import {
   ApiErrorSchema,
   CreateTestRunResponseSchema,
+  CoverageResponseSchema,
+  ExploratoryFindingSchema,
+  FindingsResponseSchema,
   DiscoveryCapabilitySchema,
   DiscoveryRolloutSchema,
   LlmSettingsViewSchema,
   SuggestionSetResponseSchema,
   SiteAnalysisSchema,
   type SiteAnalysis,
+  type CoverageResponse,
+  type ExploratoryFinding,
+  type FindingsResponse,
   NormalizedRequirementSchema,
   CriterionProposalSchema,
   type CriterionProposalResponse,
@@ -202,6 +208,21 @@ export const getSuggestions = (runId: string): Promise<SuggestionSetResponse> =>
 /** Chooses a suggested test (`requirement` only when edited): the run's new summary, now analysing it. */
 export const selectSuggestion = (runId: string, body: SelectSuggestionRequest): Promise<TestRunSummary> =>
   request(TestRunSummarySchema, `${runPath(runId)}/suggestions/select`, { method: "POST", body });
+
+/** Phase C: one site's coverage graph across the caller's recent runs (`url`: any page of the site). */
+export const getCoverage = (url: string): Promise<CoverageResponse> =>
+  request(CoverageResponseSchema, `/api/v1/discovery/coverage?url=${encodeURIComponent(url)}`);
+
+/** Phase C: a run's exploratory findings (unverified Browser Use hypotheses) with their derived status. */
+export const getFindings = (runId: string): Promise<FindingsResponse> => request(FindingsResponseSchema, `${runPath(runId)}/findings`);
+
+export const dismissFinding = (runId: string, findingId: string): Promise<ExploratoryFinding> =>
+  request(ExploratoryFindingSchema, `${runPath(runId)}/findings/${encodeURIComponent(findingId)}/dismiss`, { method: "POST" });
+
+/** Starts (or returns) the finding's independent reproduction run. */
+export const reproduceFinding = (runId: string, findingId: string): Promise<{ finding: ExploratoryFinding; run: CreateTestRunResponse }> =>
+  request(z.object({ finding: ExploratoryFindingSchema, run: CreateTestRunResponseSchema }),
+    `${runPath(runId)}/findings/${encodeURIComponent(findingId)}/reproduce`, { method: "POST" });
 
 /** Confirms the criteria; `testData` (V1.3: the accepted suggestions) becomes the run's before it starts. */
 export const confirmCriteria = (runId: string, testData: Record<string, string | number | boolean> = {}): Promise<ConfirmResult> =>

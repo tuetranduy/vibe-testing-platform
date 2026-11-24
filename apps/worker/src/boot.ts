@@ -57,6 +57,8 @@ export async function bootWorker(opts: BootOptions = {}): Promise<void> {
     // A scripted transport has no person watching it (CI E2E); preserve its failure behavior (2026-11-21).
     ...(transport ? {} : { redis: publisher }),
     discoveryRollout: publisher,
+    // Browser Use runs on each run's own model and Settings key, like Stagehand.
+    discoveryModel: (tenantId, request) => runLlm.discoveryModelFor(tenantId, request),
     db: handle.db,
     logger,
     storage,

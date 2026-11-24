@@ -162,3 +162,31 @@ describe("wholeRequirementFallback", () => {
     expect(criteria[0]).toMatchObject({ sourceText: "ok", statement: "The requirement holds", expectedOutcome: { kind: "semantic", description: "The requirement holds" } });
   });
 });
+
+describe("groundInferred with Browser Use routes (Phase B)", () => {
+  const withRoutes = { ...ctx, routeCount: 2 };
+  it("lets a criterion citing a listed route extend even a specific requirement", () => {
+    const kept = groundInferred(out([criterion(1), inferred(2, { discoveryRoute: 2 })], { clarity: "specific", checks: { 1: "found", 2: "unclear" } }), withRoutes);
+    expect(kept.output.criteria.map((c) => [c.statement, c.discoveryRoute])).toEqual([["Check number 1 holds", undefined], ["Check number 2 holds", 2]]);
+  });
+
+  it("drops a route number that was not listed, or one on a stated criterion, and the uncited inferred check of a specific requirement", () => {
+    const kept = groundInferred(out([criterion(1, { discoveryRoute: 1 }), inferred(2, { discoveryRoute: 3 })], { clarity: "specific" }), withRoutes);
+    expect(kept.output.criteria.map((c) => [c.statement, c.discoveryRoute])).toEqual([["Check number 1 holds", undefined]]);
+    expect(kept.notes).toEqual([LEFT_OUT("Check number 2 holds", "the requirement already says what to check")]);
+  });
+
+  it("needs an objective check, and keeps at most three route checks", () => {
+    const semantic = inferred(1, { discoveryRoute: 1, expectedOutcome: { kind: "semantic", description: "Looks right" } });
+    expect(groundInferred(out([criterion(9), semantic], { clarity: "specific" }), withRoutes).notes)
+      .toEqual([LEFT_OUT("Check number 1 holds", "a discovered route needs an objective check")]);
+    const many = groundInferred(out([criterion(9), ...[1, 2, 3, 4].map((n) => inferred(n, { discoveryRoute: 1 }))], { clarity: "specific" }), withRoutes);
+    expect(many.output.criteria).toHaveLength(4);
+    expect(many.notes).toEqual([LEFT_OUT("Check number 4 holds", "more than 3 checks came from discovery")]);
+  });
+
+  it("still refuses a destructive route check", () => {
+    const pay = inferred(1, { discoveryRoute: 1, statement: "Place the order and pay with the saved card" });
+    expect(groundInferred(out([criterion(9), pay], { clarity: "specific" }), withRoutes).output.criteria).toHaveLength(1);
+  });
+});

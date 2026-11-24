@@ -179,3 +179,16 @@ Five bounded hosted attempts on the community noticeboard (2026-11-23, `.artifac
 returned no reviewable ideas: two DeepSeek attempts failed with a provider-side `UserError`, two ended `PARTIAL` with no valid candidates (the larger used 12 model calls, an estimated $0.0056, and
 42.8 s), and an Anthropic attempt stopped at authentication. They verified provider connectivity and cost recording
 only. With no candidates returned, they also say nothing about prompt-injection resistance.
+
+## Findings against known defects (Phase C)
+
+`/benchmark/defects/` has two deliberate defects and a healthy control page, described in `defects.json`. `defects.ts`
+scores findings against it. A finding matches a defect on the same page whose pattern it matches; a finding on a
+healthy page is a false alarm.
+
+- `defects.test.ts` (Playwright) proves the defects are real and the control is clean, and that the reproduction
+  requirement built from each finding checks the behavior the defect breaks.
+- `apps/browser-use-discovery/tests/test_container.py::test_findings_match_the_known_defects_and_spare_the_healthy_page`
+  runs the scripted agent in a real container. Recall is 1.0, precision 1.0, with no false alarm. The scripted
+  heuristics (`benchmark_findings`) were written beside the fixture, so this shows the pipeline carries findings
+  through, not that a hosted model finds them. A hosted run needs a cost approval.

@@ -9,6 +9,7 @@ import {
   URL_FACT_KEY,
   type FactRef,
 } from "./common";
+import { DiscoveryFixturePathSchema } from "./discovery";
 
 /**
  * What a text check compares with: a literal `value`, or the run's value for a test data key (`testDataKey`, KI-001:
@@ -93,6 +94,14 @@ export const AcceptanceCriterionSchema = z.object({
   rationale: z.string().min(3).max(300).nullable().optional(),
   /** A vague phrase checked in a concrete way: what the analysis assumed it means. Cleared when the user edits the check. */
   assumption: z.string().min(3).max(300).nullable().optional(),
+  /**
+   * Phase B: an inferred criterion suggested by a route Browser Use observed. It starts non-critical, so it never
+   * decides the verdict unless the person confirming the criteria makes it critical.
+   */
+  discovery: z.object({
+    engine: z.literal("browser_use"),
+    relevantPaths: z.array(DiscoveryFixturePathSchema).min(1).max(8),
+  }).optional(),
 });
 export type AcceptanceCriterion = z.infer<typeof AcceptanceCriterionSchema>;
 
@@ -167,6 +176,9 @@ export const NormalizedRequirementSchema = z
       }
       if (!isInferred(c) && rationale !== null) {
         ctx.addIssue({ code: "custom", path: ["criteria", i, "rationale"], message: "Only an inferred criterion has a rationale" });
+      }
+      if (c.discovery && !isInferred(c)) {
+        ctx.addIssue({ code: "custom", path: ["criteria", i, "discovery"], message: "Only an inferred criterion comes from discovery" });
       }
     });
     if (req.criteria.filter(isInferred).length > MAX_INFERRED_CRITERIA) {

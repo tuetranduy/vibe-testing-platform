@@ -27,7 +27,7 @@ import {
 } from "@platform/stagehand-adapter/browser-explorer";
 import { createRunRedactor } from "@platform/security";
 import type { Page } from "playwright-core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ZodType } from "zod";
 import type { EventDraft, StageContext } from "../orchestrator/stages";
 import { pagePath, namedControl, quotedNames, runExploration, type ExplorationStore, type RecorderPort } from "./executor";
@@ -1673,6 +1673,68 @@ describe("runExploration (fake explorer)", () => {
     await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, wayThere });
     expect(session.calls.filter((c) => c.op === "actOn")).toEqual([]);
     expect(session.calls.filter((c) => c.op === "observe").every((c) => !String(c.arg).startsWith("Find the link or button that leads"))).toBe(true);
+  });
+
+  it("Phase C: with no way there, opens one matching Browser Use route page as a navigate, then Stagehand does the step there", async () => {
+    const { ctx } = fakeCtx();
+    const button = { selector: "xpath=/button", description: "Add to cart button", method: "click", arguments: [] };
+    const session: FakeSession = new FakeSession({ observe: (): ObservedElement[] => (session.url.endsWith("/products/assam") ? [button] : []) });
+    Object.assign(session.page, { evaluate: async () => [] });
+    const wayThere: WayThere = { choose: async () => ({ index: null, llm: USAGE }) };
+    const routes = [{ title: "Add Assam tea to the cart", goal: "Open the Assam tea product page and add it to the cart.",
+      relevantPaths: ["/catalog", "/products/assam"], expectedBehavior: ["The cart lists Assam tea."] }];
+    const plan = planOf(step("navigate", "Open"), step("click", "Click Add to cart for Assam tea"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1), discoveryRoutes: routes },
+      { store: memoryStore().store, recorder: fakeRecorder().recorder, wayThere });
+    const routed = outcome.steps.find((s) => s.discoveryRoute);
+    expect(routed).toMatchObject({ kind: "navigate", instruction: "Navigate to https://shop.test/products/assam", outcome: "SUCCESS", onGoldenPath: true });
+    expect(session.calls.filter((c) => c.op === "actOn")).toEqual([{ op: "actOn", arg: button }]);
+    // One route page per step, never more.
+    expect(session.calls.filter((c) => c.op === "navigate")).toHaveLength(2);
+  });
+
+  it("Phase C: the guard refusing a route page fails the hint, not the scenario", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({
+      observe: () => [],
+      navigate: (url) => { if (url.endsWith("/products/assam")) throw new NavigationBlockedError(url, "OFF_DOMAIN_NAVIGATION"); },
+    });
+    Object.assign(session.page, { evaluate: async () => [] });
+    const wayThere: WayThere = { choose: async () => ({ index: null, llm: USAGE }) };
+    const routes = [{ title: "Add Assam tea to the cart", goal: "Open the Assam tea product page.", relevantPaths: ["/products/assam"], expectedBehavior: ["Shown."] }];
+    const plan = planOf(step("navigate", "Open"), step("click", "Click Add to cart for Assam tea"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1), discoveryRoutes: routes },
+      { store: memoryStore().store, recorder: fakeRecorder().recorder, wayThere });
+    expect(outcome.steps.find((s) => s.discoveryRoute)).toMatchObject({ outcome: "FAILED", onGoldenPath: false });
+    expect(outcome.steps.some((s) => s.outcome === "BLOCKED_BY_POLICY")).toBe(false);
+  });
+
+  it("Phase C: asks Browser Use live, once per run, when no stored route fits the step", async () => {
+    const { ctx } = fakeCtx();
+    const button = { selector: "xpath=/button", description: "Add to cart button", method: "click", arguments: [] };
+    const session: FakeSession = new FakeSession({ observe: (): ObservedElement[] => (session.url.endsWith("/products/assam") ? [button] : []) });
+    Object.assign(session.page, { evaluate: async () => [] });
+    const wayThere: WayThere = { choose: async () => ({ index: null, llm: USAGE }) };
+    const findRoutes = vi.fn(async () => [{ title: "Add Assam tea to the cart", goal: "Open the Assam tea product page.", relevantPaths: ["/products/assam"], expectedBehavior: ["Shown."] }]);
+    const plan = planOf(step("navigate", "Open"), step("click", "Click Add to cart for Assam tea"), step("click", "Click the Checkout banner"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) },
+      { store: memoryStore().store, recorder: fakeRecorder().recorder, wayThere, findRoutes });
+    expect(findRoutes).toHaveBeenCalledTimes(1);
+    expect(findRoutes).toHaveBeenCalledWith("Click Add to cart for Assam tea");
+    expect(outcome.steps.find((s) => s.discoveryRoute)).toMatchObject({ instruction: "Navigate to https://shop.test/products/assam", outcome: "SUCCESS" });
+  });
+
+  it("Phase C: a route that does not match the step changes nothing", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({ observe: () => [] });
+    Object.assign(session.page, { evaluate: async () => [] });
+    const wayThere: WayThere = { choose: async () => ({ index: null, llm: USAGE }) };
+    const routes = [{ title: "Read the help page", goal: "Open the help page from the footer.", relevantPaths: ["/help"], expectedBehavior: ["Help opens."] }];
+    const plan = planOf(step("navigate", "Open"), step("click", "Click Add to cart for Assam tea"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1), discoveryRoutes: routes },
+      { store: memoryStore().store, recorder: fakeRecorder().recorder, wayThere });
+    expect(outcome.steps.some((s) => s.discoveryRoute)).toBe(false);
+    expect(session.calls.filter((c) => c.op === "navigate")).toHaveLength(1);
   });
 
   it("a click that brings up a password field is marked as having opened a sign-in prompt; a login step never is (KI-073)", async () => {

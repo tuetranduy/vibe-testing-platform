@@ -36,6 +36,62 @@ class FixtureTarget:
     def needs_host_alias(self) -> bool:
         return self.host not in ('127.0.0.1', 'localhost')
 
+    scheme = 'http'
+    live = False
+
+
+@dataclass(frozen=True)
+class LiveTarget:
+    """A public HTTPS page for live interaction (``DISCOVERY_LIVE_SITES=on``): reached only through the job's
+    inspecting egress proxy, never directly."""
+
+    url: str
+    host: str
+    path: str
+    port: int = 443
+    scheme = 'https'
+    live = True
+    needs_host_alias = False
+
+    @property
+    def origin(self) -> str:
+        return f'https://{self.host}'
+
+
+def normalize_live_url(raw: str) -> LiveTarget:
+    if not isinstance(raw, str) or len(raw) > 2048 or raw != raw.strip():
+        raise PolicyError('URL is not a clean string')
+    try:
+        parts = urlsplit(raw)
+        port = parts.port
+    except ValueError as e:
+        raise PolicyError('URL does not parse') from e
+    if parts.scheme != 'https' or port not in (None, 443):
+        raise PolicyError('live sites are https:// on the default port')
+    if parts.username is not None or parts.password is not None or '?' in raw or '#' in raw:
+        raise PolicyError('a live URL must not carry credentials, a query or a fragment')
+    host = (parts.hostname or '').lower().rstrip('.')
+    try:
+        ipaddress.ip_address(host)
+        raise PolicyError('a live site is named by its domain, not an IP address')
+    except ValueError:
+        pass
+    if not _HOSTNAME.match(host) or '.' not in host or host.rsplit('.', 1)[1].isdigit() or host.endswith(('.local', '.internal', '.localhost')):
+        raise PolicyError('invalid live hostname')
+    path = parts.path or '/'
+    if not re.fullmatch(r'/[A-Za-z0-9._~/-]*', path) or '..' in path or '//' in path or len(path) > 180:
+        raise PolicyError('invalid live path')
+    return LiveTarget(url=f'https://{host}{path}', host=host, path=path)
+
+
+def match_request(fixture_url: str, live_sites: bool, target_url: str, live: bool) -> FixtureTarget | LiveTarget:
+    """The fixture for a fixture request; a public HTTPS page for a live one, when the operator enabled live sites."""
+    if live:
+        if not live_sites:
+            raise PolicyError('live sites are not enabled')
+        return normalize_live_url(target_url)
+    return match_target(fixture_url, target_url)
+
 
 def normalize_url(raw: str) -> FixtureTarget:
     if not isinstance(raw, str) or len(raw) > 2048 or raw != raw.strip():

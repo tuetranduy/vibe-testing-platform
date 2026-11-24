@@ -476,6 +476,13 @@ Implementation:
 
 - **Pilot:** run a dedicated Browser Use model/account for discovery. Existing Stagehand run LLM choice continues to govern Stagehand and the core pipeline; display the discovery model separately.
 - **Later:** evaluate a Pydantic-AI-supported `ChatOpenAI`/`ChatAnthropic`/`ChatGoogle` adapter to align with platform model choice. This is **not automatically compatible** with the platform's custom TypeScript `LlmClient.generateJson` bridge.
+- **Done (2026-11-24):** each job now uses the run's own model and its Settings key, as Stagehand does. The worker
+  resolves them (`run-llm.ts` `discoveryModelFor`) and sends them on the signed job request (`DiscoveryInput.model`).
+  The broker builds that job's Pydantic AI client with the key passed to the provider explicitly (`make_run_model`;
+  Anthropic, Gemini, DeepSeek). The key is a `SecretStr`, absent from every representation, the agent's start frame,
+  logs and results. A run without a key records `BLOCKED`/`model_not_configured`. Production's first two discovery runs
+  had failed as `FAILED`/`agent_error` because the broker had no key of its own and Pydantic AI's `UserError` was not
+  classified.
 - Capture `modelCostUsd`, known/unknown cost status, token usage, browser/infra time, step budget. Do not assume `result.cost_usd` includes separate browser/proxy charges.
 - Hard stop: timeout, step count, max candidate/page counts, sidecar memory/CPU, per-tenant concurrency; a soft USD budget cannot provide perfect pre-call cost enforcement unless metering is external and real time.
 
@@ -619,7 +626,7 @@ Before enabling discovery outside an isolated pilot, run negative tests proving 
 
 **Do not enable discovery against arbitrary user-supplied production sites until these controls are proven.**
 
-*Status, 2026-11-24:* the split exists for controlled local fixtures only (proxy mode, Milestone 5). Model traffic leaves through the host broker; target traffic leaves only through a per-job egress proxy limited to the fixture's origin on an internal network. The negative tests above pass in real containers for that mode. External targets remain disabled.
+*Status, 2026-11-24:* the split exists for controlled local fixtures (proxy mode) and, since live interaction, for public HTTPS sites. Model traffic leaves through the host broker. Target traffic leaves only through a per-job egress proxy that inspects each request (safe methods only, no bodies or upgrades) and refuses any non-public address. The negative tests above pass in real containers for both modes (`tests/test_container.py`, `tests/test_live_container.py`).
 
 ---
 
@@ -803,7 +810,13 @@ Add a clearly separate **Discovery** section containing pages/journeys mapped an
     - Before deploying, a local rehearsal of the production compose services showed: the worker-like probe reached the fixture and completed a signed job; a container on the fixture network could not reach the broker; and the fixture had no external DNS.
     - A dry run of `deploy-worker.sh` produced a worker configuration that validates as production.
     - Admission still needs an administrator to enable the tenant in Settings.
-  - [ ] **Open — needs a deployed staging environment:** no non-production staging target is documented or confirmed; only production is deployed, on push to `main`. Repeat the rehearsal there with its own monitoring.
+  - [x] ~~**Needs a deployed staging environment.**~~ **Withdrawn (owner's decision, 2026-11-24):** there is no staging
+    environment and none is planned; Browser Use rolls out directly to production behind the tenant flag. The staging
+    rehearsal is replaced by the production items below.
+  - [ ] **Open — production rollback drill with monitoring:** repeat the local rehearsal (queued and in-flight rollback,
+    broker `activeJobs` back to 0, no agent containers left) on the deployed production worker. The worker's metrics
+    port is closed in production (`docs/deployment.md`), so the §14.2 alert rules are not evaluated there yet: a
+    Prometheus must scrape the production worker before the drill can show its alerts.
   - [x] **Target-site egress split — local controlled fixtures only (proxy mode, development and test).**
     - With `DISCOVERY_TARGET_MODE=proxy`, each job gets its own `--internal` Docker network whose only peer is a per-job egress proxy.
     - The proxy also joins a pre-created `--internal` network named `vtp-discovery-targets[-name]`, which holds the approved fixture container.
@@ -823,10 +836,33 @@ Add a clearly separate **Discovery** section containing pages/journeys mapped an
     bounded, unauthenticated HTML from that exact origin and the Browser Use agent receives only escaped snapshots in
     its network-isolated container. The DNS TXT ownership proof was dropped (2026-11-24): the reads are less than the
     standard survey's browser already makes to unverified sites, and the tenant's hourly discovery limit still applies.
-  - [ ] **Open — direct browser interaction with live sites:**
-    - Proxy mode only joins internal `vtp-discovery-targets*` networks.
-    - The platform's own survey of a proxy-mode target is not wired.
-    - An approved external staging target would need a target network with a controlled route out, its own boundary tests (redirects, DNS rebinding against a real resolver), and the §8.2 review.
+  - [x] **Live interaction with public HTTPS sites (2026-11-24, `BROWSER_USE_DISCOVERY_LIVE_INTERACTION`, on by default
+    where live-site discovery is on).** The agent now works on the real site, not only on snapshots: it opens menus,
+    tabs and dialogs, uses filters, search and pagination, follows links and fills forms to see validation.
+    - **Boundary:** the agent container stays on its job's `--internal` network; only the job's egress proxy also joins
+      `vtp-discovery-live-egress`, a plain bridge with a route out (created by the launcher, refused if `--internal`).
+    - **Inspection:** the proxy accepts `CONNECT` to the approved host on port 443 only and terminates it with a per-job
+      EC key. Only that job's Chromium trusts the key, by SPKI pin (`--ignore-certificate-errors-spki-list`); no CA is
+      installed anywhere. Every request is therefore visible: `GET`, `HEAD` and `OPTIONS` without a body pass. Any
+      other method, a request body, a protocol upgrade (web sockets) and a top-level navigation to another site are
+      refused with 403 and counted (`method_denied`, `upgrade_denied`, `not_allowlisted`). This holds for
+      model-written Python too, because the proxy is its only way out.
+    - **Upstream:** the proxy resolves the name itself and refuses a name with any non-public address (private,
+      loopback, link-local/metadata, CGNAT, reserved). It connects to the address it checked, so DNS rebinding cannot
+      swap it, and it verifies the real certificate. Requests are rate limited (15/s, 1500 per job; 400 from other hosts).
+    - **Subresources:** scripts, styles and fonts may come from the target's own site (`same-site`, for example
+      `cdn.example.com` for `www.example.com`). `DISCOVERY_LIVE_OTHER_HOSTS=public` widens this to any public host
+      and `none` narrows it to the exact host.
+    - **Grounding:** ideas must cite pages the browser really opened, as the proxy saw them (`egress.page`, paths only,
+      held in memory for the job).
+    - **Evidence:** `tests/test_live_proxy.py` (policy, rate limit, key handling, an in-process TLS round trip in which a
+      `GET` passes and `POST`, a body, an upgrade, a smuggled `Host`, an off-site host, another port and a privately
+      resolving name are refused). `tests/test_live_container.py` runs real containers against `https://example.com/`
+      (CI sets `DISCOVERY_LIVE_NET_TESTS=1`). There, Chromium loaded the page through the proxy. The agent's own
+      Python could `GET`, but `POST`, `PUT` and `DELETE` got 403. The off-site host and metadata tunnels were refused,
+      direct TCP to every probe address was unreachable, and nothing was left behind.
+    - **Not covered:** anything a site does with a `GET` (a badly built site can change data on a `GET`); sites that
+      need an account (still credentialless).
   - [x] **Fair multi-tenant admission (worker side, Redis).**
     - Before a job starts, the worker takes a fair turn at the broker's bounded slots. `BROWSER_USE_DISCOVERY_CAPACITY` defaults to 1, matching the broker's own slots, and the slots are shared by every worker replica through Redis.
     - Tenants take turns (round robin), and each tenant's runs go first in, first out.
@@ -866,13 +902,74 @@ Add a clearly separate **Discovery** section containing pages/journeys mapped an
 
 ### Later Phase B — Requirement-enriched discovery (4–7 days)
 
-- [ ] **Pending the evaluation gate.**
+- [x] **Implemented (2026-11-24), behind the same tenant flag, quota and fair admission as Phase A.** The usefulness
+  gate (human rating of `candidates-for-rating.hosted.json`) is still open; the owner chose to build B before it.
+  - **Opt-in:** `autonomousDiscovery` is accepted with a written requirement (`run.ts`); manual criteria review stays
+    mandatory. The new-run form offers the toggle in **Describe a test** too.
+  - **One job runner:** `discovery/run-job.ts` holds the admission gates, the job, progress, in-flight rollback and the
+    one outcome event for both the survey and the analysis, so the two paths cannot drift.
+  - **Focus:** the agent receives the redacted requirement as `focus` (≤ 1000 characters, between markers, as data;
+    `runner.build_task`). The broker re-cleans it (`protocol.clean_focus`).
+  - **Routes, not criteria:** `requirement/discovery-routes.ts` keeps at most four read-only candidates that share a
+    content word with the requirement and stores them, with the outcome, as `SiteAnalysis.discovery`.
+  - **Reviewed additions:** the requirement compiler sees the numbered routes. A criterion may cite one
+    (`discoveryRoute`) and is then kept even for a specific requirement, but only as an inferred criterion with an
+    objective check, read-only, within the credential rules, at most three, and **non-critical**: it never decides the
+    verdict unless the reviewer marks it critical. The review shows "Suggested by Browser Use" and the route's paths.
+  - **Planner:** the routes reach the planner as untrusted hints next to the pages read.
+  - **Live sites:** in live-site mode the analysis uses the pages the snapshot was read from (`readVerifiedSite`)
+    instead of a browser read.
+  - **Fallback:** every failure records one `discovery.failed` outcome ("Analyzing the requirement without it.") and
+    the analysis continues unchanged. Covered by `requirement/discovery-routes.test.ts` and the grounding tests.
 
 After MVP metrics justify expansion, feed Browser Use findings into `analyze`/planner for explicit user criteria, not only blank-prompt survey. Introduce reviewed additional criteria. Test token budget interaction and avoid growing prompts unboundedly.
 
 ### Later Phase C — Autonomous exploratory testing / route recovery (1–3+ weeks)
 
-- [ ] **Pending the controlled release and deterministic corroboration gates.**
+- [x] **Findings pipeline and route recovery implemented (2026-11-24).**
+  - **Findings:** the agent may report up to five things that look wrong (`CandidateBatch.findings`). The broker keeps
+    only findings on observed pages, with plain steps and no unsafe wording (`protocol.sanitize_findings`). Findings
+    ride only on a `COMPLETED` reply.
+  - **Separate storage:** the worker stores findings in `run_findings` (migration 0019: run tenant trigger, RLS, deleted
+    with the run). They are apart from criteria, results and verdicts, and counted in `discovery_findings_total`.
+  - **Status:** a finding starts as `HYPOTHESIS`. A reviewer may dismiss it, or start its **reproduction**: a new
+    ordinary run at the finding's page whose requirement is built from the steps and the expected behavior. The agent's
+    observation is left out, so it is never taken as something to check. Criteria review stays manual, and the run has
+    no discovery and no destructive actions.
+  - **Promotion:** only that run's verdict changes the finding (`findingStatus`): `FAILED` → `REPRODUCED`, `PASSED` →
+    `DISMISSED`/`not_reproduced`, `BLOCKED` → `BLOCKED`, otherwise `INCONCLUSIVE`. A reproduced finding cannot be
+    dismissed. API: `GET /v1/test-runs/:id/findings`, `POST …/findings/:F-n/dismiss`, `POST …/findings/:F-n/reproduce`
+    (idempotent per finding). The report shows them as **Exploratory findings (unverified)**.
+  - **Route recovery (BU-024):** when a planned step's control is not found and neither the way-there chooser nor a
+    named link helps, the executor may open one page of the best-matching Browser Use route, once per step. That
+    page is on the run's allowed hosts, is not the current page, and has no destructive path. The executor opens it
+    through the guarded session as an ordinary `navigate` (marked `discoveryRoute`, replayed as a plain `goto`), then
+    Stagehand locates and acts on the step there. No agent action or code is replayed.
+- [x] **Remaining Phase C items (2026-11-24):**
+  - **Recurring findings (§15.6):** each finding carries a fingerprint (origin, path, sorted title words; indexed per
+    tenant). A run's findings show how many other runs saw the same problem and whether it was reproduced or dismissed
+    there. This is informational: another run never changes a finding's own status.
+  - **Coverage graph (§15.6):** `GET /v1/discovery/coverage?url=` builds, on read, one site's pages across the caller's
+    last 50 runs. Each page shows whether Browser Use found it (suggestions, routes, findings), whether a verified
+    golden path reached it, its findings and how many were reproduced. The graph also has the journey edges between
+    pages and the **gaps** (found, never tested). The report shows it as **Coverage across runs**.
+  - **Multi-agent exploration (§15.7):** `discoveryAgents` (1–3). Each extra agent runs in its own container and broker
+    job (`<runId>-a2`), with its own fair-admission slot taken at once, its own quota attempt (refunded when no slot is
+    free) and the same step and time limits. Each is told to concentrate on another page the survey read. Results
+    merge: candidates, deduplicated findings and summed statistics, and any completed agent completes the job. The
+    broker's `DISCOVERY_JOB_SLOTS` and the worker's capacity both come from `BROWSER_USE_DISCOVERY_CAPACITY`, default
+    1, so production keeps one agent until an operator raises it.
+  - **Live recovery during exploration:** when no stored route fits a step, the executor may ask Browser Use once per
+    run. That is a quiet 45-second, 8-step job (`<runId>-r1`) under the run's quota, rollout and admission. Its answer
+    goes through the same policy-checked `navigate`, and Stagehand acts.
+  - **Reproduction against known defects:** a `/benchmark/defects/` fixture with two deliberate defects (a Help link to
+    a missing page, and a count that contradicts its list) and a healthy control page, described by
+    `evals/discovery/defects.json`. Playwright confirms both defects are real and the control is clean. The reproduction
+    requirement built from each finding asserts the behavior the defect breaks. In a real container the scripted
+    agent's findings scored recall 1.0 and precision 1.0 with no false alarm. Those heuristics were written beside the
+    fixture, so this is pipeline evidence, not a measure of a hosted model.
+- [ ] **Open:** a hosted-model run on the defects fixture (cost-approved), and a full Stagehand → Playwright
+  reproduction of each finding on the deployed stack.
 
 Build a **separate** findings pipeline with hypothesis status. Require deterministic corroboration or user review before promotion to confirmed failures. Only consider Stagehand recovery suggestions when you can translate proposed routes into validated, policy-checked planned steps. Avoid directly replaying arbitrary agent-authored code.
 
@@ -904,9 +1001,9 @@ Build a **separate** findings pipeline with hypothesis status. Require determini
 | BU-020 | P1 | Evaluation suite and comparison dashboard | Baseline vs Browser Use study reproducible |
 | BU-021 | P1 | Concurrency/quotas/circuit breaker | Graceful backpressure and fallback |
 | BU-022 | P1 | Rollout switch and rollback drill | Disable without affecting Stagehand runs |
-| BU-023 | P2 | Explicit requirement enrichment | Extra criteria always require review |
-| BU-024 | P2 | Agent-generated route suggestions | Stagehand revalidates every suggested action |
-| BU-025 | P2 | Exploratory bug hypotheses and reproduction | Unverified vs confirmed statuses explicit |
+| BU-023 | P2 | Explicit requirement enrichment | Extra criteria always require review — **done 2026-11-24** (non-critical, manual review) |
+| BU-024 | P2 | Agent-generated route suggestions | Stagehand revalidates every suggested action — **done 2026-11-24** (policy-checked navigate, Stagehand acts) |
+| BU-025 | P2 | Exploratory bug hypotheses and reproduction | Unverified vs confirmed statuses explicit — **done 2026-11-24** (`run_findings`, verdict-only promotion) |
 
 **Suggested parallelization:** security/runtime (BU-002–005, 009) and contracts/worker (BU-006–008, 012) can overlap; UI starts after contract stabilizes. Do not merge autonomous browser functionality before isolation/security P0 gates pass.
 
@@ -968,7 +1065,7 @@ All percentages are **proposed acceptance goals**, not observed performance clai
 - [x] Tenant scoping, URL policy and retention tested for the fixture pilot: another tenant's report is 404; admission, capability and settings are per tenant; only the exact fixture URL is admitted; discovery data lives only in the run's events and suggestion set (deleted with the run) and in the broker's 15-minute in-memory registry; no discovery artifacts are stored. A platform-wide retention period for run records does not exist yet and is outside this feature.
 - [x] New events use existing SSE and sequence persistence with bounded progress and summary fields.
 - [x] Discovery model cost visible (per run and `discovery_model_cost_usd_total`, known prices only) and bounded (per-run step and time budgets, fair admission to the broker's bounded slots, per-tenant hourly quota, cost alert). Infrastructure cost is not measured.
-- [ ] Feature rollback tested in a staging deployment. (Queued and in-flight rollback, cleanup and Prometheus scraping and rule evaluation were verified in a local deployment rehearsal; CI is configured to repeat the rollback checks. No deployed staging environment exists yet.)
+- [ ] Feature rollback tested in the production deployment (no staging environment, owner's decision 2026-11-24). Queued and in-flight rollback, cleanup and Prometheus scraping and rule evaluation were verified in a local deployment rehearsal; CI repeats the rollback checks. Production has no Prometheus scraping the worker yet.
 
 ---
 

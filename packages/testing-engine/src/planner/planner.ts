@@ -1,6 +1,6 @@
-import { ContractError, TestPlanSchema, type NormalizedRequirement, type SitePage, type StoredTestRunRequest, type TestPlan } from "@platform/contracts";
+import { ContractError, TestPlanSchema, type DiscoveryRoute, type NormalizedRequirement, type SitePage, type StoredTestRunRequest, type TestPlan } from "@platform/contracts";
 import type { ActionPolicy } from "@platform/security";
-import { requireLlm, type StageContext } from "../orchestrator/stages";
+import { requireLlm, type EngineStages, type StageContext } from "../orchestrator/stages";
 import type { RequirementLlm } from "../requirement/compiler";
 import { applyBlocking } from "./blocking";
 import { PLANNER_MAX_TOKENS, PLANNER_TIMEOUT_MS, PlannerOutputSchema } from "./model-output";
@@ -23,6 +23,8 @@ export interface PlanTestInput {
   inlineInputs?: StoredTestRunRequest["inlineInputs"];
   /** The pages the requirement analysis read (redacted inventories); absent or empty: none were read (KI-048). */
   sitePages?: SitePage[];
+  /** Phase B: routes Browser Use observed for the requirement; absent or empty: none. */
+  discoveryRoutes?: DiscoveryRoute[];
   policy: ActionPolicy;
   signal: AbortSignal;
   deadlineAt?: Date | null;
@@ -52,6 +54,7 @@ export async function planTest(llm: RequirementLlm, input: PlanTestInput): Promi
           secretNames: input.secretNames,
           inlineInputs: input.inlineInputs,
           sitePages: input.sitePages,
+          discoveryRoutes: input.discoveryRoutes,
         }),
       },
     ],
@@ -101,8 +104,8 @@ export async function planTest(llm: RequirementLlm, input: PlanTestInput): Promi
 }
 
 /** The real `plan` stage: plans with the run's model client, names, the pages read, action policy, redactor and deadline. */
-export function createPlanStage(): (ctx: StageContext, requirement: NormalizedRequirement, site: SitePage[]) => Promise<TestPlan> {
-  return async (ctx, requirement, site) =>
+export function createPlanStage(): EngineStages["plan"] {
+  return async (ctx, requirement, site, routes = []) =>
     planTest(requireLlm(ctx), {
       runId: ctx.runId,
       requirement,
@@ -111,6 +114,7 @@ export function createPlanStage(): (ctx: StageContext, requirement: NormalizedRe
       secretNames: ctx.secrets.names,
       inlineInputs: ctx.request.inlineInputs,
       sitePages: site,
+      ...(routes.length > 0 && { discoveryRoutes: ctx.redact(routes) as DiscoveryRoute[] }),
       policy: actionPolicyFor(ctx.request),
       signal: ctx.signal,
       deadlineAt: ctx.deadlineAt,

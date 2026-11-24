@@ -72,6 +72,7 @@ describe("rerun-run (V1.1 F5)", () => {
     const run = await queuedRerun({ password: "pw-123456" });
     const forRun = { called: 0 };
     const runLlm: RunLlmFactory = {
+      discoveryModelFor: async () => null,
       forRun: async () => {
         forRun.called++;
         throw new Error("a rerun must not build a model client");

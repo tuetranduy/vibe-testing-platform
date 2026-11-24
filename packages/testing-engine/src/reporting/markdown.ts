@@ -85,9 +85,14 @@ export function renderReportMarkdown(report: TestReport): string {
   if (report.discovery) {
     const { acceptedCount, candidateCount, fallbackUsed, status, reason } = report.discovery;
     push("## Browser Use discovery", "");
-    push(fallbackUsed
-      ? `The standard survey supplied the test ideas (Browser Use outcome: ${escapeMarkdown(status)}${reason ? `, ${escapeMarkdown(reason)}` : ""}).`
-      : `${acceptedCount} of ${candidateCount} candidate ideas were offered for review. They are hypotheses until the selected test runs.`, "");
+    const outcome = `Browser Use outcome: ${escapeMarkdown(status)}${reason ? `, ${escapeMarkdown(reason)}` : ""}`;
+    push(report.discovery.context === "requirement"
+      ? fallbackUsed
+        ? `The requirement was analyzed without Browser Use (${outcome}).`
+        : `${acceptedCount} of ${candidateCount} observed routes were used for this requirement. Checks they suggested were reviewed and start non-critical.`
+      : fallbackUsed
+        ? `The standard survey supplied the test ideas (${outcome}).`
+        : `${acceptedCount} of ${candidateCount} candidate ideas were offered for review. They are hypotheses until the selected test runs.`, "");
     const selected = report.discovery.selectedSuggestion;
     if (selected) push(`Selected idea · ${escapeMarkdown(selected.title)}${selected.edited ? " (edited)" : ""}`, "");
   }

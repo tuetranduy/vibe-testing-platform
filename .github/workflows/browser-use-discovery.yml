@@ -51,9 +51,12 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install uv==0.12.9
       - run: docker build -t vtp-browser-use-discovery:1.0.6 apps/browser-use-discovery
-      - name: Python unit and container tests (isolation, budgets, cleanup, signatures)
+      - name: Python unit and container tests (isolation, budgets, cleanup, signatures, live interaction)
         run: uv run --frozen pytest -q
         working-directory: apps/browser-use-discovery
+        env:
+          # The live-interaction container test reaches https://example.com/ through the inspecting egress proxy.
+          DISCOVERY_LIVE_NET_TESTS: '1'
       - name: Validate and unit-test the alert rules
         run: |
           for command in "check rules browser-use-discovery.rules.yml" "test rules browser-use-discovery.rules.test.yml"; do

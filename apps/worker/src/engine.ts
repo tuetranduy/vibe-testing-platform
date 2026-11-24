@@ -3,14 +3,16 @@ import { createAssistancePort, assistanceTimeoutMs } from "./assistance";
 import os from "node:os";
 import path from "node:path";
 import { discoveryAdmission, type DiscoveryEnv, type Env } from "@platform/config";
-import type { LlmChoice } from "@platform/contracts";
-import type { Database } from "@platform/db";
+import type { DiscoveryModel, LlmChoice, StoredTestRunRequest } from "@platform/contracts";
+import { FindingRepository, type Database } from "@platform/db";
 import type { ArtifactStorage } from "@platform/storage";
 import { admitDiscoveryRun, discoveryEnabled, refundDiscoveryAttempt, reserveDiscoveryAttempt } from "@platform/event-bus";
 import {
   createFakeStages,
   createRealStages,
+  discoverStepRoutes,
   prepareVerifiedSite,
+  readVerifiedSite,
   type AnalyzeStageDeps,
   type EngineStages,
   type ExploreStageDeps,
@@ -41,6 +43,7 @@ export type EngineConfig = Partial<
     | "RUNNER_URL"
     | "RUNNER_TOKEN"
     | "BROWSER_USE_DISCOVERY_VERIFIED_SITES"
+    | "BROWSER_USE_DISCOVERY_LIVE_INTERACTION"
   > & DiscoveryEnv
 >;
 
@@ -48,7 +51,10 @@ export type EngineConfig = Partial<
  * The survey's Browser Use wiring. Always present, so a run the API admitted still records a typed outcome and
  * metrics here when this worker has no transport (BLOCKED / not_configured) or another fixture (fixture_mismatch).
  */
-export function createDiscoveryDeps(config: EngineConfig, deps: Pick<EngineDeps, "discoveryRollout" | "logger" | "metrics">): AutonomousSurveyDeps {
+export function createDiscoveryDeps(
+  config: EngineConfig,
+  deps: Pick<EngineDeps, "discoveryRollout" | "logger" | "metrics"> & Partial<Pick<EngineDeps, "db" | "discoveryModel">>,
+): AutonomousSurveyDeps {
   const admission = discoveryAdmission(config);
   const metrics = deps.metrics;
   const port = !admission
@@ -74,7 +80,24 @@ export function createDiscoveryDeps(config: EngineConfig, deps: Pick<EngineDeps,
   };
   return {
     ...(admission && counted ? { fixtureUrl: admission.fixtureUrl, port: counted } : {}),
-    ...(config.BROWSER_USE_DISCOVERY_VERIFIED_SITES === "on" ? { prepareVerifiedSite } : {}),
+    ...(config.BROWSER_USE_DISCOVERY_VERIFIED_SITES === "on" ? { prepareVerifiedSite, readVerifiedSite } : {}),
+    // The broker's agent may then work on the real site through its job's inspecting egress proxy.
+    ...(config.BROWSER_USE_DISCOVERY_VERIFIED_SITES === "on" && config.BROWSER_USE_DISCOVERY_LIVE_INTERACTION === "on" ? { liveInteraction: true } : {}),
+    // Phase C: unverified findings, stored apart from every result for a person to dismiss or reproduce.
+    ...(deps.db && {
+      recordFindings: async (ctx, findings) => {
+        const origin = new URL(ctx.request.targetUrl).origin;
+        const createdAt = ctx.now().toISOString();
+        const stored = await new FindingRepository(deps.db!).saveNew(ctx.runId, findings.map((finding, index) => ({
+          id: `F-${index + 1}`, source: "browser_use" as const, ...finding, url: new URL(finding.path, origin).href,
+          dismissedAt: null, reproductionRunId: null, createdAt,
+        })));
+        metrics?.discoveryFindings.inc(stored);
+        return stored;
+      },
+    }),
+    // The run's own model and Settings key (as Stagehand uses them); absent: the broker's DISCOVERY_MODEL.
+    ...(deps.discoveryModel && { modelFor: (ctx) => deps.discoveryModel!(ctx.tenantId, ctx.request) }),
     allowsTenant: async (tenantId) => Boolean(admission?.tenantIds.includes(tenantId)) && await discoveryEnabled(deps.discoveryRollout, tenantId),
     reserve: (tenantId) => reserveDiscoveryAttempt(deps.discoveryRollout, tenantId, hourlyLimit),
     refund: (tenantId) => refundDiscoveryAttempt(deps.discoveryRollout, tenantId),
@@ -140,6 +163,8 @@ export interface EngineDeps {
   rerun?: Partial<RunTestStageDeps>;
   /** Prometheus metrics (sandbox sessions, egress blocks, artifact uploads). */
   metrics?: WorkerMetrics;
+  /** The run's model and key for its Browser Use job (run-llm.ts `discoveryModelFor`). */
+  discoveryModel?: (tenantId: string, request: StoredTestRunRequest) => Promise<DiscoveryModel | null>;
   /** Test seam for the real analyze stage (V1.3: its live-site read); default: the survey's sandbox and store. */
   analyze?: AnalyzeStageDeps;
 }
@@ -166,6 +191,9 @@ export function createEngines(config: EngineConfig, deps: EngineDeps): Engines {
     ...(deps.exploration ? { overrides: deps.exploration } : {}),
   });
   if (deps.redis) exploration.assistance = (ctx) => createAssistancePort(deps.redis!, ctx.runId, assistanceTimeoutMs());
+  // Phase C: an opted-in run may ask Browser Use once, mid-exploration, for the way to a step it cannot find.
+  const discovery = createDiscoveryDeps(config, deps);
+  if (discovery.port) exploration.findRoutes ??= (ctx, goal) => discoverStepRoutes(ctx, discovery, goal);
   const workspace = rerunWorkspaceConfig(config);
   const runTest = createRunTestDeps({
     db: deps.db,
@@ -191,13 +219,14 @@ export function createEngines(config: EngineConfig, deps: EngineDeps): Engines {
   });
   const real = createRealStages({
     survey,
-    discovery: createDiscoveryDeps(config, deps),
+    discovery,
     exploration,
     generateTest: createGenerateTestDeps(deps.db, deps.logger),
     runTest,
     report,
     // V1.3: the requirement is analyzed against the live site, read like the survey reads it (no Stagehand).
-    analyze: deps.analyze ?? { site: { openSandbox: survey.openSandbox, store: survey.store, logger: deps.logger } },
+    // Phase B: an opted-in requirement run also asks Browser Use for routes (same admission, quota and rollback).
+    analyze: deps.analyze ?? { site: { openSandbox: survey.openSandbox, store: survey.store, logger: deps.logger }, discovery },
     // V1.3: a run whose every criterion is blocked still gets a full-page screenshot of the start page.
     captureEvidence: {
       openSandbox: survey.openSandbox,

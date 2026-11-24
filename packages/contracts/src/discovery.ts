@@ -7,7 +7,11 @@ export const DiscoverySecondsSchema = z.number().int().min(15).max(120);
 /** A broker job's whole wall-clock budget: container start, the agent and result delivery. */
 export const DiscoveryJobSecondsSchema = z.number().int().min(10).max(120);
 export const DiscoveryStepsSchema = z.number().int().min(2).max(20);
-export const DiscoveryCapabilitySchema = z.object({ fixtureUrl: z.string().nullable(), verifiedSites: z.boolean().optional() });
+export const DiscoveryCapabilitySchema = z.object({
+  fixtureUrl: z.string().nullable(), verifiedSites: z.boolean().optional(),
+  /** Live sites: the agent may interact with the real site (clicks, menus, form validation; nothing is submitted). */
+  liveInteraction: z.boolean().optional(),
+});
 export const DiscoveryRolloutSchema = z.object({ available: z.boolean(), enabled: z.boolean() });
 
 export const DiscoveryFixturePathSchema = z.string().max(180).regex(
@@ -31,8 +35,24 @@ export const DiscoveryFixtureUrlSchema = HttpUrlSchema
   .refine((url) => url.protocol === "http:" && Number(url.port) >= 1024, "Discovery requires an HTTP fixture on a port of 1024 or higher")
   .transform((url) => url.href);
 
+/**
+ * The run's own model and its key from Settings (the key Stagehand uses), for this job's broker only. The broker
+ * keeps it in memory for the job and never passes it into the agent container; nothing persists or logs it.
+ */
+export const DiscoveryModelSchema = z.strictObject({
+  provider: z.enum(["anthropic", "gemini", "deepseek"]),
+  model: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/),
+  apiKey: z.string().min(8).max(512),
+});
+export type DiscoveryModel = z.infer<typeof DiscoveryModelSchema>;
+
 export const DiscoveryInputSchema = z.strictObject({
-  schemaVersion: version, runId, targetUrl: DiscoveryFixtureUrlSchema,
+  schemaVersion: version, runId,
+  /** The fixture; or, with `live`, a public HTTPS page reached only through the job's inspecting egress proxy. */
+  targetUrl: z.union([DiscoveryFixtureUrlSchema, DiscoveryLiveUrlSchema.transform((url) => url.href)]),
+  live: z.literal(true).optional(),
+  /** The run's model (Settings). Absent: the broker's own DISCOVERY_MODEL. */
+  model: DiscoveryModelSchema.optional(),
   timeoutSeconds: DiscoveryJobSecondsSchema.optional(),
   maxAgentSteps: DiscoveryStepsSchema.optional(),
   snapshot: z.array(z.object({
@@ -40,6 +60,16 @@ export const DiscoveryInputSchema = z.strictObject({
     title: z.string().max(150),
     evidence: z.string().max(550),
   }).strict()).min(1).max(6).optional(),
+  /**
+   * Phase B: the run's requirement (redacted, credential placeholders only), so the agent looks for routes that
+   * exercise it. Untrusted text to the agent, like the pages it reads.
+   */
+  focus: z.string().trim().min(10).max(1000).refine((value) => !/[\p{Cc}\p{Cf}]/u.test(value), "Use plain text").optional(),
+}).superRefine((input, ctx) => {
+  if (Boolean(input.live) !== input.targetUrl.startsWith("https://")) {
+    ctx.addIssue({ code: "custom", path: ["live"], message: "A live request names an HTTPS page; a fixture request the fixture" });
+  }
+  if (input.live && input.snapshot) ctx.addIssue({ code: "custom", path: ["snapshot"], message: "A live request reads the site itself" });
 });
 export type DiscoveryInput = z.infer<typeof DiscoveryInputSchema>;
 
@@ -55,9 +85,29 @@ const DiscoveryCandidateSchema = z.strictObject({
   negativeCases: z.array(candidateText(1, 180)).max(5),
 });
 
+export const MAX_DISCOVERY_FINDINGS = 5;
+/**
+ * Phase C: something the agent saw that looks wrong (a broken link, a missing result, an error message). A
+ * hypothesis only: it never becomes a failure without an independent reproduction or a person's review.
+ */
+const DiscoveryFindingCandidateSchema = z.strictObject({
+  title: candidateText(3, 80),
+  /** What the agent saw, in its own words. */
+  observation: candidateText(10, 300),
+  /** What a user would expect instead. */
+  expected: candidateText(3, 180),
+  path: DiscoveryFixturePathSchema,
+  /** Plain-language steps to see it again: a proposal for the platform's own reproduction, never code. */
+  reproduction: z.array(candidateText(1, 180)).min(1).max(6),
+  severity: z.enum(["low", "medium", "high"]),
+});
+export type DiscoveryFindingCandidate = z.infer<typeof DiscoveryFindingCandidateSchema>;
+
 /** The egress proxy's refusal codes (proxy mode). */
 export const DiscoveryEgressReasonSchema = z.enum([
   "not_allowlisted", "forbidden_address", "connect_denied", "bad_request", "unresolvable", "upstream_error",
+  // Live interaction: a request that sends data (or has a body), a protocol upgrade, a failed interception, the rate limit.
+  "method_denied", "upgrade_denied", "tls_error", "rate_limited",
 ]);
 
 /** What the Python broker reports. */
@@ -82,8 +132,9 @@ export const DiscoveryOutcomeReasonSchema = z.enum([
 ]);
 export type DiscoveryOutcomeReason = z.infer<typeof DiscoveryOutcomeReasonSchema>;
 export const DiscoveryStatisticsSchema = z.strictObject({
-  agentSteps: z.number().int().min(0).max(20),
-  modelRequests: z.number().int().min(0).max(20),
+  // Per broker job at most 20; a multi-agent run (Phase C, up to 3 agents) adds its agents' up.
+  agentSteps: z.number().int().min(0).max(60),
+  modelRequests: z.number().int().min(0).max(60),
   durationMs: z.number().int().min(0).max(240_000),
   inputTokens: z.number().int().min(0).max(100_000_000),
   outputTokens: z.number().int().min(0).max(1_000_000),
@@ -101,19 +152,25 @@ export const DiscoverySummarySchema = z.strictObject({
   reason: DiscoveryOutcomeReasonSchema.optional(),
   /** False: no broker job ran (configuration, rollout, quota, capacity or budget). Absent on older summaries. */
   attempted: z.boolean().optional(),
-  candidateCount: z.number().int().min(0).max(12),
+  candidateCount: z.number().int().min(0).max(36),
   acceptedCount: z.number().int().min(0).max(8),
+  /** Phase C: the unverified findings stored for review. Absent: none were reported or stored. */
+  findingCount: z.number().int().min(0).max(MAX_DISCOVERY_FINDINGS).optional(),
+  /** Phase C: how many agents explored in parallel; absent: one. */
+  agents: z.number().int().min(2).max(3).optional(),
   pageCount: z.number().int().min(0).max(96),
   fallbackUsed: z.boolean(),
   statistics: DiscoveryStatisticsSchema.optional(),
 });
 export type DiscoverySummary = z.infer<typeof DiscoverySummarySchema>;
-export const DiscoveryProgressSchema = z.strictObject({ agentSteps: z.number().int().min(1).max(20) });
+export const DiscoveryProgressSchema = z.strictObject({ agentSteps: z.number().int().min(1).max(60) });
 const responseFields = {
   schemaVersion: version, runId, reason: DiscoveryResultReasonSchema.optional(), statistics: DiscoveryStatisticsSchema.optional(),
 };
 export const DiscoveryResultSchema = z.discriminatedUnion("status", [
-  z.strictObject({ ...responseFields, status: z.literal("COMPLETED"), candidates: z.array(DiscoveryCandidateSchema).min(1).max(12) }),
+  z.strictObject({ ...responseFields, status: z.literal("COMPLETED"), candidates: z.array(DiscoveryCandidateSchema).min(1).max(12),
+    findings: z.array(DiscoveryFindingCandidateSchema).max(MAX_DISCOVERY_FINDINGS).optional(),
+  }),
   z.strictObject({
     ...responseFields,
     status: z.enum(["PARTIAL", "BLOCKED", "FAILED", "CANCELLED"]),
@@ -122,3 +179,23 @@ export const DiscoveryResultSchema = z.discriminatedUnion("status", [
 ]);
 export type DiscoveryResult = z.infer<typeof DiscoveryResultSchema>;
 export type DiscoveryCandidate = z.infer<typeof DiscoveryCandidateSchema>;
+
+/**
+ * Phase B: a route Browser Use observed that bears on an explicit requirement. Context for the requirement
+ * analysis and the planner, never a criterion by itself: a check it suggests is an inferred, non-critical criterion
+ * that the person confirming the criteria reviews.
+ */
+export const DiscoveryRouteSchema = z.strictObject({
+  title: candidateText(3, 80),
+  goal: candidateText(10, 500),
+  relevantPaths: z.array(DiscoveryFixturePathSchema).min(1).max(8),
+  expectedBehavior: z.array(candidateText(1, 180)).min(1).max(3),
+});
+export type DiscoveryRoute = z.infer<typeof DiscoveryRouteSchema>;
+export const MAX_DISCOVERY_ROUTES = 4;
+/** What the analysis keeps of a requirement run's discovery: its outcome and the routes it handed on. */
+export const RequirementDiscoverySchema = z.strictObject({
+  summary: DiscoverySummarySchema,
+  routes: z.array(DiscoveryRouteSchema).max(MAX_DISCOVERY_ROUTES),
+});
+export type RequirementDiscovery = z.infer<typeof RequirementDiscoverySchema>;

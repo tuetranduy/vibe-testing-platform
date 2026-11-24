@@ -14,4 +14,5 @@ export * from "./shared/viewport";
 export * from "./shared/generated-inputs";
 export * from "./reporting";
 export * from "./reporting/diagnostics";
-export { prepareVerifiedSite } from "./survey/verified-site";
+export { prepareVerifiedSite, readVerifiedSite } from "./survey/verified-site";
+export { discoverStepRoutes } from "./requirement/discovery-routes";

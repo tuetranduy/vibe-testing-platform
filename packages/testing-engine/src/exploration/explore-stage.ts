@@ -47,6 +47,8 @@ export interface ExploreStageDeps {
   startRecording?(ctx: StageContext, sandbox: ExplorationSandbox): Promise<SessionRecording | null>;
   /** Where the recordings are stored (the rerun's evidence store). */
   recordingStore?(ctx: StageContext): EvidenceStore;
+  /** Phase C: a live Browser Use request for routes to a step (opted-in runs only; see ExplorationDeps.findRoutes). */
+  findRoutes?(ctx: StageContext, goal: string): Promise<import("@platform/contracts").DiscoveryRoute[]>;
 }
 
 /** Which start-up step failed, for the user-facing template message. */
@@ -61,7 +63,7 @@ const START_FAILURES = {
  * `ctx.addCleanup` in case the orchestrator abandons the stage on abort.
  */
 export function createExploreStage(deps: ExploreStageDeps): EngineStages["explore"] {
-  return async (ctx, plan, requirement, site = []): Promise<ExplorationOutcome> => {
+  return async (ctx, plan, requirement, site = [], routes = []): Promise<ExplorationOutcome> => {
     // Stagehand's model calls go through the run's client (before any browser starts: a run without one fails here).
     const llm = requireLlm(ctx);
     const budget = ctx.budgetSignal(ctx.budgets.explorationMs);
@@ -90,10 +92,11 @@ export function createExploreStage(deps: ExploreStageDeps): EngineStages["explor
       const started = session;
       ctx.addCleanup(() => started.close());
       starting = null;
-      const outcome = (explored = await runExploration(ctx, { plan, requirement, session, budget, seenUrls: site.flatMap((p) => [p.url, ...(p.interactions ?? []).map((i) => i.url)]) }, {
+      const outcome = (explored = await runExploration(ctx, { plan, requirement, session, budget, seenUrls: site.flatMap((p) => [p.url, ...(p.interactions ?? []).map((i) => i.url)]), ...(routes.length > 0 && { discoveryRoutes: routes }) }, {
         store: deps.store(ctx),
         ...(deps.logger ? { logger: deps.logger } : {}),
         assistance: deps.assistance?.(ctx),
+        ...(deps.findRoutes && ctx.request.options.autonomousDiscovery ? { findRoutes: (goal: string) => deps.findRoutes!(ctx, goal) } : {}),
         ...(deps.replanner !== undefined ? { replanner: deps.replanner } : {}),
         ...(deps.stepReviewer !== undefined ? { stepReviewer: deps.stepReviewer } : {}),
         ...(deps.recorder ? { recorder: deps.recorder } : {}),

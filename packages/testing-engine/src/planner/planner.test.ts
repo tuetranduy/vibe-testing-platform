@@ -861,6 +861,17 @@ describe("PlannerOutputSchema: stop conditions are optional (KI-001)", () => {
   });
 });
 
+describe("buildPlannerPrompt: Browser Use routes (Phase B)", () => {
+  it("lists the routes as untrusted hints, and nothing without them", () => {
+    const base = { targetUrl: "https://shop.test/", requirement: cartRequirement(), testDataKeys: [], secretNames: [] };
+    const routes = [{ title: "Add tea to the cart", goal: "Open the tea page and add it to the cart.", relevantPaths: ["/tea", "/cart"], expectedBehavior: ["The cart lists tea."] }];
+    const text = buildPlannerPrompt({ ...base, discoveryRoutes: routes });
+    expect(text).toContain("untrusted hypotheses");
+    expect(text).toContain('"relevantPaths":["/tea","/cart"]');
+    expect(buildPlannerPrompt(base)).not.toContain("<<<ROUTES");
+  });
+});
+
 describe("buildPlannerPrompt: what the user wants to know (2026-11-11)", () => {
   const prompt = (intent: NormalizedRequirement["intent"]) =>
     buildPlannerPrompt({ targetUrl: "https://shop.test/", requirement: { ...cartRequirement(), intent }, testDataKeys: [], secretNames: [] });

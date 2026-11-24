@@ -108,8 +108,7 @@ export function inventoryOfVerifiedHtml(html: string, url: URL): RawPageInventor
  * credentials, and every request re-checked against the public-address policy. No proof of ownership is needed,
  * since this reads less than the standard survey's browser does.
  */
-export async function prepareVerifiedSite(ctx: StageContext): Promise<{ draft: SuggestionSetDraft; snapshot: Snapshot }> {
-  const llm = requireLlm(ctx);
+export async function readVerifiedSite(ctx: StageContext): Promise<{ pages: SitePage[]; snapshot: Snapshot }> {
   const parsed = DiscoveryLiveUrlSchema.safeParse(ctx.request.targetUrl);
   if (!parsed.success) {
     throw new BrowserProviderError("Live-site discovery requires an HTTPS URL with a supported page path");
@@ -147,15 +146,23 @@ export async function prepareVerifiedSite(ctx: StageContext): Promise<{ draft: S
     if (signal.aborted) break;
     await read(link);
   }
-  const suggestions = (await suggestTests(llm, {
-    runId: ctx.runId, startUrl: target.href, environment: ctx.request.environment, destructiveAllowed: false,
-    testDataKeys: [], secretNames: [], pages, screenshot: null, signal: ctx.signal, deadlineAt: ctx.deadlineAt, redact: ctx.redact,
-  })).filter((suggestion) => !suggestion.destructive && suggestion.needs.secrets.length === 0);
-  if (suggestions.length === 0) throw new BrowserProviderError("The survey did not return any read-only test ideas");
   const snapshot = pages.map(({ url, inventory }) => ({
     path: new URL(url).pathname, title: clean(inventory.title, 150),
     evidence: clean([...inventory.headings.map(({ text }) => text), ...inventory.links.map(({ text, url }) => `${text} (${new URL(url).pathname})`),
       ...inventory.buttons].join(" / "), 550),
   }));
+  return { pages, snapshot };
+}
+
+/** The live-site survey: `readVerifiedSite`, then the standard survey's read-only test ideas from those pages. */
+export async function prepareVerifiedSite(ctx: StageContext): Promise<{ draft: SuggestionSetDraft; snapshot: Snapshot }> {
+  const llm = requireLlm(ctx);
+  const { pages, snapshot } = await readVerifiedSite(ctx);
+  const target = new URL(pages[0]!.url);
+  const suggestions = (await suggestTests(llm, {
+    runId: ctx.runId, startUrl: target.href, environment: ctx.request.environment, destructiveAllowed: false,
+    testDataKeys: [], secretNames: [], pages, screenshot: null, signal: ctx.signal, deadlineAt: ctx.deadlineAt, redact: ctx.redact,
+  })).filter((suggestion) => !suggestion.destructive && suggestion.needs.secrets.length === 0);
+  if (suggestions.length === 0) throw new BrowserProviderError("The survey did not return any read-only test ideas");
   return { draft: { suggestions, pages: pages.map(({ url, inventory }) => ({ url, title: inventory.title, status: "READ" })) }, snapshot };
 }

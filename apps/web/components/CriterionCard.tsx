@@ -110,8 +110,13 @@ export function CriterionCard({
         {c.id}
       </h3>
       <div className="criterion-body">
-        {(c.ambiguity || aiJudged) && (
+        {(c.ambiguity || aiJudged || c.discovery) && (
           <div className="flex flex-wrap gap-1.5">
+            {c.discovery && (
+              <Badge variant="outline" className="min-h-6 gap-1.5 border-transparent bg-(--info-bg) text-(--info)">
+                <Icon name="sparkle" /> Suggested by Browser Use
+              </Badge>
+            )}
             {c.ambiguity && (
               <Badge variant="outline" className="min-h-6 gap-1.5 border-transparent bg-(--warning-bg) text-(--warning)">
                 <Icon name="warning" /> Needs clarification
@@ -132,6 +137,12 @@ export function CriterionCard({
           </p>
         )}
         {c.assumption && <p className="mt-[0.35rem] text-sm text-muted-foreground">Assumed: {c.assumption}</p>}
+        {c.discovery && (
+          <p className="mt-[0.35rem] text-sm text-muted-foreground">
+            Seen on {c.discovery.relevantPaths.map((path, i) => <span key={path}>{i > 0 && ", "}<code>{path}</code></span>)}.
+            {!c.critical && " It does not decide the result unless you mark it critical."}
+          </p>
+        )}
 
         <div className="criterion-check" role="group" aria-labelledby={`${c.id}-check`}>
           <p id={`${c.id}-check`} className="criterion-check-title">

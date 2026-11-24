@@ -119,7 +119,7 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
 
       {report.discovery && <section>
         <h2>Browser Use discovery</h2>
-        <p>{discoveryOutcomeText(report.discovery)}</p>
+        <p>{discoveryOutcomeText(report.discovery, report.discovery.context)}</p>
         {report.discovery.selectedSuggestion && <p>
           Selected idea · {report.discovery.selectedSuggestion.title}{report.discovery.selectedSuggestion.edited && " (edited)"}
         </p>}

@@ -1,0 +1,18 @@
+{
+  "fixture": "/benchmark/defects/index.html",
+  "defects": [
+    {
+      "id": "broken-help-link",
+      "path": "/benchmark/defects/index.html",
+      "pattern": "help",
+      "description": "The Help link opens a page that answers 404."
+    },
+    {
+      "id": "count-mismatch",
+      "path": "/benchmark/defects/catalog.html",
+      "pattern": "count|contradict|0 seeds",
+      "description": "The catalog heading says 0 seeds while three are listed."
+    }
+  ],
+  "healthy": ["/benchmark/defects/shipping.html"]
+}

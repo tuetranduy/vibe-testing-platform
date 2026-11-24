@@ -28,8 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from discovery_service.broker import Broker, BrokerRefused, is_zero_cost, make_model
-from discovery_service.policy import FixtureTarget, PolicyError, fixture_paths, match_target
+from discovery_service.broker import Broker, BrokerRefused, is_zero_cost, make_model, make_run_model
+from discovery_service.policy import FixtureTarget, LiveTarget, PolicyError, fixture_paths, match_request
 from discovery_service.protocol import (
     AGENT_TIMEOUT_S,
     MAX_AGENT_STEPS,
@@ -42,7 +42,9 @@ from discovery_service.protocol import (
     decode_frame,
     encode_frame,
     parse_request,
+    clean_focus,
     sanitize_candidates,
+    sanitize_findings,
 )
 
 APP_DIR = Path(__file__).resolve().parents[2]
@@ -79,6 +81,12 @@ class Config:
     target_network: str = ''
     # The agent container's memory and swap limit (docker --memory); lower on a small shared host.
     agent_memory: str = '2g'
+    # Live interaction with public HTTPS sites (DISCOVERY_LIVE_SITES=on): each job's inspecting egress proxy joins
+    # live_egress_network (a plain bridge with a route out); the agent container never does.
+    live_sites: bool = False
+    live_egress_network: str = 'vtp-discovery-live-egress'
+    # Subresource hosts a live page may load from besides its own: same-site (default), public or none.
+    live_other_hosts: str = 'same-site'
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Config:
@@ -91,6 +99,9 @@ class Config:
             target_mode=env.get('DISCOVERY_TARGET_MODE') or 'bundled',
             target_network=env.get('DISCOVERY_TARGET_NETWORK', ''),
             agent_memory=agent_memory(env.get('DISCOVERY_AGENT_MEMORY') or '2g'),
+            live_sites=env.get('DISCOVERY_LIVE_SITES') == 'on',
+            live_egress_network=env.get('DISCOVERY_LIVE_EGRESS_NETWORK') or 'vtp-discovery-live-egress',
+            live_other_hosts=live_other_hosts(env.get('DISCOVERY_LIVE_OTHER_HOSTS') or 'same-site'),
         )
 
 
@@ -103,7 +114,15 @@ def agent_memory(value: str) -> str:
     return value
 
 
+def live_other_hosts(value: str) -> str:
+    if value not in ('same-site', 'public', 'none'):
+        raise ValueError('DISCOVERY_LIVE_OTHER_HOSTS must be same-site, public or none')
+    return value
+
+
 TARGET_NETWORK = re.compile(r'vtp-discovery-targets(-[a-z0-9]{1,32})?')
+LIVE_EGRESS_NETWORK = re.compile(r'vtp-discovery-live-egress(-[a-z0-9]{1,32})?')
+MAX_LIVE_PAGES = 200
 EGRESS_ALIAS, EGRESS_PORT = 'egress-proxy', 3128
 
 
@@ -131,6 +150,28 @@ def check_target_mode(cfg: Config) -> None:
         raise ConfigError('DISCOVERY_TARGET_NETWORK must exist and be --internal')
 
 
+def check_live_network(cfg: Config) -> None:
+    """Live mode's way out: a plain (non-internal) bridge that only egress proxies join. Created when missing,
+    never labeled for the reaper; refused when it exists as an internal network (it would have no route out)."""
+    if not LIVE_EGRESS_NETWORK.fullmatch(cfg.live_egress_network):
+        raise ConfigError('DISCOVERY_LIVE_EGRESS_NETWORK must be a vtp-discovery-live-egress[-name] network')
+    try:
+        inspect = subprocess.run(
+            [cfg.docker, 'network', 'inspect', '--format', '{{.Internal}}', cfg.live_egress_network],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        if inspect.returncode != 0:
+            created = subprocess.run([cfg.docker, 'network', 'create', '--driver', 'bridge', cfg.live_egress_network],
+                                     capture_output=True, text=True, timeout=20, check=False)
+            if created.returncode != 0 and 'already exists' not in created.stderr:
+                raise ConfigError('the live egress network could not be created')
+            return
+    except (OSError, subprocess.SubprocessError) as e:
+        raise ConfigError('the live egress network could not be inspected') from e
+    if inspect.stdout.strip() != 'false':
+        raise ConfigError('DISCOVERY_LIVE_EGRESS_NETWORK must not be --internal')
+
+
 def diag(event: str, **fields: Any) -> None:
     """One bounded JSON line on stderr. Values are numbers/codes chosen here, never untrusted text."""
     try:
@@ -140,7 +181,7 @@ def diag(event: str, **fields: Any) -> None:
         pass
 
 
-def docker_args(cfg: Config, target: FixtureTarget, name: str, deadline_epoch: int, network: str = 'none') -> list[str]:
+def docker_args(cfg: Config, target: FixtureTarget | LiveTarget, name: str, deadline_epoch: int, network: str = 'none') -> list[str]:
     args = [
         cfg.docker, 'run', '-i', '--rm', '--pull', 'never',
         '--name', name,
@@ -171,8 +212,12 @@ def docker_args(cfg: Config, target: FixtureTarget, name: str, deadline_epoch: i
     return args
 
 
-def egress_proxy_args(cfg: Config, target: FixtureTarget, name: str, network: str, deadline_epoch: int) -> list[str]:
-    """The job's target-site proxy: same image, same hardening, allowlisting only the fixture's host:port."""
+def egress_proxy_args(cfg: Config, target: FixtureTarget | LiveTarget, name: str, network: str, deadline_epoch: int,
+                      job_key: bytes | None = None) -> list[str]:
+    """The job's target-site proxy: same image, same hardening, allowlisting only the target's host:port. Live mode
+    also gets the job's interception key (ephemeral, this job only) and a small tmpfs for its minted certificates."""
+    live = ['-e', 'EGRESS_MODE=live', '-e', f'EGRESS_OTHER_HOSTS={cfg.live_other_hosts}',
+            '-e', f'EGRESS_KEY={job_key.decode()}', '--tmpfs', '/tmp:rw,nosuid,nodev,noexec,size=8m,mode=1777'] if target.live and job_key else []
     return [
         cfg.docker, 'run', '-d', '--pull', 'never', '--name', name,
         '--label', f'{LABEL}=1', '--label', f'{LABEL}.deadline={deadline_epoch}',
@@ -180,8 +225,27 @@ def egress_proxy_args(cfg: Config, target: FixtureTarget, name: str, network: st
         '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '10001:10001',
         '--pids-limit', '64', '--memory', '128m', '--memory-swap', '128m', '--cpus', '0.5',
         '-e', f'EGRESS_ALLOW={target.host}:{target.port}', '-e', f'EGRESS_PORT={EGRESS_PORT}', '-e', 'PYTHONDONTWRITEBYTECODE=1',
+        *live,
         '--entrypoint', 'python', cfg.image, '-P', '-m', 'discovery_service.egress_proxy',
     ]
+
+
+def pages_from(log: str) -> frozenset[str]:
+    """Live mode's grounding: the document paths the browser really opened on the target (the proxy's egress.page)."""
+    from discovery_service.egress_proxy import PAGE_PATH
+
+    pages: set[str] = set()
+    for line in log.splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        path = entry.get('path') if isinstance(entry, dict) and entry.get('event') == 'egress.page' else None
+        if isinstance(path, str) and PAGE_PATH.match(path) and '..' not in path and '//' not in path:
+            pages.add(path)
+            if len(pages) >= MAX_LIVE_PAGES:
+                break
+    return frozenset(pages)
 
 
 def count_egress(log: str) -> tuple[int, dict[str, int]]:
@@ -307,13 +371,20 @@ def reap_orphans(cfg: Config) -> int:
 
 
 class Session:
-    def __init__(self, cfg: Config, request: DiscoveryRequest, target: FixtureTarget, broker: Broker,
+    def __init__(self, cfg: Config, request: DiscoveryRequest, target: FixtureTarget | LiveTarget, broker: Broker,
                  on_progress: Callable[[int], None] | None = None, deadline: float | None = None) -> None:
         self.cfg, self.request, self.target, self.broker = cfg, request, target, broker
         self.deadline = deadline  # monotonic end of the caller's job budget, when it set one
         self.cleanup_ok: bool | None = None
         self.name = f'vtp-discovery-{request.runId[:40]}-{secrets.token_hex(4)}'
-        self.proxy_mode = cfg.target_mode == 'proxy'
+        self.live = target.live
+        self.proxy_mode = cfg.target_mode == 'proxy' or self.live
+        self.job_key, self.spki = (None, None)
+        if self.live:
+            from discovery_service.interception import new_job_key
+
+            self.job_key, self.spki = new_job_key()
+        self.pages: frozenset[str] = frozenset()
         self.network = f'{self.name}-net' if self.proxy_mode else 'none'
         self.egress_name = f'{self.name}-egress'
         self.blocked: tuple[int, dict[str, int]] | None = (0, {}) if self.proxy_mode else None
@@ -368,7 +439,9 @@ class Session:
             max_steps=min(MAX_AGENT_STEPS, self.broker.max_requests - 1),
             timeout_s=self.agent_timeout(),
             **({'proxy': f'http://{EGRESS_ALIAS}:{EGRESS_PORT}'} if self.proxy_mode else {}),
+            **({'scheme': 'https', 'spki': self.spki} if self.live else {}),
             **({'snapshot': [page.model_dump() for page in self.request.snapshot]} if self.request.snapshot else {}),
+            **({'focus': focus} if (focus := clean_focus(self.request.focus)) else {}),
         )
         while True:
             try:
@@ -418,8 +491,8 @@ class Session:
         label = ['--label', f'{LABEL}=1', '--label', f'{LABEL}.deadline={deadline_epoch}']
         for args in (
             ['network', 'create', '--internal', *label, self.network],
-            egress_proxy_args(self.cfg, self.target, self.egress_name, self.network, deadline_epoch)[1:],
-            ['network', 'connect', self.cfg.target_network, self.egress_name],
+            egress_proxy_args(self.cfg, self.target, self.egress_name, self.network, deadline_epoch, self.job_key)[1:],
+            ['network', 'connect', self.cfg.live_egress_network if self.live else self.cfg.target_network, self.egress_name],
         ):
             code, _ = await _docker(self.cfg, *args, timeout=30)
             if code != 0:
@@ -488,6 +561,8 @@ class Session:
             log = await self._egress_log()
             if log:
                 self.blocked = count_egress(log)
+                if self.live:
+                    self.pages = pages_from(log)
             removed = await remove_container(self.cfg, self.egress_name) and removed
             code, stderr = await _docker(self.cfg, 'network', 'rm', self.network, timeout=CLEANUP_TIMEOUT_S)
             removed = removed and (code == 0 or b'not found' in stderr.lower())
@@ -514,7 +589,8 @@ def to_response(run_id: str, outcome: dict[str, Any] | None, known: frozenset[st
         candidates = sanitize_candidates(outcome.get('output'), known)
         if outcome.get('success') is False or not candidates:
             return DiscoveryResponse(runId=run_id, status='PARTIAL', reason='no_valid_candidates'), 'no_valid_candidates'
-        return DiscoveryResponse(runId=run_id, status='COMPLETED', reason='ok', candidates=candidates), 'ok'
+        findings = sanitize_findings(outcome.get('output'), known)
+        return DiscoveryResponse(runId=run_id, status='COMPLETED', reason='ok', candidates=candidates, findings=findings), 'ok'
     if status == 'timeout':  # only COMPLETED carries candidates
         return DiscoveryResponse(runId=run_id, status='PARTIAL', reason='timeout'), 'timeout'
     if status == 'max_steps':
@@ -527,19 +603,22 @@ async def discover(request: DiscoveryRequest, cfg: Config, model: Any = None,
     """Library entry (tests pass a model object). Returns the wire response and safe statistics."""
     started = time.monotonic()
     try:
-        target = match_target(cfg.fixture_url, request.targetUrl)
+        target = match_request(cfg.fixture_url, cfg.live_sites, request.targetUrl, request.live)
     except PolicyError:
         return DiscoveryResponse(runId=request.runId, status='BLOCKED', reason='target_not_allowed'), {'reason': 'target_not_allowed'}
     if request.snapshot and cfg.target_mode != 'bundled':
         return DiscoveryResponse(runId=request.runId, status='BLOCKED', reason='target_not_allowed'), {'reason': 'snapshot_requires_offline_mode'}
     try:
-        await asyncio.to_thread(check_target_mode, cfg)
+        await asyncio.to_thread(check_live_network if target.live else check_target_mode, cfg)
     except ConfigError as e:
         diag('discovery.config_error', code=str(e)[:80])
         return DiscoveryResponse(runId=request.runId, status='BLOCKED', reason='target_not_allowed'), {'reason': 'target_mode'}
     try:
-        broker = Broker(model if model is not None else make_model(cfg.model), max_requests=request.maxAgentSteps or 20)
-    except (ValueError, ImportError) as e:
+        chosen = model if model is not None else make_run_model(request.model) if request.model else make_model(cfg.model)
+        broker = Broker(chosen, max_requests=request.maxAgentSteps or 20)
+    # RuntimeError: Pydantic AI's UserError for a provider whose key is not set (e.g. DEEPSEEK_API_KEY). Without it
+    # here, a missing key escaped to the job service and was reported as an agent crash (FAILED / agent_error).
+    except (ValueError, ImportError, RuntimeError) as e:
         diag('discovery.config_error', code=type(e).__name__)
         return DiscoveryResponse(runId=request.runId, status='BLOCKED', reason='model_not_configured'), {'reason': 'model_not_configured'}
     # The caller's budget is measured from receipt and includes the reaper, container start and delivery.
@@ -558,7 +637,10 @@ async def discover(request: DiscoveryRequest, cfg: Config, model: Any = None,
         return DiscoveryResponse(runId=request.runId, status='CANCELLED', reason='cancelled'), {'reason': 'cancelled'}
     except OSError:
         return DiscoveryResponse(runId=request.runId, status='FAILED', reason='docker_unavailable'), {'reason': 'docker_unavailable'}
+    # Grounding: the snapshot's pages; on a live site the pages the browser really opened (start page included);
+    # else the bundled fixture's pages under the start page.
     known = (frozenset(page.path for page in request.snapshot) if request.snapshot
+             else session.pages | {target.path} if target.live
              else scoped_paths(fixture_paths(SITE_DIR), target.path))
     response, reason = to_response(request.runId, outcome, known)
     if deadline_hit:
@@ -569,7 +651,7 @@ async def discover(request: DiscoveryRequest, cfg: Config, model: Any = None,
         agentSteps=steps, modelRequests=broker.requests,
         inputTokens=min(broker.usage['input'], 100_000_000), outputTokens=min(broker.usage['output'], 1_000_000),
         durationMs=min(int((time.monotonic() - started) * 1000), 240_000),
-        modelCostUsd=0 if is_zero_cost(cfg.model) else broker.estimated_cost_usd,
+        modelCostUsd=0 if model is None and not request.model and is_zero_cost(cfg.model) else broker.estimated_cost_usd,
         protocolViolations=min(session.violations, 1000),
         blockedDestinations=None if session.blocked is None else min(session.blocked[0], 100_000),
         blockedByReason=None if session.blocked is None else {k: min(v, 100_000) for k, v in session.blocked[1].items()},
@@ -581,6 +663,7 @@ async def discover(request: DiscoveryRequest, cfg: Config, model: Any = None,
         **statistics.model_dump(),
         'cleanup': 'ok' if session.cleanup_ok is not False else 'failed',
         **({'blockedByReason': session.blocked[1]} if session.blocked else {}),
+        **({'livePages': len(session.pages)} if target.live else {}),
     }
     return response, stats
 

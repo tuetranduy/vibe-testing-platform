@@ -129,6 +129,7 @@ export class ReportService {
     const selectedSuggestion = selected?.discovery && set?.selected
       ? { id: selected.id, title: selected.title, relevantPaths: selected.discovery.relevantPaths, edited: set.selected.edited }
       : null;
-    return { ...report, discovery: { ...summary.payload, selectedSuggestion } };
+    const context = summary.stage === "ANALYZING_REQUIREMENT" ? "requirement" as const : "survey" as const;
+    return { ...report, discovery: { ...summary.payload, selectedSuggestion, context } };
   }
 }

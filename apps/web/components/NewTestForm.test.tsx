@@ -91,6 +91,31 @@ describe("simple test setup", () => {
         autoConfirmCriteria: false, additionalAllowedHosts: [] } });
     expect(push).toHaveBeenCalledWith("/runs/run_new");
   });
+  it("lets Browser Use interact with a live site by default where the deployment offers it", async () => {
+    vi.mocked(getDiscoveryCapability).mockResolvedValue({ fixtureUrl: null, verifiedSites: true, liveInteraction: true });
+    const fetch = api();
+    render(<NewTestForm />);
+    const user = await fill();
+    await user.click(screen.getByRole("button", { name: "Find test ideas" }));
+    await user.click(await screen.findByRole("checkbox", { name: /Autonomous Discovery/ }));
+    const interact = screen.getByRole("checkbox", { name: "Interact with the live site" });
+    expect(interact).toBeChecked();
+    expect(screen.getByText(/Nothing is submitted/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Explore website" }));
+    expect(payload(fetch)).toMatchObject({ options: { verifiedSiteDiscovery: true, discoveryLiveInteraction: true } });
+    expect(CreateTestRunRequestSchema.safeParse(payload(fetch)).success).toBe(true);
+  });
+  it("uses snapshots when the reviewer turns live interaction off", async () => {
+    vi.mocked(getDiscoveryCapability).mockResolvedValue({ fixtureUrl: null, verifiedSites: true, liveInteraction: true });
+    const fetch = api();
+    render(<NewTestForm />);
+    const user = await fill();
+    await user.click(screen.getByRole("button", { name: "Find test ideas" }));
+    await user.click(await screen.findByRole("checkbox", { name: /Autonomous Discovery/ }));
+    await user.click(screen.getByRole("checkbox", { name: "Interact with the live site" }));
+    await user.click(screen.getByRole("button", { name: "Explore website" }));
+    expect(payload(fetch).options).not.toHaveProperty("discoveryLiveInteraction");
+  });
   it("does not offer Browser Use on a live site when the deployment has it off", async () => {
     vi.mocked(getDiscoveryCapability).mockResolvedValue({ fixtureUrl: null });
     api();
@@ -112,11 +137,30 @@ describe("simple test setup", () => {
     expect(toggle).not.toBeChecked();
     await user.click(toggle);
     fireEvent.change(screen.getByLabelText("Discovery time (seconds)"), { target: { value: "60" } });
+    fireEvent.change(screen.getByLabelText("Browser Use agents"), { target: { value: "2" } });
     await user.click(screen.getByRole("button", { name: "Explore website" }));
     expect(payload(fetch)).toMatchObject({
       targetUrl, requirement: "", environment: "staging",
-      options: { autonomousDiscovery: true, discoveryMaxSeconds: 60, discoveryMaxSteps: 20, autoConfirmCriteria: false, allowDestructiveActions: false },
+      options: { autonomousDiscovery: true, discoveryMaxSeconds: 60, discoveryMaxSteps: 20, discoveryAgents: 2, autoConfirmCriteria: false, allowDestructiveActions: false },
     });
+  });
+  it("opts written instructions into Browser Use route discovery with manual review (Phase B)", async () => {
+    const targetUrl = "http://127.0.0.1:4599/";
+    vi.mocked(getDiscoveryCapability).mockResolvedValue({ fixtureUrl: targetUrl });
+    const fetch = api();
+    render(<NewTestForm />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/Which website/), targetUrl);
+    await user.type(screen.getByLabelText("Test instructions"), "Add a product to the cart and check the total.");
+    const toggle = await screen.findByRole("checkbox", { name: /Autonomous Discovery/ });
+    expect(screen.getByText(/do not decide the result until you mark them critical/)).toBeInTheDocument();
+    await user.click(toggle);
+    await user.click(create());
+    expect(payload(fetch)).toMatchObject({
+      targetUrl, requirement: "Add a product to the cart and check the total.", environment: "staging",
+      options: { autonomousDiscovery: true, autoConfirmCriteria: false, allowDestructiveActions: false },
+    });
+    expect(CreateTestRunRequestSchema.safeParse(payload(fetch)).success).toBe(true);
   });
   it("fills and focuses instructions from an example", async () => {
     api(); render(<NewTestForm />);

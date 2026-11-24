@@ -225,6 +225,24 @@ describe("analyze-run: the survey and the selection", () => {
     expect((await new RequirementRepository(h.tdb.db).getLatest(run.id)).originalText).toBe(analysed);
   });
 
+  it("Phase B: a chosen suggestion's analysis never starts a second Browser Use job; a written requirement's does", async () => {
+    const seen: boolean[] = [];
+    const fake = createFakeStages();
+    const stages = { ...fake, analyze: async (ctx: Parameters<typeof fake.analyze>[0]) => {
+      seen.push(ctx.request.options.autonomousDiscovery === true);
+      return fake.analyze(ctx);
+    } };
+    const blank = await seedRun(h, { lifecycle: "AWAITING_SELECTION", requirement: "", options: { autonomousDiscovery: true } });
+    const chosen = SEEDED_SUGGESTIONS.suggestions[0]!;
+    await new SuggestionRepository(h.tdb.db).select(blank.id, { suggestionId: chosen.id, requirement: chosen.requirement, edited: false });
+    await analyzeRunJob(h.deps(stages), blank.id);
+    const written = await seedRun(h, { options: { autonomousDiscovery: true } });
+    await analyzeRunJob(h.deps(stages), written.id);
+    expect(seen).toEqual([false, true]);
+    // The stored request keeps the opt-in (the report reads it).
+    expect((await new RunRepository(h.tdb.db).getById(blank.id)).request.options.autonomousDiscovery).toBe(true);
+  });
+
   it("skips an ANALYZING_REQUIREMENT run that has no selection", async () => {
     const run = await seedRun(h, { lifecycle: "ANALYZING_REQUIREMENT" });
     await analyzeRunJob(h.deps(createFakeStages()), run.id);

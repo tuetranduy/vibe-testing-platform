@@ -9,6 +9,16 @@ launcher's broker over the container's stdin/stdout.
 
 Each decision is one JSON line on stdout with a reason code and nothing else (no host, path or page content), so
 the launcher can count blocked destinations without collecting browsing data.
+
+``EGRESS_MODE=live`` (public HTTPS sites; see ``LiveProxy``): the proxy also joins a network with a route out, and is
+the agent's only way to the target. It accepts CONNECT to approved hosts on port 443 only and terminates that TLS
+with a per-job key that only this job's Chromium trusts (``--ignore-certificate-errors-spki-list``), so every request
+is inspected: GET, HEAD and OPTIONS without a body pass; any other method, a request body, a protocol upgrade (web
+sockets) and a top-level navigation to another site are refused. Upstream, the proxy resolves the name itself,
+refuses any non-public address, connects to the address it checked (no second lookup: DNS rebinding cannot swap it)
+and verifies the real certificate. Requests are rate limited. The one piece of browsing data it reports is the path
+of each document the browser opened on the target (``egress.page``), which grounds the agent's ideas in pages it
+really visited; it is held in the launcher's memory for the job only.
 """
 
 from __future__ import annotations
@@ -17,17 +27,26 @@ import asyncio
 import ipaddress
 import json
 import os
+import re
 import socket
+import ssl
 import sys
+import time
+from dataclasses import dataclass
+from typing import Awaitable, Callable
 
 MAX_HEAD_BYTES = 32 * 1024
 IDLE_TIMEOUT_S = 30.0
 HOP_HEADERS = {'proxy-connection', 'proxy-authorization', 'connection', 'keep-alive', 'te', 'trailer', 'upgrade'}
-REASONS = ('not_allowlisted', 'forbidden_address', 'connect_denied', 'bad_request', 'unresolvable', 'upstream_error')
+REASONS = (
+    'not_allowlisted', 'forbidden_address', 'connect_denied', 'bad_request', 'unresolvable', 'upstream_error',
+    # live mode
+    'method_denied', 'upgrade_denied', 'tls_error', 'rate_limited',
+)
 
 
-def event(kind: str, reason: str | None = None) -> None:
-    sys.stdout.write(json.dumps({'event': kind, **({'reason': reason} if reason else {})}) + '\n')
+def event(kind: str, reason: str | None = None, **fields: str) -> None:
+    sys.stdout.write(json.dumps({'event': kind, **({'reason': reason} if reason else {}), **fields}) + '\n')
     sys.stdout.flush()
 
 
@@ -140,9 +159,238 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, all
     await asyncio.gather(pipe(reader, up_writer), pipe(up_reader, writer))
 
 
+# --- live mode ------------------------------------------------------------------------------------------------------
+
+SAFE_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
+NAVIGATION_DESTS = frozenset({'document', 'iframe', 'frame', 'embed', 'object'})
+PAGE_PATH = re.compile(r'^/[A-Za-z0-9._~/-]{0,179}$')
+MAX_REQUESTS = 1500  # per job, every host
+MAX_OTHER_HOST_REQUESTS = 400  # per job, subresources from the target's other hosts
+RATE_PER_S, BURST = 15.0, 30
+_LABEL = re.compile(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')
+
+
+def site_of(host: str) -> str:
+    """An approximate registrable domain: the last two labels, or three under a short second-level label of a
+    two-letter country code (co.uk, com.au). Used only to decide which subresource hosts count as the same site."""
+    labels = host.split('.')
+    if len(labels) >= 3 and len(labels[-1]) == 2 and len(labels[-2]) <= 3:
+        return '.'.join(labels[-3:])
+    return '.'.join(labels[-2:])
+
+
+def valid_host(host: str) -> bool:
+    labels = host.split('.')
+    return 2 <= len(labels) and len(host) <= 253 and all(_LABEL.match(label) for label in labels) and not labels[-1].isdigit()
+
+
+def public_address(address: str) -> bool:
+    ip = ipaddress.ip_address(address)
+    return ip.is_global and not ip.is_multicast
+
+
+@dataclass
+class Decision:
+    allowed: bool
+    reason: str | None = None
+
+
+def request_decision(method: str, headers: dict[str, str], host: str, target_host: str) -> Decision:
+    """The method and header policy for one decrypted request (pure; unit tested)."""
+    if method not in SAFE_METHODS:
+        return Decision(False, 'method_denied')
+    if headers.get('transfer-encoding') or headers.get('content-length', '0').strip() not in ('', '0'):
+        return Decision(False, 'method_denied')  # a body means a submission, whatever the method says
+    if headers.get('upgrade') or 'upgrade' in headers.get('connection', '').lower():
+        return Decision(False, 'upgrade_denied')
+    if host != target_host and headers.get('sec-fetch-dest', '').lower() in NAVIGATION_DESTS:
+        return Decision(False, 'not_allowlisted')  # the agent may not navigate to another site
+    return Decision(True)
+
+
+class RateLimit:
+    def __init__(self, rate: float = RATE_PER_S, burst: int = BURST, total: int = MAX_REQUESTS,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self.rate, self.burst, self.total, self.clock = rate, burst, total, clock
+        self.tokens, self.used, self.at = float(burst), 0, clock()
+
+    def take(self) -> bool:
+        now = self.clock()
+        self.tokens = min(self.burst, self.tokens + (now - self.at) * self.rate)
+        self.at = now
+        if self.used >= self.total or self.tokens < 1:
+            return False
+        self.tokens -= 1
+        self.used += 1
+        return True
+
+
+class LiveProxy:
+    """Live-mode policy and relay. ``permitted`` decides upstream addresses (tests substitute it)."""
+
+    def __init__(self, target_host: str, key_pem: bytes, *, other_hosts: str = 'same-site', workdir: str = '/tmp/egress',
+                 permitted: Callable[[str], bool] = public_address, upstream_ssl: ssl.SSLContext | None = None,
+                 upstream_port: int = 443, lookup: Callable[[str, int], Awaitable[list[str]]] | None = None) -> None:
+        if not valid_host(target_host):
+            raise ValueError('EGRESS_ALLOW must name one public host')
+        if other_hosts not in ('same-site', 'public', 'none'):
+            raise ValueError('EGRESS_OTHER_HOSTS must be same-site, public or none')
+        self.target_host, self.other_hosts, self.permitted = target_host, other_hosts, permitted
+        self.key_pem, self.workdir = key_pem, workdir
+        self.upstream_ssl = upstream_ssl or ssl.create_default_context()
+        self.upstream_port = upstream_port
+        self.lookup = lookup
+        self.limit = RateLimit()
+        self.other_used = 0
+        self.contexts: dict[str, ssl.SSLContext] = {}
+        os.makedirs(workdir, mode=0o700, exist_ok=True)
+
+    def host_allowed(self, host: str) -> bool:
+        if host == self.target_host:
+            return True
+        if not valid_host(host) or self.other_hosts == 'none':
+            return False
+        return self.other_hosts == 'public' or site_of(host) == site_of(self.target_host)
+
+    def server_context(self, host: str) -> ssl.SSLContext:
+        """A leaf certificate for `host` on the job's single key: Chromium trusts it by that key's SPKI pin."""
+        if host not in self.contexts:
+            from discovery_service.interception import leaf_certificate_pem
+
+            cert, key = os.path.join(self.workdir, f'{host}.crt'), os.path.join(self.workdir, 'job.key')
+            if not os.path.exists(key):
+                with open(os.open(key, os.O_WRONLY | os.O_CREAT, 0o600), 'wb') as f:
+                    f.write(self.key_pem)
+            with open(cert, 'wb') as f:
+                f.write(leaf_certificate_pem(self.key_pem, host))
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            ctx.set_alpn_protocols(['http/1.1'])  # one request per connection; no HTTP/2 multiplexing to inspect
+            ctx.load_cert_chain(cert, key)
+            self.contexts[host] = ctx
+        return self.contexts[host]
+
+    async def resolve(self, host: str) -> tuple[list[str] | None, str | None]:
+        try:
+            if self.lookup:
+                addresses = list(dict.fromkeys(await self.lookup(host, self.upstream_port)))
+            else:
+                infos = await asyncio.get_running_loop().getaddrinfo(host, self.upstream_port, type=socket.SOCK_STREAM)
+                addresses = list(dict.fromkeys(str(info[4][0]) for info in infos))
+        except OSError:
+            return None, 'unresolvable'
+        # Every address must be public: a name that also resolves privately is refused outright.
+        if not addresses or not all(self.permitted(address) for address in addresses):
+            return None, 'forbidden_address'
+        return addresses, None
+
+    async def connect(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, target: str) -> None:
+        host, _, port = target.rpartition(':')
+        host = host.lower().rstrip('.')
+        if port != '443' or not self.host_allowed(host):
+            await refuse(writer, 'not_allowlisted')
+            return
+        if host != self.target_host:
+            if self.other_used >= MAX_OTHER_HOST_REQUESTS:
+                await refuse(writer, 'rate_limited')
+                return
+        writer.write(b'HTTP/1.1 200 Connection Established\r\n\r\n')
+        await writer.drain()
+        try:
+            await asyncio.wait_for(writer.start_tls(self.server_context(host)), IDLE_TIMEOUT_S)
+        except (OSError, ssl.SSLError, TimeoutError, ValueError):
+            event('egress.blocked', 'tls_error')
+            writer.close()
+            return
+        await self.serve_request(reader, writer, host)
+
+    async def serve_request(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, host: str) -> None:
+        """One decrypted request per connection, answered with Connection: close."""
+        try:
+            head = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), IDLE_TIMEOUT_S)
+        except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, TimeoutError, OSError, ssl.SSLError):
+            writer.close()
+            return
+        lines = head.decode('latin-1').split('\r\n')
+        parts = lines[0].split(' ')
+        if len(parts) != 3 or not parts[1].startswith('/') or parts[2] not in ('HTTP/1.1', 'HTTP/1.0'):
+            await refuse(writer, 'bad_request')
+            return
+        method, path, version = parts
+        headers: dict[str, str] = {}
+        for line in lines[1:]:
+            if ':' in line:
+                name, _, value = line.partition(':')
+                headers[name.strip().lower()] = value.strip()
+        named = headers.get('host', '').lower().rstrip('.')
+        if named not in (host, f'{host}:443'):
+            await refuse(writer, 'bad_request')
+            return
+        decision = request_decision(method.upper(), headers, host, self.target_host)
+        if not decision.allowed:
+            await refuse(writer, decision.reason or 'method_denied')
+            return
+        if not self.limit.take():
+            await refuse(writer, 'rate_limited')
+            return
+        if host != self.target_host:
+            self.other_used += 1
+        addresses, reason = await self.resolve(host)
+        if reason or not addresses:
+            await refuse(writer, reason or 'unresolvable')
+            return
+        for address in addresses:  # the addresses checked above, never a fresh lookup
+            try:
+                up_reader, up_writer = await asyncio.wait_for(asyncio.open_connection(
+                    address, self.upstream_port, ssl=self.upstream_ssl, server_hostname=host), 10)
+                break
+            except (OSError, ssl.SSLError, TimeoutError):
+                continue
+        else:
+            await refuse(writer, 'upstream_error')
+            return
+        event('egress.allowed')
+        page = path.split('?', 1)[0]
+        if host == self.target_host and method.upper() == 'GET' and headers.get('sec-fetch-dest') == 'document' and PAGE_PATH.match(page):
+            event('egress.page', path=page)
+        kept = [line for line in lines[1:] if line and line.split(':', 1)[0].strip().lower() not in HOP_HEADERS]
+        up_writer.write(('\r\n'.join([f'{method} {path} {version}', *kept, 'Connection: close']) + '\r\n\r\n').encode('latin-1'))
+        await up_writer.drain()
+        await pipe(up_reader, writer)  # no request body is ever relayed
+        try:
+            up_writer.close()
+        except OSError:
+            pass
+
+    async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            head = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), IDLE_TIMEOUT_S)
+        except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, TimeoutError, OSError):
+            await refuse(writer, 'bad_request')
+            return
+        parts = head.decode('latin-1').split('\r\n')[0].split(' ')
+        if len(parts) != 3 or parts[0].upper() != 'CONNECT':
+            # Plain http:// is never relayed in live mode: the target is HTTPS only.
+            await refuse(writer, 'not_allowlisted' if len(parts) == 3 else 'bad_request')
+            return
+        await self.connect(reader, writer, parts[1])
+
+
 async def main() -> None:
-    allow = parse_allow(os.environ.get('EGRESS_ALLOW', ''))
     port = int(os.environ.get('EGRESS_PORT', '3128'))
+    if os.environ.get('EGRESS_MODE') == 'live':
+        allow = os.environ.get('EGRESS_ALLOW', '')
+        host, _, allowed_port = allow.rpartition(':')
+        if allowed_port != '443':
+            raise ValueError('live mode allows one host on port 443')
+        proxy = LiveProxy(host.lower(), os.environ.get('EGRESS_KEY', '').encode(), other_hosts=os.environ.get('EGRESS_OTHER_HOSTS', 'same-site'))
+        os.environ.pop('EGRESS_KEY', None)
+        server = await asyncio.start_server(proxy.handle, '0.0.0.0', port, limit=MAX_HEAD_BYTES)
+        event('egress.ready')
+        async with server:
+            await server.serve_forever()
+        return
+    allow = parse_allow(os.environ.get('EGRESS_ALLOW', ''))
     server = await asyncio.start_server(lambda r, w: handle(r, w, allow), '0.0.0.0', port, limit=MAX_HEAD_BYTES)
     event('egress.ready')
     async with server:

@@ -3,6 +3,7 @@ import {
   ContractError,
   isInferred,
   liveSiteAnalysisOn,
+  type DiscoveryRoute,
   type RequirementIntent,
   type SiteAnalysisDraft,
   type SitePage,
@@ -13,7 +14,9 @@ import {
 import type { LlmClient, LlmContentPart } from "@platform/llm";
 import { requireLlm, type AnalyzedRequirement, type RequirementDraft, type StageContext } from "../orchestrator/stages";
 import type { SurveyLink } from "../survey/links";
+import type { AutonomousSurveyDeps } from "../discovery/run-job";
 import { readSite, type SiteRead, type SurveySandbox, type SurveyStore } from "../survey/site-reader";
+import { discoverRequirementRoutes } from "./discovery-routes";
 import { validateInsights, type RequirementInsights } from "./insights";
 import { WHOLE_REQUIREMENT_NOTE, groundInferred, salvage, wholeRequirementFallback } from "./intent";
 import { CompilerOutputSchema, type CompilerOutput } from "./model-output";
@@ -37,12 +40,16 @@ export interface CompileRequirementInput {
   inlineInputs?: StoredTestRunRequest["inlineInputs"];
   /** Pages of the live site read for this analysis (V1.3), and the start page's screenshot. */
   site?: { pages: SitePage[]; screenshot: Buffer | null };
+  /** Phase B: routes Browser Use observed for this requirement (sanitized, at most 4). */
+  discoveryRoutes?: DiscoveryRoute[];
 }
 
 /** A compiled draft plus the advisory insights (V1.3): site checks and suggested test data. */
 export type CompiledRequirement = RequirementDraft & { insights: RequirementInsights };
 
-type Source = { originalText: string; testData: Record<string, TestDataValue>; secretNames: string[]; pages?: readonly SitePage[] };
+type Source = {
+  originalText: string; testData: Record<string, TestDataValue>; secretNames: string[]; pages?: readonly SitePage[]; routeCount?: number;
+};
 type Settled = { ok: true; draft: RequirementDraft; output: CompilerOutput; notes: string[] } | { ok: false; issues: string[] };
 
 const clip = (text: string, max: number): string => text.replace(/\s+/g, " ").trim().slice(0, max);
@@ -65,7 +72,7 @@ function tidy(output: CompilerOutput): CompilerOutput {
  * matches the output schema never fails the analysis.
  */
 function settle(raw: CompilerOutput, source: Source, pagesRead: boolean, final: boolean): Settled {
-  const grounded = groundInferred(tidy(raw), { pagesRead, secretNames: source.secretNames });
+  const grounded = groundInferred(tidy(raw), { pagesRead, secretNames: source.secretNames, routeCount: source.routeCount ?? 0 });
   const notes = [...grounded.notes];
   const whole = (output: CompilerOutput): Settled => {
     const fallback = { ...output, ...wholeRequirementFallback(source.originalText), siteChecks: [], testData: [] };
@@ -122,7 +129,10 @@ function intentOf(output: CompilerOutput, notes: string[], originalText: string,
 export async function compileRequirement(llm: RequirementLlm, input: CompileRequirementInput): Promise<CompiledRequirement> {
   // A blank requirement is surveyed, never compiled: analysis only runs on a chosen text.
   if (input.originalText.trim() === "") throw new ContractError("The requirement is empty: there is nothing to compile");
-  const source = { originalText: input.originalText, testData: input.testData, secretNames: input.secretNames, pages: input.site?.pages };
+  const routes = input.discoveryRoutes ?? [];
+  const source = {
+    originalText: input.originalText, testData: input.testData, secretNames: input.secretNames, pages: input.site?.pages, routeCount: routes.length,
+  };
   const pages = input.site?.pages ?? [];
   const screenshot = pages.length > 0 ? (input.site?.screenshot ?? null) : null;
   const text = buildRequirementPrompt({
@@ -132,6 +142,7 @@ export async function compileRequirement(llm: RequirementLlm, input: CompileRequ
     inlineInputs: input.inlineInputs,
     pages: input.redact(pages) as typeof pages,
     hasScreenshot: screenshot !== null,
+    discoveryRoutes: input.redact(routes) as typeof routes,
   });
   const content: string | LlmContentPart[] = screenshot
     ? [
@@ -158,13 +169,26 @@ export async function compileRequirement(llm: RequirementLlm, input: CompileRequ
   // Unreachable in practice (`check` already passed), but never hand an invalid draft on.
   if (!result.ok) throw new ContractError(`Compiled requirement is invalid: ${result.issues.join("; ")}`);
   const masked = (text: string | null | undefined) => (text ? { text: clip(String(input.redact(text)), 300) } : null);
+  // Phase B: a criterion from a discovery route starts non-critical (the reviewer decides), unless nothing else is.
+  const routeOfCriterion = (i: number) => {
+    const route = result.output.criteria[i]?.discoveryRoute;
+    return typeof route === "number" ? routes[route - 1] : undefined;
+  };
+  const anyOtherCritical = result.draft.criteria.some((_c, i) => routeOfCriterion(i) === undefined);
   const draft: RequirementDraft = {
     ...result.draft,
-    criteria: result.draft.criteria.map((c) => {
-      const { rationale, assumption, ...rest } = c;
+    criteria: result.draft.criteria.map((c, i) => {
+      const { rationale, assumption, discovery: _discovery, ...rest } = c as typeof c & { discoveryRoute?: unknown };
+      delete (rest as { discoveryRoute?: unknown }).discoveryRoute;
       const why = masked(rationale);
       const assumed = masked(assumption);
-      return { ...rest, ...(why ? { rationale: why.text } : {}), ...(assumed ? { assumption: assumed.text } : {}) };
+      const route = routeOfCriterion(i);
+      return {
+        ...rest,
+        ...(why ? { rationale: why.text } : {}),
+        ...(assumed ? { assumption: assumed.text } : {}),
+        ...(route && { discovery: { engine: "browser_use" as const, relevantPaths: route.relevantPaths }, critical: !anyOtherCritical }),
+      };
     }),
     intent: intentOf(result.output, result.notes, input.originalText, input.redact),
   };
@@ -193,6 +217,11 @@ export interface AnalyzeSiteDeps {
 export interface AnalyzeStageDeps {
   /** Absent: the live site is never read (the analysis works from the requirement alone). */
   site?: AnalyzeSiteDeps;
+  /**
+   * Phase B: Browser Use for a run that opted in with a written requirement. Its routes reach the criteria (as
+   * reviewed, non-critical additions) and the planner; absent, an opted-in run records BLOCKED / not_configured.
+   */
+  discovery?: AutonomousSurveyDeps;
 }
 
 /** The analysis reads the start page and at most this many pages it links to. */
@@ -287,8 +316,17 @@ export function createAnalyzeStage(deps: AnalyzeStageDeps = {}): (ctx: StageCont
   return async (ctx) => {
     const llm = requireLlm(ctx); // before any browser: a run without a model client can't be analyzed
     if (ctx.request.requirement.trim() === "") throw new ContractError("The requirement is empty: there is nothing to compile");
-    const site = await readLiveSite(ctx, deps.site);
-    if (deps.site) await ctx.boundary(); // the site read took time: re-check cancel before the model call
+    // Phase B: discovery runs beside the site read; neither waits for the other.
+    const [read, found] = await Promise.all([
+      readLiveSite(ctx, deps.site),
+      ctx.request.options.autonomousDiscovery ? discoverRequirementRoutes(ctx, deps.discovery) : null,
+    ]);
+    // Live-site mode reads no page with a browser: the analysis uses the pages discovery's snapshot came from.
+    const site: LiveSite = found && found.pages.length > 0 && read.read.length === 0
+      ? { status: "READ", reason: null, pages: found.pages.map(({ url, inventory }) => ({ url, title: inventory.title, status: "READ" as const })),
+          read: found.pages, screenshot: null }
+      : read;
+    if (deps.site || found) await ctx.boundary(); // the site read took time: re-check cancel before the model call
     const { insights, ...draft } = await compileRequirement(llm, {
       runId: ctx.runId,
       originalText: ctx.request.requirement,
@@ -299,6 +337,7 @@ export function createAnalyzeStage(deps: AnalyzeStageDeps = {}): (ctx: StageCont
       deadlineAt: ctx.deadlineAt,
       redact: ctx.redact,
       ...(site.read.length > 0 ? { site: { pages: site.read, screenshot: site.screenshot } } : {}),
+      ...(found && found.discovery.routes.length > 0 ? { discoveryRoutes: found.discovery.routes } : {}),
     });
     return {
       ...draft,
@@ -309,6 +348,7 @@ export function createAnalyzeStage(deps: AnalyzeStageDeps = {}): (ctx: StageCont
         checks: insights.checks,
         testData: insights.testData,
         pageContents: site.read,
+        ...(found && { discovery: found.discovery }),
       },
     };
   };

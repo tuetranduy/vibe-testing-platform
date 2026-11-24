@@ -103,6 +103,16 @@ describe("createRunLlmFactory: one model client per run", () => {
     expect(sent[0]!.key).toBe("gm-from-env");
   });
 
+  it("Browser Use gets the run's own model and the key saved in Settings, as Stagehand does", async () => {
+    await saveKey("anthropic", "sk-ant-from-settings");
+    const run = await seedRun(h, { llm: OPUS_HIGH });
+    expect(await factory({ ...ENV, ANTHROPIC_API_KEY: "sk-env-not-used" }).discoveryModelFor(TEST_TENANT_ID, run.request))
+      .toEqual({ provider: "anthropic", model: "claude-opus-5-5", apiKey: "sk-ant-from-settings" });
+    expect(await factory().discoveryModelFor(TEST_TENANT_ID, { llm: { provider: "fake", model: "fake", reasoning: "default" } })).toBeNull();
+    const missing = await factory().discoveryModelFor(TEST_TENANT_ID, { llm: GEMINI_LITE_LOW }).catch((e: unknown) => e);
+    expect(missing).toBeInstanceOf(ModelProviderError);
+  });
+
   it("no key in Settings or the environment → ModelProviderError naming the fix", async () => {
     const err = await factory().forRun(await seedRun(h, { llm: OPUS_HIGH })).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ModelProviderError);

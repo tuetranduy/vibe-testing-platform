@@ -5,8 +5,15 @@ case "${VTP_PROXY_SERVER:-}" in
   http://*:*) ;;
   *) echo "VTP_PROXY_SERVER is not set" >&2; exit 64 ;;
 esac
+# Live mode: trust only certificates on this job's interception key (its SPKI pin), which the job's proxy mints.
+pin=""
+case "${VTP_PROXY_SPKI:-}" in
+  "") ;;
+  *[!A-Za-z0-9+/=]*) echo "VTP_PROXY_SPKI is not a base64 pin" >&2; exit 64 ;;
+  *) pin="--ignore-certificate-errors-spki-list=$VTP_PROXY_SPKI" ;;
+esac
 # No background services: the proxy's blocked-destination count then reflects what the page and agent requested.
-exec /usr/bin/chromium --proxy-server="$VTP_PROXY_SERVER" \
+exec /usr/bin/chromium --proxy-server="$VTP_PROXY_SERVER" $pin \
   --disable-background-networking --disable-component-update --disable-domain-reliability \
   --disable-client-side-phishing-detection --disable-default-apps --disable-sync --no-pings \
   --disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication,CertificateTransparencyComponentUpdater \

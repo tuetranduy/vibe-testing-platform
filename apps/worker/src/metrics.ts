@@ -74,6 +74,7 @@ export function createWorkerMetrics(registry = new Registry()) {
     discoveryProtocolViolations: new Counter({ name: "discovery_protocol_violations_total", help: "Malformed frames from Browser Use agent containers", registers }),
     discoveryFallback: new Counter({ name: "discovery_fallback_total", help: "Browser Use attempts using the standard survey fallback", registers }),
     discoveryCandidates: new Counter({ name: "discovery_candidates_total", help: "Returned and accepted Browser Use candidates", labelNames: ["kind"], registers }),
+    discoveryFindings: new Counter({ name: "discovery_findings_total", help: "Unverified Browser Use findings stored for review (Phase C)", registers }),
     discoverySteps: new Histogram({ name: "discovery_agent_steps", help: "Browser Use agent steps per run", buckets: [1, 2, 5, 10, 15, 20], registers }),
     discoveryCost: new Counter({ name: "discovery_model_cost_usd_total", help: "Known Browser Use model cost in USD", registers }),
     browserSessions: new Gauge({ name: "browser_sessions_active", help: "Open sandboxed browsers (exploration) and rerun runner processes", registers }),

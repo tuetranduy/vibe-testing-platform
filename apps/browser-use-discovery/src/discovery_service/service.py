@@ -21,8 +21,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from discovery_service.broker import make_model
 from discovery_service.launcher import Config, diag, discover
-from discovery_service.policy import PolicyError, match_target
+from discovery_service.policy import PolicyError, match_request, match_target
 from discovery_service.protocol import MAX_STDIN_BYTES, DiscoveryRequest, DiscoveryResponse, parse_request
 
 RESULT_TTL_SECONDS = 900
@@ -75,12 +76,32 @@ class Job:
         self.finished_at = time.monotonic()
 
 
-def create_app(config: Config, secret: str, *, runner=discover) -> Starlette:
+def job_slots(raw: str | None) -> int:
+    """Concurrent agent containers (DISCOVERY_JOB_SLOTS, 1-3; default 1). Each holds the agent memory limit."""
+    value = int(raw or '1') if (raw or '1').isdigit() else 0
+    if not 1 <= value <= 3:
+        raise ValueError('DISCOVERY_JOB_SLOTS must be 1, 2 or 3')
+    return value
+
+
+def model_configured(spec: str) -> bool:
+    """Whether the model can be built here (its provider key present). Builds a client only: no network request."""
+    try:
+        make_model(spec)
+    except (ValueError, ImportError, RuntimeError):
+        return False
+    return True
+
+
+def create_app(config: Config, secret: str, *, runner=discover, slots: int = 1) -> Starlette:
     if len(secret) < 32:
         raise ValueError('DISCOVERY_SERVICE_TOKEN requires at least 32 characters')
     match_target(config.fixture_url, config.fixture_url)
     if not config.model:
         raise ValueError('DISCOVERY_MODEL is required')
+    model_ready = model_configured(config.model) if runner is discover else True
+    if not model_ready:
+        diag('discovery.config_error', code='model_not_configured')
     jobs: dict[str, Job] = {}
     nonces = NonceCache()
     cleanup = {'failures': 0}
@@ -127,12 +148,15 @@ def create_app(config: Config, secret: str, *, runner=discover) -> Starlette:
             task.cancel()
         await asyncio.gather(*active, return_exceptions=True)
 
-    def capacity() -> dict[str, int]:
+    def capacity() -> dict[str, int | str]:
         """Counts only: one active job at a time across every worker and tenant (no queue, no fairness)."""
         return {
             'activeJobs': sum(1 for job in jobs.values() if job.result is None),
-            'jobSlots': 1,
+            'jobSlots': slots,
             'cleanupFailures': cleanup['failures'],
+            # Jobs normally bring the run's own model and Settings key. This is the operator's DISCOVERY_MODEL fallback
+            # for a job without one; not_configured refuses such a job as BLOCKED / model_not_configured.
+            'defaultModel': 'ready' if model_ready else 'not_configured',
         }
 
     async def health(_request: Request) -> JSONResponse:
@@ -178,7 +202,7 @@ def create_app(config: Config, secret: str, *, runner=discover) -> Starlette:
             return refused
         try:
             discovery = parse_request(raw)
-            match_target(config.fixture_url, discovery.targetUrl)
+            match_request(config.fixture_url, config.live_sites, discovery.targetUrl, discovery.live)
         except (ValueError, PolicyError):
             return JSONResponse({}, 422)
         if request.headers.get('idempotency-key') != f'{discovery.runId}:{discovery.schemaVersion}':
@@ -190,7 +214,7 @@ def create_app(config: Config, secret: str, *, runner=discover) -> Starlette:
         existing = jobs.get(discovery.runId)
         if existing:
             return respond(existing, 202) if existing.request == discovery else JSONResponse({}, 409)
-        if len(jobs) >= JOB_LIMIT or any(job.result is None for job in jobs.values()):
+        if len(jobs) >= JOB_LIMIT or sum(1 for job in jobs.values() if job.result is None) >= slots:
             return JSONResponse({}, 429)
         job = jobs[discovery.runId] = Job(discovery)
         job.task = asyncio.create_task(work(job))
@@ -231,7 +255,7 @@ def create_app(config: Config, secret: str, *, runner=discover) -> Starlette:
 if __name__ == '__main__':
     import uvicorn
 
-    app = create_app(Config.from_env(), os.environ.get('DISCOVERY_SERVICE_TOKEN', ''))
+    app = create_app(Config.from_env(), os.environ.get('DISCOVERY_SERVICE_TOKEN', ''), slots=job_slots(os.environ.get('DISCOVERY_JOB_SLOTS')))
     # Loopback by default. A container deployment binds its private network (DISCOVERY_SERVICE_HOST=0.0.0.0) and
     # relies on that network admitting only the worker; every request is still signed.
     host = os.environ.get('DISCOVERY_SERVICE_HOST', '127.0.0.1')

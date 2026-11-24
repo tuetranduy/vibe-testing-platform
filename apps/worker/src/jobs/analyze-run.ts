@@ -66,7 +66,12 @@ export async function analyzeRunJob(deps: WorkerDeps, runId: string): Promise<vo
         await runSurvey(handle.ctx, handle.ports, stages);
       } else {
         if (mode === "selected") await redactSelectedText(deps, handle);
-        await runAnalysis(handle.ctx, handle.ports, stages);
+        // Phase B asks Browser Use for a written requirement's routes. A chosen suggestion already had its
+        // discovery in the survey: its analysis never starts (and bills) a second job.
+        const ctx = mode === "selected" && handle.ctx.request.options.autonomousDiscovery
+          ? { ...handle.ctx, request: { ...handle.ctx.request, options: { ...handle.ctx.request.options, autonomousDiscovery: false } } }
+          : handle.ctx;
+        await runAnalysis(ctx, handle.ports, stages);
       }
     } catch (err) {
       await failRun(deps, handle, err);

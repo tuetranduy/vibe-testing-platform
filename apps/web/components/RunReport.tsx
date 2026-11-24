@@ -2,6 +2,8 @@
 
 import { Button } from "@/components/ui/button";
 import { discoveryOutcomeText } from "../lib/discovery";
+import { CoveragePanel } from "./CoveragePanel";
+import { FindingsPanel } from "./FindingsPanel";
 import { Card } from "@/components/ui/card";
 import type { CancelReason, TestReport, TestRunSummary } from "@platform/contracts";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -96,7 +98,7 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
       {report.discovery && (
         <Card as="section" aria-labelledby="discovery-report-title">
           <h2 id="discovery-report-title" className="text-sm font-semibold">Browser Use discovery</h2>
-          <p className="text-sm text-muted-foreground">{discoveryOutcomeText(report.discovery)}</p>
+          <p className="text-sm text-muted-foreground">{discoveryOutcomeText(report.discovery, report.discovery.context)}</p>
           {report.discovery.selectedSuggestion && <p className="text-sm text-muted-foreground">
             Selected idea · {report.discovery.selectedSuggestion.title}{report.discovery.selectedSuggestion.edited && " (edited)"}.
             The results below reflect the reviewed criteria.
@@ -108,6 +110,8 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
           </p>}
         </Card>
       )}
+      {report.discovery && <FindingsPanel runId={runId} />}
+      {report.discovery && <CoveragePanel targetUrl={report.targetUrl} />}
       <Assumptions requirement={report.requirement} />
       <div className="actions flex flex-wrap items-center gap-2">
         <Button asChild variant="outline">

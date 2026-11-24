@@ -42,6 +42,35 @@ export function LiveSiteSummary({ analysis }: { analysis: SiteAnalysis }) {
           {analysis.reason ? `: ${analysis.reason}.` : "."} The criteria come from the requirement alone.
         </p>
       )}
+      {analysis.discovery && <DiscoveryRoutes discovery={analysis.discovery} />}
     </Card>
+  );
+}
+
+const OUTCOME: Record<string, string> = {
+  COMPLETED: "finished", PARTIAL: "returned no usable routes", TIMED_OUT: "reached its time limit", BUSY: "was busy with other runs",
+  BLOCKED: "is not available for this run", FAILED: "was unavailable", CANCELLED: "stopped before it finished",
+};
+
+/** Phase B: what Browser Use observed for this requirement. Hypotheses for planning, not results. */
+function DiscoveryRoutes({ discovery }: { discovery: NonNullable<SiteAnalysis["discovery"]> }) {
+  const { summary, routes } = discovery;
+  return (
+    <div className="mt-3" aria-label="Browser Use routes">
+      <p className="text-muted-foreground">
+        <Icon name="sparkle" /> Browser Use {OUTCOME[summary.status] ?? "finished"}
+        {routes.length > 0 ? ` and observed ${plural(routes.length, "route")} for these instructions. The planner uses them as hints; nothing here is tested yet.` : "."}
+      </p>
+      {routes.length > 0 && (
+        <ul className="site-pages">
+          {routes.map((route) => (
+            <li key={route.title}>
+              <strong>{route.title}</strong>
+              <span> — {route.relevantPaths.map((path, i) => <span key={path}>{i > 0 && " → "}<code>{path}</code></span>)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

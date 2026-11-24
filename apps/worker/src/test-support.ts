@@ -67,7 +67,7 @@ export function onlyEngine(stages: EngineStages): Engines {
 
 /** The fake engine's choice, with no model client, for every run. */
 export const FAKE_CHOICE: LlmChoice = { provider: "fake", model: "fake", reasoning: "default" };
-export const noRunLlm: RunLlmFactory = { forRun: async () => ({ choice: FAKE_CHOICE, llm: null }), choiceOf: () => FAKE_CHOICE };
+export const noRunLlm: RunLlmFactory = { forRun: async () => ({ choice: FAKE_CHOICE, llm: null }), choiceOf: () => FAKE_CHOICE, discoveryModelFor: async () => null };
 
 export interface WorkerHarness {
   tdb: TestDatabase;

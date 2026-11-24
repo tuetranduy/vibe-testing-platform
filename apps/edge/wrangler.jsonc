@@ -19,6 +19,8 @@
     "BROWSER_USE_DISCOVERY_PRODUCTION": "fixture-pilot",
     "BROWSER_USE_DISCOVERY_FIXTURE_URL": "http://browser-use-fixture:4599/",
     "BROWSER_USE_DISCOVERY_VERIFIED_SITES": "on",
+    // Live interaction: the agent works on the real site through its job's inspecting egress proxy (docs/deployment.md).
+    "BROWSER_USE_DISCOVERY_LIVE_INTERACTION": "on",
     "BROWSER_USE_DISCOVERY_TENANTS": "t_default",
     "TARGET_PRIVATE_ALLOWLIST": "browser-use-fixture:4599"
   },

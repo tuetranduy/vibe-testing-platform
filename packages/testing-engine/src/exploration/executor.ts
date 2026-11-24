@@ -27,6 +27,7 @@ import {
   type ReplanReason,
   type TestPlan,
   type TestScenario,
+  type DiscoveryRoute,
 } from "@platform/contracts";
 import { assertActionAllowed, type ActionPolicy } from "@platform/security";
 import {
@@ -70,6 +71,7 @@ import {
 import { captureEarlyNotificationFact, notificationTexts } from "./early-facts";
 import { CANDIDATES, CandidateSchema } from "../survey/interactive";
 import { createWayThere, wayThereCandidates, type WayThere } from "./way-there";
+import { chooseRouteUrl } from "./route-recovery";
 import { SIGN_IN_STATE_SCRIPT, openedSignIn, type SignInState } from "./sign-in-prompt";
 import { SITE_ERROR_SCRIPT, siteErrorOf, type PageHeadline } from "./site-error";
 import { MAX_REPLANS, createReplanner, type Replanner } from "./replanner";
@@ -275,6 +277,12 @@ export interface ExplorationInput {
   session: ExplorerSession;
   /** `ctx.budgetSignal(ctx.budgets.explorationMs)`. */
   budget: AbortSignal;
+  /**
+   * Phase C: routes Browser Use observed for the requirement (the analysis kept them). When a step's control is not
+   * found and no way there is, the executor may open one route page that matches the step, once per step, and look
+   * again. Absent or empty: no route recovery.
+   */
+  discoveryRoutes?: readonly DiscoveryRoute[];
 }
 
 export interface ExplorationDeps {
@@ -294,6 +302,11 @@ export interface ExplorationDeps {
    * Null: the explorer is asked in free text instead.
    */
   wayThere?: WayThere | null;
+  /**
+   * Phase C: asks Browser Use, once per run, for routes to a step whose control is not found and that no stored
+   * route fits. Its answer is used exactly like the analysis' routes (policy-checked navigate; Stagehand acts).
+   */
+  findRoutes?: (goal: string) => Promise<DiscoveryRoute[]>;
   /**
    * Plans the rest of a scenario again when one of its steps still fails (2026-11-19); default `createReplanner(ctx.llm)`.
    * Null: a failed step ends its scenario.
@@ -421,6 +434,8 @@ interface StepDraft {
   signInPrompt?: boolean;
   /** A `checkpoint` taken on a server error page: its error heading (KI-074). */
   siteError?: string;
+  /** A navigate to a page on a Browser Use route (Phase C route recovery). */
+  discoveryRoute?: boolean;
 }
 
 /** What the generator is told about a field the recorder cannot describe. */
@@ -663,6 +678,11 @@ class ExplorationRun {
   private typed: Typed[] = [];
   private readonly judge: CriterionJudge | null;
   private readonly wayThere: WayThere | null;
+  /** Planned steps that already tried a Browser Use route (Phase C): one route page per step at most. */
+  private readonly routeTried = new Set<string>();
+  /** Routes Browser Use found during this exploration (one live request per run). */
+  private liveRoutes: DiscoveryRoute[] = [];
+  private liveRoutesAsked = false;
   private readonly replanner: Replanner | null;
   private readonly stepReviewer: StepReviewer | null;
   private readonly pageContext: ReturnType<typeof createPageContextRecorder>;
@@ -1212,17 +1232,21 @@ class ExplorationRun {
     return out;
   }
 
-  private async navigate(url: string, step: PlannedStep | null): Promise<Attempt> {
+  private async navigate(url: string, step: PlannedStep | null, discoveryRoute = false): Promise<Attempt> {
     await this.reserve();
     const startedAt = this.ctx.now();
     const urlBefore = this.url();
-    const base = { plannedStepId: step?.id ?? null, kind: "navigate" as const, instruction: `Navigate to ${url}`, urlBefore, startedAt };
+    const base = {
+      plannedStepId: step?.id ?? null, kind: "navigate" as const, instruction: `Navigate to ${url}`, urlBefore, startedAt,
+      ...(discoveryRoute && { discoveryRoute: true }),
+    };
     this.typed = [];
     try {
       await this.session.navigate(this.redactString(url));
     } catch (err) {
       this.rethrowIfFatal(err);
-      if (err instanceof NavigationBlockedError) {
+      // A Browser Use route is a hint (Phase C): the guard refusing it fails the hint, never the scenario.
+      if (err instanceof NavigationBlockedError && !discoveryRoute) {
         await this.record({ ...base, outcome: "BLOCKED_BY_POLICY", blockReason: err.reason ?? "TARGET_BLOCKED_BY_POLICY", error: firstLine(err) });
         throw new Stop("BLOCKED_BY_POLICY");
       }
@@ -1289,7 +1313,16 @@ class ExplorationRun {
       const chosen = await this.chooseWayThere(step);
       const instruction = chosen ? chosen.instruction : `Find the link or button that leads to where you can: ${step.description}`;
       const way = chosen === undefined ? await this.locate(step, instruction) : chosen?.located ?? null;
-      if (!way) return this.linkByName(step);
+      if (!way) {
+        const linked = await this.linkByName(step);
+        if (linked !== "failed") return linked;
+        // Phase C: a page on a route Browser Use observed for this step, opened through the guarded session and
+        // recorded as a plain navigate; the step's own control is then located and acted on as usual.
+        if ((await this.followDiscoveryRoute(step)) !== "ok") return "failed";
+        located = await this.locate(step, observeInstruction);
+        if (located) located = await this.namedTarget(step, located);
+        continue;
+      }
       // Recovery must not inherit permission to commit the goal's destructive action (KI-088, 2026-11-22).
       const label = way.info.name ?? way.info.text ?? way.element.description;
       await this.enforcePolicy({ ...step, description: "Follow an intermediate control", destructive: false, kind: "click" }, label, way, "act");
@@ -2120,6 +2153,28 @@ class ExplorationRun {
    * navigate step, which the generated test replays as a `goto`. Only when the step clicks that link (namesControl),
    * exactly one URL matches, the host is allowed and the link is not destructive; otherwise the step fails as before.
    */
+  private async followDiscoveryRoute(step: PlannedStep): Promise<Attempt | null> {
+    if (this.routeTried.has(step.id) || step.destructive) return null;
+    if ((this.input.discoveryRoutes ?? []).length === 0 && !this.deps.findRoutes) return null;
+    this.routeTried.add(step.id);
+    if (!assertActionAllowed({ instruction: step.description }, DENY_DESTRUCTIVE).allowed) return null;
+    const where = {
+      current: this.url(), targetUrl: this.ctx.request.targetUrl, additionalAllowedHosts: this.ctx.request.options.additionalAllowedHosts,
+    };
+    let url = chooseRouteUrl([...(this.input.discoveryRoutes ?? []), ...this.liveRoutes], step.description, where);
+    // No stored route fits: ask Browser Use once per run for routes to this step (a short, quiet job).
+    if (!url && this.deps.findRoutes && !this.liveRoutesAsked) {
+      this.liveRoutesAsked = true;
+      this.liveRoutes = await this.deps.findRoutes(step.description).catch((err: unknown) => {
+        this.rethrowIfFatal(err);
+        return [];
+      });
+      url = chooseRouteUrl(this.liveRoutes, step.description, where);
+    }
+    if (!url) return null;
+    return this.navigate(url, step, true);
+  }
+
   private async linkByName(step: PlannedStep): Promise<Attempt> {
     const names = quotedNames(step.description).filter((n) => namesControl(step.description, n));
     if (names.length === 0) return "failed";
@@ -2477,6 +2532,7 @@ class ExplorationRun {
       ...(draft.judgment !== undefined ? { judgment: draft.judgment } : {}),
       ...(draft.signInPrompt ? { signInPrompt: true } : {}),
       ...(draft.siteError !== undefined ? { siteError: draft.siteError.slice(0, 200) } : {}),
+      ...(draft.discoveryRoute ? { discoveryRoute: true } : {}),
     }) as ExplorationStep;
     return ExplorationStepSchema.parse({
       ...redacted,

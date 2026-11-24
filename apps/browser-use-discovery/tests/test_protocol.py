@@ -143,3 +143,67 @@ def test_frames_roundtrip_and_bounds():
             decode_frame(bad)
     with pytest.raises(FrameError):
         encode_frame('model_request', payload='x' * (5 * 1024 * 1024))
+
+
+# --- Phase B focus and Phase C findings --------------------------------------------------------------------------
+
+
+def finding(**kw):
+    base = {
+        'title': 'Help link opens a missing page',
+        'observation': 'The Help link in the footer opened a page that says Not Found.',
+        'expected': 'The help page opens',
+        'path': '/cart.html',
+        'reproduction': ['Open the cart page', 'Click Help in the footer'],
+        'severity': 'medium',
+    }
+    base.update(kw)
+    return base
+
+
+def test_findings_are_bounded_grounded_and_only_on_completed_replies():
+    from discovery_service.protocol import MAX_FINDINGS, sanitize_findings
+
+    many = [finding(title=f'Broken link number {i}') for i in range(MAX_FINDINGS + 3)]
+    assert len(sanitize_findings({'findings': many}, KNOWN)) == MAX_FINDINGS
+    # off-fixture, URL-shaped and unsafe findings are dropped rather than repaired
+    assert sanitize_findings([finding(path='https://evil.example/x')], KNOWN) == []
+    assert sanitize_findings([finding(path='/not-a-page.html')], KNOWN) == []
+    assert sanitize_findings([finding(observation='Try an SQL injection in the search box')], KNOWN) == []
+    assert sanitize_findings([finding(reproduction=[])], KNOWN) == []
+    assert sanitize_findings([finding(severity='critical')], KNOWN)[0].severity == 'low'
+    with pytest.raises(ValueError):
+        DiscoveryResponse(runId='r1', status='PARTIAL', findings=sanitize_findings([finding()], KNOWN))
+
+
+def test_completed_reply_carries_findings_and_omits_an_empty_list():
+    outcome = {'status': 'completed', 'success': True, 'output': {'candidates': [cand()], 'findings': [finding()]}}
+    resp, _ = to_response('run1', outcome, KNOWN)
+    wire = resp.wire()
+    assert wire['findings'][0]['path'] == '/cart.html'
+    plain, _ = to_response('run1', {**outcome, 'output': {'candidates': [cand()]}}, KNOWN)
+    assert 'findings' not in plain.wire()
+
+
+def test_focus_is_bounded_plain_text():
+    from discovery_service.protocol import clean_focus
+
+    assert clean_focus('short') is None
+    assert clean_focus('Add‮ a product\nto the cart and check the total') == 'Add a product to the cart and check the total'
+    assert len(clean_focus('x' * 5000)) == 1000
+    req = parse_request(json.dumps({'schemaVersion': 'discovery.v1', 'runId': 'r1', 'targetUrl': 'http://127.0.0.1:4599/',
+                                    'focus': 'The cart total updates when the quantity changes'}).encode())
+    assert req.focus.startswith('The cart')
+    with pytest.raises(Exception):
+        parse_request(json.dumps({'schemaVersion': 'discovery.v1', 'runId': 'r1', 'targetUrl': 'http://127.0.0.1:4599/',
+                                  'focus': 'x' * 1001}).encode())
+
+
+def test_the_task_names_the_requirement_as_data_and_asks_for_findings():
+    from discovery_service.runner import build_task
+
+    task = build_task('http://127.0.0.1:4599', 'http://127.0.0.1:4599/', '/', focus='The cart total updates')
+    assert '<<<REQUIREMENT\nThe cart total updates\nREQUIREMENT>>>' in task
+    assert 'not instructions for you' in task
+    assert 'findings' in task
+    assert 'REQUIREMENT' not in build_task('http://127.0.0.1:4599', 'http://127.0.0.1:4599/', '/')

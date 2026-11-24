@@ -29,3 +29,14 @@ describe("discovery.v1 contracts", () => {
     expect(DiscoverySummarySchema.safeParse({ ...summary, status: "BUSY", reason: "free text" }).success).toBe(false);
   });
 });
+
+describe("live interaction input", () => {
+  it("names an HTTPS page with live, and never a snapshot with it", () => {
+    const base = { schemaVersion: "discovery.v1", runId: "run_1" } as const;
+    expect(DiscoveryInputSchema.parse({ ...base, targetUrl: "https://shop.example.com/catalog", live: true }).targetUrl).toBe("https://shop.example.com/catalog");
+    expect(DiscoveryInputSchema.safeParse({ ...base, targetUrl: "https://shop.example.com/" }).success).toBe(false);
+    expect(DiscoveryInputSchema.safeParse({ ...base, targetUrl: "http://127.0.0.1:4599/", live: true }).success).toBe(false);
+    expect(DiscoveryInputSchema.safeParse({ ...base, targetUrl: "https://shop.example.com/", live: true,
+      snapshot: [{ path: "/", title: "Home", evidence: "x" }] }).success).toBe(false);
+  });
+});

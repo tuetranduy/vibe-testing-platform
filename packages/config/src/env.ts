@@ -145,6 +145,11 @@ const EnvSchema = z
     BROWSER_USE_DISCOVERY_LAUNCHER: emptyAsUnset(z.string().refine(path.isAbsolute, "must be an absolute executable path")),
     BROWSER_USE_DISCOVERY_FIXTURE_URL: emptyAsUnset(DiscoveryFixtureUrlSchema),
     BROWSER_USE_DISCOVERY_VERIFIED_SITES: emptyAsUnset(z.enum(["on", "off"])),
+    /**
+     * Live interaction on public HTTPS sites: the broker's agent works on the real site through its job's
+     * inspecting egress proxy (clicks, menus, form validation; nothing that sends data). Needs VERIFIED_SITES.
+     */
+    BROWSER_USE_DISCOVERY_LIVE_INTERACTION: emptyAsUnset(z.enum(["on", "off"])),
     BROWSER_USE_DISCOVERY_SERVICE_URL: emptyAsUnset(z.url().transform((url) => new URL(url)).refine(
       (url) => url.href === `${url.origin}/` && (url.protocol === "https:" ||
         // Loopback, or a single-label service name on a private container network (no dots: never a public host).
@@ -221,6 +226,13 @@ const EnvSchema = z
         ctx.addIssue({ code: "custom", path: ["BROWSER_USE_DISCOVERY_VERIFIED_SITES"],
           message: "verified discovery requires the isolated Browser Use broker in production" });
       }
+      if (env.BROWSER_USE_DISCOVERY_LIVE_INTERACTION === "on") {
+        ctx.addIssue({ code: "custom", path: ["BROWSER_USE_DISCOVERY_LIVE_INTERACTION"],
+          message: "live interaction requires the isolated Browser Use broker in production" });
+      }
+    }
+    if (env.BROWSER_USE_DISCOVERY_LIVE_INTERACTION === "on" && env.BROWSER_USE_DISCOVERY_VERIFIED_SITES !== "on") {
+      ctx.addIssue({ code: "custom", path: ["BROWSER_USE_DISCOVERY_LIVE_INTERACTION"], message: "live interaction needs BROWSER_USE_DISCOVERY_VERIFIED_SITES=on" });
     }
     if (env.NODE_ENV === "production" && env.BROWSER_USE_DISCOVERY_LAUNCHER) {
       ctx.addIssue({ code: "custom", path: ["BROWSER_USE_DISCOVERY_LAUNCHER"], message: "production uses the signed job service, not the one-shot launcher" });

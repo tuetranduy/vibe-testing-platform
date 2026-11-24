@@ -1,5 +1,6 @@
 import {
   ContractError,
+  type DiscoveryRoute,
   type ExplorationOutcome,
   type ExplorationStep,
   type GeneratedTest,
@@ -92,10 +93,16 @@ export interface EngineStages {
    */
   survey(ctx: StageContext): Promise<SuggestionSetDraft>;
   analyze(ctx: StageContext): Promise<AnalyzedRequirement>;
-  /** `site`: the pages the analysis read (KI-048); empty when none were read. */
-  plan(ctx: StageContext, requirement: NormalizedRequirement, site: SitePage[]): Promise<TestPlan>;
-  /** Must return (not throw) when the exploration budget or step limit is exhausted. */
-  explore(ctx: StageContext, plan: TestPlan, requirement: NormalizedRequirement, site?: SitePage[]): Promise<ExplorationOutcome>;
+  /**
+   * `site`: the pages the analysis read (KI-048); empty when none were read. `routes` (Phase B): what Browser Use
+   * observed for an opted-in requirement run, as planning hints; absent or empty: none.
+   */
+  plan(ctx: StageContext, requirement: NormalizedRequirement, site: SitePage[], routes?: DiscoveryRoute[]): Promise<TestPlan>;
+  /**
+   * Must return (not throw) when the exploration budget or step limit is exhausted. `routes` (Phase C): the same
+   * routes, for recovering a step whose control is not found (policy-checked navigation; Stagehand acts).
+   */
+  explore(ctx: StageContext, plan: TestPlan, requirement: NormalizedRequirement, site?: SitePage[], routes?: DiscoveryRoute[]): Promise<ExplorationOutcome>;
   verify(
     ctx: StageContext,
     requirement: NormalizedRequirement,

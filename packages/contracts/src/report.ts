@@ -48,6 +48,8 @@ export const TestReportSchema = z.object({
       edited: z.boolean(),
       relevantPaths: z.array(DiscoveryFixturePathSchema).max(8),
     }).nullable().optional(),
+    /** Where discovery ran: the blank-prompt survey, or (Phase B) a written requirement's analysis. Absent: the survey. */
+    context: z.enum(["survey", "requirement"]).optional(),
   }).optional(),
   /** Values nobody provided that exploration generated and filled (2026-10-07). */
   generatedInputs: z.array(GeneratedInputSchema).default([]),
