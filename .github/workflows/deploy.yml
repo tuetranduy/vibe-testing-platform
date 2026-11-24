@@ -122,7 +122,18 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: 0aa33be34354cada10bebf66ea994e23
-          SECRETS_JSON: ${{ toJSON(secrets) }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          REDIS_TLS_CA: ${{ secrets.REDIS_TLS_CA }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          API_TOKEN: ${{ secrets.API_TOKEN }}
+          SECRETS_ENCRYPTION_KEY: ${{ secrets.SECRETS_ENCRYPTION_KEY }}
+          BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.BOOTSTRAP_ADMIN_EMAIL }}
+          BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'anthropic' }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
           BROWSER_USE_DISCOVERY_VERIFIED_SITES: ${{ (vars.BROWSER_USE_DISCOVERY == 'off' && 'off') || vars.BROWSER_USE_DISCOVERY_VERIFIED_SITES || 'on' }}
@@ -131,9 +142,8 @@ jobs:
           sed -i "s/__IMAGE_TAG__/$SHA/g" wrangler.jsonc
           umask 077
           node -e '
-            const s = JSON.parse(process.env.SECRETS_JSON);
             const names = ["DATABASE_URL","REDIS_URL","REDIS_TLS_CA","S3_ACCESS_KEY_ID","S3_SECRET_ACCESS_KEY","API_TOKEN","SECRETS_ENCRYPTION_KEY","BOOTSTRAP_ADMIN_EMAIL","BOOTSTRAP_ADMIN_PASSWORD","ANTHROPIC_API_KEY","GEMINI_API_KEY","DEEPSEEK_API_KEY"];
-            const out = Object.fromEntries(names.filter((n) => s[n]).map((n) => [n, s[n]]));
+            const out = Object.fromEntries(names.filter((n) => process.env[n]).map((n) => [n, process.env[n]]));
             require("fs").writeFileSync("/tmp/worker-secrets.json", JSON.stringify(out));
           '
           vars=(--var "LLM_PROVIDER:$LLM_PROVIDER" --var "BROWSER_USE_DISCOVERY_VERIFIED_SITES:$BROWSER_USE_DISCOVERY_VERIFIED_SITES")
