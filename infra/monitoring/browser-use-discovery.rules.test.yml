@@ -1,0 +1,199 @@
+# promtool test rules infra/monitoring/browser-use-discovery.rules.test.yml
+rule_files:
+  - browser-use-discovery.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Saturated single-job broker: many BUSY outcomes, every attempted job completes.
+  # Backpressure alerts on its own and never trips the failure-rate alert.
+  - interval: 1m
+    input_series:
+      - series: 'discovery_jobs_total{status="COMPLETED",reason="ok"}'
+        values: '0+1x60'
+      - series: 'discovery_jobs_total{status="BUSY",reason="broker_busy"}'
+        values: '0+3x60'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: BrowserUseDiscoveryFailureRateHigh
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: BrowserUseDiscoveryBackpressureHigh
+        exp_alerts:
+          - exp_labels:
+              severity: info
+            exp_annotations:
+              summary: Most opted-in runs find the single-job broker or their tenant quota busy
+
+  # Attempted jobs time out: that is a failure-rate signal.
+  - interval: 1m
+    input_series:
+      - series: 'discovery_jobs_total{status="COMPLETED",reason="ok"}'
+        values: '0+1x60'
+      - series: 'discovery_jobs_total{status="TIMED_OUT",reason="worker_deadline"}'
+        values: '0+1x60'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: BrowserUseDiscoveryFailureRateHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Attempted Browser Use jobs are frequently falling back to the standard survey
+
+  # An operator disabling a tenant deliberately cancels its running jobs.
+  - interval: 1m
+    input_series:
+      - series: 'discovery_jobs_total{status="COMPLETED",reason="ok"}'
+        values: '0+1x60'
+      - series: 'discovery_jobs_total{status="CANCELLED",reason="tenant_disabled"}'
+        values: '0+1x60'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: BrowserUseDiscoveryFailureRateHigh
+        exp_alerts: []
+
+  # Rollout and configuration: an admitted run the worker cannot run, and cleanup / cost signals.
+  - interval: 1m
+    input_series:
+      - series: 'discovery_jobs_total{status="BLOCKED",reason="not_configured"}'
+        values: '0 1 1 1 1 1'
+      - series: 'discovery_cancellation_cleanup_errors_total'
+        values: '0 0 1 1 1 1'
+      - series: 'discovery_model_cost_usd_total'
+        values: '0 0.5 1 1.5 2 2.5'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: BrowserUseDiscoveryNotConfigured
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: The API admitted discovery runs that a worker cannot run (transport or fixture mismatch)
+      - eval_time: 5m
+        alertname: BrowserUseDiscoveryCleanupErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: The broker did not confirm cancellation of abandoned Browser Use jobs
+      - eval_time: 5m
+        alertname: BrowserUseDiscoveryCostHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Known Browser Use model cost exceeded the pilot's hourly budget
+
+  # Agent container memory: one job peaked at 1.9 GiB (above the 1.8 GiB bucket), another at 600 MiB.
+  - interval: 1m
+    input_series:
+      - series: 'discovery_worker_memory_bytes_count'
+        values: '0 1 2 2 2 2'
+      - series: 'discovery_worker_memory_bytes_bucket{le="1932735283"}'
+        values: '0 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: BrowserUseDiscoveryAgentMemoryNearLimit
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: A Browser Use agent container peaked above 90% of its 2 GiB memory limit
+
+  # Every job stayed below 1.8 GiB: no memory alert.
+  - interval: 1m
+    input_series:
+      - series: 'discovery_worker_memory_bytes_count'
+        values: '0 1 2 3 4 5'
+      - series: 'discovery_worker_memory_bytes_bucket{le="1932735283"}'
+        values: '0 1 2 3 4 5'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: BrowserUseDiscoveryAgentMemoryNearLimit
+        exp_alerts: []
+
+  # Selected suggestions: half inconclusive vs about 6 % platform-wide (cancellations excluded) -> alert.
+  - interval: 10m
+    input_series:
+      - series: 'discovery_selected_runs_total{lifecycle="COMPLETED",verdict="PASSED",edited="false"}'
+        values: '0+1x60'
+      - series: 'discovery_selected_runs_total{lifecycle="COMPLETED",verdict="INCONCLUSIVE",edited="false"}'
+        values: '0+1x60'
+      - series: 'discovery_selected_runs_total{lifecycle="CANCELLED",verdict="none",edited="false"}'
+        values: '0+5x60'
+      - series: 'test_runs_total{lifecycle="COMPLETED",verdict="PASSED"}'
+        values: '0+15x60'
+      - series: 'test_runs_total{lifecycle="COMPLETED",verdict="INCONCLUSIVE"}'
+        values: '0+1x60'
+    alert_rule_test:
+      - eval_time: 7h
+        alertname: BrowserUseSelectedDiscoveryInconclusiveRateHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Selected Browser Use suggestions fail to execute to a verdict more often than other runs
+
+  # The same discovery rate when the platform overall is just as inconclusive -> no alert.
+  - interval: 10m
+    input_series:
+      - series: 'discovery_selected_runs_total{lifecycle="COMPLETED",verdict="PASSED",edited="false"}'
+        values: '0+1x60'
+      - series: 'discovery_selected_runs_total{lifecycle="COMPLETED",verdict="INCONCLUSIVE",edited="false"}'
+        values: '0+1x60'
+      - series: 'test_runs_total{lifecycle="COMPLETED",verdict="PASSED"}'
+        values: '0+5x60'
+      - series: 'test_runs_total{lifecycle="COMPLETED",verdict="INCONCLUSIVE"}'
+        values: '0+5x60'
+    alert_rule_test:
+      - eval_time: 7h
+        alertname: BrowserUseSelectedDiscoveryInconclusiveRateHigh
+        exp_alerts: []
+
+  # Proxy mode: a forbidden-address refusal alerts at once; baseline Chromium refusals (CONNECT) do not.
+  - interval: 1m
+    input_series:
+      - series: 'discovery_blocked_destinations_total{reason="forbidden_address"}'
+        values: '0 0 1 1 1 1'
+      - series: 'discovery_blocked_destinations_total{reason="connect_denied"}'
+        values: '0+4x5'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: BrowserUseDiscoveryForbiddenAddress
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: A Browser Use target name resolved to a forbidden address; the egress proxy refused it
+
+  # 30 off-allowlist requests per job over 20 minutes: repeated attempts to leave the fixture.
+  - interval: 1m
+    input_series:
+      - series: 'discovery_blocked_destinations_total{reason="not_allowlisted"}'
+        values: '0+30x30'
+      - series: 'discovery_duration_seconds_count'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: BrowserUseDiscoveryEgressBlocksRepeated
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Browser Use agents repeatedly try to leave the approved fixture
+
+  # The measured baseline (2 off-allowlist and 4 CONNECT refusals per job) stays quiet.
+  - interval: 1m
+    input_series:
+      - series: 'discovery_blocked_destinations_total{reason="not_allowlisted"}'
+        values: '0+2x30'
+      - series: 'discovery_blocked_destinations_total{reason="connect_denied"}'
+        values: '0+4x30'
+      - series: 'discovery_duration_seconds_count'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: BrowserUseDiscoveryEgressBlocksRepeated
+        exp_alerts: []
+

@@ -1,4 +1,4 @@
-import { createLogger, loadEnvOrExit, redisTlsOptions, resolveEnvLlmChoice } from "@platform/config";
+import { createLogger, discoveryAdmission, loadEnvOrExit, redisTlsOptions, resolveEnvLlmChoice } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
 import { DEFAULT_REAPER_CONFIG, RunEventHub, createRevisionQueue, createRunQueue, createScheduleSync, startReaper } from "@platform/event-bus";
 import { defaultResolver } from "@platform/security";
@@ -59,6 +59,7 @@ const deps: ApiDeps = {
     defaultTenantId: env.DEFAULT_TENANT_ID,
     maxActiveRunsPerTenant: env.MAX_ACTIVE_RUNS_PER_TENANT,
     privateAllowlist: env.TARGET_PRIVATE_ALLOWLIST,
+    discovery: discoveryAdmission(env),
     secretsKey: env.secretsKey,
     artifactUrlTtlSeconds: 300,
     sseHeartbeatMs: 20_000,
@@ -80,6 +81,7 @@ const deps: ApiDeps = {
   db: handle.db,
   redis,
   assistanceRedis: redis,
+  discoveryRollout: redis,
   hub: new RunEventHub(subscriber),
   queue,
   revisions,

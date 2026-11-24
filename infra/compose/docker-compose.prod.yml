@@ -15,7 +15,8 @@ services:
       # Loopback-free: nothing on this server scrapes it, and it must not be published.
       WORKER_METRICS_PORT: "0"
     volumes: ["runs:/work/runs"]
-    networks: [default, runner]
+    # discovery and fixture: the Browser Use pilot's private networks (below); the worker is their only other member.
+    networks: [default, runner, discovery, fixture]
     # This server is shared with other apps.
     mem_limit: 2g
     depends_on:
@@ -41,6 +42,56 @@ services:
     volumes: ["runs:/work/runs"]
     networks: [runner]
     mem_limit: 1g
+    restart: unless-stopped
+
+  # Browser Use fixture pilot (BROWSER_USE_DISCOVERY_PRODUCTION=fixture-pilot). The disposable fixture site that the
+  # worker's own survey browses, reachable only on the internal `fixture` network.
+  browser-use-fixture:
+    image: ${BROWSER_USE_AGENT_IMAGE:?}
+    entrypoint: ["python", "-P", "-m", "discovery_service.fixture_server", "--host", "0.0.0.0", "--port", "4599"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4599/', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    networks: [fixture]
+    mem_limit: 96m
+    pids_limit: 32
+    restart: unless-stopped
+
+  # The signed job service. It starts each job's agent container on this host's Docker with --network none, a
+  # read-only filesystem, no capabilities and a 1 GiB memory cap, brokers its model calls (the only service that
+  # holds the model key and the signing token), and is reachable only from the worker on the internal `discovery`
+  # network. `discovery-egress` is its own way out, for the model provider.
+  browser-use-discovery:
+    image: ${BROWSER_USE_BROKER_IMAGE:?}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      DISCOVERY_FIXTURE_URL: http://browser-use-fixture:4599/
+      DISCOVERY_MODEL: ${BROWSER_USE_DISCOVERY_MODEL:?}
+      DISCOVERY_IMAGE: ${BROWSER_USE_AGENT_IMAGE:?}
+      DISCOVERY_AGENT_MEMORY: 1g
+      DISCOVERY_SERVICE_TOKEN: ${BROWSER_USE_DISCOVERY_SERVICE_TOKEN:?}
+      DISCOVERY_SERVICE_HOST: 0.0.0.0
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4600/internal/health', timeout=5)"]
+      interval: 15s
+      timeout: 8s
+      retries: 8
+    networks: [discovery, discovery-egress]
+    mem_limit: 384m
+    pids_limit: 128
     restart: unless-stopped
 
   # The queues, pub/sub and rate-limit counters. The worker uses the plain port over this project's network; the API
@@ -96,3 +147,8 @@ volumes:
 networks:
   runner:
     internal: true
+  discovery:
+    internal: true
+  fixture:
+    internal: true
+  discovery-egress: {}

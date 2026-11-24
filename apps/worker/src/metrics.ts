@@ -10,6 +10,10 @@ export const NO_VERDICT = "none";
 /** `test_run_duration_seconds` buckets; the API's histogram uses the same, since Prometheus sums the two. */
 export const RUN_DURATION_BUCKETS = [1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600];
 
+const MIB = 1024 ** 2;
+/** Up to the agent container's 2 GiB limit; 1.8 GiB (90 %) is the alert's near-limit boundary. */
+export const DISCOVERY_MEMORY_BUCKETS = [64 * MIB, 128 * MIB, 256 * MIB, 512 * MIB, 768 * MIB, 1024 * MIB, 1536 * MIB, 1932735283, 2048 * MIB];
+
 /**
  * The worker's Prometheus metrics (Task 22). One registry per process; the API exports
  * `queue_depth` and its own `test_runs_total` series (runs it ends itself), which Prometheus sums.
@@ -28,6 +32,50 @@ export function createWorkerMetrics(registry = new Registry()) {
       registers,
     }),
     activeRuns: new Gauge({ name: "active_worker_runs", help: "Run jobs (analyze / execute) this worker is processing", registers }),
+    discoveryJobs: new Counter({
+      name: "discovery_jobs_total",
+      help: "Opted-in runs' Browser Use outcomes by status and reason (BUSY and BLOCKED never started a broker job)",
+      labelNames: ["status", "reason"],
+      registers,
+    }),
+    discoveryDuration: new Histogram({ name: "discovery_duration_seconds", help: "Elapsed time of attempted Browser Use jobs", buckets: RUN_DURATION_BUCKETS, registers }),
+    discoveryCleanupErrors: new Counter({ name: "discovery_cancellation_cleanup_errors_total", help: "Abandoned Browser Use jobs whose cancellation the broker did not confirm", registers }),
+    discoveryWorkerMemory: new Histogram({
+      name: "discovery_worker_memory_bytes",
+      help: "Peak memory of each attempted job's Browser Use agent container (Chromium, Browser Use and agent Python), "
+        + "sampled on the trusted host with docker stats; the container's hard limit is 2 GiB",
+      buckets: DISCOVERY_MEMORY_BUCKETS,
+      registers,
+    }),
+    discoveryAdmissionWait: new Histogram({
+      name: "discovery_admission_wait_seconds",
+      help: "Time opted-in runs waited for a fair turn at the broker's job slots, by outcome",
+      labelNames: ["outcome"],
+      buckets: [0.1, 0.5, 1, 5, 15, 30, 60, 120],
+      registers,
+    }),
+    discoveryBlockedDestinations: new Counter({
+      name: "discovery_blocked_destinations_total",
+      help: "Proxy mode: requests from Browser Use agent containers that the job's egress proxy refused, by reason",
+      labelNames: ["reason"],
+      registers,
+    }),
+    discoveryActiveJobs: new Gauge({
+      name: "discovery_active_jobs",
+      help: "Browser Use discovery calls in flight in this worker process (the broker itself runs one job at a time)",
+      registers,
+    }),
+    discoverySelectedRuns: new Counter({
+      name: "discovery_selected_runs_total",
+      help: "Runs that executed a selected Browser Use suggestion, by terminal lifecycle, verdict and whether it was edited",
+      labelNames: ["lifecycle", "verdict", "edited"],
+      registers,
+    }),
+    discoveryProtocolViolations: new Counter({ name: "discovery_protocol_violations_total", help: "Malformed frames from Browser Use agent containers", registers }),
+    discoveryFallback: new Counter({ name: "discovery_fallback_total", help: "Browser Use attempts using the standard survey fallback", registers }),
+    discoveryCandidates: new Counter({ name: "discovery_candidates_total", help: "Returned and accepted Browser Use candidates", labelNames: ["kind"], registers }),
+    discoverySteps: new Histogram({ name: "discovery_agent_steps", help: "Browser Use agent steps per run", buckets: [1, 2, 5, 10, 15, 20], registers }),
+    discoveryCost: new Counter({ name: "discovery_model_cost_usd_total", help: "Known Browser Use model cost in USD", registers }),
     browserSessions: new Gauge({ name: "browser_sessions_active", help: "Open sandboxed browsers (exploration) and rerun runner processes", registers }),
     llmRequests: new Counter({ name: "llm_requests_total", help: "Model calls", labelNames: ["stage", "model", "status"], registers }),
     llmTokens: new Counter({ name: "llm_tokens_total", help: "Model tokens", labelNames: ["stage", "model", "direction"], registers }),

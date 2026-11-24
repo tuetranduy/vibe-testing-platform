@@ -56,6 +56,7 @@ export async function bootWorker(opts: BootOptions = {}): Promise<void> {
   const engines = createEngines(env, {
     // A scripted transport has no person watching it (CI E2E); preserve its failure behavior (2026-11-21).
     ...(transport ? {} : { redis: publisher }),
+    discoveryRollout: publisher,
     db: handle.db,
     logger,
     storage,

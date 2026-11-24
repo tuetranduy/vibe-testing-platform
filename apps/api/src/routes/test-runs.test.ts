@@ -18,6 +18,7 @@ beforeEach(() => {
   t.queue.fail = false;
   t.deps.config.maxActiveRunsPerTenant = 100;
   t.deps.config.llm = FAKE_LLM;
+  delete t.deps.config.discovery;
 });
 
 const post = (body: unknown, headers: Record<string, string> = {}) =>
@@ -249,6 +250,30 @@ describe("POST /v1/test-runs: the run's model (request → Settings → environm
     t.deps.config.llm = ANTHROPIC_ENV;
     await t.tdb.db.delete(schema.llmProviderKeys);
     await t.tdb.db.delete(schema.llmSettings);
+  });
+
+  it("admits discovery only on the exact fixture for an enrolled tenant and a manual review run", async () => {
+    const targetUrl = "http://demo-shop:4000/";
+    const request = { targetUrl, environment: "staging", requirement: "", options: { autonomousDiscovery: true } };
+    const capability = () => t.app.inject({ method: "GET", url: "/v1/discovery/capability", headers: auth });
+    const toggle = (enabled: boolean) => t.app.inject({ method: "PUT", url: "/v1/settings/discovery", headers: auth, payload: { enabled } });
+    await toggle(false);
+    t.deps.config.discovery = { fixtureUrl: targetUrl, tenantIds: [OTHER_TENANT_ID] };
+    expect((await capability()).json()).toEqual({ fixtureUrl: null });
+    expect((await post(request)).json().code).toBe("DISCOVERY_UNAVAILABLE");
+
+    t.deps.config.discovery = { fixtureUrl: targetUrl, tenantIds: [TEST_TENANT_ID] };
+    expect((await capability()).json()).toEqual({ fixtureUrl: null });
+    expect((await toggle(true)).json()).toEqual({ available: true, enabled: true });
+    expect((await capability()).json()).toEqual({ fixtureUrl: targetUrl });
+    expect((await post({ ...request, targetUrl: targetUrl + "elsewhere" })).json().code).toBe("DISCOVERY_UNAVAILABLE");
+    expect((await post({ ...request, options: { autonomousDiscovery: true, autoConfirmCriteria: true } })).statusCode).toBe(400);
+    const accepted = await post(request);
+    expect(accepted.statusCode).toBe(202);
+    expect((await new RunRepository(t.tdb.db).findById(accepted.json().runId))?.request.options.autonomousDiscovery).toBe(true);
+    expect((await toggle(false)).json()).toEqual({ available: true, enabled: false });
+    expect((await capability()).json()).toEqual({ fixtureUrl: null });
+    expect((await post(request)).statusCode).toBe(422);
   });
 
   it("nothing saved, nothing requested: the environment's choice is recorded", async () => {

@@ -83,6 +83,45 @@ def test_scripted_discovery_completes():
     assert leftover_containers() == []
 
 
+def test_caller_budget_completes_within_the_job_budget_and_removes_the_container():
+    request = DiscoveryRequest(schemaVersion='discovery.v1', runId='it-budget', targetUrl=FIXTURE_URL, timeoutSeconds=30)
+    started = time.monotonic()
+    resp, stats = asyncio.run(discover(request, cfg(), model=ScriptedModel()))
+    assert resp.status == 'COMPLETED' and resp.reason == 'ok', stats
+    assert time.monotonic() - started < 30
+    assert resp.statistics is not None and resp.statistics.durationMs < 30_000
+    # Host-sampled peak memory of this job's own agent container, below its 2 GiB hard limit.
+    assert resp.statistics.peakMemoryBytes is not None
+    assert 16 * 1024**2 < resp.statistics.peakMemoryBytes < 2 * 1024**3
+    assert stats['cleanup'] == 'ok'
+    assert leftover_containers() == []
+
+
+def test_cleanup_keeps_the_event_loop_responsive_during_a_real_job():
+    """While a real container starts, runs and is removed, other coroutines (the job service's requests) keep running."""
+
+    async def scenario():
+        gaps: list[float] = []
+
+        async def ticker():
+            last = time.monotonic()
+            while True:
+                await asyncio.sleep(0.05)
+                now = time.monotonic()
+                gaps.append(now - last)
+                last = now
+
+        task = asyncio.ensure_future(ticker())
+        resp, stats = await discover(req('it-loop'), cfg(), model=ScriptedModel())
+        task.cancel()
+        return resp, stats, max(gaps)
+
+    resp, stats, worst_gap = asyncio.run(scenario())
+    assert resp.status == 'COMPLETED' and stats['cleanup'] == 'ok'
+    assert worst_gap < 1.0, worst_gap  # the old synchronous `docker rm -f` stalled every request for its duration
+    assert leftover_containers() == []
+
+
 def test_positive_control_bridge_container_reaches_host_canary():
     """Proves the probe below would detect a leak: the same image on a normal network does reach the canary."""
     canary = Canary()
@@ -166,7 +205,8 @@ def test_cli_blocks_other_targets(tmp_path):
     proc, _ = _cli(tmp_path)
     line = json.dumps({'schemaVersion': 'discovery.v1', 'runId': 'cli-2', 'targetUrl': 'http://169.254.169.254/'}) + '\n'
     out, _ = proc.communicate(line.encode(), timeout=60)
-    assert json.loads(out) == {'schemaVersion': 'discovery.v1', 'runId': 'cli-2', 'status': 'BLOCKED', 'candidates': []}
+    assert json.loads(out) == {'schemaVersion': 'discovery.v1', 'runId': 'cli-2', 'status': 'BLOCKED', 'reason': 'target_not_allowed',
+                               'candidates': []}
 
 
 def test_cli_sigterm_cancels_and_tears_down(tmp_path):
@@ -206,3 +246,90 @@ def test_sigkilled_launcher_container_still_dies(tmp_path):
     while leftover_containers() and time.monotonic() - t < 45:
         time.sleep(0.5)
     assert leftover_containers() == []
+
+
+# --- proxy mode: target-site traffic through a per-job egress proxy, model traffic only through the broker --------
+
+PROXY_TARGETS = 'vtp-discovery-targets-it'
+PROXY_FIXTURE = 'http://vtp-fixture:4599/'
+
+
+def leftover_networks() -> list[str]:
+    out = subprocess.run(['docker', 'network', 'ls', '-q', '--filter', f'label={LABEL}=1'], capture_output=True, text=True).stdout
+    return out.split()
+
+
+@pytest.fixture(scope='module')
+def target_network():
+    """A controlled, --internal target network holding only a container serving the bundled disposable fixture."""
+    subprocess.run(['docker', 'rm', '-f', 'vtp-fixture-it'], capture_output=True)
+    subprocess.run(['docker', 'network', 'rm', PROXY_TARGETS], capture_output=True)
+    subprocess.run(['docker', 'network', 'create', '--internal', PROXY_TARGETS], check=True, capture_output=True)
+    subprocess.run([
+        'docker', 'run', '-d', '--rm', '--name', 'vtp-fixture-it', '--network', PROXY_TARGETS, '--network-alias', 'vtp-fixture',
+        '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '10001:10001',
+        '--entrypoint', 'python', IMAGE, '-P', '-m', 'discovery_service.fixture_server', '--host', '0.0.0.0', '--port', '4599',
+    ], check=True, capture_output=True)
+    time.sleep(1)
+    yield PROXY_TARGETS
+    subprocess.run(['docker', 'rm', '-f', 'vtp-fixture-it'], capture_output=True)
+    subprocess.run(['docker', 'network', 'rm', PROXY_TARGETS], capture_output=True)
+
+
+def proxy_cfg(network: str) -> Config:
+    return Config(fixture_url=PROXY_FIXTURE, model='scripted', image=IMAGE, target_mode='proxy', target_network=network)
+
+
+def test_proxy_mode_reaches_the_fixture_container_and_counts_nothing_blocked(target_network):
+    request = DiscoveryRequest(schemaVersion='discovery.v1', runId='it-proxy', targetUrl=PROXY_FIXTURE, timeoutSeconds=60)
+    resp, stats = asyncio.run(discover(request, proxy_cfg(target_network), model=ScriptedModel()))
+    assert resp.status == 'COMPLETED' and resp.candidates, stats  # crawled through the egress proxy
+    # Chromium's own leftover background requests are refused and counted too (a few per job), never forwarded.
+    statistics = resp.statistics
+    assert statistics is not None and statistics.blockedDestinations is not None and statistics.blockedByReason is not None
+    assert statistics.blockedDestinations == sum(statistics.blockedByReason.values())
+    assert statistics.blockedByReason.get('forbidden_address', 0) == 0
+    print('baseline blocked by reason', statistics.blockedByReason)
+    assert stats['cleanup'] == 'ok'
+    assert leftover_containers() == [] and leftover_networks() == []
+
+
+def test_proxy_mode_refuses_every_other_destination_and_counts_them(target_network):
+    canary = Canary()
+    secret = 'sk-ant-canary-' + secrets.token_hex(16)
+    os.environ['ANTHROPIC_API_KEY'] = secret
+    try:
+        model = ScriptedModel(probe=True, canary_port=canary.port)
+        request = DiscoveryRequest(schemaVersion='discovery.v1', runId='it-proxy-probe', targetUrl=PROXY_FIXTURE, timeoutSeconds=90)
+        resp, stats = asyncio.run(discover(request, proxy_cfg(target_network), model=model))
+    finally:
+        os.environ.pop('ANTHROPIC_API_KEY', None)
+    probe = model.observations.get('probe')
+    assert isinstance(probe, dict) and 'proxy' in probe, model.observations
+    print(json.dumps({k: probe[k] for k in ('tcp', 'dns', 'http', 'browser', 'proxy', 'proxy_allowed', 'ipv4_routes')}, indent=1))
+    # Direct traffic: no route anywhere (an --internal network has no gateway), and no external name resolution.
+    for kind in ('tcp', 'udp', 'http'):
+        for dest, outcome in probe[kind].items():
+            assert outcome.startswith('BLOCKED'), (kind, dest, outcome)
+    assert probe['dns']['example.com'].startswith('BLOCKED') and probe['dns']['metadata.google.internal'].startswith('BLOCKED')
+    assert not any(route.split('\t')[1] == '00000000' for route in probe['ipv4_routes'] if '\t' in route)  # no default route
+    # Through the proxy: everything but the fixture's own origin is refused; the fixture is the positive control.
+    for url, outcome in probe['proxy'].items():
+        assert 'HTTPError' in outcome and '403' in outcome, (url, outcome)
+    assert probe['proxy_allowed'] == 'FETCHED 200'
+    for url, outcome in probe['browser'].items():
+        assert 'meta-data' not in outcome and 'example.com/' not in outcome.replace('AT ', '') or not outcome.startswith('AT http'), (url, outcome)
+    # Model traffic never used the network: the provider key stayed in the host process.
+    assert secret not in json.dumps(probe) and canary.hits == 0
+    assert resp.statistics is not None and resp.statistics.blockedDestinations >= len(probe['proxy'])
+    assert stats['blockedByReason'].get('not_allowlisted', 0) >= len(probe['proxy'])
+    assert resp.status == 'COMPLETED'
+    assert leftover_containers() == [] and leftover_networks() == []
+
+
+def test_proxy_mode_refuses_unapproved_target_networks():
+    for network in ('bridge', 'host', 'vtp-discovery-targets-missing'):
+        request = DiscoveryRequest(schemaVersion='discovery.v1', runId='it-proxy-bad', targetUrl=PROXY_FIXTURE)
+        resp, stats = asyncio.run(discover(request, proxy_cfg(network), model=ScriptedModel()))
+        assert resp.status == 'BLOCKED' and stats['reason'] == 'target_mode', (network, stats)
+    assert leftover_containers() == [] and leftover_networks() == []

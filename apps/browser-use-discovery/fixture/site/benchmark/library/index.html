@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Library catalog</title>
+<main><h1>Library catalog</h1>
+<form role="search"><label for="query">Search books</label> <input id="query" type="search"><button>Search</button></form>
+<p id="matches" role="status"></p>
+<ul id="books"><li>Rain gardens</li><li>Urban birds</li><li>Wildflowers</li></ul>
+<a href="page-two.html" rel="next">Next page</a></main>
+<script>
+  document.querySelector("form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const query = document.querySelector("#query").value.trim().toLowerCase();
+    const books = [...document.querySelectorAll("#books li")];
+    for (const book of books) book.hidden = !book.textContent.toLowerCase().includes(query);
+    const count = books.filter((book) => !book.hidden).length;
+    document.querySelector("#matches").textContent = count ? `${count} matching books` : "No matching books";
+  });
+</script></html>

@@ -82,6 +82,16 @@ export function renderReportMarkdown(report: TestReport): string {
   if (report.error) push(`- **Error:** ${escapeMarkdown(report.error.category)} — ${escapeMarkdown(report.error.message)}`);
   push("");
 
+  if (report.discovery) {
+    const { acceptedCount, candidateCount, fallbackUsed, status, reason } = report.discovery;
+    push("## Browser Use discovery", "");
+    push(fallbackUsed
+      ? `The standard survey supplied the test ideas (Browser Use outcome: ${escapeMarkdown(status)}${reason ? `, ${escapeMarkdown(reason)}` : ""}).`
+      : `${acceptedCount} of ${candidateCount} candidate ideas were offered for review. They are hypotheses until the selected test runs.`, "");
+    const selected = report.discovery.selectedSuggestion;
+    if (selected) push(`Selected idea · ${escapeMarkdown(selected.title)}${selected.edited ? " (edited)" : ""}`, "");
+  }
+
   if (report.requirement) {
     push("## Requirement", "");
     for (const line of report.requirement.originalText.split(/\r?\n/).filter((l) => l.trim())) push(`> ${escapeMarkdown(line)}`);

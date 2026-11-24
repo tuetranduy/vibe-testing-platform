@@ -27,6 +27,11 @@ interface Env {
   ANTHROPIC_API_KEY?: string;
   GEMINI_API_KEY?: string;
   DEEPSEEK_API_KEY?: string;
+  /** Browser Use fixture pilot admission (non-secret; wrangler.jsonc vars). The signing token is the worker's only. */
+  BROWSER_USE_DISCOVERY_PRODUCTION?: string;
+  BROWSER_USE_DISCOVERY_FIXTURE_URL?: string;
+  BROWSER_USE_DISCOVERY_TENANTS?: string;
+  TARGET_PRIVATE_ALLOWLIST?: string;
 }
 
 /** Drops unset optional values: the config treats a missing key and an empty one differently. */
@@ -66,6 +71,10 @@ export class ApiContainer extends Container<Env> {
       ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
       GEMINI_API_KEY: env.GEMINI_API_KEY,
       DEEPSEEK_API_KEY: env.DEEPSEEK_API_KEY,
+      BROWSER_USE_DISCOVERY_PRODUCTION: env.BROWSER_USE_DISCOVERY_PRODUCTION,
+      BROWSER_USE_DISCOVERY_FIXTURE_URL: env.BROWSER_USE_DISCOVERY_FIXTURE_URL,
+      BROWSER_USE_DISCOVERY_TENANTS: env.BROWSER_USE_DISCOVERY_TENANTS,
+      TARGET_PRIVATE_ALLOWLIST: env.TARGET_PRIVATE_ALLOWLIST,
     });
   }
 }

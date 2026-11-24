@@ -1,0 +1,13 @@
+#!/bin/sh
+# Chromium for DISCOVERY_TARGET_MODE=proxy: every page request goes through the job's egress proxy.
+# Browser Use 1.0.6 has no local proxy option, so the runner points BH_CHROME_PATH here.
+case "${VTP_PROXY_SERVER:-}" in
+  http://*:*) ;;
+  *) echo "VTP_PROXY_SERVER is not set" >&2; exit 64 ;;
+esac
+# No background services: the proxy's blocked-destination count then reflects what the page and agent requested.
+exec /usr/bin/chromium --proxy-server="$VTP_PROXY_SERVER" \
+  --disable-background-networking --disable-component-update --disable-domain-reliability \
+  --disable-client-side-phishing-detection --disable-default-apps --disable-sync --no-pings \
+  --disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication,CertificateTransparencyComponentUpdater \
+  "$@"

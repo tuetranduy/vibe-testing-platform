@@ -1,4 +1,5 @@
 import type { LlmChoice, LlmKeyProvider } from "@platform/contracts";
+import type { DiscoveryAdmission } from "@platform/config";
 import type { Database } from "@platform/db";
 import type { RunEventHub, RunQueue, ScheduleSync, RevisionQueue } from "@platform/event-bus";
 import type { Resolver } from "@platform/security";
@@ -14,6 +15,7 @@ export interface ApiConfig {
   defaultTenantId: string;
   maxActiveRunsPerTenant: number;
   privateAllowlist: string[];
+  discovery?: DiscoveryAdmission;
   secretsKey: Buffer;
   /** Signed artifact URL lifetime; capped at 300 s. */
   artifactUrlTtlSeconds: number;
@@ -45,6 +47,7 @@ export interface ApiDeps {
   /** Publishing connection (events + cancel signals). */
   redis: Pick<Redis, "publish">;
   assistanceRedis?: Pick<Redis, "get" | "eval">;
+  discoveryRollout?: Pick<Redis, "get" | "set" | "del">;
   hub: RunEventHub;
   queue: RunQueue;
   /** Rewrites a check from the user's words on the worker (2026-11-19); unset: 503 REVISE_UNAVAILABLE. */

@@ -9,6 +9,7 @@ Production runs at https://testing.tuetran.dev.
 | Web, API | Cloudflare Containers behind `apps/edge`. Only web is public; it reaches the API at `http://api.internal` |
 | Queues | Valkey (Redis) on the worker server, in the same compose project. The worker uses the plain port on the compose network; the API comes in over TLS on port 6380 |
 | Worker, runner | Docker on the worker server, `/opt/vibe-testing` (`infra/compose/docker-compose.prod.yml`) |
+| Browser Use pilot | Docker on the worker server: `browser-use-fixture`, `browser-use-discovery` and per-job agent containers (below) |
 
 ## Continuous deployment
 
@@ -19,6 +20,32 @@ CI does not run the tests, so nothing stops a broken commit from deploying. Run 
 `pnpm infra:up` first: `pnpm typecheck`, `pnpm test`, `pnpm test:integration`, `pnpm test:e2e`.
 
 Migrations run first, so each one must work with the previous version of the code still running.
+
+## Browser Use fixture pilot
+
+Production runs the disposable fixture pilot (`docs/Browser_Use_Integration_Plan_for_Vibe_Testing_Platform.md`).
+It is fixture-only: the agent explores a network-less copy of the bundled demo site, never a user's site.
+
+| Part | Where |
+|---|---|
+| `browser-use-fixture` | Worker server. The bundled fixture site on the internal `fixture` network; the worker's survey browses it at `http://browser-use-fixture:4599/` |
+| `browser-use-discovery` | Worker server. The signed job service: holds the model key (`BROWSER_USE_DISCOVERY_MODEL`, default `deepseek:deepseek-flash`) and a signing token generated on every deploy; starts each job's agent container on the host's Docker (mounted socket) with `--network none`, a read-only root, no capabilities and a 1 GiB memory cap. Reachable only from the worker on the internal `discovery` network; its own `discovery-egress` network reaches the model provider |
+| Agent image | `ghcr.io/tuetranduy/vibe-testing-browser-use-agent:<sha>`, also the fixture service's image |
+| API admission | `apps/edge/wrangler.jsonc` vars: `BROWSER_USE_DISCOVERY_PRODUCTION=fixture-pilot`, the fixture URL, `t_default`, and the fixture's own host:port as the only private target |
+
+Production refuses every Browser Use variable without `BROWSER_USE_DISCOVERY_PRODUCTION=fixture-pilot`, refuses the
+one-shot launcher, and allows only the fixture's own `host:port` as a private target.
+
+**Turning it on for a tenant:** an administrator selects **Enable Browser Use** in **Settings → Browser Use fixture
+pilot**. Then create a test with the URL `http://browser-use-fixture:4599/`, choose **Find test ideas**, and check
+**Autonomous Discovery (Browser Use)**. Each tenant may start 20 discovery attempts an hour, one at a time.
+
+**Turning it off:** **Disable Browser Use** in Settings stops new and in-flight discovery at once (Redis flag, no
+deploy). To remove the worker's side entirely, set the repository variable `BROWSER_USE_DISCOVERY=off` and re-run
+the Deploy workflow; opted-in runs then record `BLOCKED`/`not_configured` and keep the standard survey.
+
+The worker's metrics port is closed in production, so the Browser Use alert rules (`infra/monitoring/`) are not
+evaluated there until a Prometheus scrapes the worker.
 
 ## First-time setup
 

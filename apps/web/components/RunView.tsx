@@ -228,6 +228,7 @@ export function RunView({ runId }: { runId: string }) {
   const blank = summary.requirementPreview === "";
   const surveying = lifecycle === "SURVEYING" || (lifecycle === "QUEUED" && blank);
   const analyzing = !surveying && (lifecycle === "QUEUED" || lifecycle === "ANALYZING_REQUIREMENT");
+  const discoveryActivity = progress.timeline.findLast((event) => event.type.startsWith("discovery."));
 
   return (
     <div className="flex min-w-0 flex-col gap-7 run-workspace">
@@ -391,6 +392,7 @@ export function RunView({ runId }: { runId: string }) {
               <p className="text-muted-foreground">
                 The agent explores pages and controls, captures screenshots, and suggests useful tests for you to choose from.
               </p>
+              {discoveryActivity && <p role="status" className="mt-2 text-sm text-muted-foreground">{discoveryActivity.message}</p>}
             </div>
           </Card>
           <div className="live-grid">
@@ -401,7 +403,7 @@ export function RunView({ runId }: { runId: string }) {
           </div>
         </>
       ) : lifecycle === "AWAITING_SELECTION" ? (
-        <SuggestionReview runId={runId} onSelected={onSelected} onCancel={() => setCancel("confirming")} />
+        <SuggestionReview runId={runId} discoveryNotice={discoveryActivity?.type === "discovery.failed" ? discoveryActivity.message : null} onSelected={onSelected} onCancel={() => setCancel("confirming")} />
       ) : lifecycle === "AWAITING_CONFIRMATION" ? (
         <CriteriaReview runId={runId} onConfirmed={onConfirmed} />
       ) : terminal ? (

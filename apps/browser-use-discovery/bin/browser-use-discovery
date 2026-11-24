@@ -18,4 +18,8 @@ if [ ! -x "$PY" ]; then
   echo '{"event":"discovery.config_error","code":"venv_missing: run uv sync --frozen in apps/browser-use-discovery"}' >&2
   exit 127
 fi
-PYTHONPATH="$APP_DIR/src" PYTHONDONTWRITEBYTECODE=1 exec "$PY" -P -m discovery_service.launcher
+MODULE=discovery_service.launcher
+if [ "${1:-}" = "--serve" ]; then
+  MODULE=discovery_service.service
+fi
+PYTHONPATH="$APP_DIR/src" PYTHONDONTWRITEBYTECODE=1 exec "$PY" -P -m "$MODULE"

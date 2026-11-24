@@ -138,9 +138,30 @@ const EnvSchema = z
     ANALYSIS_TIMEOUT_SECONDS: intWithDefault(120),
     /** A blank requirement's survey (explore the site, suggest tests): its hard deadline. Page loading stops at 60 % of it. */
     SURVEY_TIMEOUT_SECONDS: intWithDefault(180),
-    /** Setting both opts the real survey into discovery on one disposable development fixture. */
+    /**
+     * The disposable fixture pilot. API admission is non-secret: the fixture URL and the tenant allowlist. Only the
+     * worker sets a transport (the launcher path, or the job service URL with its signing token).
+     */
     BROWSER_USE_DISCOVERY_LAUNCHER: emptyAsUnset(z.string().refine(path.isAbsolute, "must be an absolute executable path")),
     BROWSER_USE_DISCOVERY_FIXTURE_URL: emptyAsUnset(DiscoveryFixtureUrlSchema),
+    BROWSER_USE_DISCOVERY_SERVICE_URL: emptyAsUnset(z.url().transform((url) => new URL(url)).refine(
+      (url) => url.href === `${url.origin}/` && (url.protocol === "https:" ||
+        // Loopback, or a single-label service name on a private container network (no dots: never a public host).
+        (url.protocol === "http:" && (["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) ||
+          /^[a-z][a-z0-9-]{0,62}$/.test(url.hostname)))),
+      "must be an HTTPS origin, a local HTTP origin or an HTTP container service name",
+    ).transform((url) => url.origin)),
+    BROWSER_USE_DISCOVERY_SERVICE_TOKEN: emptyAsUnset(z.string().min(32)),
+    BROWSER_USE_DISCOVERY_TENANTS: emptyAsUnset(z.string().transform((value) => value.split(",").map((id) => id.trim()).filter(Boolean))),
+    /** Browser Use attempts per tenant per hour (worker): the single-job broker stays available to other tenants. */
+    BROWSER_USE_DISCOVERY_TENANT_HOURLY_LIMIT: intWithDefault(20, 1, 1000),
+    /**
+     * Production only: the operator's explicit opt-in to the disposable fixture pilot. Without it, production refuses
+     * every Browser Use variable. The pilot stays fixture-only (an exact HTTP fixture URL, a network-less agent).
+     */
+    BROWSER_USE_DISCOVERY_PRODUCTION: emptyAsUnset(z.literal("fixture-pilot")),
+    /** The broker's total job slots, shared fairly across tenants and worker replicas (worker). */
+    BROWSER_USE_DISCOVERY_CAPACITY: intWithDefault(1, 1, 16),
     WORKER_CONCURRENCY: intWithDefault(2),
     /** A suite schedule's least time between two runs (V1.2 F3). */
     SCHEDULE_MIN_INTERVAL_MINUTES: intWithDefault(15, 1, 24 * 60),
@@ -181,14 +202,42 @@ const EnvSchema = z
       ),
   })
   .superRefine((env, ctx) => {
-    if (env.BROWSER_USE_DISCOVERY_LAUNCHER && env.NODE_ENV === "production") {
-      ctx.addIssue({ code: "custom", path: ["BROWSER_USE_DISCOVERY_LAUNCHER"], message: "the disposable discovery pilot is for development and test" });
+    const discoveryTransport = env.BROWSER_USE_DISCOVERY_LAUNCHER || env.BROWSER_USE_DISCOVERY_SERVICE_URL;
+    if (env.NODE_ENV === "production" && env.BROWSER_USE_DISCOVERY_PRODUCTION !== "fixture-pilot") {
+      // Name each variable that is set: without the explicit opt-in the pilot is for development and test only.
+      for (const name of [
+        "BROWSER_USE_DISCOVERY_FIXTURE_URL", "BROWSER_USE_DISCOVERY_TENANTS", "BROWSER_USE_DISCOVERY_LAUNCHER",
+        "BROWSER_USE_DISCOVERY_SERVICE_URL", "BROWSER_USE_DISCOVERY_SERVICE_TOKEN",
+      ] as const) {
+        if (env[name] !== undefined) {
+          ctx.addIssue({
+            code: "custom", path: [name],
+            message: "the disposable Browser Use discovery pilot needs BROWSER_USE_DISCOVERY_PRODUCTION=fixture-pilot in production",
+          });
+        }
+      }
     }
-    if (Boolean(env.BROWSER_USE_DISCOVERY_LAUNCHER) !== Boolean(env.BROWSER_USE_DISCOVERY_FIXTURE_URL)) {
+    if (env.NODE_ENV === "production" && env.BROWSER_USE_DISCOVERY_LAUNCHER) {
+      ctx.addIssue({ code: "custom", path: ["BROWSER_USE_DISCOVERY_LAUNCHER"], message: "production uses the signed job service, not the one-shot launcher" });
+    }
+    if (discoveryTransport && !env.BROWSER_USE_DISCOVERY_FIXTURE_URL) {
       ctx.addIssue({
         code: "custom",
-        path: [env.BROWSER_USE_DISCOVERY_LAUNCHER ? "BROWSER_USE_DISCOVERY_FIXTURE_URL" : "BROWSER_USE_DISCOVERY_LAUNCHER"],
-        message: "both Browser Use discovery settings are required to enable the disposable fixture pilot",
+        path: ["BROWSER_USE_DISCOVERY_FIXTURE_URL"],
+        message: "a discovery transport needs the disposable fixture URL it may explore",
+      });
+    }
+    if (env.BROWSER_USE_DISCOVERY_LAUNCHER && env.BROWSER_USE_DISCOVERY_SERVICE_URL) {
+      ctx.addIssue({ code: "custom", path: ["BROWSER_USE_DISCOVERY_SERVICE_URL"], message: "configure one discovery transport" });
+    }
+    if (env.BROWSER_USE_DISCOVERY_SERVICE_URL && !env.BROWSER_USE_DISCOVERY_SERVICE_TOKEN) {
+      ctx.addIssue({ code: "custom", path: ["BROWSER_USE_DISCOVERY_SERVICE_TOKEN"], message: "required with a discovery service URL" });
+    }
+    if (env.BROWSER_USE_DISCOVERY_SERVICE_TOKEN && !env.BROWSER_USE_DISCOVERY_SERVICE_URL) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["BROWSER_USE_DISCOVERY_SERVICE_URL"],
+        message: "the signing token belongs only with the worker's discovery service URL",
       });
     }
     if (env.RUNNER_URL && !env.RUNNER_TOKEN) {
@@ -222,11 +271,17 @@ const EnvSchema = z
       ctx.addIssue({ code: "custom", path: ["BOOTSTRAP_ADMIN_PASSWORD"], message: "is the development default; choose a password for production" });
     }
     if (env.NODE_ENV === "production" && env.TARGET_PRIVATE_ALLOWLIST.length > 0) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["TARGET_PRIVATE_ALLOWLIST"],
-        message: "is not allowed in production",
-      });
+      // One exception: the opted-in fixture pilot may reach its own disposable fixture, and nothing else.
+      const fixture = env.BROWSER_USE_DISCOVERY_PRODUCTION === "fixture-pilot" && env.BROWSER_USE_DISCOVERY_FIXTURE_URL
+        ? new URL(env.BROWSER_USE_DISCOVERY_FIXTURE_URL).host
+        : null;
+      if (!fixture || env.TARGET_PRIVATE_ALLOWLIST.some((entry) => entry !== fixture)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["TARGET_PRIVATE_ALLOWLIST"],
+          message: "is not allowed in production (except the opted-in Browser Use fixture's own host:port)",
+        });
+      }
     }
     if (env.NODE_ENV === "production" && env.LLM_PROVIDER === "fake") {
       ctx.addIssue({ code: "custom", path: ["LLM_PROVIDER"], message: "fake provider is not allowed in production" });

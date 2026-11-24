@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -25,6 +26,7 @@ import json
 from urllib.parse import urlsplit, urljoin
 start = START_URL
 origin = '{0.scheme}://{0.netloc}'.format(urlsplit(start))
+scope = urlsplit(start).path.rsplit('/', 1)[0] + '/'
 queue, seen, pages = [start], set(), []
 while queue and len(pages) < 12:
     url = queue.pop(0)
@@ -44,11 +46,17 @@ while queue and len(pages) < 12:
       inputs: [...document.querySelectorAll('input,select')].filter(i => !i.form).map(i => ({id: i.id, type: i.type,
           min: i.min, max: i.max || i.getAttribute('maxlength')})),
       buttons: [...document.querySelectorAll('button')].map(b => ({text: b.textContent.trim(), disabled: b.disabled})),
+      fragmentLinks: document.querySelectorAll('nav a[href^="#"]').length,
+      disclosures: document.querySelectorAll('details > summary').length,
+      dialogs: document.querySelectorAll('button[aria-haspopup="dialog"]').length,
+      nextPage: !!document.querySelector('a[rel="next"]'),
+      statusRefresh: !!document.querySelector('#refresh') && !!document.querySelector('[role="status"]'),
     }""")
     pages.append({'path': path, **info})
     for link in info['links']:
         u = urlsplit(urljoin(url, link))
-        if '{0.scheme}://{0.netloc}'.format(u) == origin and u.path not in seen:
+        if ('{0.scheme}://{0.netloc}'.format(u) == origin and u.path not in seen
+                and u.path.startswith(scope)):
             queue.append(origin + u.path)
 for p in pages:
     p.pop('links', None)
@@ -135,6 +143,24 @@ for pid in [p for p in os.listdir('/proc') if p.isdigit()]:
                 out['procfd'][f'{pid}/{fd}'] = 'OPENED ' + cmd[:40] + ' -> ' + target
             except Exception as e:
                 out['procfd'][f'{pid}/{fd}'] = 'DENIED ' + type(e).__name__
+try:  # proxy mode: the job's egress proxy is the network's only peer (its alias resolves only there)
+    socket.gethostbyname('egress-proxy')
+    px = 'http://egress-proxy:3128'
+except OSError:
+    px = None
+if px:  # it must refuse everything but the fixture's origin
+    from urllib.parse import urlsplit as _split
+    via = urllib.request.build_opener(urllib.request.ProxyHandler({'http': px}))
+    def proxied(url):
+        try:
+            return 'FETCHED ' + str(via.open(url, timeout=5).status)
+        except Exception as e:
+            return 'BLOCKED ' + type(e).__name__ + ': ' + str(e)[:60]
+    start = PROBE_START_URL
+    off_port = f'http://{_split(start).hostname}:{(_split(start).port or 80) + 1}/'
+    out['proxy'] = {u: proxied(u) for u in ['http://169.254.169.254/latest/meta-data/', 'http://example.com/',
+                                            f'http://host.docker.internal:{CANARY}/', off_port]}
+    out['proxy_allowed'] = proxied(start)
 out['pid1'] = open('/proc/1/cmdline', 'rb').read().replace(b'\0', b' ').decode(errors='replace')[:120]
 out['env'] = {'readable_processes': readable, 'denied_processes': denied, 'names': sorted(names), 'suspicious': suspicious}
 print('PROBE ' + json.dumps(out))
@@ -172,6 +198,61 @@ def _last_json_line(text: str, prefix: str = '') -> Any:
             except ValueError:
                 continue
     return None
+
+
+def benchmark_candidates(pages: list[dict[str, Any]]) -> dict[str, Any]:
+    """Offer deterministic functional QA hypotheses from the DOM of the benchmark fixtures."""
+    out = []
+    paths = [page['path'] for page in pages if page.get('headings')]
+
+    def add(title, goal, rationale, relevant, expected):
+        out.append({
+            'title': title, 'goal': goal, 'rationale': rationale,
+            'relevant_paths': relevant, 'expected_behavior': [expected], 'negative_cases': [],
+        })
+
+    if len(paths) > 1:
+        add('Navigation labels match destination headings', 'Follow the visible links through the available pages.',
+            'The crawl observed linked pages with headings.', paths[:8],
+            'The destination heading identifies the selected section.')
+    for page in pages:
+        path = page['path']
+        if page['fragmentLinks']:
+            add('Client-side navigation updates the section', 'Switch between the displayed sections on the same page.',
+                'Navigation links point to client-side fragments.', [path],
+                'The active section heading updates to the selection.')
+        forms = page['forms']
+        if any(form['role'] == 'search' for form in forms):
+            add('Search narrows the displayed results', 'Search for a matching entry and then a missing entry.',
+                'A search form is present.', [path],
+                'Matching entries remain visible and a missing query shows an empty result.')
+        if page['nextPage']:
+            add('Pagination opens the next result page', 'Follow the next page link and return to the first page.',
+                'The catalog has a next-page link.', paths[:8],
+                'Each page displays its own entries.')
+        fields = [field for form in forms for field in form['fields']]
+        if any(field['type'] == 'password' for field in fields):
+            if len(paths) > 1:
+                add('Guest workspace access', 'Open the available guide while browsing as a guest.',
+                    'The guide is linked from the guest entry page.', paths[:8],
+                    'Guests can read the guide.')
+        elif any(field['required'] for field in fields):
+            add('Required fields block an empty form', 'Preview the form after leaving a required value empty.',
+                'The form includes required fields.', [path],
+                'The browser marks the field invalid and the preview stays empty.')
+        if page['disclosures']:
+            add('Help disclosure reveals its answer', 'Expand and collapse the help question.',
+                'A disclosure control is present.', [path],
+                'The associated answer is only visible while expanded.')
+        if page['dialogs']:
+            add('Help dialog opens and closes', 'Open and dismiss the help dialog.',
+                'A button advertises a dialog.', [path],
+                'The dialog opens and disappears when dismissed.')
+        if page['statusRefresh']:
+            add('Status refresh announces a failed request', 'Refresh the status when the service response is unavailable.',
+                'A refresh control and a status region are present.', [path],
+                'The status region reports failure and provides retry guidance.')
+    return {'candidates': out[:8], 'visited_paths': paths}
 
 
 def candidates_from_pages(pages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -257,7 +338,7 @@ class ScriptedModel(FunctionModel):
             return ModelResponse(parts=[ToolCallPart('python', {'code': crawl})])
         pages = _last_json_line(returns[0])
         if self.probe and len(returns) == 1:
-            return ModelResponse(parts=[ToolCallPart('python', {'code': PROBE.replace('CANARY_PORT', str(self.canary_port))})])
+            return ModelResponse(parts=[ToolCallPart('python', {'code': PROBE.replace('CANARY_PORT', str(self.canary_port)).replace('PROBE_START_URL', json.dumps(start))})])
         if self.probe and len(returns) >= 2 and 'probe' not in self.observations:
             self.observations['probe'] = _last_json_line(returns[1], 'PROBE ') or {'raw': returns[1][-2000:]}
         if not isinstance(pages, list):
@@ -266,4 +347,5 @@ class ScriptedModel(FunctionModel):
         self.observations['pages'] = [p.get('path') for p in pages if isinstance(p, dict)]
         names = {t.name for t in info.output_tools}
         tool = 'finish' if 'finish' in names else next(iter(names), 'finish')
-        return ModelResponse(parts=[ToolCallPart(tool, {'result': candidates_from_pages(pages), 'success': True})])
+        result = benchmark_candidates(pages) if urlsplit(start).path.startswith('/benchmark/') else candidates_from_pages(pages)
+        return ModelResponse(parts=[ToolCallPart(tool, {'result': result, 'success': True})])

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DiscoverySecondsSchema, DiscoveryStepsSchema } from "./discovery";
 import { DataKeySchema, HostnameSchema, HttpUrlSchema, IsoDateTime, SecretNameSchema } from "./common";
 import { LlmOverrideSchema, LlmProviderSchema, ReasoningLevelSchema, type LlmChoice } from "./llm";
 import { RunOwnerSchema } from "./users";
@@ -119,6 +120,9 @@ export const RunOptionsSchema = z
     /** Omitted: off when destructive actions are allowed (the rerun repeats every action), on otherwise. */
     rerunGeneratedTest: z.boolean().optional(),
     autoConfirmCriteria: z.boolean().default(false),
+    autonomousDiscovery: z.boolean().optional(),
+    discoveryMaxSeconds: DiscoverySecondsSchema.optional(),
+    discoveryMaxSteps: DiscoveryStepsSchema.optional(),
     allowDestructiveActions: z.boolean().default(false),
     /** Production only: the target URL's host, typed as the confirmation that destructive actions may run there. */
     confirmProductionHost: z.string().trim().min(1).max(255).optional(),
@@ -180,6 +184,13 @@ export const CreateTestRunRequestSchema = z
     llm: LlmOverrideSchema.optional(),
   })
   .superRefine((r, ctx) => {
+    if (r.options.autonomousDiscovery && (r.environment !== "staging" || r.requirement !== "" || r.options.autoConfirmCriteria)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["options", "autonomousDiscovery"],
+        message: "Autonomous Discovery requires a staging run with blank instructions and manual criteria review",
+      });
+    }
     // D9, amended 2026-09-28: production allows destructive actions only with the target host typed as confirmation.
     // Zod 4 runs this even when a field failed its own check (e.g. a string that is not a URL): an unparseable URL
     // is left to its own issue, never parsed here unguarded.

@@ -431,7 +431,11 @@ describe("TestEventSchema", () => {
   });
 
   it("lists every type and knows the terminal ones", () => {
-    expect(TEST_EVENT_TYPES).toHaveLength(27);
+    expect(TEST_EVENT_TYPES).toHaveLength(31);
+    expect(TEST_EVENT_TYPES).toEqual(expect.arrayContaining([
+      "discovery.started", "discovery.progress", "discovery.completed", "discovery.failed",
+    ]));
+    expect(isTerminalEvent({ type: "discovery.completed" })).toBe(false);
     expect(isTerminalEvent({ type: "run.completed" })).toBe(true);
     expect(isTerminalEvent({ type: "stage.completed" })).toBe(false);
   });

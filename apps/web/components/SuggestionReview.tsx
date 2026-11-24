@@ -14,6 +14,8 @@ import { displayUrl } from "./report-format";
 
 interface Props {
   runId: string;
+  /** The discovery outcome when the standard survey supplied the ideas (fallback), from the run timeline. */
+  discoveryNotice?: string | null;
   /** The server accepted the choice: the run now analyses that test (its new summary). */
   onSelected: (summary: TestRunSummary) => void;
   /** "None of these — cancel run": the page's own cancel confirmation takes over. */
@@ -32,7 +34,7 @@ const messageOf = (err: unknown) => (err instanceof ApiRequestError ? err.messag
  * suggested test. "Test this" opens its text for editing, "Continue with this test" chooses it for
  * this run; any other can start as a separate test with the form pre-filled.
  */
-export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
+export function SuggestionReview({ runId, discoveryNotice, onSelected, onCancel }: Props) {
   const [set, setSet] = useState<SuggestionSetResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   /** The card whose text is open for editing, and the text as edited so far. */
@@ -111,6 +113,7 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
           </p>
         </div>
 
+        {discoveryNotice && <p role="status" className="note note-warning">{discoveryNotice}</p>}
         <div className="suggestion-list">
           {set.suggestions.map((s) => {
             const editing = draft?.id === s.id ? draft : null;
@@ -121,6 +124,7 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
                   <h3 id={`${s.id}-title`} className="suggestion-title">
                     {s.title}
                   </h3>
+                  {s.discovery && <Badge variant="outline">Browser Use · Not yet tested</Badge>}
                   {s.destructive && (
                     <Badge variant="outline" className="min-h-6 gap-1.5 border-transparent bg-(--warning-bg) text-(--warning)">
                       <Icon name="warning" /> Changes data
@@ -149,6 +153,7 @@ export function SuggestionReview({ runId, onSelected, onCancel }: Props) {
                   <p className="suggestion-text">{s.requirement}</p>
                 )}
                 {s.why && <p className="text-muted-foreground">Why: {s.why}</p>}
+                {s.discovery && <p className="text-sm text-muted-foreground">Fixture pages for this idea · {s.discovery.relevantPaths.join(", ")}</p>}
                 {s.destructive && !set.run.destructiveActionsAllowed && (
                   <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
                     <Icon name="info" /> Will be blocked: this run doesn&apos;t allow destructive actions

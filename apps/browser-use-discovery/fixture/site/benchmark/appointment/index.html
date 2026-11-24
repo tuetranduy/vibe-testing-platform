@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Appointment estimate</title>
+<main><h1>Appointment estimate</h1><p>Check that your details are valid before previewing the estimate.</p>
+<form>
+  <p><label>Email <input name="email" type="email" required></label></p>
+  <p><label>Visit date <input name="date" type="date" required></label></p>
+  <p><label>Party size <input name="size" type="number" min="1" max="8" required></label></p>
+  <p><label>Notes (optional) <textarea name="notes"></textarea></label></p>
+  <button>Preview estimate</button>
+</form><p id="preview" role="status"></p></main>
+<script>
+  document.querySelector("form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    document.querySelector("#preview").textContent = "Estimate ready for review";
+  });
+</script></html>
