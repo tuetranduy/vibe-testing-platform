@@ -274,6 +274,15 @@ describe("the survey through the real sandbox (demo shop, scripted model)", () =
     });
 
     it.each(DISCOVERY_CORPUS)("compares the standard and enriched surveys for $id", async (fixture) => {
+      // A provider run stops before any job that could take it past the approved cap, or once a cost is unknown.
+      const cap = Number(process.env.BROWSER_USE_BENCHMARK_MAX_COST_USD ?? "0");
+      if (hostedModel && !hostedModel.startsWith("local:")) {
+        if (!(cap > 0)) throw new Error("A provider benchmark needs BROWSER_USE_BENCHMARK_MAX_COST_USD");
+        if (rows.some((row) => row.modelCostUsd === null)) throw new Error("An earlier job's cost was unknown: stopping at the cap");
+        const spent = rows.reduce((sum, row) => sum + (row.modelCostUsd ?? 0), 0);
+        const reserve = Number(process.env.BROWSER_USE_BENCHMARK_JOB_RESERVE_USD ?? "0.03");
+        if (spent + reserve > cap) throw new Error(`Stopping at the cost cap: USD ${spent.toFixed(4)} spent of ${cap}`);
+      }
       const url = new URL(fixture.path, benchmarkOrigin).href;
       const { ctx, survey, events } = setup(fixture.path, url, new SuggestionTransport(fixture));
       const start = performance.now();

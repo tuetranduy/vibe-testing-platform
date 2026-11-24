@@ -165,3 +165,32 @@ def test_the_launcher_samples_the_agent_containers_peak_memory(tmp_path, monkeyp
 
     asyncio.run(scenario())
     assert session.peak_memory == 300 * 1024**2
+
+
+def test_grounding_stays_inside_the_requested_fixture():
+    from discovery_service.launcher import SITE_DIR, scoped_paths, to_response
+    from discovery_service.policy import fixture_paths
+
+    known = fixture_paths(SITE_DIR)
+    museum = scoped_paths(known, '/benchmark/museum/index.html')
+    assert museum and all(path.startswith('/benchmark/museum/') for path in museum)
+    assert '/cart.html' not in museum and '/benchmark/library/index.html' not in museum
+    assert scoped_paths(known, '/') == known  # the shop at / keeps the whole site
+    idea = {'title': 'Cart totals', 'goal': 'A shopper sees a correct cart total.', 'rationale': 'Seen on the cart page.',
+            'expected_behavior': ['The total is the sum of the lines'], 'negative_cases': []}
+    outcome = {'status': 'completed', 'success': True, 'output': {'candidates': [
+        {**idea, 'relevant_paths': ['/cart.html']},
+        {**idea, 'title': 'Exhibit navigation', 'relevant_paths': ['/benchmark/museum/exhibit.html']},
+    ]}}
+    response, _ = to_response('r1', outcome, museum)
+    assert [c.title for c in response.candidates] == ['Exhibit navigation']
+    response, reason = to_response('r1', {**outcome, 'output': {'candidates': [{**idea, 'relevant_paths': ['/cart.html']}]}}, museum)
+    assert response.status == 'PARTIAL' and reason == 'no_valid_candidates'
+
+
+def test_the_task_names_the_fixture_scope():
+    from discovery_service.runner import build_task, path_scope
+
+    assert path_scope('/benchmark/museum/index.html') == '/benchmark/museum/' and path_scope('/') == '/'
+    task = build_task('http://127.0.0.1:4599', 'http://127.0.0.1:4599/benchmark/museum/index.html', '/benchmark/museum/')
+    assert 'pages under http://127.0.0.1:4599/benchmark/museum/' in task and 'out of scope' in task

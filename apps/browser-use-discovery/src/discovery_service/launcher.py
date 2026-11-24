@@ -484,6 +484,13 @@ class Session:
         return removed
 
 
+def scoped_paths(known: frozenset[str], start_path: str) -> frozenset[str]:
+    """Grounding stays within the requested fixture: only pages under the start page's directory count, so an idea
+    about another fixture on the same origin (a benchmark page wandering to the shop at /) is dropped."""
+    scope = start_path.rsplit('/', 1)[0] + '/'
+    return frozenset(path for path in known if path.startswith(scope))
+
+
 def to_response(run_id: str, outcome: dict[str, Any] | None, known: frozenset[str]) -> tuple[DiscoveryResponse, str]:
     if outcome is None:
         return DiscoveryResponse(runId=run_id, status='FAILED', reason='no_result'), 'no_result'
@@ -536,7 +543,7 @@ async def discover(request: DiscoveryRequest, cfg: Config, model: Any = None,
         return DiscoveryResponse(runId=request.runId, status='CANCELLED', reason='cancelled'), {'reason': 'cancelled'}
     except OSError:
         return DiscoveryResponse(runId=request.runId, status='FAILED', reason='docker_unavailable'), {'reason': 'docker_unavailable'}
-    response, reason = to_response(request.runId, outcome, fixture_paths(SITE_DIR))
+    response, reason = to_response(request.runId, outcome, scoped_paths(fixture_paths(SITE_DIR), target.path))
     if deadline_hit:
         reason = response.reason = 'hard_deadline'
     reported_steps = (outcome or {}).get('steps')

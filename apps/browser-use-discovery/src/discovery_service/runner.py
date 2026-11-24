@@ -156,10 +156,17 @@ class HostLink:
                 os._exit(137)
 
 
-def build_task(origin: str, start_url: str) -> str:
+def path_scope(path: str) -> str:
+    """The start page's directory: a fixture under /benchmark/<name>/ stays there; '/' keeps the whole site."""
+    return path.rsplit('/', 1)[0] + '/'
+
+
+def build_task(origin: str, start_url: str, scope: str = '/') -> str:
+    scope_url = origin + scope
     return f"""You are doing functional QA test discovery on a disposable demo website.
 
-Start at {start_url}. Explore only pages under {origin} by reading pages and following links.
+Start at {start_url}. Explore only pages under {scope_url} by reading pages and following links; pages elsewhere on
+{origin} belong to other fixtures and are out of scope.
 Identify the main end-user workflows (navigation, search, product browsing, cart, forms) and propose functional
 test scenarios a QA engineer should automate.
 
@@ -223,7 +230,7 @@ async def _run(transport: Transport, host_link: 'HostLink', start: dict[str, Any
     workspace = Path(os.environ.get('TMPDIR', '/tmp')) / 'agent-workspace'
     workspace.mkdir(parents=True, exist_ok=True)
     agent = Agent(
-        build_task(origin, start_url),
+        build_task(origin, start_url, path_scope(path)),
         llm=BrokeredModel(channel),
         browser=browser,
         output_model_schema=CandidateBatch,
