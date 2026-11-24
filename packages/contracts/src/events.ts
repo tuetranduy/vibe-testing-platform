@@ -11,6 +11,7 @@ import {
 } from "./run";
 import { ExplorationStepSchema } from "./exploration";
 import { SuggestionIdSchema } from "./suggestions";
+import { DiscoveryProgressSchema, DiscoverySummarySchema } from "./discovery";
 
 const envelope = {
   id: z.string(),
@@ -62,6 +63,10 @@ export const TestEventSchema = z.discriminatedUnion("type", [
     }),
   ),
   ev("suggestion.selected", z.object({ suggestionId: SuggestionIdSchema, edited: z.boolean() })),
+  ev("discovery.started", z.strictObject({ engine: z.literal("browser_use") })),
+  ev("discovery.progress", DiscoveryProgressSchema),
+  ev("discovery.completed", DiscoverySummarySchema),
+  ev("discovery.failed", DiscoverySummarySchema),
   ev("stage.started", StagePayload),
   ev("stage.completed", StagePayload),
   ev("stage.skipped", StagePayload),

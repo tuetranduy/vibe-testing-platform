@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Status dashboard</title>
+<main><h1>Status dashboard</h1><p>Retrieve the latest service status.</p>
+<button type="button" id="refresh">Refresh status</button><p id="status" role="status">Ready</p>
+</main><script>
+  document.querySelector("#refresh").addEventListener("click", async () => {
+    const status = document.querySelector("#status");
+    status.textContent = "Loading status";
+    try {
+      const response = await fetch("status-unavailable.json");
+      if (!response.ok) throw new Error("Status unavailable");
+      status.textContent = "Service online";
+    } catch {
+      status.textContent = "Status unavailable. Try again.";
+    }
+  });
+</script></html>

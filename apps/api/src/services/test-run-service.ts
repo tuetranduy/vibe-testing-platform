@@ -1,5 +1,6 @@
 import {
   CreateTestRunRequestSchema,
+  DiscoveryFixtureUrlSchema,
   MAX_SECRETS,
   extractInlineInputs,
   MAX_TEST_DATA_ENTRIES,
@@ -20,7 +21,7 @@ import {
   toRunSummary,
   type TestRun,
 } from "@platform/db";
-import { createRunEventPublisher, type RunEventPublisher } from "@platform/event-bus";
+import { createRunEventPublisher, discoveryEnabled, type RunEventPublisher } from "@platform/event-bus";
 import { catalogModel } from "@platform/llm/catalog";
 import { createRunRedactor, encryptSecret, redactByKey, secretFingerprint, validateTargetUrl } from "@platform/security";
 import { createHmac } from "node:crypto";
@@ -122,6 +123,14 @@ export class TestRunService {
     const { saved, availability } = await new LlmSettingsService(this.deps).state(tenantId);
     const resolved = resolveRunLlm({ override: req.llm, saved, env: this.deps.config.llm.envChoice, availability });
     if (!resolved.ok) throw modelNotAvailable(resolved.issue);
+    if (req.options.autonomousDiscovery) {
+      const admission = this.deps.config.discovery;
+      const target = DiscoveryFixtureUrlSchema.safeParse(req.targetUrl);
+      if (!admission?.tenantIds.includes(tenantId) || !target.success || target.data !== admission.fixtureUrl ||
+          resolved.choice.provider === "fake" || !await discoveryEnabled(this.deps.discoveryRollout, tenantId)) {
+        throw new HttpError(422, "DISCOVERY_UNAVAILABLE", "Autonomous Discovery needs an approved staging fixture and a real survey model");
+      }
+    }
 
     // A saved test data set (V1.1 F3): its values under the request's own, copied now.
     let testData = req.testData;

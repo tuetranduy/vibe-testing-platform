@@ -7,10 +7,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/ui/native-select";
-import { CreateTestRunRequestSchema, HttpUrlSchema, type CreateTestRunRequestInput, type LlmSettingsView, type ReasoningLevel } from "@platform/contracts";
+import { CreateTestRunRequestSchema, DiscoveryFixtureUrlSchema, HttpUrlSchema, type CreateTestRunRequestInput, type LlmSettingsView, type ReasoningLevel } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ApiRequestError, createRun, getCriteria, getLlmSettings, getRun, getSuggestions } from "../lib/api";
+import { ApiRequestError, createRun, getCriteria, getDiscoveryCapability, getLlmSettings, getRun, getSuggestions } from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
 import { Icon } from "./Icon";
 import { LEVEL_LABEL, modelGroups } from "./llm-format";
@@ -37,6 +37,10 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const [maxRunSeconds, setMaxRunSeconds] = useState("600");
   const [maxSteps, setMaxSteps] = useState("40");
   const [autoConfirm, setAutoConfirm] = useState(false);
+  const [discoveryFixture, setDiscoveryFixture] = useState<string | null>(null);
+  const [discover, setDiscover] = useState(false);
+  const [discoverySeconds, setDiscoverySeconds] = useState("120");
+  const [discoverySteps, setDiscoverySteps] = useState("20");
   const [rerun, setRerun] = useState(true);
   const [hosts, setHosts] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -52,6 +56,13 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
     getLlmSettings().then((v) => live && setCatalog(v), () => live && setCatalogFailed(true));
     return () => { live = false; };
   }, []);
+
+  useEffect(() => {
+    if (mode !== "explore") return;
+    let live = true;
+    getDiscoveryCapability().then(({ fixtureUrl }) => live && setDiscoveryFixture(fixtureUrl), () => {});
+    return () => { live = false; };
+  }, [mode]);
 
   useEffect(() => {
     if (!from) return;
@@ -79,6 +90,9 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const effectiveModel = catalog?.models.find((m) => m.id === (model || catalog.defaults.model));
   const levels = effectiveModel?.reasoningLevels.filter((l) => l !== "default") ?? [];
   const host = HttpUrlSchema.safeParse(targetUrl.trim()).success ? new URL(targetUrl.trim()).host : null;
+  const fixture = DiscoveryFixtureUrlSchema.safeParse(targetUrl.trim());
+  const canDiscover = mode === "explore" && fixture.success && fixture.data === discoveryFixture && effectiveModel?.provider !== "fake";
+  const usingDiscovery = canDiscover && discover;
   const errorFor = (id: string) => errors[id] ? <p id={`${id}-error`} className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px"><Icon name="error" /> {errors[id]}</p> : null;
   const invalid = (id: string) => ({ "aria-invalid": errors[id] ? true as const : undefined, "aria-describedby": errors[id] ? `${id}-error` : undefined });
 
@@ -92,7 +106,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   }, [errors, settingsOpen]);
 
   function showErrors(next: Errors) {
-    const first = ["targetUrl", "requirement", "model", "reasoning", "maxRunSeconds", "maxExplorationSteps", "additionalAllowedHosts"].find((id) => id in next);
+    const first = ["targetUrl", "requirement", "autonomousDiscovery", "discoveryMaxSeconds", "discoveryMaxSteps", "model", "reasoning", "maxRunSeconds", "maxExplorationSteps", "additionalAllowedHosts"].find((id) => id in next);
     pendingFocus.current = first ?? null;
     if (first && first !== "targetUrl" && first !== "requirement") setSettingsOpen(true);
     setErrors(next);
@@ -105,12 +119,13 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
     const body: CreateTestRunRequestInput = {
       targetUrl: targetUrl.trim(), requirement: mode === "explore" ? "" : requirement.trim(),
       // Action consent is acknowledged for the app. Populate the legacy API authorization fields automatically.
-      environment: "production",
+      environment: usingDiscovery ? "staging" : "production",
       options: {
         maxRunSeconds: Number(maxRunSeconds), maxExplorationSteps: Number(maxSteps),
-        generatePlaywright: true, rerunGeneratedTest: rerun, autoConfirmCriteria: autoConfirm,
-        allowDestructiveActions: true,
-        ...(host ? { confirmProductionHost: host } : {}),
+        generatePlaywright: true, rerunGeneratedTest: rerun, autoConfirmCriteria: usingDiscovery ? false : autoConfirm,
+        allowDestructiveActions: !usingDiscovery,
+        ...(host && !usingDiscovery ? { confirmProductionHost: host } : {}),
+        ...(usingDiscovery ? { autonomousDiscovery: true, discoveryMaxSeconds: Number(discoverySeconds), discoveryMaxSteps: Number(discoverySteps) } : {}),
         additionalAllowedHosts: hosts.split(/[\s,]+/).filter(Boolean),
       },
       ...((model || reasoning) ? { llm: { ...(model ? { model } : {}), ...(reasoning ? { reasoning } : {}) } } : {}),
@@ -166,6 +181,18 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
             {errorFor("requirement")}
             <div className="example-row" role="group" aria-label="Example tests"><span className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Try an example</span>{EXAMPLES.map((ex) => <Button variant="plain" key={ex.label} type="button" className="example-chip" onClick={() => { setRequirement(ex.text); prompt.current?.focus(); }}><Icon name={ex.icon} />{ex.label}</Button>)}</div>
           </Field> : <div className="explore-intro"><Icon name="sparkle" /><div><strong>Let the agent find a starting point.</strong><p>It explores your website and suggests useful tests. Choose an idea, review the checks, and start when you’re ready.</p></div></div>}
+          {canDiscover && <Field className="gap-2">
+            <div className="flex items-center gap-2">
+              <Checkbox id="autonomousDiscovery" checked={discover} onCheckedChange={(checked) => setDiscover(checked === true)} aria-describedby="discovery-hint" />
+              <label htmlFor="autonomousDiscovery">Autonomous Discovery (Browser Use)</label>
+            </div>
+            <p id="discovery-hint" className="text-sm text-muted-foreground">Explore the staging fixture for additional test ideas. This uses extra AI calls and requires criteria review.</p>
+            {errorFor("autonomousDiscovery")}
+            {usingDiscovery && <div className="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1">
+              <Field><label htmlFor="discoveryMaxSeconds">Discovery time (seconds)</label><Input id="discoveryMaxSeconds" name="discoveryMaxSeconds" type="number" min={15} max={120} value={discoverySeconds} onChange={(e) => setDiscoverySeconds(e.target.value)} {...invalid("discoveryMaxSeconds")} />{errorFor("discoveryMaxSeconds")}</Field>
+              <Field><label htmlFor="discoveryMaxSteps">Discovery model calls</label><Input id="discoveryMaxSteps" name="discoveryMaxSteps" type="number" min={2} max={20} value={discoverySteps} onChange={(e) => setDiscoverySteps(e.target.value)} {...invalid("discoveryMaxSteps")} />{errorFor("discoveryMaxSteps")}</Field>
+            </div>}
+          </Field>}
         </div>
       </div>
       <Collapsible open={settingsOpen} onOpenChange={setSettingsOpen} className="group border-t border-(--border-soft) px-[30px] max-[720px]:px-[22px]">

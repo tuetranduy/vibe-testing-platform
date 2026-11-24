@@ -47,7 +47,7 @@ def normalize_url(raw: str) -> FixtureTarget:
         raise PolicyError('URL does not parse') from e
     if parts.scheme != 'http':  # the in-container copy is plain HTTP on loopback
         raise PolicyError('only http:// fixture URLs are supported')
-    if parts.username or parts.password or parts.query or parts.fragment:
+    if parts.username is not None or parts.password is not None or '?' in raw or '#' in raw:
         raise PolicyError('fixture URL must not carry credentials, a query or a fragment')
     host = (parts.hostname or '').lower().rstrip('.')
     try:
@@ -62,7 +62,7 @@ def normalize_url(raw: str) -> FixtureTarget:
     if not 1024 <= port <= 65535:
         raise PolicyError('fixture port must be 1024-65535')
     path = parts.path or '/'
-    if not re.match(r'^/[A-Za-z0-9._~/-]*$', path) or '..' in path:
+    if not re.fullmatch(r'/[A-Za-z0-9._~/-]*', path) or '..' in path or '//' in path:
         raise PolicyError('invalid fixture path')
     return FixtureTarget(url=f'http://{host}:{port}{path}', host=host, port=port, path=path)
 

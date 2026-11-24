@@ -4,6 +4,8 @@ import { NormalizedRequirementSchema } from "./requirement";
 import { GeneratedInputSchema } from "./exploration";
 import { CriterionResultSchema, NotCompiledSchema } from "./results";
 import { ErrorCategorySchema, RunLifecycleSchema, RunVerdictSchema } from "./run";
+import { DiscoveryFixturePathSchema, DiscoverySummarySchema } from "./discovery";
+import { SuggestionIdSchema } from "./suggestions";
 
 export const TestReportSchema = z.object({
   runId: z.string(),
@@ -39,6 +41,14 @@ export const TestReportSchema = z.object({
     .object({ status: z.enum(["PASSED", "FAILED", "ERRORED"]), durationMs: z.number().int() })
     .nullable(),
   diagnostics: z.array(z.object({ criterionId: CriterionIdSchema.nullable(), summary: z.string().max(2000) })),
+  discovery: DiscoverySummarySchema.extend({
+    selectedSuggestion: z.object({
+      id: SuggestionIdSchema,
+      title: z.string().max(80),
+      edited: z.boolean(),
+      relevantPaths: z.array(DiscoveryFixturePathSchema).max(8),
+    }).nullable().optional(),
+  }).optional(),
   /** Values nobody provided that exploration generated and filled (2026-10-07). */
   generatedInputs: z.array(GeneratedInputSchema).default([]),
   usage: z.object({

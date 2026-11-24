@@ -1,8 +1,8 @@
-import { SuggestionSetDraftSchema, type DiscoveryCandidate, type SuggestionSetDraft } from "@platform/contracts";
+import { RunOptionsSchema, SuggestionSetDraftSchema, type DiscoveryCandidate, type SuggestionSetDraft } from "@platform/contracts";
 import { describe, expect, it, vi } from "vitest";
-import type { AutonomousDiscoveryPort } from "../discovery/port";
+import { DiscoveryPortError, type AutonomousDiscoveryPort } from "../discovery/port";
 import type { StageContext } from "../orchestrator/stages";
-import { withAutonomousDiscovery } from "./autonomous-survey";
+import { classifyDiscoveryResult, withAutonomousDiscovery } from "./autonomous-survey";
 
 const fixtureUrl = "http://localhost:4178/";
 const baseline = SuggestionSetDraftSchema.parse({
@@ -28,25 +28,43 @@ const candidate = {
 function context(signal = new AbortController().signal): StageContext {
   return {
     runId: "run_fixture",
-    request: { targetUrl: fixtureUrl, environment: "staging", requirement: "" },
+    tenantId: "t_default",
+    request: {
+      targetUrl: fixtureUrl, environment: "staging", requirement: "", browser: "chromium",
+      testData: {}, secretNames: [], options: RunOptionsSchema.parse({ autonomousDiscovery: true }),
+    },
     deadlineAt: new Date("2026-11-23T00:03:00Z"),
     now: () => new Date("2026-11-23T00:00:00Z"),
     signal,
     budgetSignal: (ms: number) => AbortSignal.any([signal, AbortSignal.timeout(ms)]),
     boundary: async () => signal.throwIfAborted(),
     redact: (value: unknown) => value,
-  } as StageContext;
+    publish: vi.fn(async () => {}),
+    budgets: { explorationMs: 100_000, rerunMs: 30_000 },
+    secrets: { names: [], get: () => undefined },
+    addCleanup: () => {},
+    llm: null,
+  };
 }
 
 const survey = async (): Promise<SuggestionSetDraft> => baseline;
 const completeWith = (candidates: DiscoveryCandidate[]): AutonomousDiscoveryPort["discover"] =>
   async ({ schemaVersion, runId }) => ({ schemaVersion, runId, status: "COMPLETED", candidates });
 
+const published = (ctx: StageContext) => vi.mocked(ctx.publish).mock.calls.map(([event]) => event);
+const outcome = (ctx: StageContext) => published(ctx).find((event) => event.type === "discovery.completed" || event.type === "discovery.failed");
+
 describe("fixture discovery in the existing survey", () => {
-  it("uses the original stage and result with the feature off", async () => {
-    const stage = withAutonomousDiscovery(survey);
-    expect(stage).toBe(survey);
-    await expect(stage(context())).resolves.toBe(baseline);
+  it("leaves a run that did not opt in untouched: same suggestions, no discovery events, no adapter call", async () => {
+    const ctx = context();
+    delete ctx.request.options.autonomousDiscovery;
+    const discover = vi.fn(completeWith([candidate]));
+    const observe = vi.fn();
+    await expect(withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, observe })(ctx)).resolves.toBe(baseline);
+    await expect(withAutonomousDiscovery(survey)(ctx)).resolves.toBe(baseline);
+    expect(discover).not.toHaveBeenCalled();
+    expect(observe).not.toHaveBeenCalled();
+    expect(ctx.publish).not.toHaveBeenCalled();
   });
 
   it("merges useful candidates in depth order, deduplicates, and preserves two original suggestions", async () => {
@@ -59,13 +77,22 @@ describe("fixture discovery in the existing survey", () => {
       candidate,
       { ...candidate, title: "Delete account", goal: "Delete the customer account." },
     ]));
-    const result = await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover } })(context());
+    const ctx = context();
+    const observe = vi.fn();
+    const result = await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, observe })(ctx);
+    // The deadline leaves 175 s; the 120 s default stage budget gives the broker 115 s for its whole job.
     expect(discover).toHaveBeenCalledWith({
-      schemaVersion: "discovery.v1", runId: "run_fixture", targetUrl: fixtureUrl,
-    }, { signal: expect.any(AbortSignal) });
+      schemaVersion: "discovery.v1", runId: "run_fixture", targetUrl: fixtureUrl, timeoutSeconds: 115,
+    }, { signal: expect.any(AbortSignal), onProgress: expect.any(Function) });
     expect(result.pages).toBe(baseline.pages);
     expect(result.suggestions.slice(0, 2)).toEqual(baseline.suggestions.slice(0, 2));
     expect(result.suggestions[2]).toMatchObject({ title: candidate.title, why: candidate.rationale, destructive: false });
+    expect(result.suggestions[2]?.discovery).toEqual({ engine: "browser_use", relevantPaths: candidate.relevantPaths });
+    expect(ctx.publish).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "discovery.completed",
+      payload: expect.objectContaining({ status: "COMPLETED", reason: "ok", attempted: true, acceptedCount: 6, fallbackUsed: false }),
+    }));
+    expect(observe).toHaveBeenCalledWith(expect.objectContaining({ status: "COMPLETED" }), expect.any(Number));
     expect(result.suggestions[2]?.requirement).toContain(candidate.expectedBehavior[0]);
     expect(result.suggestions).toHaveLength(8);
     expect(result.suggestions.map(({ title }) => title)).not.toContain("Delete account");
@@ -73,30 +100,126 @@ describe("fixture discovery in the existing survey", () => {
   });
 
   it.each([
-    { environment: "production" },
-    { targetUrl: fixtureUrl + "?token=private" },
-    { targetUrl: fixtureUrl + "another-fixture" },
-  ] as const)("skips runs outside the disposable fixture (%j)", async (request) => {
+    [{ environment: "production" }, "environment"],
+    [{ targetUrl: fixtureUrl + "?token=private" }, "fixture_mismatch"],
+    [{ targetUrl: fixtureUrl + "another-fixture" }, "fixture_mismatch"],
+  ] as const)("records a typed fallback for an opted-in run outside the disposable fixture (%j)", async (request, reason) => {
     const ctx = context();
     Object.assign(ctx.request, request);
     const discover = vi.fn(completeWith([candidate]));
-    await expect(withAutonomousDiscovery(survey, { fixtureUrl, port: { discover } })(ctx)).resolves.toBe(baseline);
+    const observe = vi.fn();
+    await expect(withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, observe })(ctx)).resolves.toBe(baseline);
+    expect(discover).not.toHaveBeenCalled();
+    expect(outcome(ctx)).toMatchObject({ type: "discovery.failed", payload: { status: "BLOCKED", reason, attempted: false, fallbackUsed: true } });
+    expect(observe).toHaveBeenCalledWith(expect.objectContaining({ status: "BLOCKED", reason }), null);
+  });
+
+  it("records BLOCKED / not_configured when the API admitted the run but this worker has no discovery transport", async () => {
+    for (const deps of [undefined, { observe: vi.fn() }]) {
+      const ctx = context();
+      await expect(withAutonomousDiscovery(survey, deps)(ctx)).resolves.toBe(baseline);
+      expect(published(ctx).map(({ type }) => type)).toEqual(["discovery.failed"]);
+      expect(outcome(ctx)?.payload).toMatchObject({ status: "BLOCKED", reason: "not_configured", attempted: false });
+      if (deps) expect(deps.observe).toHaveBeenCalledWith(expect.objectContaining({ reason: "not_configured" }), null);
+    }
+  });
+
+  it("records tenant rollback and an exhausted tenant quota without starting a job", async () => {
+    const discover = vi.fn(completeWith([candidate]));
+    const disabled = context();
+    await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, allowsTenant: async () => false })(disabled);
+    expect(outcome(disabled)?.payload).toMatchObject({ status: "BLOCKED", reason: "tenant_disabled", attempted: false });
+    const quota = context();
+    const reserve = vi.fn(async () => false);
+    await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, reserve })(quota);
+    expect(reserve).toHaveBeenCalledWith("t_default");
+    expect(outcome(quota)?.payload).toMatchObject({ status: "BUSY", reason: "tenant_quota", attempted: false });
+    expect(published(quota).some(({ type }) => type === "discovery.started")).toBe(false);
     expect(discover).not.toHaveBeenCalled();
   });
 
-  it("returns the original suggestions if the discovery adapter fails", async () => {
-    const discover = async () => { throw new Error("unavailable"); };
-    await expect(withAutonomousDiscovery(survey, { fixtureUrl, port: { discover } })(context())).resolves.toBe(baseline);
+  it("aborts in-flight discovery when the tenant disables it and keeps the standard survey", async () => {
+    const ctx = context();
+    let jobSignal: AbortSignal | undefined;
+    let enabled = true;
+    const discover: AutonomousDiscoveryPort["discover"] = async (_input, { signal }) => {
+      jobSignal = signal;
+      enabled = false;
+      return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    };
+    await expect(withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, allowsTenant: () => enabled })(ctx)).resolves.toBe(baseline);
+    expect(jobSignal?.aborted).toBe(true);
+    expect(ctx.signal.aborted).toBe(false);
+    expect(published(ctx).map(({ type }) => type)).toEqual(["discovery.started", "discovery.failed"]);
+    expect(outcome(ctx)?.payload).toMatchObject({ status: "CANCELLED", reason: "tenant_disabled", attempted: true, acceptedCount: 0 });
   });
 
-  it("keeps discovery under the remaining survey budget, with time for persistence", async () => {
+  it("discards candidates if the rollout was disabled before a result could be offered", async () => {
     const ctx = context();
-    ctx.deadlineAt = new Date("2026-11-23T00:00:06Z");
+    const allowsTenant = vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false);
+    const discover = completeWith([candidate]);
+    await expect(withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, allowsTenant })(ctx)).resolves.toBe(baseline);
+    expect(allowsTenant).toHaveBeenCalledTimes(2);
+    expect(outcome(ctx)?.payload).toMatchObject({ status: "CANCELLED", reason: "tenant_disabled", fallbackUsed: true });
+  });
+
+  it.each([
+    [new DiscoveryPortError("busy", "broker full"), { status: "BUSY", reason: "broker_busy", attempted: false }],
+    [new DiscoveryPortError("invalid_result", "bad"), { status: "FAILED", reason: "invalid_result", attempted: true }],
+    [new DiscoveryPortError("unavailable", "down"), { status: "FAILED", reason: "broker_unavailable", attempted: true }],
+    [new Error("socket hang up"), { status: "FAILED", reason: "broker_unavailable", attempted: true }],
+  ] as const)("classifies an adapter failure (%s) and keeps the original suggestions", async (error, expected) => {
+    const ctx = context();
+    const observe = vi.fn();
+    const discover = async () => { throw error; };
+    await expect(withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, observe })(ctx)).resolves.toBe(baseline);
+    expect(outcome(ctx)?.payload).toMatchObject({ ...expected, fallbackUsed: true });
+    expect(observe).toHaveBeenCalledWith(expect.anything(), expected.attempted ? expect.any(Number) : null);
+  });
+
+  it.each([
+    [{ status: "PARTIAL", reason: "timeout" }, "TIMED_OUT", "timeout"],
+    [{ status: "FAILED", reason: "hard_deadline" }, "TIMED_OUT", "hard_deadline"],
+    [{ status: "PARTIAL", reason: "no_valid_candidates" }, "PARTIAL", "no_valid_candidates"],
+    [{ status: "PARTIAL" }, "PARTIAL", "no_result"],
+    [{ status: "CANCELLED", reason: "cancelled" }, "CANCELLED", "cancelled"],
+  ] as const)("classifies the broker's reply %j", async (reply, status, reason) => {
+    const ctx = context();
+    const discover: AutonomousDiscoveryPort["discover"] = async ({ schemaVersion, runId }) => ({ schemaVersion, runId, candidates: [], ...reply });
+    await expect(withAutonomousDiscovery(survey, { fixtureUrl, port: { discover } })(ctx)).resolves.toBe(baseline);
+    expect(outcome(ctx)).toMatchObject({ type: "discovery.failed", payload: { status, reason, attempted: true, fallbackUsed: true } });
+    expect(classifyDiscoveryResult({ schemaVersion: "discovery.v1", runId: "r", candidates: [], ...reply })).toEqual({ status, reason });
+  });
+
+  it("bounds the whole job inside the stage budget and classifies the stage's own deadline as TIMED_OUT", async () => {
+    const ctx = context();
+    ctx.deadlineAt = new Date("2026-11-23T00:00:25Z");
     const discoveryTimeout = AbortSignal.abort(new DOMException("Discovery timed out", "TimeoutError"));
     ctx.budgetSignal = vi.fn(() => discoveryTimeout);
     const discover = vi.fn(completeWith([candidate]));
     await expect(withAutonomousDiscovery(survey, { fixtureUrl, port: { discover } })(ctx)).resolves.toBe(baseline);
-    expect(ctx.budgetSignal).toHaveBeenCalledWith(1000);
+    // 25 s left − 5 s to save the suggestions = a 20 s stage; the broker's job budget ends 5 s before it.
+    expect(ctx.budgetSignal).toHaveBeenCalledWith(20_000);
+    expect(discover.mock.calls[0]?.[0].timeoutSeconds).toBe(15);
+    expect(outcome(ctx)?.payload).toMatchObject({ status: "TIMED_OUT", reason: "worker_deadline", attempted: true });
+  });
+
+  it("uses the run's lower discovery budget and steps", async () => {
+    const ctx = context();
+    ctx.request.options.discoveryMaxSeconds = 30;
+    ctx.request.options.discoveryMaxSteps = 6;
+    const discover = vi.fn(completeWith([candidate]));
+    await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover } })(ctx);
+    expect(discover.mock.calls[0]?.[0]).toMatchObject({ timeoutSeconds: 25, maxAgentSteps: 6 });
+  });
+
+  it("does not start a job without enough survey time left", async () => {
+    const ctx = context();
+    ctx.deadlineAt = new Date("2026-11-23T00:00:06Z");
+    const discover = vi.fn(completeWith([candidate]));
+    await expect(withAutonomousDiscovery(survey, { fixtureUrl, port: { discover } })(ctx)).resolves.toBe(baseline);
+    expect(discover).not.toHaveBeenCalled();
+    expect(outcome(ctx)?.payload).toMatchObject({ status: "TIMED_OUT", reason: "no_budget", attempted: false });
   });
 
   it("propagates an actual run cancellation", async () => {
@@ -108,4 +231,69 @@ describe("fixture discovery in the existing survey", () => {
     };
     await expect(withAutonomousDiscovery(survey, { fixtureUrl, port: { discover } })(context(controller.signal))).rejects.toBe(error);
   });
+
+  describe("fair admission to the broker's slots", () => {
+    it("waits its turn within the discovery budget, then runs with the remaining time and releases the slot", async () => {
+      const ctx = context();
+      const release = vi.fn(async () => {});
+      const admit = vi.fn(async () => ({ granted: true as const, waitedMs: 20_000, release }));
+      const discover = vi.fn(completeWith([candidate]));
+      await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, admit })(ctx);
+      // 120 s stage budget: wait up to 115 - 10 s; the lease outlives the job's budget by a grace period.
+      expect(admit).toHaveBeenCalledWith(expect.objectContaining({ tenantId: "t_default", runId: "run_fixture", maxWaitMs: 105_000, leaseMs: 145_000 }));
+      // 20 s spent waiting: the broker's job budget shrinks to 95 s.
+      expect(discover.mock.calls[0]?.[0].timeoutSeconds).toBe(95);
+      expect(release).toHaveBeenCalledTimes(1);
+      expect(outcome(ctx)?.payload).toMatchObject({ status: "COMPLETED" });
+    });
+
+    it.each([
+      ["not admitted in time", async () => ({ granted: false as const, waitedMs: 105_000 })],
+      ["the scheduler is unavailable", async () => { throw new Error("redis down"); }],
+    ])("records BUSY / capacity_wait without a job and refunds the quota when %s", async (_case, admit) => {
+      const ctx = context();
+      const refund = vi.fn();
+      const discover = vi.fn(completeWith([candidate]));
+      await expect(withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, admit, refund, reserve: async () => true })(ctx))
+        .resolves.toBe(baseline);
+      expect(discover).not.toHaveBeenCalled();
+      expect(refund).toHaveBeenCalledWith("t_default");
+      expect(outcome(ctx)?.payload).toMatchObject({ status: "BUSY", reason: "capacity_wait", attempted: false });
+    });
+
+    it("rechecks the rollout after waiting: a disabled tenant gets no job and frees its slot", async () => {
+      const ctx = context();
+      let enabled = true;
+      const release = vi.fn(async () => {});
+      const refund = vi.fn();
+      const admit = vi.fn(async () => { enabled = false; return { granted: true as const, waitedMs: 1_000, release }; });
+      const discover = vi.fn(completeWith([candidate]));
+      await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, admit, refund, allowsTenant: () => enabled })(ctx);
+      expect(discover).not.toHaveBeenCalled();
+      expect(release).toHaveBeenCalled();
+      expect(refund).toHaveBeenCalled();
+      expect(outcome(ctx)?.payload).toMatchObject({ status: "BLOCKED", reason: "tenant_disabled", attempted: false });
+    });
+
+    it("ends without a job when the wait used up the budget", async () => {
+      const ctx = context();
+      const release = vi.fn(async () => {});
+      const admit = vi.fn(async () => ({ granted: true as const, waitedMs: 106_000, release }));
+      const discover = vi.fn(completeWith([candidate]));
+      await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, admit })(ctx);
+      expect(discover).not.toHaveBeenCalled();
+      expect(release).toHaveBeenCalled();
+      expect(outcome(ctx)?.payload).toMatchObject({ status: "TIMED_OUT", reason: "no_budget", attempted: false });
+    });
+
+    it("propagates a run cancellation while waiting", async () => {
+      const controller = new AbortController();
+      const error = new Error("run cancelled");
+      const admit = vi.fn(async () => { controller.abort(error); throw error; });
+      const discover = vi.fn(completeWith([candidate]));
+      await expect(withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, admit })(context(controller.signal))).rejects.toBe(error);
+      expect(discover).not.toHaveBeenCalled();
+    });
+  });
 });
+

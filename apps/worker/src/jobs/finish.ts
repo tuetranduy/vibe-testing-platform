@@ -1,9 +1,10 @@
 import { ModelProviderError, isTerminalLifecycle } from "@platform/contracts";
-import { EventRepository, RunRepository, SecretRepository, StaleTransitionError, type TestRun } from "@platform/db";
+import { EventRepository, RunRepository, SecretRepository, StaleTransitionError, SuggestionRepository, type TestRun } from "@platform/db";
 import { createRunEventPublisher } from "@platform/event-bus";
 import { redactByKey } from "@platform/security";
 import { CancelledError, errorCategoryOf, errorMessageOf } from "@platform/testing-engine";
 import type { WorkerDeps } from "../deps";
+import { recordSelectedDiscoveryOutcome } from "../discovery-outcome";
 import { NO_VERDICT, observeStage } from "../metrics";
 import type { RunContextHandle } from "../run-context";
 
@@ -60,6 +61,7 @@ export async function failBeforeContext(deps: WorkerDeps, run: TestRun, err: unk
     await new RunRepository(deps.db).transition(run.id, run.lifecycle, "ERRORED", { errorCategory: category, errorMessage: message });
     observeStage(deps.metrics, run.lifecycle, run.lifecycleChangedAt, (deps.now ?? (() => new Date()))());
     deps.metrics?.testRuns.inc({ lifecycle: "ERRORED", verdict: NO_VERDICT });
+    await recordSelectedDiscoveryOutcome(deps, run, "ERRORED", null, (id) => new SuggestionRepository(deps.db).get(id));
     await new SecretRepository(deps.db).purge(run.id);
     await createRunEventPublisher({ events: new EventRepository(deps.db), redis: deps.redis, redact: redactByKey }).publish({
       runId: run.id,

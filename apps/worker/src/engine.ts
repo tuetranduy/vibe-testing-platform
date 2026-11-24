@@ -2,10 +2,11 @@ import type { Redis } from "ioredis";
 import { createAssistancePort, assistanceTimeoutMs } from "./assistance";
 import os from "node:os";
 import path from "node:path";
-import type { Env } from "@platform/config";
+import { discoveryAdmission, type DiscoveryEnv, type Env } from "@platform/config";
 import type { LlmChoice } from "@platform/contracts";
 import type { Database } from "@platform/db";
 import type { ArtifactStorage } from "@platform/storage";
+import { admitDiscoveryRun, discoveryEnabled, refundDiscoveryAttempt, reserveDiscoveryAttempt } from "@platform/event-bus";
 import {
   createFakeStages,
   createRealStages,
@@ -14,10 +15,12 @@ import {
   type ExploreStageDeps,
   type FakeEngineOptions,
   type RunTestStageDeps,
+  type AutonomousDiscoveryPort,
+  type AutonomousSurveyDeps,
   type WorkspaceConfig,
 } from "@platform/testing-engine";
 import type { WorkerLogger } from "./deps";
-import { createBrowserUseDiscoveryClient } from "./discovery-client";
+import { createBrowserUseDiscoveryClient, createDiscoveryServiceClient } from "./discovery-client";
 import { createExplorationDeps, createExplorationStore } from "./exploration";
 import { createGenerateTestDeps } from "./generated-test";
 import type { WorkerMetrics } from "./metrics";
@@ -36,10 +39,72 @@ export type EngineConfig = Partial<
     | "RUNNER_NODE_MODULES_DIR"
     | "RUNNER_URL"
     | "RUNNER_TOKEN"
-    | "BROWSER_USE_DISCOVERY_LAUNCHER"
-    | "BROWSER_USE_DISCOVERY_FIXTURE_URL"
-  >
+  > & DiscoveryEnv
 >;
+
+/**
+ * The survey's Browser Use wiring. Always present, so a run the API admitted still records a typed outcome and
+ * metrics here when this worker has no transport (BLOCKED / not_configured) or another fixture (fixture_mismatch).
+ */
+export function createDiscoveryDeps(config: EngineConfig, deps: Pick<EngineDeps, "discoveryRollout" | "logger" | "metrics">): AutonomousSurveyDeps {
+  const admission = discoveryAdmission(config);
+  const metrics = deps.metrics;
+  const port = !admission
+    ? undefined
+    : config.BROWSER_USE_DISCOVERY_LAUNCHER
+      ? createBrowserUseDiscoveryClient(config.BROWSER_USE_DISCOVERY_LAUNCHER)
+      : config.BROWSER_USE_DISCOVERY_SERVICE_URL && config.BROWSER_USE_DISCOVERY_SERVICE_TOKEN
+        ? createDiscoveryServiceClient(config.BROWSER_USE_DISCOVERY_SERVICE_URL, config.BROWSER_USE_DISCOVERY_SERVICE_TOKEN, {
+            onCleanupError: () => metrics?.discoveryCleanupErrors.inc(),
+          })
+        : undefined;
+  const hourlyLimit = config.BROWSER_USE_DISCOVERY_TENANT_HOURLY_LIMIT ?? 20;
+  // In-flight calls per worker process; Prometheus sums workers. The broker's own count is its health endpoint.
+  const counted: AutonomousDiscoveryPort | undefined = port && {
+    async discover(input, context) {
+      metrics?.discoveryActiveJobs.inc();
+      try {
+        return await port.discover(input, context);
+      } finally {
+        metrics?.discoveryActiveJobs.dec();
+      }
+    },
+  };
+  return {
+    ...(admission && counted ? { fixtureUrl: admission.fixtureUrl, port: counted } : {}),
+    allowsTenant: async (tenantId) => Boolean(admission?.tenantIds.includes(tenantId)) && await discoveryEnabled(deps.discoveryRollout, tenantId),
+    reserve: (tenantId) => reserveDiscoveryAttempt(deps.discoveryRollout, tenantId, hourlyLimit),
+    refund: (tenantId) => refundDiscoveryAttempt(deps.discoveryRollout, tenantId),
+    ...(deps.discoveryRollout && {
+      admit: async ({ tenantId, runId, maxWaitMs, leaseMs, signal }) => {
+        const admission = await admitDiscoveryRun(deps.discoveryRollout!, tenantId, runId, {
+          capacity: config.BROWSER_USE_DISCOVERY_CAPACITY ?? 1, maxWaitMs, leaseMs, signal,
+        });
+        metrics?.discoveryAdmissionWait.observe({ outcome: admission.granted ? "granted" : "timed_out" }, admission.waitedMs / 1000);
+        return admission;
+      },
+    }),
+    logger: deps.logger,
+    observe: (summary, elapsedSeconds) => {
+      if (!metrics) return;
+      metrics.discoveryJobs.inc({ status: summary.status, reason: summary.reason ?? "unknown" });
+      // Only attempted jobs: configuration, rollout, quota and capacity refusals take no time to report.
+      if (elapsedSeconds !== null) metrics.discoveryDuration.observe(elapsedSeconds);
+      if (summary.fallbackUsed) metrics.discoveryFallback.inc();
+      metrics.discoveryCandidates.inc({ kind: "returned" }, summary.candidateCount);
+      metrics.discoveryCandidates.inc({ kind: "accepted" }, summary.acceptedCount);
+      if (summary.statistics) {
+        metrics.discoverySteps.observe(summary.statistics.agentSteps);
+        if (summary.statistics.modelCostUsd !== null) metrics.discoveryCost.inc(summary.statistics.modelCostUsd);
+        if (summary.statistics.protocolViolations) metrics.discoveryProtocolViolations.inc(summary.statistics.protocolViolations);
+        if (summary.statistics.peakMemoryBytes != null) metrics.discoveryWorkerMemory.observe(summary.statistics.peakMemoryBytes);
+        for (const [reason, count] of Object.entries(summary.statistics.blockedByReason ?? {})) {
+          if (count) metrics.discoveryBlockedDestinations.inc({ reason }, count);
+        }
+      }
+    },
+  };
+}
 
 /** Where reruns get their workspaces (Ruling R32): RUNNER_WORKSPACE_DIR / RUNNER_NODE_MODULES_DIR, with defaults. */
 export function rerunWorkspaceConfig(config: Pick<EngineConfig, "RUNNER_WORKSPACE_DIR" | "RUNNER_NODE_MODULES_DIR">): WorkspaceConfig {
@@ -59,6 +124,8 @@ export interface Engines {
 
 export interface EngineDeps {
   redis?: Redis;
+  /** The tenant rollout flag and hourly attempt quota. Absent: discovery admission stays closed on this worker. */
+  discoveryRollout?: Pick<Redis, "get" | "eval">;
   db: Database;
   logger: WorkerLogger;
   fake?: FakeEngineOptions;
@@ -121,11 +188,7 @@ export function createEngines(config: EngineConfig, deps: EngineDeps): Engines {
   });
   const real = createRealStages({
     survey,
-    discovery: config.BROWSER_USE_DISCOVERY_LAUNCHER && config.BROWSER_USE_DISCOVERY_FIXTURE_URL ? {
-      fixtureUrl: config.BROWSER_USE_DISCOVERY_FIXTURE_URL,
-      port: createBrowserUseDiscoveryClient(config.BROWSER_USE_DISCOVERY_LAUNCHER),
-      logger: deps.logger,
-    } : undefined,
+    discovery: createDiscoveryDeps(config, deps),
     exploration,
     generateTest: createGenerateTestDeps(deps.db, deps.logger),
     runTest,

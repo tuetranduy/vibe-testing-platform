@@ -193,6 +193,7 @@ function tone(e: TestEvent): Tone {
     case "test.generated":
     case "suggestions.proposed":
     case "suggestion.selected":
+    case "discovery.completed":
       return "success";
     case "page.surveyed":
       return e.payload.status === "READ" ? "success" : "warning";
@@ -205,6 +206,7 @@ function tone(e: TestEvent): Tone {
     case "run.completed":
       return e.payload.verdict === "PASSED" ? "success" : e.payload.verdict === "FAILED" ? "error" : "warning";
     case "plan.not_revised":
+    case "discovery.failed":
     case "artifact.omitted":
     case "egress.blocked":
     case "stage.skipped":

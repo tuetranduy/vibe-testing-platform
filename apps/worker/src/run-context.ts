@@ -23,6 +23,7 @@ import {
 } from "@platform/testing-engine";
 import { PausableTimer } from "./pausable-timer";
 import type { WorkerDeps } from "./deps";
+import { recordSelectedDiscoveryOutcome } from "./discovery-outcome";
 import { NO_VERDICT, observeStage } from "./metrics";
 
 export interface RunContextHandle {
@@ -161,7 +162,10 @@ export async function createRunContext(
       stageStartedAt = at;
       lifecycle = to;
       deps.runLogs?.setStage(run.id, to);
-      if (isTerminalLifecycle(to)) deps.metrics?.testRuns.inc({ lifecycle: to, verdict: patch.verdict ?? NO_VERDICT });
+      if (isTerminalLifecycle(to)) {
+        deps.metrics?.testRuns.inc({ lifecycle: to, verdict: patch.verdict ?? NO_VERDICT });
+        await recordSelectedDiscoveryOutcome(deps, run, to, patch.verdict, (id) => new SuggestionRepository(deps.db).get(id));
+      }
     },
     publish: ctx.publish,
     saveRequirement: (draft) => new RequirementRepository(deps.db).createRevision(run.id, draft),

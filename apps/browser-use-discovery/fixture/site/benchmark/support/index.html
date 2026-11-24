@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Support center</title>
+<main><h1>Support center</h1>
+<details><summary>Where is my reference number?</summary><p>Look at the top of the receipt.</p></details>
+<button type="button" aria-haspopup="dialog" id="open">Open help dialog</button>
+<dialog aria-labelledby="dialog-title"><h2 id="dialog-title">Contact details</h2><p>Support is available on weekdays.</p>
+<form method="dialog"><button>Close help</button></form></dialog>
+</main><script>
+  document.querySelector("#open").addEventListener("click", () => document.querySelector("dialog").showModal());
+</script></html>

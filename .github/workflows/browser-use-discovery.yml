@@ -1,0 +1,141 @@
+name: Browser Use discovery
+
+# The disposable fixture pilot: scripted models only, no hosted model calls and no external targets.
+on:
+  pull_request:
+    paths:
+      - 'apps/browser-use-discovery/**'
+      - 'apps/api/**'
+      - 'apps/worker/**'
+      - 'apps/web/components/**'
+      - 'apps/web/lib/**'
+      - 'packages/config/**'
+      - 'packages/contracts/**'
+      - 'packages/db/**'
+      - 'packages/event-bus/**'
+      - 'packages/testing-engine/**'
+      - 'evals/discovery/**'
+      - 'infra/monitoring/**'
+      - 'tests/integration/survey-stage.test.ts'
+      - 'tests/e2e/**'
+      - 'docs/Browser_Use_Integration_Plan_for_Vibe_Testing_Platform.md'
+      - '.github/workflows/browser-use-discovery.yml'
+  # Dedicated CI branches only (never main): this workflow has no deploy step, and deploy.yml runs on main alone.
+  push:
+    branches:
+      - 'ci/browser-use-discovery-**'
+  workflow_dispatch:
+
+# A newer push to the same branch replaces an older run.
+concurrency:
+  group: browser-use-discovery-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Actions are pinned to the commits their major tags resolved to on 2026-11-23 (release in the comment).
+jobs:
+  fixture:
+    name: Agent isolation, alert rules and scripted fixture smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install uv==0.12.9
+      - run: docker build -t vtp-browser-use-discovery:1.0.6 apps/browser-use-discovery
+      - name: Python unit and container tests (isolation, budgets, cleanup, signatures)
+        run: uv run --frozen pytest -q
+        working-directory: apps/browser-use-discovery
+      - name: Validate and unit-test the alert rules
+        run: |
+          for command in "check rules browser-use-discovery.rules.yml" "test rules browser-use-discovery.rules.test.yml"; do
+            docker run --rm --network none -v "$PWD/infra/monitoring:/rules:ro" -w /rules --entrypoint promtool \
+              prom/prometheus@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996 $command
+          done
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright-core install --with-deps chromium
+      - name: Test the hosted evaluation scorer without provider calls
+        run: pnpm test:evals evals/discovery/ratings.test.ts
+      - name: Scripted fixture smoke (standard vs enriched survey)
+        run: |
+          apps/browser-use-discovery/bin/serve-fixture --port 4599 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid"' EXIT
+          curl --retry 5 --retry-connrefused --fail --silent http://127.0.0.1:4599/ >/dev/null
+          BROWSER_USE_BENCHMARK=1 pnpm test:integration tests/integration/survey-stage.test.ts -t 'ten-site Browser Use fixture benchmark'
+          node -e 'const r = require("./.artifacts/discovery-benchmark/results.json"); if (!r.complete) { console.error("incomplete benchmark"); process.exit(1); }'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: discovery-fixture-smoke
+          path: |
+            .artifacts/discovery-benchmark/results.json
+            .artifacts/discovery-benchmark/candidates-for-rating.json
+
+  platform:
+    name: Unedited suggestion to Playwright, and tenant rollback (E2E)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea # 16-alpine
+        env:
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: platform
+          POSTGRES_DB: platform
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U platform" --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499 # 7-alpine
+        ports: ['6379:6379']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install uv==0.12.9
+      - run: docker build -t vtp-browser-use-discovery:1.0.6 apps/browser-use-discovery
+      - run: uv sync --frozen
+        working-directory: apps/browser-use-discovery
+      - name: Local S3 for run artifacts
+        run: |
+          docker run -d --name s3 -p 9000:9000 \
+            rclone/rclone@sha256:45401ad7410db1d67ffdb58e19059ad20b0d8e0285a60e38bbec55cc1019c7a5 \
+            serve s3 --auth-key s3admin,s3admin-secret --addr :9000 /data
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright-core install --with-deps chromium
+      - name: Discovery E2E through the signed job service (scripted models)
+        run: |
+          token_file="$RUNNER_TEMP/discovery-token"
+          umask 077
+          openssl rand -hex 32 > "$token_file"
+          printf 'DISCOVERY_FIXTURE_URL=http://127.0.0.1:4599/\nDISCOVERY_MODEL=scripted\nDISCOVERY_SERVICE_TOKEN=%s\n' \
+            "$(cat "$token_file")" > "$RUNNER_TEMP/discovery.env"
+          apps/browser-use-discovery/bin/serve-fixture --port 4599 &
+          fixture_pid=$!
+          BROWSER_USE_DISCOVERY_ENV="$RUNNER_TEMP/discovery.env" apps/browser-use-discovery/bin/browser-use-discovery --serve &
+          service_pid=$!
+          trap 'kill "$fixture_pid" "$service_pid"' EXIT
+          curl --retry 10 --retry-connrefused --fail --silent http://127.0.0.1:4599/ >/dev/null
+          curl --retry 10 --retry-connrefused --fail --silent http://127.0.0.1:4600/internal/health
+          export BROWSER_USE_DISCOVERY_FIXTURE_URL=http://127.0.0.1:4599/
+          export BROWSER_USE_DISCOVERY_SERVICE_URL=http://127.0.0.1:4600
+          export BROWSER_USE_DISCOVERY_SERVICE_TOKEN="$(cat "$token_file")"
+          pnpm test:integration tests/integration/survey-stage.test.ts
+          BROWSER_USE_DISCOVERY_E2E_REQUIRED=1 \
+            pnpm test:e2e tests/e2e/platform-discovery.spec.ts tests/e2e/platform-suggest.spec.ts

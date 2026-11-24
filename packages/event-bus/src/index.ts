@@ -4,3 +4,5 @@ export * from "./subscriber";
 export * from "./queues";
 export * from "./reaper";
 export * from "./revisions";
+export * from "./discovery-rollout";
+export * from "./discovery-scheduler";

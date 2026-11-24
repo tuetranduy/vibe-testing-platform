@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { discoveryOutcomeText } from "../lib/discovery";
 import { Card } from "@/components/ui/card";
 import type { CancelReason, TestReport, TestRunSummary } from "@platform/contracts";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -92,6 +93,21 @@ export function RunReport({ runId, artifacts, steps, cancelReason = null, llm = 
   return (
     <>
       <ReportSummary report={report} cancelReason={cancelReason} llm={llm} />
+      {report.discovery && (
+        <Card as="section" aria-labelledby="discovery-report-title">
+          <h2 id="discovery-report-title" className="text-sm font-semibold">Browser Use discovery</h2>
+          <p className="text-sm text-muted-foreground">{discoveryOutcomeText(report.discovery)}</p>
+          {report.discovery.selectedSuggestion && <p className="text-sm text-muted-foreground">
+            Selected idea · {report.discovery.selectedSuggestion.title}{report.discovery.selectedSuggestion.edited && " (edited)"}.
+            The results below reflect the reviewed criteria.
+          </p>}
+          {report.discovery.statistics && <p className="text-sm text-muted-foreground">
+            {report.discovery.statistics.modelRequests} model calls · {(report.discovery.statistics.durationMs / 1000).toFixed(1)} s · {
+              report.discovery.statistics.modelCostUsd === null ? "Model cost unavailable" : `$${report.discovery.statistics.modelCostUsd.toFixed(4)} model cost`
+            }
+          </p>}
+        </Card>
+      )}
       <Assumptions requirement={report.requirement} />
       <div className="actions flex flex-wrap items-center gap-2">
         <Button asChild variant="outline">

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Shift planner</title>
+<main><h1>Shift planner</h1><nav aria-label="Planner sections">
+<a href="#today">Today</a> · <a href="#week">This week</a></nav>
+<section><h2 id="section-title">Today</h2><p id="section-copy">Morning shift begins at nine.</p></section>
+</main>
+<script>
+  function renderSection() {
+    const week = location.hash === "#week";
+    document.querySelector("#section-title").textContent = week ? "This week" : "Today";
+    document.querySelector("#section-copy").textContent = week ? "Three shifts are scheduled this week." : "Morning shift begins at nine.";
+  }
+  addEventListener("hashchange", renderSection);
+  renderSection();
+</script></html>

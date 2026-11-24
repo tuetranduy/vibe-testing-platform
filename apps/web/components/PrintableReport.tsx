@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { discoveryOutcomeText } from "../lib/discovery";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { assumptionsOf, isInferred, qualifiedPassLabel, type TestReport, type TestRunSummary } from "@platform/contracts";
 import { useEffect, useRef, useState } from "react";
@@ -115,6 +116,14 @@ export function PrintableReport({ runId, autoPrint = true }: { runId: string; au
           </p>
         )}
       </header>
+
+      {report.discovery && <section>
+        <h2>Browser Use discovery</h2>
+        <p>{discoveryOutcomeText(report.discovery)}</p>
+        {report.discovery.selectedSuggestion && <p>
+          Selected idea · {report.discovery.selectedSuggestion.title}{report.discovery.selectedSuggestion.edited && " (edited)"}
+        </p>}
+      </section>}
 
       {report.requirement && (
         <section>

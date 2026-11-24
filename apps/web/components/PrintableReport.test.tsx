@@ -55,4 +55,20 @@ describe("PrintableReport (V1.1)", () => {
     expect(screen.getByText("A usual check")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /^AC-2 — .*\(added by the platform\)$/ })).toBeInTheDocument();
   });
+
+  it("prints the discovery outcome and keeps the edited provenance of the selected idea", async () => {
+    const report = {
+      ...reportFixture(),
+      discovery: {
+        status: "COMPLETED" as const, reason: "ok" as const, attempted: true, candidateCount: 4, acceptedCount: 2, pageCount: 3,
+        fallbackUsed: false, selectedSuggestion: { id: "S-3", title: "Main navigation reaches every section", edited: true, relevantPaths: ["/"] },
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => (String(input).endsWith("/report") ? json(200, report) : json(200, summaryFixture({ lifecycle: "COMPLETED", verdict: "PASSED" })))));
+    vi.stubGlobal("print", vi.fn());
+    render(<PrintableReport runId="run_1" />);
+    expect(await screen.findByRole("heading", { name: "Browser Use discovery" })).toBeInTheDocument();
+    expect(screen.getByText(/2 of 4 candidate ideas were offered for review/)).toBeInTheDocument();
+    expect(screen.getByText(/Selected idea · Main navigation reaches every section \(edited\)/)).toBeInTheDocument();
+  });
 });

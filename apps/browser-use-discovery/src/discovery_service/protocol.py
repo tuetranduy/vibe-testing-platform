@@ -18,11 +18,21 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 SCHEMA_VERSION = 'discovery.v1'
 Status = Literal['COMPLETED', 'PARTIAL', 'BLOCKED', 'FAILED', 'CANCELLED']
+# Why a job ended. Codes only: never page text, model output or provider messages.
+# The egress proxy's refusal codes (egress_proxy.REASONS).
+EgressReason = Literal['not_allowlisted', 'forbidden_address', 'connect_denied', 'bad_request', 'unresolvable', 'upstream_error']
+Reason = Literal[
+    'ok', 'no_valid_candidates', 'timeout', 'max_steps', 'hard_deadline', 'cancelled', 'agent_error', 'no_result',
+    'target_not_allowed', 'model_not_configured', 'docker_unavailable', 'invalid_request',
+]
 
 # Hard budgets for this slice. Not caller-configurable.
 MAX_AGENT_STEPS = 19  # Browser Use max_steps; +1 possible delivery repair = the broker's 20-call cap
 AGENT_TIMEOUT_S = 120
 MAX_CANDIDATES = 12
+
+# A caller's total job budget (timeoutSeconds) covers container start, the agent and result delivery.
+MIN_JOB_SECONDS, MAX_JOB_SECONDS = 10, 120
 
 MAX_STDIN_BYTES = 16 * 1024
 MAX_FRAME_BYTES = 4 * 1024 * 1024  # one IPC line (a model request with history; screenshots are off)
@@ -38,12 +48,37 @@ RUN_ID = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 
 
 class DiscoveryRequest(BaseModel):
-    """Node -> launcher. Unknown fields are rejected: callers cannot pass policy, limits or credentials."""
+    """Node -> launcher. Callers may lower the budget for the operator's fixture.
+
+    ``timeoutSeconds`` is the whole job's wall-clock budget, measured from receipt: container start, the agent and
+    the result's delivery. The launcher stops the job within it, so a caller waiting slightly longer always receives
+    a typed response instead of having to abandon the job.
+    """
 
     model_config = ConfigDict(extra='forbid', frozen=True)
     schemaVersion: Literal['discovery.v1']
     runId: str = Field(pattern=RUN_ID.pattern)
     targetUrl: str = Field(min_length=1, max_length=2048)
+    timeoutSeconds: int | None = Field(default=None, strict=True, ge=MIN_JOB_SECONDS, le=MAX_JOB_SECONDS)
+    maxAgentSteps: int | None = Field(default=None, strict=True, ge=2, le=20)
+
+
+class DiscoveryStatistics(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    agentSteps: int = Field(ge=0, le=20)
+    modelRequests: int = Field(ge=0, le=20)
+    durationMs: int = Field(ge=0, le=240_000)
+    inputTokens: int = Field(ge=0, le=100_000_000)
+    outputTokens: int = Field(ge=0, le=1_000_000)
+    modelCostUsd: float | None = Field(default=None, ge=0)
+    protocolViolations: int = Field(default=0, ge=0, le=1000)
+    # Peak memory of the job's agent container (Chromium, Browser Use and agent Python), sampled by the host launcher
+    # from `docker stats`. None when no sample succeeded. The container's hard limit is 2 GiB.
+    peakMemoryBytes: int | None = Field(default=None, ge=0, le=8 * 1024**3)
+    # Proxy mode only: requests the job's egress proxy refused (off-allowlist, forbidden address, CONNECT, malformed).
+    # None in bundled mode, where the container has no network and nothing reaches a proxy to be counted.
+    blockedDestinations: int | None = Field(default=None, ge=0, le=100_000)
+    blockedByReason: dict[EgressReason, Annotated[int, Field(ge=0, le=100_000)]] | None = None
 
 
 class WireCandidate(BaseModel):
@@ -61,7 +96,9 @@ class DiscoveryResponse(BaseModel):
     schemaVersion: Literal['discovery.v1'] = SCHEMA_VERSION
     runId: str
     status: Status
+    reason: Reason | None = None
     candidates: list[WireCandidate] = Field(default_factory=list, max_length=MAX_CANDIDATES)
+    statistics: DiscoveryStatistics | None = None
 
     @model_validator(mode='after')
     def _only_completed_carries_candidates(self) -> 'DiscoveryResponse':
@@ -71,8 +108,12 @@ class DiscoveryResponse(BaseModel):
             raise ValueError('bad runId')
         return self
 
+    def wire(self) -> dict[str, Any]:
+        # Omit unset optional top-level fields; keep nulls inside statistics (modelCostUsd may be unknown).
+        return self.model_dump(mode='json', exclude={name for name in ('reason', 'statistics') if getattr(self, name) is None})
+
     def line(self) -> str:
-        return self.model_dump_json() + '\n'
+        return json.dumps(self.wire(), separators=(',', ':')) + '\n'
 
 
 # --- what the agent is asked to deliver (Browser Use output_model_schema) -------------------------------------------

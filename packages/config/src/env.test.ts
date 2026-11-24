@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { discoveryAdmission } from "./discovery";
 import { loadEnv, loadLiveLlmEnv, providerOfModel } from "./env";
 
 const validEnv: Record<string, string | undefined> = {
@@ -29,7 +30,37 @@ describe("loadEnv", () => {
     expect(() => loadEnv({ ...validEnv, ...settings, BROWSER_USE_DISCOVERY_LAUNCHER: "launcher" })).toThrow(/absolute executable path/);
     expect(() => loadEnv({ ...validEnv, ...settings, BROWSER_USE_DISCOVERY_FIXTURE_URL: "not a URL" })).toThrow(/BROWSER_USE_DISCOVERY_FIXTURE_URL/);
     expect(() => loadEnv({ ...validEnv, ...settings, BROWSER_USE_DISCOVERY_FIXTURE_URL: "http://localhost:4178/?key=private" })).toThrow(/query or fragment/);
-    expect(() => loadEnv({ ...validEnv, ...settings, NODE_ENV: "production" })).toThrow(/disposable discovery pilot/);
+    expect(() => loadEnv({ ...validEnv, ...settings, NODE_ENV: "production" })).toThrow(/disposable Browser Use discovery pilot/);
+  });
+
+  it("separates non-secret API admission from the worker-only broker credential", () => {
+    const service = { BROWSER_USE_DISCOVERY_SERVICE_URL: "http://127.0.0.1:4600", BROWSER_USE_DISCOVERY_SERVICE_TOKEN: "x".repeat(32) };
+    const fixture = { BROWSER_USE_DISCOVERY_FIXTURE_URL: "http://localhost:4178/", BROWSER_USE_DISCOVERY_TENANTS: "t_default, t_two" };
+    // The API: the fixture and tenants alone admit runs, with no transport or token.
+    const api = loadEnv({ ...validEnv, ...fixture });
+    expect(discoveryAdmission(api)).toEqual({ fixtureUrl: "http://localhost:4178/", tenantIds: ["t_default", "t_two"] });
+    expect(api.BROWSER_USE_DISCOVERY_SERVICE_TOKEN).toBeUndefined();
+    expect(discoveryAdmission(loadEnv(validEnv))).toBeUndefined();
+    // The worker: a transport needs the fixture; the token belongs only with the service URL.
+    expect(loadEnv({ ...validEnv, ...fixture, ...service }).BROWSER_USE_DISCOVERY_TENANT_HOURLY_LIMIT).toBe(20);
+    expect(() => loadEnv({ ...validEnv, ...service })).toThrow(/BROWSER_USE_DISCOVERY_FIXTURE_URL/);
+    expect(() => loadEnv({ ...validEnv, ...fixture, BROWSER_USE_DISCOVERY_SERVICE_URL: service.BROWSER_USE_DISCOVERY_SERVICE_URL }))
+      .toThrow(/BROWSER_USE_DISCOVERY_SERVICE_TOKEN/);
+    expect(() => loadEnv({ ...validEnv, ...fixture, BROWSER_USE_DISCOVERY_SERVICE_TOKEN: "x".repeat(32) })).toThrow(/BROWSER_USE_DISCOVERY_SERVICE_URL/);
+    expect(() => loadEnv({ ...validEnv, ...fixture, ...service, BROWSER_USE_DISCOVERY_LAUNCHER: "/opt/launcher" }))
+      .toThrow(/one discovery transport/);
+  });
+
+  it("names each production discovery variable that is set, not the launcher regardless", () => {
+    let message = "";
+    try {
+      loadEnv({ ...validEnv, NODE_ENV: "production", BROWSER_USE_DISCOVERY_FIXTURE_URL: "http://localhost:4178/", BROWSER_USE_DISCOVERY_SERVICE_URL: "https://broker.internal" });
+    } catch (error) {
+      message = String(error);
+    }
+    expect(message).toMatch(/BROWSER_USE_DISCOVERY_FIXTURE_URL/);
+    expect(message).toMatch(/BROWSER_USE_DISCOVERY_SERVICE_URL/);
+    expect(message).not.toMatch(/BROWSER_USE_DISCOVERY_LAUNCHER/);
   });
 
   it("SURVEY_TIMEOUT_SECONDS: the survey's hard deadline, 180 by default", () => {

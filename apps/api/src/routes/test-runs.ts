@@ -1,6 +1,6 @@
 import { RunRepository } from "@platform/db";
-import { runAssistKey, runAssistAnswerKey, runAssistChannel } from "@platform/event-bus";
-import { runScope, actorId } from "../auth/principal";
+import { runAssistKey, runAssistAnswerKey, runAssistChannel, discoveryEnabled, setDiscoveryEnabled } from "@platform/event-bus";
+import { runScope, actorId, requireAdmin } from "../auth/principal";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { ApiDeps } from "../deps";
@@ -25,6 +25,38 @@ export function parseOr400<T>(schema: z.ZodType<T>, value: unknown): T {
 
 export async function testRunRoutes(app: FastifyInstance, deps: ApiDeps): Promise<void> {
   const service = new TestRunService(deps);
+
+  app.get("/v1/discovery/capability", async (req, reply) => {
+    const discovery = deps.config.discovery;
+    const { tenantId } = req.principal;
+    reply.header("Cache-Control", "no-store");
+    const enabled = discovery?.tenantIds.includes(tenantId) && await discoveryEnabled(deps.discoveryRollout, tenantId);
+    return { fixtureUrl: enabled ? discovery?.fixtureUrl ?? null : null };
+  });
+
+  app.get("/v1/settings/discovery", async (req, reply) => {
+    requireAdmin(req.principal);
+    const { tenantId } = req.principal;
+    const available = deps.config.discovery?.tenantIds.includes(tenantId) === true;
+    reply.header("Cache-Control", "no-store");
+    return { available, enabled: available && await discoveryEnabled(deps.discoveryRollout, tenantId) };
+  });
+
+  app.put("/v1/settings/discovery", async (req) => {
+    requireAdmin(req.principal);
+    const { tenantId } = req.principal;
+    const available = deps.config.discovery?.tenantIds.includes(tenantId) === true;
+    const { enabled } = parseOr400(z.strictObject({ enabled: z.boolean() }), req.body);
+    if (enabled && !available) throw new HttpError(422, "DISCOVERY_UNAVAILABLE", "This tenant has no approved staging fixture");
+    if (!deps.discoveryRollout) throw new HttpError(503, "DISCOVERY_UNAVAILABLE", "Could not save the discovery setting");
+    try {
+      await setDiscoveryEnabled(deps.discoveryRollout, tenantId, enabled);
+    } catch {
+      throw new HttpError(503, "DISCOVERY_UNAVAILABLE", "Could not save the discovery setting");
+    }
+    await audit(deps, req, { action: "settings.discovery.updated", detail: { enabled } });
+    return { available, enabled };
+  });
 
   // Claim + retain + notify atomically: two tabs cannot both answer, and pub/sub reconnects lose no answer (2026-11-21).
   app.post("/v1/test-runs/:runId/assistance/:requestId", async (req, reply) => {

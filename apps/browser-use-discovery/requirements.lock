@@ -98,7 +98,7 @@ charset-normalizer==3.5.3 \
     --hash=sha256:e5e4785d8a0adeadfbdf75f4efc357911842674651cbafd7e97f69b11ec3cbc6 \
     --hash=sha256:f06e257ee0cc85a7e4ec44f171ae2595fd901c34212f3c9e7ab8fd8621401e99
     # via requests
-click==8.5.1 ; sys_platform != 'emscripten' \
+click==8.5.1 \
     --hash=sha256:8bb5376d2006950386f8c6427613334a2acadc5f559cb80e638d00b4df957e37 \
     --hash=sha256:9bbfada76703fd1d784b83eea012e3e8c6a001a876543ef104fa56aaaeb072b4
     # via uvicorn
@@ -440,6 +440,7 @@ starlette==1.10.0 \
     --hash=sha256:478c0ab3b4ced6e82719849c118fa406f0278a3499c1a898cd15cd31bdc38ce4 \
     --hash=sha256:b8399098d4c1e3522734f7235dc79b1fc967f96cf139c81e0fa30479e0685f9b
     # via
+    #   browser-use-discovery
     #   mcp
     #   sse-starlette
 tenacity==9.1.4 \
@@ -496,10 +497,12 @@ uuid7==0.1.0 \
     --hash=sha256:5e259bb63c8cb4aded5927ff41b444a80d0c7124e8a0ced7cf44efa1f5cccf61 \
     --hash=sha256:8c57aa32ee7456d3cc68c95c4530bc571646defac01895cfc73545449894a63c
     # via browser-use
-uvicorn==0.54.0 ; sys_platform != 'emscripten' \
+uvicorn==0.54.0 \
     --hash=sha256:505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf \
     --hash=sha256:a2e33cbfaa0306f8e6b0c13e0cb89d7d7a2da3e62b90c66e18c33d9807b28620
-    # via mcp
+    # via
+    #   browser-use-discovery
+    #   mcp
 websockets==15.0.1 \
     --hash=sha256:0701bc3cfcb9164d04a14b149fd74be7347a530ad3bbf15ab2c678a2cd3dd9a2 \
     --hash=sha256:0af68c55afbd5f07986df82831c7bff04846928ea8d1fd7f30052638788bc9b5 \

@@ -2,14 +2,18 @@ import { CreateTestRunRequestSchema, destructiveActionsAllowed } from "@platform
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getLlmSettings } from "../lib/api";
+import { getDiscoveryCapability, getLlmSettings } from "../lib/api";
 import { json, llmSettingsFixture, requirementFixture, summaryFixture } from "../test/fixtures";
 import { NewTestForm } from "./NewTestForm";
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
-vi.mock("../lib/api", async (original) => ({ ...(await original<typeof import("../lib/api")>()), getLlmSettings: vi.fn() }));
-beforeEach(() => { push.mockReset(); vi.mocked(getLlmSettings).mockResolvedValue(llmSettingsFixture()); });
+vi.mock("../lib/api", async (original) => ({ ...(await original<typeof import("../lib/api")>()), getLlmSettings: vi.fn(), getDiscoveryCapability: vi.fn() }));
+beforeEach(() => {
+  push.mockReset();
+  vi.mocked(getLlmSettings).mockResolvedValue(llmSettingsFixture());
+  vi.mocked(getDiscoveryCapability).mockResolvedValue({ fixtureUrl: null });
+});
 const created = () => json(202, { runId: "run_new", lifecycle: "QUEUED", eventsUrl: "/events" });
 function api(...answers: (Response | Error)[]) {
   const fetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => {
@@ -71,6 +75,24 @@ describe("simple test setup", () => {
     await user.click(screen.getByRole("button", { name: "Explore website" }));
     expect(payload(fetch).requirement).toBe("");
     expect(destructiveActionsAllowed(CreateTestRunRequestSchema.parse(payload(fetch)))).toBe(true);
+  });
+  it("opts an approved fixture into Browser Use with manual review and bounded discovery settings", async () => {
+    const targetUrl = "http://127.0.0.1:4599/";
+    vi.mocked(getDiscoveryCapability).mockResolvedValue({ fixtureUrl: targetUrl });
+    const fetch = api();
+    render(<NewTestForm />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/Which website/), targetUrl);
+    await user.click(screen.getByRole("button", { name: "Find test ideas" }));
+    const toggle = await screen.findByRole("checkbox", { name: /Autonomous Discovery/ });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    fireEvent.change(screen.getByLabelText("Discovery time (seconds)"), { target: { value: "60" } });
+    await user.click(screen.getByRole("button", { name: "Explore website" }));
+    expect(payload(fetch)).toMatchObject({
+      targetUrl, requirement: "", environment: "staging",
+      options: { autonomousDiscovery: true, discoveryMaxSeconds: 60, discoveryMaxSteps: 20, autoConfirmCriteria: false, allowDestructiveActions: false },
+    });
   });
   it("fills and focuses instructions from an example", async () => {
     api(); render(<NewTestForm />);

@@ -142,6 +142,7 @@ export async function createTestApi(
     db: tdb.db,
     redis,
     assistanceRedis: redis,
+    discoveryRollout: redis,
     hub,
     queue,
     storage: new FakeStorage(),

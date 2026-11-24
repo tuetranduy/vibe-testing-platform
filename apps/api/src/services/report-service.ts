@@ -11,6 +11,7 @@ import {
   RequirementRepository,
   ResultRepository,
   RunRepository,
+  SuggestionRepository,
   schema,
   type Database,
   type RunScope,
@@ -113,6 +114,21 @@ export class ReportService {
     if (!isTerminalLifecycle(run.lifecycle)) {
       throw new HttpError(409, "REPORT_NOT_READY", `The report is available once the run ends (it is ${run.lifecycle})`);
     }
-    return this.builder.buildReport(runId);
+    const report = await this.builder.buildReport(runId);
+    if (!run.request.options.autonomousDiscovery) return report;
+    const events = new EventRepository(this.deps.db);
+    // The latest terminal outcome by sequence: a retried survey's later failure must not hide behind an earlier success.
+    const [completed, failed] = await Promise.all([
+      events.findLastOfType(runId, "discovery.completed"),
+      events.findLastOfType(runId, "discovery.failed"),
+    ]);
+    const summary = completed && failed ? (completed.sequence > failed.sequence ? completed : failed) : completed ?? failed;
+    if (!summary) return report;
+    const set = await new SuggestionRepository(this.deps.db).get(runId);
+    const selected = set?.suggestions.find((suggestion) => suggestion.id === set.selected?.suggestionId && suggestion.discovery);
+    const selectedSuggestion = selected?.discovery && set?.selected
+      ? { id: selected.id, title: selected.title, relevantPaths: selected.discovery.relevantPaths, edited: set.selected.edited }
+      : null;
+    return { ...report, discovery: { ...summary.payload, selectedSuggestion } };
   }
 }

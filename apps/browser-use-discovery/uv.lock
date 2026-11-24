@@ -94,6 +94,8 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "browser-use" },
+    { name = "starlette" },
+    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
@@ -102,7 +104,11 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "browser-use", specifier = "==1.0.6" }]
+requires-dist = [
+    { name = "browser-use", specifier = "==1.0.6" },
+    { name = "starlette", specifier = "==1.10.0" },
+    { name = "uvicorn", specifier = "==0.54.0" },
+]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = "==8.4.2" }]

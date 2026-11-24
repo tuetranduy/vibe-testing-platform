@@ -137,3 +137,17 @@ export function createScheduleSync(connection: ConnectionOptions): ScheduleSync 
     close: () => queue.close(),
   };
 }
+
+/**
+ * Pauses or resumes every worker's intake of run jobs (BullMQ global pause). Operations and deterministic tests:
+ * jobs added meanwhile wait, and run in order once resumed.
+ */
+export async function setRunQueuePaused(connection: ConnectionOptions, paused: boolean): Promise<void> {
+  const queue = new Queue(RUNS_QUEUE, { connection });
+  try {
+    if (paused) await queue.pause();
+    else await queue.resume();
+  } finally {
+    await queue.close();
+  }
+}

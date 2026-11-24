@@ -29,6 +29,7 @@ RUN pip install --require-hashes --no-deps -r /app/requirements.lock \
     && python -c "import browser_use, pydantic_ai; print('browser-use import ok')"
 
 COPY fixture/site /app/fixture/site
+COPY image-bin /app/bin
 COPY src /app/src
 RUN python -m compileall -q /app/src \
     && useradd --uid 10001 --no-create-home --home-dir /tmp/home --shell /usr/sbin/nologin agent \

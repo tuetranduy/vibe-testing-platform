@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Fixture-only Browser Use discovery runner (one-shot stdin/stdout launcher + isolated container)."
 requires-python = ">=3.12,<3.13"
 # Exact pin: Browser Use 1.0 APIs changed across patch releases; upgrade deliberately (see README).
-dependencies = ["browser-use==1.0.6"]
+dependencies = ["browser-use==1.0.6", "starlette==1.10.0", "uvicorn==0.54.0"]
 
 [dependency-groups]
 dev = ["pytest==8.4.2"]

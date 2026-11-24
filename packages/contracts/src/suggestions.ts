@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DataKeySchema, HttpUrlSchema, SecretNameSchema } from "./common";
+import { DiscoveryFixturePathSchema } from "./discovery";
 
 /**
  * Suggested tests (spec 2026-09-28-suggest-tests): with a blank requirement the run surveys the
@@ -23,6 +24,10 @@ export const SuggestionSchema = z.object({
   }),
   /** It creates, changes or deletes data (or pays, orders, …): blocked unless the run allows it. */
   destructive: z.boolean(),
+  discovery: z.object({
+    engine: z.literal("browser_use"),
+    relevantPaths: z.array(DiscoveryFixturePathSchema).min(1).max(8),
+  }).optional(),
 });
 export type Suggestion = z.infer<typeof SuggestionSchema>;
 

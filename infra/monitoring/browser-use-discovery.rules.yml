@@ -1,0 +1,107 @@
+# Browser Use fixture pilot (worker metrics). Outcome statuses:
+#   COMPLETED, PARTIAL, TIMED_OUT, FAILED, CANCELLED: a broker job was attempted.
+#   BUSY (broker or tenant-quota backpressure) and BLOCKED (configuration, rollout, environment): no job started.
+# Backpressure is capacity, not failure: it has its own alert and never counts toward the failure rate.
+groups:
+  - name: browser_use_discovery
+    rules:
+      - alert: BrowserUseDiscoveryFailureRateHigh
+        expr: |
+          sum(increase(discovery_jobs_total{status=~"FAILED|PARTIAL|TIMED_OUT|CANCELLED",reason!="tenant_disabled"}[30m]))
+          / clamp_min(sum(increase(discovery_jobs_total{status!~"BLOCKED|BUSY",reason!="tenant_disabled"}[30m])), 1) > 0.01
+          and sum(increase(discovery_jobs_total{status!~"BLOCKED|BUSY",reason!="tenant_disabled"}[30m])) >= 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Attempted Browser Use jobs are frequently falling back to the standard survey
+      - alert: BrowserUseDiscoveryBackpressureHigh
+        expr: |
+          sum(increase(discovery_jobs_total{status="BUSY"}[30m]))
+          / clamp_min(sum(increase(discovery_jobs_total{status!="BLOCKED"}[30m])), 1) > 0.5
+          and sum(increase(discovery_jobs_total{status!="BLOCKED"}[30m])) >= 20
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: Most opted-in runs find the single-job broker or their tenant quota busy
+      - alert: BrowserUseDiscoveryNotConfigured
+        expr: sum(increase(discovery_jobs_total{status="BLOCKED",reason=~"not_configured|fixture_mismatch"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: The API admitted discovery runs that a worker cannot run (transport or fixture mismatch)
+      - alert: BrowserUseDiscoveryP95Slow
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(discovery_duration_seconds_bucket[15m]))) > 90
+          and sum(increase(discovery_duration_seconds_count[15m])) >= 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Attempted Browser Use jobs take more than 90 seconds at p95
+      - alert: BrowserUseDiscoveryCleanupErrors
+        expr: sum(increase(discovery_cancellation_cleanup_errors_total[30m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: The broker did not confirm cancellation of abandoned Browser Use jobs
+      - alert: BrowserUseDiscoveryProtocolViolations
+        expr: sum(increase(discovery_protocol_violations_total[30m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Browser Use agent containers sent malformed frames to the broker
+      - alert: BrowserUseDiscoveryCostHigh
+        # Known model cost only; unpriced requests are excluded. Tune the hourly budget per pilot.
+        expr: sum(increase(discovery_model_cost_usd_total[1h])) > 1
+        labels:
+          severity: warning
+        annotations:
+          summary: Known Browser Use model cost exceeded the pilot's hourly budget
+      - alert: BrowserUseDiscoveryAgentMemoryNearLimit
+        # Host-sampled peak memory of attempted jobs' agent containers (hard limit 2 GiB); bucket le = 1.8 GiB.
+        expr: |
+          sum(increase(discovery_worker_memory_bytes_count[30m]))
+          - sum(increase(discovery_worker_memory_bytes_bucket{le="1932735283"}[30m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: A Browser Use agent container peaked above 90% of its 2 GiB memory limit
+      - alert: BrowserUseSelectedDiscoveryInconclusiveRateHigh
+        # Runs that executed a selected Browser Use suggestion end inconclusive, blocked or errored clearly more often
+        # than the platform's runs overall. User cancellations are excluded on both sides.
+        expr: |
+          (
+            sum(increase(discovery_selected_runs_total{lifecycle!="CANCELLED",verdict=~"INCONCLUSIVE|BLOCKED|none"}[6h]))
+            / clamp_min(sum(increase(discovery_selected_runs_total{lifecycle!="CANCELLED"}[6h])), 1)
+          )
+          > (
+            sum(increase(test_runs_total{lifecycle!="CANCELLED",verdict=~"INCONCLUSIVE|BLOCKED|none"}[6h]))
+            / clamp_min(sum(increase(test_runs_total{lifecycle!="CANCELLED"}[6h])), 1)
+          ) + 0.2
+          and sum(increase(discovery_selected_runs_total{lifecycle!="CANCELLED"}[6h])) >= 10
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Selected Browser Use suggestions fail to execute to a verdict more often than other runs
+      - alert: BrowserUseDiscoveryForbiddenAddress
+        # Proxy mode: an allowlisted name resolved to loopback, link-local (metadata) or another forbidden address.
+        expr: sum(increase(discovery_blocked_destinations_total{reason="forbidden_address"}[30m])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: A Browser Use target name resolved to a forbidden address; the egress proxy refused it
+      - alert: BrowserUseDiscoveryEgressBlocksRepeated
+        # Proxy mode: off-allowlist requests per attempted job well above Chromium's measured baseline (about 2).
+        expr: |
+          sum(increase(discovery_blocked_destinations_total{reason=~"not_allowlisted|bad_request"}[30m]))
+          / clamp_min(sum(increase(discovery_duration_seconds_count[30m])), 1) > 10
+          and sum(increase(discovery_duration_seconds_count[30m])) >= 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Browser Use agents repeatedly try to leave the approved fixture
+

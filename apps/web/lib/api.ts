@@ -1,6 +1,8 @@
 import {
   ApiErrorSchema,
   CreateTestRunResponseSchema,
+  DiscoveryCapabilitySchema,
+  DiscoveryRolloutSchema,
   LlmSettingsViewSchema,
   SuggestionSetResponseSchema,
   SiteAnalysisSchema,
@@ -67,6 +69,11 @@ import { z } from "zod";
  * (app/api/[...path]/route.ts), which adds the API token on the server; the browser never has it.
  */
 const BASE = "/api/v1/test-runs";
+
+export const getDiscoveryCapability = () => request(DiscoveryCapabilitySchema, "/api/v1/discovery/capability");
+export const getDiscoveryRollout = () => request(DiscoveryRolloutSchema, "/api/v1/settings/discovery");
+export const updateDiscoveryRollout = (enabled: boolean) =>
+  request(DiscoveryRolloutSchema, "/api/v1/settings/discovery", { method: "PUT", body: { enabled } });
 
 export class ApiRequestError extends Error {
   constructor(

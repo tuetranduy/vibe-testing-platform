@@ -26,6 +26,9 @@ export interface E2EStack {
   shopUrl: string;
   /** The demo shop as the platform reaches it: the base of every run's target URL. */
   targetUrl: string;
+  discoveryFixtureUrl?: string;
+  /** The Browser Use variable names (never values) each process was started with. */
+  discoveryEnvNames: { api: string[]; worker: string[] };
   databaseUrl: string;
   redisUrl: string;
   workerMetricsUrl: string;
@@ -147,6 +150,16 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
     stops.push(() => shop.close());
     // Docker Desktop forwards host.docker.internal to this machine, loopback included.
     const targetUrl = platform === "compose" ? `http://host.docker.internal:${shop.port}` : shop.url;
+    const fixture = platform === "local" ? process.env.BROWSER_USE_DISCOVERY_FIXTURE_URL : undefined;
+    const discoveryEnabled = Boolean(fixture && (process.env.BROWSER_USE_DISCOVERY_LAUNCHER || process.env.BROWSER_USE_DISCOVERY_SERVICE_URL));
+    const discoveryVars = discoveryEnabled
+      ? Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] =>
+          entry[0].startsWith("BROWSER_USE_DISCOVERY_") && entry[1] !== undefined))
+      : {};
+    // The API admits runs from the non-secret fixture URL and tenant list; only the worker gets the transport and token.
+    const ADMISSION = new Set(["BROWSER_USE_DISCOVERY_FIXTURE_URL", "BROWSER_USE_DISCOVERY_TENANTS"]);
+    const discoveryEnv = Object.fromEntries(Object.entries(discoveryVars).filter(([name]) => ADMISSION.has(name)));
+    const discoveryWorkerEnv = Object.fromEntries(Object.entries(discoveryVars).filter(([name]) => !ADMISSION.has(name)));
 
     const apiPort = await freePort();
     const metricsPort = await freePort();
@@ -175,7 +188,8 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
       MAX_ACTIVE_RUNS_PER_TENANT: "10",
       // A schedule may fire every minute, so the suite-schedule E2E waits at most one (V1.2 F3).
       SCHEDULE_MIN_INTERVAL_MINUTES: "1",
-      TARGET_PRIVATE_ALLOWLIST: new URL(targetUrl).host,
+      TARGET_PRIVATE_ALLOWLIST: [new URL(targetUrl).host, ...(fixture ? [new URL(fixture).host] : [])].join(","),
+      ...discoveryEnv,
       RUNNER_WORKSPACE_DIR: runnerDir,
       WORKER_METRICS_PORT: platform === "compose" ? "9464" : String(metricsPort),
       WORKER_CONCURRENCY: "2",
@@ -237,7 +251,7 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
 
     const worker = launch(
       "worker",
-      { ...llmEnv, E2E_MODE: mode, ...runnerEnv },
+      { ...llmEnv, E2E_MODE: mode, ...runnerEnv, ...discoveryWorkerEnv },
       { port: metricsPort, target: 9464 },
     );
     const workerLog = path.join(logDir, "worker.log");
@@ -252,6 +266,11 @@ export async function startStack(): Promise<{ stack: E2EStack; stop(): Promise<v
         admin,
         shopUrl: shop.url,
         targetUrl,
+        discoveryFixtureUrl: discoveryEnabled ? fixture : undefined,
+        discoveryEnvNames: {
+          api: Object.keys(env).filter((name) => name.startsWith("BROWSER_USE_DISCOVERY_")).sort(),
+          worker: Object.keys({ ...env, ...discoveryWorkerEnv }).filter((name) => name.startsWith("BROWSER_USE_DISCOVERY_")).sort(),
+        },
         databaseUrl: db.url,
         redisUrl,
         workerMetricsUrl: `http://127.0.0.1:${metricsPort}/metrics`,
