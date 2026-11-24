@@ -781,9 +781,14 @@ Add a clearly separate **Discovery** section containing pages/journeys mapped an
     - This is far below the §12.3 targets (≥ 80 % execution, ≥ 70 % confirmation).
   - [x] **Focused candidate requirements:** the fixture pilot asks for one concrete action or short sequence with one
     observable result. The survey hands that requirement to analysis and retains the fixture paths as provenance.
-  - [ ] **Open — human review and evaluation of the updated candidates:**
-    - Ratings of `candidates-for-rating.hosted.json`. A scripted or model rating is not a human rating, so the useful-idea rate and cost per useful candidate are unmeasured.
-    - A hosted rerun with the scope and requirement changes, then measurement of the §12.3 execution and confirmation rates on unedited suggestions.
+  - [x] **Hosted follow-up with the scope and requirement changes (2026-11-24):** all ten fixture checks passed and
+    discovery completed on nine. It offered 50 ideas, 30 matched the rubric, and rubric coverage rose from 10
+    checks to 12. Two of three unedited ideas reached a verdict on every criterion and one was independently
+    confirmed by Playwright. The benchmark and confirmation were US$0.104455 at peak rates against the approved
+    US$0.25 cap. See `evals/discovery/README.md`.
+  - [ ] **Open — human review and confirmation quality:**
+    - The new `candidates-for-rating.hosted.json` awaits a human review to measure useful-idea rate and cost per useful candidate.
+    - The three-fixture follow-up fell short of the §12.3 execution and confirmation targets.
   - [x] **Local deployment rehearsal — not a deployed staging environment.**
     - The E2E stack runs:
       - the API with admission values only (the test asserts the API process has no token);

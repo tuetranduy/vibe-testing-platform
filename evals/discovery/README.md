@@ -7,7 +7,7 @@ Two different things run on the same ten disposable fixtures. Keep them apart:
 | Purpose | Regression evidence that the standard survey, Browser Use enrichment, merge and fixture checks work end to end | Evidence of discovery usefulness and cost |
 | Models | Scripted on both paths (no provider, no cost) | Standard survey scripted; Browser Use with the operator's model |
 | What it can show | Plumbing, completion, latency of the scripted path | Rubric agreement, cost, and (with human ratings) useful-idea rate |
-| Status | Runs in CI and locally | Baseline measured; human ratings and a repeat after the scope and candidate changes are pending |
+| Status | Runs in CI and locally | Baseline and follow-up measured; human ratings are pending |
 
 The corpus covers a storefront, a static museum, a client-side shift planner, a paginated library, an appointment
 form, a support portal with disclosures and a dialog, a guest workspace, a failed status request, a multi-page
@@ -112,12 +112,32 @@ criteria, and academy and library ended `ERRORED`.
 The fixture pilot now asks for one action or short sequence and one observable outcome per idea. Invalid-input cases
 can be offered as their own ideas. The executable requirement combines the goal and first expected result. The review
 and report still carry the fixture paths. The scripted smoke passed on all ten fixtures, and the platform E2E selected
-an unedited suggestion, clicked the Products link, and verified the exact heading text in Playwright. A new hosted
-run is needed to measure the effect on execution and confirmation across model-generated ideas.
+an unedited suggestion, clicked the Products link, and verified the exact heading text in Playwright.
 
 A zero-cost follow-up with `local:openai/gpt-oss-20b` covered the same three confirmation fixtures (museum, library,
 academy). All three independent fixture checks passed. Discovery returned zero candidates again (two `PARTIAL`,
 one `FAILED`), so the follow-up yielded no model-generated suggestions for unedited execution.
+
+## Hosted follow-up with focused requirements (2026-11-24)
+
+DeepSeek Flash ran on the ten disposable fixtures at `5ba36cd` with a matching agent image. All ten independent
+fixture checks passed. Discovery completed on nine fixtures and fell back to the standard survey on appointment.
+The broker returned 58 ideas. The survey offered 50, of which 30 matched a fixture rubric check. Rubric coverage rose
+from 10 checks on the standard survey to 12 after enrichment. Added latency was p50 41.3 s and p95 66.5 s.
+
+The live test ran one unedited idea from each of the same three fixtures used in the initial confirmation.
+
+| Fixture | Run verdict | Criteria | Playwright rerun |
+|---|---|---:|---|
+| Museum | Passed | 2 | Passed and confirmed every criterion |
+| Library | Inconclusive | 2 | Passed with criteria still unresolved |
+| Academy | Failed | 4 | Failed |
+
+Two of three reached a verdict on every criterion, and one of three was independently confirmed. The results are
+below the proposed 80% execution and 70% confirmation gates. The benchmark and confirmation together used
+US$0.104455 at peak rates, below the approved US$0.25 cap. This uses provider-reported token and cache usage from all
+182 calls. The 80-entry rating worksheet contains 30 standard-survey ideas and 50 Browser Use ideas and awaits human
+review.
 
 ## Hosted-model evaluation (mechanism)
 
