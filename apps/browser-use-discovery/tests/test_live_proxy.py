@@ -41,13 +41,13 @@ def test_a_live_request_never_carries_a_snapshot():
         parse_request(json.dumps({**body, 'snapshot': [{'path': '/', 'title': 'Home', 'evidence': 'x'}]}).encode())
 
 
-def test_only_requests_that_send_nothing_pass():
-    ok = request_decision('GET', {'sec-fetch-dest': 'document'}, HOST, HOST)
-    assert ok.allowed
-    assert request_decision('POST', {}, HOST, HOST).reason == 'method_denied'
-    assert request_decision('DELETE', {}, HOST, HOST).reason == 'method_denied'
-    assert request_decision('GET', {'content-length': '12'}, HOST, HOST).reason == 'method_denied'
-    assert request_decision('GET', {'transfer-encoding': 'chunked'}, HOST, HOST).reason == 'method_denied'
+def test_browser_methods_and_request_bodies_pass_on_approved_destinations():
+    assert request_decision('GET', {'sec-fetch-dest': 'document'}, HOST, HOST).allowed
+    for method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+        assert request_decision(method, {'content-length': '12'}, HOST, HOST).allowed
+    assert request_decision('POST', {'transfer-encoding': 'chunked'}, HOST, HOST).allowed
+    assert request_decision('POST', {'transfer-encoding': 'chunked', 'content-length': '12'}, HOST, HOST).reason == 'bad_request'
+    assert request_decision('CONNECT', {}, HOST, HOST).reason == 'method_denied'
     assert request_decision('GET', {'upgrade': 'websocket', 'connection': 'Upgrade'}, HOST, HOST).reason == 'upgrade_denied'
     # Another host serves subresources only: no top-level navigation off the site.
     assert request_decision('GET', {'sec-fetch-dest': 'script'}, 'cdn.example.com', HOST).allowed
@@ -89,12 +89,23 @@ def upstream(tmp_path):
     cert = tmp_path / 'up.crt'
     cert.write_bytes(leaf_certificate_pem(key, HOST))
     (tmp_path / 'up.key').write_bytes(key)
-    seen: list[str] = []
+    seen: list[tuple[bytes, bytes]] = []
 
     async def serve(reader, writer):
         head = await reader.readuntil(b'\r\n\r\n')
-        seen.append(head.decode().split('\r\n')[0])
-        writer.write(b'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello')
+        request_line, *fields = head.strip().split(b'\r\n')
+        headers = {name.lower(): value.strip() for name, value in (line.split(b':', 1) for line in fields)}
+        body = await reader.readexactly(int(headers.get(b'content-length', b'0')))
+        if headers.get(b'transfer-encoding') == b'chunked':
+            while size := int(await reader.readline(), 16):
+                body += await reader.readexactly(size)
+                assert await reader.readexactly(2) == b'\r\n'
+            assert await reader.readline() == b'\r\n'
+        seen.append((request_line, body))
+        if request_line.startswith(b'POST /checkout '):
+            writer.write(b'HTTP/1.1 303 See Other\r\nLocation: /payment\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+        else:
+            writer.write(b'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello')
         await writer.drain()
         writer.close()
 
@@ -147,8 +158,15 @@ def test_live_proxy_end_to_end(upstream, tmp_path, capsys):
         port = srv.sockets[0].getsockname()[1]
         get = f'GET /catalog?page=2 HTTP/1.1\r\nHost: {HOST}\r\nSec-Fetch-Dest: document\r\n\r\n'.encode()
         _, page = await _request(port, f'{HOST}:443', get, pin)
-        post = f'POST /cart HTTP/1.1\r\nHost: {HOST}\r\nContent-Length: 3\r\n\r\nabc'.encode()
-        _, refused = await _request(port, f'{HOST}:443', post, pin)
+        post = (f'POST /checkout HTTP/1.1\r\nHost: {HOST}\r\nSec-Fetch-Dest: document\r\n'
+                'Content-Type: application/x-www-form-urlencoded\r\nContent-Length: 10\r\n\r\nquantity=1').encode()
+        _, submitted = await _request(port, f'{HOST}:443', post, pin)
+        _, payment = await _request(port, f'{HOST}:443', f'GET /payment HTTP/1.1\r\nHost: {HOST}\r\n\r\n'.encode(), pin)
+        chunked = (f'PATCH /cart HTTP/1.1\r\nHost: {HOST}\r\nTransfer-Encoding: chunked\r\n\r\n'
+                   '3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n').encode()
+        _, updated = await _request(port, f'{HOST}:443', chunked, pin)
+        ambiguous = f'POST /checkout HTTP/1.1\r\nHost: {HOST}\r\nContent-Length: 2\r\nTransfer-Encoding: chunked\r\n\r\n'.encode()
+        _, refused = await _request(port, f'{HOST}:443', ambiguous, pin)
         ws = f'GET /live HTTP/1.1\r\nHost: {HOST}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n'.encode()
         _, upgrade = await _request(port, f'{HOST}:443', ws, pin)
         smuggled = b'GET / HTTP/1.1\r\nHost: evil.test\r\n\r\n'
@@ -161,16 +179,24 @@ def test_live_proxy_end_to_end(upstream, tmp_path, capsys):
         for s in (srv, up):
             s.close()
             await s.wait_closed()
-        return page, refused, upgrade, wrong_host, off_site, other_port, resolved
+        return page, submitted, payment, updated, refused, upgrade, wrong_host, off_site, other_port, resolved
 
-    page, refused, upgrade, wrong_host, off_site, other_port, resolved = asyncio.run(scenario())
+    page, submitted, payment, updated, refused, upgrade, wrong_host, off_site, other_port, resolved = asyncio.run(scenario())
     assert page.endswith(b'hello')
-    assert seen == ['GET /catalog?page=2 HTTP/1.1']  # nothing else reached the site
+    assert b'303 See Other\r\nLocation: /payment\r\n' in submitted
+    assert payment.endswith(b'hello') and updated.endswith(b'hello')
+    assert seen == [
+        (b'GET /catalog?page=2 HTTP/1.1', b''),
+        (b'POST /checkout HTTP/1.1', b'quantity=1'),
+        (b'GET /payment HTTP/1.1', b''),
+        (b'PATCH /cart HTTP/1.1', b'abcde'),
+    ]
     assert b'403' in refused and b'403' in upgrade and b'403' in wrong_host
     assert b'403' in off_site and b'403' in other_port
     assert resolved == (None, 'forbidden_address')
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith('{')]
     assert {'event': 'egress.page', 'path': '/catalog'} in events
+    assert {'event': 'egress.page', 'path': '/checkout'} in events
     reasons = [e.get('reason') for e in events if e['event'] == 'egress.blocked']
-    assert reasons.count('method_denied') == 1 and 'upgrade_denied' in reasons and 'not_allowlisted' in reasons
+    assert 'bad_request' in reasons and 'upgrade_denied' in reasons and 'not_allowlisted' in reasons
     assert set(reasons) <= set(egress_proxy.REASONS)

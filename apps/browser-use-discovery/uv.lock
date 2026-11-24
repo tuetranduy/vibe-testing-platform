@@ -94,6 +94,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "browser-use" },
+    { name = "h11" },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -106,6 +107,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "browser-use", specifier = "==1.0.6" },
+    { name = "h11", specifier = "==0.16.0" },
     { name = "starlette", specifier = "==1.10.0" },
     { name = "uvicorn", specifier = "==0.54.0" },
 ]

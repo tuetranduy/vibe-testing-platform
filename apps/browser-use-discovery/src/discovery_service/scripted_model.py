@@ -168,13 +168,12 @@ if px:  # it must refuse everything but the fixture's origin
         import ssl as _ssl
         _ctx = _ssl.create_default_context(); _ctx.check_hostname = False; _ctx.verify_mode = _ssl.CERT_NONE
         via_s = urllib.request.build_opener(urllib.request.ProxyHandler({'https': px}), urllib.request.HTTPSHandler(context=_ctx))
-        def sproxied(url, data=None, method=None):
+        def sproxied(url):
             try:
-                return 'FETCHED ' + str(via_s.open(urllib.request.Request(url, data=data, method=method), timeout=10).status)
+                return 'FETCHED ' + str(via_s.open(url, timeout=10).status)
             except Exception as e:
                 return 'BLOCKED ' + type(e).__name__ + ': ' + str(e)[:60]
-        out['live'] = {'get': sproxied(start), 'post': sproxied(start, b'x=1', 'POST'), 'put': sproxied(start, b'x', 'PUT'),
-                       'delete': sproxied(start, None, 'DELETE'), 'off_site': sproxied('https://example.org/'),
+        out['live'] = {'get': sproxied(start), 'off_site': sproxied('https://example.org/'),
                        'metadata': sproxied('https://169.254.169.254/')}
 out['pid1'] = open('/proc/1/cmdline', 'rb').read().replace(b'\0', b' ').decode(errors='replace')[:120]
 out['env'] = {'readable_processes': readable, 'denied_processes': denied, 'names': sorted(names), 'suspicious': suspicious}

@@ -103,7 +103,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const fixture = DiscoveryFixtureUrlSchema.safeParse(targetUrl.trim());
   const liveSite = DiscoveryLiveUrlSchema.safeParse(targetUrl.trim());
   const usingFixture = fixture.success && fixture.data === discoveryFixture;
-  // Any public HTTPS page qualifies: the worker reads it with plain GETs, so no proof of ownership is asked for.
+  // Any public HTTPS page can use the snapshot or live discovery mode.
   const onLiveSite = !usingFixture && liveSites && liveSite.success;
   // Phase B: written instructions may opt in too; discovery then looks for routes that exercise them.
   const canDiscover = effectiveModel?.provider !== "fake" && (usingFixture || onLiveSite);
@@ -209,7 +209,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
             <p id="discovery-hint" className="text-sm text-muted-foreground">{mode === "describe"
               ? "Look for routes that exercise these instructions. Extra checks it suggests do not decide the result until you mark them critical. This uses extra AI calls and requires criteria review."
               : onLiveSite
-                ? "Suggest more tests from read-only snapshots of a few pages on this site. This uses extra AI calls and requires criteria review."
+                ? "Find test ideas on this site. This uses extra AI calls and requires criteria review."
                 : "Explore the staging fixture for additional test ideas. This uses extra AI calls and requires criteria review."}</p>
             {errorFor("autonomousDiscovery")}
             {usingVerifiedSite && canInteract && <div className="flex flex-col gap-1">
@@ -218,7 +218,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
                 <label htmlFor="discoveryLiveInteraction">Interact with the live site</label>
               </div>
               <p id="interaction-hint" className="text-sm text-muted-foreground">
-                Browser Use opens menus, tabs and dialogs, searches, pages through results and fills forms to see validation. Nothing is submitted: the network refuses every request that sends data. Off: it works from read-only snapshots.
+                Browser Use can submit forms with test data before criteria review and continue through checkout and payment steps. Submissions may change site data. Turn this off to use read-only snapshots.
               </p>
             </div>}
             {usingDiscovery && <div className="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1">

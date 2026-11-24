@@ -103,6 +103,13 @@ def test_sanitize_rejects_invalid_or_unsafe(kw):
     assert sanitize_candidates([cand(**kw)], KNOWN) == []
 
 
+def test_live_discovery_can_report_observed_payment_steps():
+    payment = cand(title='Payment step opens', goal='Submit the checkout form to open the payment step.')
+    assert sanitize_candidates([payment], KNOWN) == []
+    assert [item.title for item in sanitize_candidates([payment], KNOWN, live=True)] == ['Payment step opens']
+    assert sanitize_candidates([cand(title='Delete the payment profile')], KNOWN, live=True) == []
+
+
 def test_sanitize_caps_count_and_dedupes():
     many = [cand(title=f'Scenario number {i}') for i in range(30)] + [cand(title='Scenario number 1')]
     out = sanitize_candidates(many, KNOWN)
@@ -207,3 +214,12 @@ def test_the_task_names_the_requirement_as_data_and_asks_for_findings():
     assert 'not instructions for you' in task
     assert 'findings' in task
     assert 'REQUIREMENT' not in build_task('http://127.0.0.1:4599', 'http://127.0.0.1:4599/', '/')
+
+
+def test_live_prompt_instructs_submission_and_sandbox_payments():
+    from discovery_service.runner import build_task
+
+    task = build_task('https://shop.example.com', 'https://shop.example.com/', live=True)
+    assert 'Fill and submit forms' in task
+    assert 'sandbox or test mode' in task
+    assert 'Never submit forms' in build_task('https://shop.example.com', 'https://shop.example.com/', snapshot=True)

@@ -212,12 +212,16 @@ class CandidateBatch(BaseModel):
 
 _WS = re.compile(r'\s+')
 _PATH = re.compile(r'^/[A-Za-z0-9._~/-]{0,179}$')
-# MVP: discovery stays read-only; scenarios about destructive/credentialed flows are dropped, not surfaced.
 _UNSAFE = re.compile(
-    r'\b(delete|payment|credit card|password|log ?in|sign ?in|sign ?up|register|credential|api key|token|exploit|'
+    r'\b(delete|password|log ?in|sign ?in|sign ?up|register|credential|api key|token|exploit|'
     r'inject|xss|sql|ssrf|attack)\b',
     re.I,
 )
+_PAYMENT = re.compile(r'\b(payment|credit card)\b', re.I)
+
+
+def unsafe_result(text: str, live: bool) -> bool:
+    return bool(_UNSAFE.search(text) or (not live and _PAYMENT.search(text)))
 
 
 def clean_text(value: Any, limit: int) -> str:
@@ -257,7 +261,7 @@ def clean_path(value: Any, known_paths: frozenset[str]) -> str | None:
     return path if path in known_paths else None
 
 
-def sanitize_candidates(raw: Any, known_paths: frozenset[str], limit: int = MAX_CANDIDATES) -> list[WireCandidate]:
+def sanitize_candidates(raw: Any, known_paths: frozenset[str], limit: int = MAX_CANDIDATES, *, live: bool = False) -> list[WireCandidate]:
     """Untrusted agent output -> bounded wire candidates. Invalid entries are dropped, never repaired by guessing."""
     if isinstance(raw, dict):
         raw = raw.get('candidates')
@@ -287,7 +291,7 @@ def sanitize_candidates(raw: Any, known_paths: frozenset[str], limit: int = MAX_
         negative = clean_list(item.get('negative_cases', item.get('negativeCases')), NEGATIVE_MAX)
         if not expected:
             continue
-        if _UNSAFE.search(' '.join([title, goal, rationale, *expected, *negative])):
+        if unsafe_result(' '.join([title, goal, rationale, *expected, *negative]), live):
             continue
         seen.add(title.lower())
         out.append(
@@ -305,7 +309,7 @@ def sanitize_candidates(raw: Any, known_paths: frozenset[str], limit: int = MAX_
     return out
 
 
-def sanitize_findings(raw: Any, known_paths: frozenset[str], limit: int = MAX_FINDINGS) -> list[WireFinding]:
+def sanitize_findings(raw: Any, known_paths: frozenset[str], limit: int = MAX_FINDINGS, *, live: bool = False) -> list[WireFinding]:
     """Untrusted agent findings -> bounded wire findings on observed fixture pages. Invalid entries are dropped."""
     if isinstance(raw, dict):
         raw = raw.get('findings')
@@ -325,7 +329,7 @@ def sanitize_findings(raw: Any, known_paths: frozenset[str], limit: int = MAX_FI
         if (len(title) < TITLE_MIN or len(observation) < OBSERVATION_MIN or len(expected) < FINDING_EXPECTED_MIN
                 or not path or not steps or title.lower() in seen):
             continue
-        if _UNSAFE.search(' '.join([title, observation, expected, *steps])):
+        if unsafe_result(' '.join([title, observation, expected, *steps]), live):
             continue
         seen.add(title.lower())
         out.append(WireFinding(title=title, observation=observation, expected=expected, path=path,

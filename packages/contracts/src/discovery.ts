@@ -9,7 +9,7 @@ export const DiscoveryJobSecondsSchema = z.number().int().min(10).max(120);
 export const DiscoveryStepsSchema = z.number().int().min(2).max(20);
 export const DiscoveryCapabilitySchema = z.object({
   fixtureUrl: z.string().nullable(), verifiedSites: z.boolean().optional(),
-  /** Live sites: the agent may interact with the real site (clicks, menus, form validation; nothing is submitted). */
+  /** Live sites: the agent can interact with the site and submit forms with test data. */
   liveInteraction: z.boolean().optional(),
 });
 export const DiscoveryRolloutSchema = z.object({ available: z.boolean(), enabled: z.boolean() });
@@ -106,7 +106,7 @@ export type DiscoveryFindingCandidate = z.infer<typeof DiscoveryFindingCandidate
 /** The egress proxy's refusal codes (proxy mode). */
 export const DiscoveryEgressReasonSchema = z.enum([
   "not_allowlisted", "forbidden_address", "connect_denied", "bad_request", "unresolvable", "upstream_error",
-  // Live interaction: a request that sends data (or has a body), a protocol upgrade, a failed interception, the rate limit.
+  // Live interaction: unsupported methods, protocol upgrades, failed interception and the rate limit.
   "method_denied", "upgrade_denied", "tls_error", "rate_limited",
 ]);
 

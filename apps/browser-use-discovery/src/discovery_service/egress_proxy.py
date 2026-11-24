@@ -13,8 +13,8 @@ the launcher can count blocked destinations without collecting browsing data.
 ``EGRESS_MODE=live`` (public HTTPS sites; see ``LiveProxy``): the proxy also joins a network with a route out, and is
 the agent's only way to the target. It accepts CONNECT to approved hosts on port 443 only and terminates that TLS
 with a per-job key that only this job's Chromium trusts (``--ignore-certificate-errors-spki-list``), so every request
-is inspected: GET, HEAD and OPTIONS without a body pass; any other method, a request body, a protocol upgrade (web
-sockets) and a top-level navigation to another site are refused. Upstream, the proxy resolves the name itself,
+is inspected. Standard browser HTTP methods and their bodies can reach approved destinations. Protocol upgrades
+(web sockets) and document navigation to another host are refused. Upstream, the proxy resolves the name itself,
 refuses any non-public address, connects to the address it checked (no second lookup: DNS rebinding cannot swap it)
 and verifies the real certificate. Requests are rate limited. The one piece of browsing data it reports is the path
 of each document the browser opened on the target (``egress.page``), which grounds the agent's ideas in pages it
@@ -34,6 +34,8 @@ import sys
 import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable
+
+import h11
 
 MAX_HEAD_BYTES = 32 * 1024
 IDLE_TIMEOUT_S = 30.0
@@ -161,7 +163,7 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, all
 
 # --- live mode ------------------------------------------------------------------------------------------------------
 
-SAFE_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
+BROWSER_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE'})
 NAVIGATION_DESTS = frozenset({'document', 'iframe', 'frame', 'embed', 'object'})
 PAGE_PATH = re.compile(r'^/[A-Za-z0-9._~/-]{0,179}$')
 MAX_REQUESTS = 1500  # per job, every host
@@ -197,15 +199,34 @@ class Decision:
 
 def request_decision(method: str, headers: dict[str, str], host: str, target_host: str) -> Decision:
     """The method and header policy for one decrypted request (pure; unit tested)."""
-    if method not in SAFE_METHODS:
+    if method not in BROWSER_METHODS:
         return Decision(False, 'method_denied')
-    if headers.get('transfer-encoding') or headers.get('content-length', '0').strip() not in ('', '0'):
-        return Decision(False, 'method_denied')  # a body means a submission, whatever the method says
+    if 'transfer-encoding' in headers and 'content-length' in headers:
+        return Decision(False, 'bad_request')
     if headers.get('upgrade') or 'upgrade' in headers.get('connection', '').lower():
         return Decision(False, 'upgrade_denied')
     if host != target_host and headers.get('sec-fetch-dest', '').lower() in NAVIGATION_DESTS:
         return Decision(False, 'not_allowlisted')  # the agent may not navigate to another site
     return Decision(True)
+
+
+async def relay_request_body(incoming: h11.Connection, outgoing: h11.Connection, reader: asyncio.StreamReader,
+                             upstream: asyncio.StreamWriter) -> None:
+    """Relay exactly one HTTP message, framing chunked data afresh and discarding trailers."""
+    while True:
+        part = incoming.next_event()
+        if part is h11.NEED_DATA:
+            incoming.receive_data(await asyncio.wait_for(reader.read(65536), IDLE_TIMEOUT_S))
+            continue
+        if isinstance(part, h11.Data):
+            upstream.write(outgoing.send(h11.Data(data=part.data)))
+            await upstream.drain()
+            continue
+        if isinstance(part, h11.EndOfMessage):
+            upstream.write(outgoing.send(h11.EndOfMessage()))
+            await upstream.drain()
+            return
+        raise h11.RemoteProtocolError('request body ended before its framing was complete')
 
 
 class RateLimit:
@@ -306,27 +327,30 @@ class LiveProxy:
 
     async def serve_request(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, host: str) -> None:
         """One decrypted request per connection, answered with Connection: close."""
+        incoming = h11.Connection(h11.SERVER, max_incomplete_event_size=MAX_HEAD_BYTES)
         try:
             head = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), IDLE_TIMEOUT_S)
+            if len(head) > MAX_HEAD_BYTES:
+                await refuse(writer, 'bad_request')
+                return
+            incoming.receive_data(head)
+            request = incoming.next_event()
+        except h11.RemoteProtocolError:
+            await refuse(writer, 'bad_request')
+            return
         except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, TimeoutError, OSError, ssl.SSLError):
             writer.close()
             return
-        lines = head.decode('latin-1').split('\r\n')
-        parts = lines[0].split(' ')
-        if len(parts) != 3 or not parts[1].startswith('/') or parts[2] not in ('HTTP/1.1', 'HTTP/1.0'):
+        if not isinstance(request, h11.Request) or not request.target.startswith(b'/') or request.http_version not in (b'1.1', b'1.0'):
             await refuse(writer, 'bad_request')
             return
-        method, path, version = parts
-        headers: dict[str, str] = {}
-        for line in lines[1:]:
-            if ':' in line:
-                name, _, value = line.partition(':')
-                headers[name.strip().lower()] = value.strip()
+        method = request.method.decode('ascii')
+        headers = {name.decode('ascii'): value.decode('latin-1') for name, value in request.headers}
         named = headers.get('host', '').lower().rstrip('.')
         if named not in (host, f'{host}:443'):
             await refuse(writer, 'bad_request')
             return
-        decision = request_decision(method.upper(), headers, host, self.target_host)
+        decision = request_decision(method, headers, host, self.target_host)
         if not decision.allowed:
             await refuse(writer, decision.reason or 'method_denied')
             return
@@ -349,18 +373,27 @@ class LiveProxy:
         else:
             await refuse(writer, 'upstream_error')
             return
-        event('egress.allowed')
-        page = path.split('?', 1)[0]
-        if host == self.target_host and method.upper() == 'GET' and headers.get('sec-fetch-dest') == 'document' and PAGE_PATH.match(page):
-            event('egress.page', path=page)
-        kept = [line for line in lines[1:] if line and line.split(':', 1)[0].strip().lower() not in HOP_HEADERS]
-        up_writer.write(('\r\n'.join([f'{method} {path} {version}', *kept, 'Connection: close']) + '\r\n\r\n').encode('latin-1'))
-        await up_writer.drain()
-        await pipe(up_reader, writer)  # no request body is ever relayed
         try:
+            event('egress.allowed')
+            outgoing = h11.Connection(h11.CLIENT)
+            kept = [(name, value) for name, value in request.headers if name.decode('ascii') not in HOP_HEADERS | {'expect'}]
+            kept.append((b'connection', b'close'))
+            up_writer.write(outgoing.send(h11.Request(method=request.method, target=request.target, headers=kept)))
+            await up_writer.drain()
+            if incoming.they_are_waiting_for_100_continue:
+                writer.write(b'HTTP/1.1 100 Continue\r\n\r\n')
+                await writer.drain()
+            await relay_request_body(incoming, outgoing, reader, up_writer)
+            page = request.target.split(b'?', 1)[0].decode('latin-1')
+            if host == self.target_host and headers.get('sec-fetch-dest') == 'document' and PAGE_PATH.fullmatch(page):
+                event('egress.page', path=page)
+            await pipe(up_reader, writer)
+        except (h11.RemoteProtocolError, h11.LocalProtocolError):
+            await refuse(writer, 'bad_request')
+        except (OSError, TimeoutError):
+            writer.close()
+        finally:
             up_writer.close()
-        except OSError:
-            pass
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:

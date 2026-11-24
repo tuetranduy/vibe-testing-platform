@@ -122,7 +122,7 @@ export const RunOptionsSchema = z
     autoConfirmCriteria: z.boolean().default(false),
     autonomousDiscovery: z.boolean().optional(),
     verifiedSiteDiscovery: z.boolean().optional(),
-    /** Live sites: let Browser Use interact with the real site (nothing that sends data reaches it). */
+    /** Live sites: let Browser Use interact with the real site and submit forms with test data. */
     discoveryLiveInteraction: z.boolean().optional(),
     discoveryMaxSeconds: DiscoverySecondsSchema.optional(),
     discoveryMaxSteps: DiscoveryStepsSchema.optional(),
@@ -194,7 +194,7 @@ export const CreateTestRunRequestSchema = z
         r.options.additionalAllowedHosts.length || Object.keys(r.secrets).length || Object.keys(r.testData).length ||
         r.credentialProfileId || r.testDataSetId)) {
       ctx.addIssue({ code: "custom", path: ["options", "verifiedSiteDiscovery"],
-        message: "Verified site discovery uses one site and requires read-only settings without credentials or test data" });
+        message: "Verified site discovery requires Autonomous Discovery, one site, no supplied credentials or test data, and destructive test actions disabled" });
     }
     if (r.options.discoveryLiveInteraction && !r.options.verifiedSiteDiscovery) {
       ctx.addIssue({ code: "custom", path: ["options", "discoveryLiveInteraction"], message: "Live interaction is for live-site discovery" });

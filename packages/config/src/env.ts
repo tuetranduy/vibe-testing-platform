@@ -147,7 +147,7 @@ const EnvSchema = z
     BROWSER_USE_DISCOVERY_VERIFIED_SITES: emptyAsUnset(z.enum(["on", "off"])),
     /**
      * Live interaction on public HTTPS sites: the broker's agent works on the real site through its job's
-     * inspecting egress proxy (clicks, menus, form validation; nothing that sends data). Needs VERIFIED_SITES.
+     * inspecting egress proxy, including form submissions. Needs VERIFIED_SITES.
      */
     BROWSER_USE_DISCOVERY_LIVE_INTERACTION: emptyAsUnset(z.enum(["on", "off"])),
     BROWSER_USE_DISCOVERY_SERVICE_URL: emptyAsUnset(z.url().transform((url) => new URL(url)).refine(

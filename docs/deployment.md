@@ -23,14 +23,12 @@ Migrations run first, so each one must work with the previous version of the cod
 
 ## Browser Use fixture pilot
 
-Production supports the disposable fixture and self-service discovery for any public HTTPS site. On a live site,
+Production supports the disposable fixture and self-service discovery for any public HTTPS site. In snapshot mode,
 the worker reads a small set of same-origin HTML pages and captures headings, public links and button labels. The
 Browser Use agent receives an inert copy inside its existing network-isolated container.
 
 Any signed-in member can open **New test**, enter the site's final HTTPS page URL, choose **Find test ideas**, and select
-**Autonomous Discovery (Browser Use)**. No proof of site ownership is needed: the worker only sends plain GETs to a few
-same-origin pages (no scripts, forms or credentials, each request re-checked against the public-address policy), which is
-less than the standard survey's browser already does. Runs count against the tenant's hourly discovery limit. For an operational rollback, set the repository variable
+**Autonomous Discovery (Browser Use)**. Runs count against the tenant's hourly discovery limit. For an operational rollback, set the repository variable
 `BROWSER_USE_DISCOVERY_VERIFIED_SITES=off` and redeploy.
 
 | Part | Where |
@@ -67,9 +65,9 @@ Browser Use** and do not decide the result until marked critical. It uses the sa
 
 **Live interaction:** with `BROWSER_USE_DISCOVERY_LIVE_INTERACTION=on` (the default; a repository variable), live-site
 runs can let the agent work on the real site: **Interact with the live site** in the new-run form, on by default.
-Each job's egress proxy joins `vtp-discovery-live-egress`, a plain bridge the launcher creates on first use, and lets
-only `GET`, `HEAD` and `OPTIONS` without a body reach the site (plan §10, Milestone 5). Set the variable to `off` and
-redeploy to go back to snapshots only.
+Each job's egress proxy joins `vtp-discovery-live-egress` and forwards normal browser HTTPS requests and bodies to
+approved destinations. The agent can submit forms with synthetic data and continue through checkout and sandbox
+payment steps. Set the variable to `off` and redeploy to use snapshots only.
 
 **Parallel agents:** `BROWSER_USE_DISCOVERY_CAPACITY` (repository variable, 1–3, default 1) sets both the broker's job
 slots and the worker's fair-admission capacity. Each extra slot can hold another agent container (1 GiB each). Runs

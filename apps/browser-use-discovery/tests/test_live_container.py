@@ -32,7 +32,7 @@ def leftovers() -> list[str]:
     return out + nets
 
 
-def test_live_mode_crawls_the_site_through_the_inspecting_proxy_and_refuses_everything_that_sends_data():
+def test_live_mode_crawls_the_site_through_the_inspecting_proxy_and_refuses_other_destinations():
     model = ScriptedModel(probe=True)
     request = DiscoveryRequest(schemaVersion='discovery.v1', runId='it-live-probe', targetUrl='https://example.com/', live=True, timeoutSeconds=110)
     resp, stats = asyncio.run(discover(request, cfg(), model=model))
@@ -43,16 +43,14 @@ def test_live_mode_crawls_the_site_through_the_inspecting_proxy_and_refuses_ever
     # The browser opened the real page through the proxy, and that page grounds the result.
     assert '/' in model.observations.get('pages', [])
     assert stats['livePages'] >= 1
-    # The agent's own Python: a GET passes, anything that sends data or leaves the site is refused by the proxy.
+    # Keep the public-site probe read-only. Body forwarding is tested against the local TLS fixture.
     assert probe['live']['get'] == 'FETCHED 200'
-    for kind in ('post', 'put', 'delete'):
-        assert '403' in probe['live'][kind], (kind, probe['live'][kind])
     assert probe['live']['off_site'].startswith('BLOCKED') and probe['live']['metadata'].startswith('BLOCKED')
     # Direct traffic still has no route at all.
     for dest, outcome in probe['tcp'].items():
         assert outcome.startswith('BLOCKED'), (dest, outcome)
     reasons = stats['blockedByReason']
-    assert reasons.get('method_denied', 0) >= 3 and reasons.get('not_allowlisted', 0) >= 1
+    assert reasons.get('not_allowlisted', 0) >= 1
     assert stats['cleanup'] == 'ok' and leftovers() == []
 
 

@@ -579,17 +579,17 @@ def scoped_paths(known: frozenset[str], start_path: str) -> frozenset[str]:
     return frozenset(path for path in known if path.startswith(scope))
 
 
-def to_response(run_id: str, outcome: dict[str, Any] | None, known: frozenset[str]) -> tuple[DiscoveryResponse, str]:
+def to_response(run_id: str, outcome: dict[str, Any] | None, known: frozenset[str], *, live: bool = False) -> tuple[DiscoveryResponse, str]:
     if outcome is None:
         return DiscoveryResponse(runId=run_id, status='FAILED', reason='no_result'), 'no_result'
     status = outcome.get('status')
     if status == 'cancelled':
         return DiscoveryResponse(runId=run_id, status='CANCELLED', reason='cancelled'), 'cancelled'
     if status == 'completed':
-        candidates = sanitize_candidates(outcome.get('output'), known)
+        candidates = sanitize_candidates(outcome.get('output'), known, live=live)
         if outcome.get('success') is False or not candidates:
             return DiscoveryResponse(runId=run_id, status='PARTIAL', reason='no_valid_candidates'), 'no_valid_candidates'
-        findings = sanitize_findings(outcome.get('output'), known)
+        findings = sanitize_findings(outcome.get('output'), known, live=live)
         return DiscoveryResponse(runId=run_id, status='COMPLETED', reason='ok', candidates=candidates, findings=findings), 'ok'
     if status == 'timeout':  # only COMPLETED carries candidates
         return DiscoveryResponse(runId=run_id, status='PARTIAL', reason='timeout'), 'timeout'
@@ -642,7 +642,7 @@ async def discover(request: DiscoveryRequest, cfg: Config, model: Any = None,
     known = (frozenset(page.path for page in request.snapshot) if request.snapshot
              else session.pages | {target.path} if target.live
              else scoped_paths(fixture_paths(SITE_DIR), target.path))
-    response, reason = to_response(request.runId, outcome, known)
+    response, reason = to_response(request.runId, outcome, known, live=target.live)
     if deadline_hit:
         reason = response.reason = 'hard_deadline'
     reported_steps = (outcome or {}).get('steps')

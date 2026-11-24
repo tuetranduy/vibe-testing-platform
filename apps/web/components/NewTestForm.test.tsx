@@ -100,7 +100,7 @@ describe("simple test setup", () => {
     await user.click(await screen.findByRole("checkbox", { name: /Autonomous Discovery/ }));
     const interact = screen.getByRole("checkbox", { name: "Interact with the live site" });
     expect(interact).toBeChecked();
-    expect(screen.getByText(/Nothing is submitted/)).toBeInTheDocument();
+    expect(screen.getByText(/can submit forms with test data/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Explore website" }));
     expect(payload(fetch)).toMatchObject({ options: { verifiedSiteDiscovery: true, discoveryLiveInteraction: true } });
     expect(CreateTestRunRequestSchema.safeParse(payload(fetch)).success).toBe(true);

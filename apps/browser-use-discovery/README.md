@@ -201,7 +201,10 @@ Chromium uses the proxy through `/app/bin/chromium-proxied` (Browser Use 1.0.6 h
 background networking disabled. Model calls still leave only through the broker on the container's stdin/stdout.
 The proxy logs one reason code per refusal (never hosts, paths or content); the launcher counts them into
 `statistics.blockedDestinations` and `blockedByReason`, and removes the proxy and network with the job. The launcher
-refuses any target network that is not an internal `vtp-discovery-targets*` network. External targets stay disabled.
+refuses any target network that is not an internal `vtp-discovery-targets*` network.
+
+Live jobs use a separate HTTPS proxy that forwards browser methods and request bodies to approved destinations.
+Browser Use can submit forms with synthetic data and continue through checkout and sandbox payment steps.
 
 ## Isolation model
 
@@ -235,8 +238,8 @@ Node ──stdin/stdout──▶ launcher (host; holds model key) ──docker r
     attach does not reliably close stdin when the parent dies.
   - As a backup, the runner kills itself after 210 s.
   - Each launch removes orphaned containers that are past their deadline label (`vtp.browser-use-discovery`).
-- **Grounding:** a candidate survives only if its `relevantPaths` are real fixture pages. Scenarios about logins,
-  payments, deletion or security testing are dropped.
+- **Grounding:** bundled jobs only keep candidates backed by fixture pages. Scenarios about logins, deletion or
+  security testing are dropped. Live jobs can also report payment steps on observed pages.
 
 ## Tests
 

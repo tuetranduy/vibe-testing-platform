@@ -53,7 +53,7 @@ export interface AutonomousSurveyDeps {
   prepareVerifiedSite?: (ctx: StageContext) => Promise<{ draft: SuggestionSetDraft; snapshot: DiscoverySnapshot }>;
   /**
    * Live sites: the broker can let the agent interact with the real site through its job's inspecting egress
-   * proxy (clicks, menus, form validation; nothing that sends data). Absent: live sites use snapshots only.
+   * proxy, including submitting forms. Absent: live sites use snapshots only.
    */
   liveInteraction?: boolean;
   /** Phase B, live-site mode: the pages and their snapshot without the survey's own test ideas. */
