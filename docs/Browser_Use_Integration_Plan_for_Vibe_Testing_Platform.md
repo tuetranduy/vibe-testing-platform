@@ -768,11 +768,21 @@ Add a clearly separate **Discovery** section containing pages/journeys mapped an
     - Artifacts in `.artifacts/discovery-benchmark/`: `results.local-gpt-oss-20b.json`, and the source-mixed worksheet `candidates-for-rating.local-gpt-oss-20b.json` (30 standard-survey ideas, 0 Browser Use ideas, unrated).
     - With no Browser Use candidates, this run gave nothing to execute unedited or to confirm with Playwright.
     - **The candidate quality of the available local models blocks the usefulness gate.**
-  - [ ] **Open — needs an approved provider budget and a human reviewer:**
-    - A provider-model run across the corpus. Proposed: DeepSeek `deepseek-flash`, ten fixtures × ≤ 20 calls, hard cap USD 0.25; awaiting approval.
-    - Human ratings of its worksheet. A scripted or model rating is not a human rating.
-    - The §12.3 usefulness and new-coverage measurements.
-    - The Stagehand execution and Playwright confirmation rates for unedited candidates.
+  - [x] **Provider evaluation (approved, 2026-11-24): DeepSeek `deepseek-flash`, cap USD 0.25.**
+    - Ran all ten fixtures for USD 0.152. All ten completed; Browser Use offered 56 ideas, and 15 matched a rubric check. Rubric coverage went from 10 to 11 checks. Added latency was p50 64.4 s / p95 87.0 s, and the agent container peaked at 385 MiB.
+    - The untrusted-instruction canary never appeared in an offered idea, and no key appears in any artifact or log.
+    - **Scope finding:** only 22 of the 56 ideas stayed inside their own fixture. On six of the nine `/benchmark/` fixtures the agent wandered to the shop at `/` on the same origin, so those ideas were about other pages.
+    - **Fix:** grounding now keeps only paths under the start page's directory, and the task names that scope (`results.hosted.scope.json` applies the same rule to this run after the fact). This run predates the fix, and re-running it would exceed the cap.
+    - Artifacts: `results.hosted.json`, and the source-mixed worksheet `candidates-for-rating.hosted.json` (86 ideas: 56 Browser Use, 30 standard survey).
+  - [x] **Unedited execution and independent confirmation (DeepSeek, USD 0.026):**
+    - Three in-scope Browser Use candidates (museum, academy, library) ran unedited as staging-run requirements through Stagehand and the Playwright rerun (`confirmation.hosted.json`).
+    - Result: 0 of 3 executed to a verdict on every criterion, and 0 of 3 were confirmed.
+    - Museum completed `INCONCLUSIVE`: 14 criteria were derived from the long candidate text, and the generated test's rerun passed while some criteria stayed undecided. Academy and library ended `ERRORED`.
+    - This is far below the §12.3 targets (≥ 80 % execution, ≥ 70 % confirmation).
+  - [ ] **Open — needs a human reviewer, then candidate-quality work:**
+    - Ratings of `candidates-for-rating.hosted.json`. A scripted or model rating is not a human rating, so the useful-idea rate and cost per useful candidate are unmeasured.
+    - A re-run with the scope fix.
+    - Shorter, executable candidate requirements, so that unedited runs reach the §12.3 execution and confirmation rates.
   - [x] **Local deployment rehearsal — not a deployed staging environment.**
     - The E2E stack runs:
       - the API with admission values only (the test asserts the API process has no token);
@@ -821,9 +831,10 @@ Add a clearly separate **Discovery** section containing pages/journeys mapped an
     - The scheduler assumes one Redis. Its scripts read keys they don't declare, so Redis Cluster is not supported.
     - It also assumes one broker replica whose slots equal the configured capacity. Several broker replicas would need request routing and shared job and nonce state, which this pilot doesn't have.
     - Verify on the deployed worker topology.
-  - [ ] **Open — needs approval to publish to the public repository:** the first GitHub run of `.github/workflows/browser-use-discovery.yml`.
-    - The workflow now also triggers on pushes to `ci/browser-use-discovery-**` branches only. `deploy.yml` runs only on pushes to `main` and on manual dispatch.
-    - Publishing the integration work to the public `tuetranduy/vibe-testing-platform` is awaiting approval.
+  - [x] **First GitHub CI run (approved, 2026-11-24):** branch `ci/browser-use-discovery-m5` (push-only trigger for `ci/browser-use-discovery-**`; `deploy.yml` runs on `main` alone and did not run).
+    - The first run (`2d9a9fe`) failed only in the scripted smoke: Ubuntu 24.04 blocks the unprivileged user namespaces that Chromium's sandbox needs.
+    - The workflow now sets `kernel.apparmor_restrict_unprivileged_userns=0`, as production already does.
+    - Run [45323831927](https://github.com/tuetranduy/vibe-testing-platform/actions/runs/45323831927) on `d33e38f` concluded **success** for both jobs. That covers the Python and container tests (agent isolation and proxy mode on Linux), the promtool rule tests, the rating tests, the scripted fixture smoke, and the discovery E2E (unedited suggestion to Playwright, queued and in-flight rollback).
 
 **Work:**
 
@@ -930,7 +941,7 @@ All percentages are **proposed acceptance goals**, not observed performance clai
 
 - [x] Standard and fake-engine test suites pass in the local repository regression run.
 - [x] New request option defaults OFF and does not alter existing runs/suites.
-- [ ] Actual Python agent version is pinned and API shape verified in CI. (Pinned, and the container tests verify the Browser Use 1.0.6 API shape against the built image locally; `.github/workflows/browser-use-discovery.yml` runs them, but its first GitHub run is pending.)
+- [x] Actual Python agent version is pinned and API shape verified in CI (container tests against the built Browser Use 1.0.6 image, GitHub run [45323831927](https://github.com/tuetranduy/vibe-testing-platform/actions/runs/45323831927)).
 - [x] New result schemas roundtrip Python → TypeScript.
 - [x] Browser Use failure falls back to existing survey without poisoning final verdict.
 - [x] No direct promotion of Browser Use text into generated Playwright code or confirmed test results.

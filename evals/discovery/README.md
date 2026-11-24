@@ -86,7 +86,30 @@ On one fixture `local:qwen/qwen3.5-9b` used its whole 115 s job budget. The avai
 reviewable candidates, so usefulness, new coverage and the unedited execution and confirmation rates cannot be
 measured from them. This is not a hosted-provider evaluation and not a human rating.
 
-## Hosted-model evaluation (not run)
+## Provider evaluation (DeepSeek `deepseek-flash`, 2026-11-24)
+
+The run was approved with a USD 0.25 cap (`BROWSER_USE_BENCHMARK_MAX_COST_USD`; the harness stops before a job that could pass the cap, or after any job whose cost is unknown).
+
+| Measure | Result |
+|---|---:|
+| Fixtures completed, with passing fixture checks | 10 of 10 |
+| Browser Use ideas offered / matching a rubric check | 56 / 15 |
+| Ideas inside their own fixture (post-hoc scope rule) | 22 of 56 |
+| Rubric checks: standard survey → enriched | 10 → 11 |
+| Model cost | USD 0.152 |
+| Added latency p50 / p95 | 64.4 s / 87.0 s |
+| Agent container peak memory | 385 MiB |
+
+On six benchmark fixtures the agent left `/benchmark/<fixture>/` for the tea shop at `/`. Grounding now keeps only paths
+under the start page's directory, and the task names that scope. This run predates that fix. The worksheet
+`candidates-for-rating.hosted.json` (86 ideas) is unrated.
+
+Three in-scope candidates ran **unedited** through Stagehand and the Playwright rerun
+(`tests/e2e/platform-discovery-confirm.spec.ts`, `E2E_MODE=live`, USD 0.026; result in `confirmation.hosted.json`).
+None executed to a verdict on every criterion and none were confirmed: museum ended `INCONCLUSIVE` with 14 derived
+criteria, and academy and library ended `ERRORED`.
+
+## Hosted-model evaluation (mechanism)
 
 Prepared, not executed: running it makes paid provider calls. With an approved budget, put `DISCOVERY_MODEL` and the
 provider key in a discovery env file that only the operator can read, then:
