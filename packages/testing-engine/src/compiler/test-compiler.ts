@@ -364,7 +364,7 @@ class Compiler {
       }
     }
 
-    w.line("await page.goto(data.targetUrl);");
+    w.line('await page.goto(data.targetUrl, { waitUntil: "domcontentloaded" });');
     this.emitQuiet(w);
     let checkpoints = 0;
     (this.golden.get(scenario) ?? []).forEach((step, position) => {
@@ -372,7 +372,7 @@ class Compiler {
       switch (step.kind) {
         case "navigate":
           if (position > 0) {
-            w.line(`await page.goto(${this.url(navigateUrl(step)!)});`);
+            w.line(`await page.goto(${this.url(navigateUrl(step)!)}, { waitUntil: "domcontentloaded" });`);
             this.emitQuiet(w);
           }
           return;

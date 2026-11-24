@@ -296,12 +296,14 @@ class StagehandExplorerSession implements ExplorerSession {
       const errorPage = this.watchErrorCommit();
       try {
         try {
-          await this.page.goto(url, { waitUntil: "load", timeout: this.opts.navigationTimeoutMs }).catch(async (err: unknown) => {
+          // An image or other late resource can stall load after the document is ready to interact with.
+          const navigation = { waitUntil: "domcontentloaded" as const, timeout: this.opts.navigationTimeoutMs };
+          await this.page.goto(url, navigation).catch(async (err: unknown) => {
             // A late error-page commit from a navigation blocked before this call (e.g. a script
             // redirect between steps) interrupts ours: go again, once.
             if (!/interrupted by another navigation to "chrome-error:/.test(err instanceof Error ? err.message : String(err))) throw err;
             this.takeBlocks();
-            return this.page.goto(url, { waitUntil: "load", timeout: this.opts.navigationTimeoutMs });
+            return this.page.goto(url, navigation);
           });
         } catch (err) {
           const blocked = /ERR_BLOCKED_BY_CLIENT/.test(err instanceof Error ? err.message : String(err));

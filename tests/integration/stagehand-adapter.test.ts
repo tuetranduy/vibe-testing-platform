@@ -62,6 +62,12 @@ interface Fixture {
 /** Download fixture, reached as static.shop.test (an allowed subdomain of the target). */
 async function startFixtureServer(): Promise<Fixture> {
   const server = http.createServer((req, res) => {
+    if (req.url === "/document-ready") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end('<!doctype html><h1>Ready to test</h1><img src="/pending.png" alt="">');
+      return;
+    }
+    if (req.url === "/pending.png") return;
     if (req.url === "/offscreen") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(`<!doctype html><html style="scroll-behavior:smooth"><body style="margin:0">
@@ -187,8 +193,8 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
     return { sandbox, resolver };
   }
 
-  async function startSession(sandbox: RunSandbox, llm: LlmClient): Promise<ExplorerSession> {
-    const session = await new StagehandExplorer({ connectTimeoutMs: 90_000 }).start({
+  async function startSession(sandbox: RunSandbox, llm: LlmClient, navigationTimeoutMs?: number): Promise<ExplorerSession> {
+    const session = await new StagehandExplorer({ connectTimeoutMs: 90_000, navigationTimeoutMs }).start({
       page: sandbox,
       runId: RUN_ID,
       llm,
@@ -206,6 +212,16 @@ describe("Stagehand explorer adapter through the browser sandbox (real Chromium,
     expect(llm!.inputTokens).toBeGreaterThan(0);
     expect(llm!.outputTokens).toBeGreaterThan(0);
   };
+
+  it("can use a page whose document is ready while an image stalls", async () => {
+    const { sandbox } = await openSandbox();
+    const { llm } = llmClient();
+    const session = await startSession(sandbox, llm, 3_000);
+    const url = `http://static.shop.test:${fixture.port}/document-ready`;
+    await expect(session.navigate(url)).resolves.toEqual({ url });
+    expect(await session.page.getByRole("heading", { name: "Ready to test" }).isVisible()).toBe(true);
+    expect(await session.page.evaluate(() => document.readyState)).toBe("interactive");
+  });
 
   it("clicks the observed link itself when a fixed banner covers its first click point", async () => {
     const { sandbox } = await openSandbox();

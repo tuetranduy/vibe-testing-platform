@@ -287,7 +287,7 @@ describe("createEngines (Ruling R7: both engines, chosen per run)", () => {
     expect(test.id).toMatch(/^gt_/);
     expect(test.compiledCriteria).toEqual(["AC-1"]);
     expect(test.notCompiled).toEqual([{ criterionId: "AC-2", reason: "Fact cartItems@cart_page was extracted by the model, not read from the page" }]);
-    expect(test.source).toContain("await page.goto(data.targetUrl);");
+    expect(test.source).toContain('await page.goto(data.targetUrl, { waitUntil: "domcontentloaded" });');
     expect(test.source).not.toContain("iPhone");
     expect(JSON.parse(test.dataJson).inputs).toEqual({ input1: "iPhone 17 Pro" });
 

@@ -257,7 +257,7 @@ describe("compilePlaywrightTest: the discovered flow (snapshot)", () => {
     expect(GeneratedTestSchema.omit({ id: true }).parse(out)).toEqual(out);
 
     expect(importsOf(out.source).sort()).toEqual(["./helpers", "./run-data.json", "@playwright/test"]);
-    expect(out.source).toContain("await page.goto(data.targetUrl);");
+    expect(out.source).toContain('await page.goto(data.targetUrl, { waitUntil: "domcontentloaded" });');
     const data = dataOf(out.dataJson);
     expect(data.targetUrl).toBe(TARGET);
 
@@ -320,7 +320,7 @@ describe("compilePlaywrightTest: the discovered flow (snapshot)", () => {
     const facts = [fact("cartCount", "st_cp_2", 1, "number", byTestId("cart-count"))];
     const out = compile({ steps, facts, requirement: requirementOf([criterion("AC-1", { kind: "numeric_compare", left: after, operator: "eq", right: 1 })]) });
     const quiet = 'await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});';
-    expect(out.source).toContain(`await page.goto(data.targetUrl);\n  ${quiet}\n  await page.goto(data.urls.url1);\n  ${quiet}\n`);
+    expect(out.source).toContain(`await page.goto(data.targetUrl, { waitUntil: "domcontentloaded" });\n  ${quiet}\n  await page.goto(data.urls.url1, { waitUntil: "domcontentloaded" });\n  ${quiet}\n`);
     expect(checkGeneratedSource(out.source)).toEqual([]);
   });
 
@@ -336,7 +336,7 @@ describe("compilePlaywrightTest: the discovered flow (snapshot)", () => {
       facts,
       requirement: requirementOf([criterion("AC-1", { kind: "numeric_compare", left: after, operator: "eq", right: 1 })]),
     });
-    expect(out.source).toMatch(/await page\.goto\(data\.targetUrl\);\n.*\n {2}await page\.goto\(data\.urls\.url1\);/);
+    expect(out.source).toMatch(/await page\.goto\(data\.targetUrl, \{ waitUntil: "domcontentloaded" \}\);\n.*\n {2}await page\.goto\(data\.urls\.url1, \{ waitUntil: "domcontentloaded" \}\);/);
     expect(dataOf(out.dataJson).urls.url1).toBe(`${TARGET}cart`);
     expect(out.source).toContain('.toBeCloseTo(data.criteria["AC-1"].right, 9)');
   });
@@ -997,7 +997,7 @@ describe("compilePlaywrightTest: several scenarios (V1.1 F9)", () => {
     expect(tests[0]).toContain("[AC-2]");
     expect(tests[0]).not.toContain("[AC-9]");
     expect(tests[1]).toContain("[AC-9]");
-    for (const t of tests) expect(t).toContain("await page.goto(data.targetUrl);");
+    for (const t of tests) expect(t).toContain('await page.goto(data.targetUrl, { waitUntil: "domcontentloaded" });');
     // The second scenario replays its own clicks only (Sign in, My orders), not the cart flow.
     expect([...tests[1]!.matchAll(/\.click\(\)/g)]).toHaveLength(2);
   });

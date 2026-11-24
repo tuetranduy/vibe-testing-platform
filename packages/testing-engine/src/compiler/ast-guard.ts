@@ -39,7 +39,7 @@ export const ALLOWED_IDENTIFIERS: ReadonlySet<string> = new Set([
   "pattern", "item", "delta", "right",
   // page and locators
   "goto", "click", "press", "fill", "selectOption", "check", "scrollIntoViewIfNeeded", "hover", "dblclick", "getByRole", "getByLabel", "getByPlaceholder", "getByText", "getByTestId",
-  "locator", "url", "waitForURL", "waitForLoadState", "timeout", "catch", "exact",
+  "locator", "url", "waitForURL", "waitForLoadState", "waitUntil", "timeout", "catch", "exact",
   // test and expect
   "step", "configure", "soft", "poll", "not", "ignoreCase", "useInnerText",
   "toBeNull", "toBeVisible", "toBeHidden", "toHaveText", "toContainText", "toMatch", "toBe", "toContain", "toBeCloseTo",
@@ -59,6 +59,7 @@ const ALLOWED_STRINGS: ReadonlySet<string> = new Set([
   ...ALLOWED_IMPORTS,
   "discovered flow",
   "load",
+  "domcontentloaded",
   "networkidle",
   // the one key a step presses (a search submitted with Enter, R1)
   "Enter",
