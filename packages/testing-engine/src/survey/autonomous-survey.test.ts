@@ -74,7 +74,7 @@ describe("fixture discovery in the existing survey", () => {
     const discover = vi.fn(completeWith([
       { ...candidate, title: "OPEN THE CATALOG!" },
       ...extras,
-      candidate,
+      { ...candidate, expectedBehavior: [...candidate.expectedBehavior, "The category listing can be sorted."] },
       { ...candidate, title: "Delete account", goal: "Delete the customer account." },
     ]));
     const ctx = context();
@@ -93,7 +93,7 @@ describe("fixture discovery in the existing survey", () => {
       payload: expect.objectContaining({ status: "COMPLETED", reason: "ok", attempted: true, acceptedCount: 6, fallbackUsed: false }),
     }));
     expect(observe).toHaveBeenCalledWith(expect.objectContaining({ status: "COMPLETED" }), expect.any(Number));
-    expect(result.suggestions[2]?.requirement).toContain(candidate.expectedBehavior[0]);
+    expect(result.suggestions[2]?.requirement).toBe(`${candidate.goal}\nExpected behavior\n${candidate.expectedBehavior[0]}`);
     expect(result.suggestions).toHaveLength(8);
     expect(result.suggestions.map(({ title }) => title)).not.toContain("Delete account");
     expect(SuggestionSetDraftSchema.parse(result)).toEqual(result);

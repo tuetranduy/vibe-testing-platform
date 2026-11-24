@@ -33,6 +33,7 @@ it.runIf(Boolean(stack.discoveryFixtureUrl))("executes an unedited Browser Use s
   // The scripted Browser Use model's navigation idea, exactly as the merge offered it.
   const suggestion = set.suggestions.find((item) => item.discovery && item.requirement.startsWith(DISCOVERY_NAVIGATION_GOAL));
   expect(suggestion?.discovery?.engine).toBe("browser_use");
+  expect(suggestion?.requirement).toBe(`${DISCOVERY_NAVIGATION_GOAL}\nExpected behavior\nThe "All teas" heading is visible.`);
   const events = await store.events(runId);
   expect(events.some((event) => event.type === "discovery.started")).toBe(true);
   expect(events.some((event) => event.type === "discovery.progress")).toBe(true);
@@ -53,6 +54,7 @@ it.runIf(Boolean(stack.discoveryFixtureUrl))("executes an unedited Browser Use s
     selectedSuggestion: { id: suggestion!.id, edited: false, relevantPaths: suggestion!.discovery!.relevantPaths },
   });
   expect(report.playwright?.status).toBe("PASSED");
+  expect(report.criteria).toHaveLength(1);
   expect(report.criteria[0]?.verdictSource).toBe("PLAYWRIGHT_RERUN");
 
   // Monitoring (plan §14.2) from the worker's Prometheus endpoint and the broker's health.
@@ -120,7 +122,10 @@ it.runIf(Boolean(stack.discoveryFixtureUrl))("rolls back in flight: a disable du
     }
     expect(await (await fetch(`${broker}/internal/health`)).json()).toMatchObject({ activeJobs: 0, cleanupFailures: 0 });
   }
-  expect(execFileSync("docker", ["ps", "-aq", "--filter", "label=vtp.browser-use-discovery=1"], { encoding: "utf8" }).trim()).toBe("");
+  const agentNames = execFileSync("docker", [
+    "ps", "-a", "--filter", "label=vtp.browser-use-discovery=1", "--format", "{{.Names}}",
+  ], { encoding: "utf8" }).split("\n");
+  expect(agentNames.some((name) => name.startsWith(`vtp-discovery-${runId.slice(0, 40)}-`))).toBe(false);
 });
 
 it.runIf(Boolean(stack.discoveryFixtureUrl))("keeps the broker's signing token in the worker only", () => {

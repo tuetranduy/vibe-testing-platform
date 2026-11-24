@@ -258,16 +258,15 @@ def benchmark_candidates(pages: list[dict[str, Any]]) -> dict[str, Any]:
 def candidates_from_pages(pages: list[dict[str, Any]]) -> dict[str, Any]:
     """Observed page facts -> grounded scenario hypotheses."""
     by_path = {p['path']: p for p in pages if isinstance(p, dict) and isinstance(p.get('path'), str)}
-    nav = [p for p in by_path if p != '/'][:5]
     out: list[dict[str, Any]] = []
-    if '/' in by_path:
+    if '/' in by_path and 'All teas' in by_path.get('/products.html', {}).get('headings', []):
         out.append({
-            'title': 'Main navigation reaches every section',
-            'goal': 'A visitor can move between all top-level sections from the home page navigation.',
-            'rationale': f'The home page links to {len(by_path) - 1} other same-site pages observed during the crawl.',
-            'relevant_paths': ['/', *nav],
-            'expected_behavior': ['Each navigation link opens a page with its own heading', 'No navigation link returns an error page'],
-            'negative_cases': ['A missing page path shows a not-found response rather than a blank page'],
+            'title': 'Products link opens the tea listing',
+            'goal': 'From the home page, click Products in the main navigation.',
+            'rationale': 'The crawl observed the home page and the tea listing.',
+            'relevant_paths': ['/', '/products.html'],
+            'expected_behavior': ['The "All teas" heading is visible.'],
+            'negative_cases': [],
         })
     for p in by_path.values():
         for f in p.get('forms') or []:

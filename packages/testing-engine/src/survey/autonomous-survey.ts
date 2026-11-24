@@ -80,17 +80,8 @@ function fingerprint(text: string): string {
 }
 
 function toSuggestion(candidate: DiscoveryCandidate, ctx: StageContext): Suggestion | null {
-  const [firstExpected, ...additionalExpected] = candidate.expectedBehavior;
-  const essential = `${candidate.goal}\nExpected behavior\n${firstExpected}`;
-  const context = [
-    ...additionalExpected,
-    `Relevant pages\n${candidate.relevantPaths.join(", ")}`,
-    ...candidate.negativeCases.map((text) => `Negative case\n${text}`),
-  ];
-  let requirement = essential;
-  for (const detail of context) {
-    if (requirement.length + detail.length + 2 <= 1000) requirement += `\n\n${detail}`;
-  }
+  // Each selected suggestion becomes one runnable scenario. Fixture paths are kept in its provenance.
+  const requirement = `${candidate.goal}\nExpected behavior\n${candidate.expectedBehavior[0]}`;
   const instruction = [candidate.title, candidate.goal, candidate.rationale, ...candidate.expectedBehavior, ...candidate.negativeCases].join("\n");
   if (!assertActionAllowed({ instruction }, { allowDestructive: false }).allowed) return null;
 

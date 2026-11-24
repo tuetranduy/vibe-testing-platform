@@ -90,24 +90,23 @@ const loginSteps = [
  * (apps/browser-use-discovery/src/discovery_service/scripted_model.py). The discovery E2E selects that suggestion
  * unedited, so its requirement starts with this text and the scripted model answers it from this scenario.
  */
-export const DISCOVERY_NAVIGATION_GOAL = "A visitor can move between all top-level sections from the home page navigation.";
+export const DISCOVERY_NAVIGATION_GOAL = "From the home page, click Products in the main navigation.";
 
 export const SCENARIOS: Scenario[] = [
   {
     requirement: DISCOVERY_NAVIGATION_GOAL,
     compiled: {
-      // Grounded in the suggestion's own expected behavior: the linked Products page shows its own heading.
-      criteria: [criterion("Each navigation link opens a page with its own heading", "The Products page shows its own heading", {
-        kind: "visible",
-        fact: { key: "fixtureHeadingShown", checkpoint: "fixture_products" },
-        expected: true,
+      criteria: [criterion('The "All teas" heading is visible.', "The tea listing shows the All teas heading", {
+        kind: "text_matches",
+        fact: { key: "fixtureHeading", checkpoint: "fixture_products" },
+        match: { mode: "equals", value: "All teas", caseSensitive: true },
       })],
-      facts: [{ key: "fixtureHeadingShown", checkpoint: "fixture_products", description: "The tea listing heading is shown", valueType: "boolean" }],
+      facts: [{ key: "fixtureHeading", checkpoint: "fixture_products", description: "The tea listing heading", valueType: "string" }],
     },
     plan: {
       title: "Open the product listing",
       steps: [
-        step("navigate", "Open the Products page at /products.html"),
+        step("click", "Click the Products link in the main navigation"),
         step("capture_checkpoint", "Read the tea listing heading", { checkpoint: "fixture_products", criterionIds: ["AC-1"] }),
       ],
       stopConditions: [],
@@ -298,7 +297,8 @@ SCENARIOS.push({
 /** Where the demo shop shows what the scenarios' descriptions name (first matching rule wins). */
 export const DEMO_SHOP_SCRIPT: ExplorerScript = {
   rules: [
-    { when: "tea listing heading", selectors: ["main h2"], fact: { key: "fixtureHeadingShown", mode: "visible" } },
+    { when: "products link in the main navigation", selectors: ['nav[aria-label="Main"] a[href="/products.html"]'] },
+    { when: "tea listing heading", selectors: ["main h2"], fact: { key: "fixtureHeading", mode: "text" } },
     // The executor's search-submit instruction repeats the step description: match it first.
     { when: "submits this search", selectors: ['form[role="search"] button[type="submit"]'] },
     { when: "product search field", selectors: ['[data-testid="search-input"]'] },

@@ -123,11 +123,11 @@ class Candidate(BaseModel):
     """One proposed functional test scenario. A hypothesis, never a PASS/FAIL verdict."""
 
     title: str = Field(description='Short name of the end-user scenario')
-    goal: str = Field(description='What a user tries to achieve')
+    goal: str = Field(description='One concrete user action or short sequence, with any needed starting page, control and input')
     rationale: str = Field(description='What was observed on the site that makes this scenario worth testing')
     relevant_paths: list[str] = Field(default_factory=list, description='Site paths observed for this scenario, e.g. /cart.html')
-    expected_behavior: list[str] = Field(default_factory=list, description='Expected observable outcomes (hypotheses)')
-    negative_cases: list[str] = Field(default_factory=list, description='Invalid input or edge cases worth checking')
+    expected_behavior: list[str] = Field(default_factory=list, description='One observable outcome to test (a hypothesis)')
+    negative_cases: list[str] = Field(default_factory=list, description='Leave empty; propose a separate scenario for each edge case')
 
 
 class CandidateBatch(BaseModel):

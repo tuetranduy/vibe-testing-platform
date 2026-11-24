@@ -779,10 +779,11 @@ Add a clearly separate **Discovery** section containing pages/journeys mapped an
     - Result: 0 of 3 executed to a verdict on every criterion, and 0 of 3 were confirmed.
     - Museum completed `INCONCLUSIVE`: 14 criteria were derived from the long candidate text, and the generated test's rerun passed while some criteria stayed undecided. Academy and library ended `ERRORED`.
     - This is far below the §12.3 targets (≥ 80 % execution, ≥ 70 % confirmation).
-  - [ ] **Open — needs a human reviewer, then candidate-quality work:**
+  - [x] **Focused candidate requirements:** the fixture pilot asks for one concrete action or short sequence with one
+    observable result. The survey hands that requirement to analysis and retains the fixture paths as provenance.
+  - [ ] **Open — human review and evaluation of the updated candidates:**
     - Ratings of `candidates-for-rating.hosted.json`. A scripted or model rating is not a human rating, so the useful-idea rate and cost per useful candidate are unmeasured.
-    - A re-run with the scope fix.
-    - Shorter, executable candidate requirements, so that unedited runs reach the §12.3 execution and confirmation rates.
+    - A hosted rerun with the scope and requirement changes, then measurement of the §12.3 execution and confirmation rates on unedited suggestions.
   - [x] **Local deployment rehearsal — not a deployed staging environment.**
     - The E2E stack runs:
       - the API with admission values only (the test asserts the API process has no token);

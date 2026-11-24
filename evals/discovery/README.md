@@ -7,7 +7,7 @@ Two different things run on the same ten disposable fixtures. Keep them apart:
 | Purpose | Regression evidence that the standard survey, Browser Use enrichment, merge and fixture checks work end to end | Evidence of discovery usefulness and cost |
 | Models | Scripted on both paths (no provider, no cost) | Standard survey scripted; Browser Use with the operator's model |
 | What it can show | Plumbing, completion, latency of the scripted path | Rubric agreement, cost, and (with human ratings) useful-idea rate |
-| Status | Runs in CI and locally | Mechanism ready; **not run** (needs an approved model budget) |
+| Status | Runs in CI and locally | Baseline measured; human ratings and a repeat after the scope and candidate changes are pending |
 
 The corpus covers a storefront, a static museum, a client-side shift planner, a paginated library, an appointment
 form, a support portal with disclosures and a dialog, a guest workspace, a failed status request, a multi-page
@@ -109,10 +109,20 @@ Three in-scope candidates ran **unedited** through Stagehand and the Playwright 
 None executed to a verdict on every criterion and none were confirmed: museum ended `INCONCLUSIVE` with 14 derived
 criteria, and academy and library ended `ERRORED`.
 
+The fixture pilot now asks for one action or short sequence and one observable outcome per idea. Invalid-input cases
+can be offered as their own ideas. The executable requirement combines the goal and first expected result. The review
+and report still carry the fixture paths. The scripted smoke passed on all ten fixtures, and the platform E2E selected
+an unedited suggestion, clicked the Products link, and verified the exact heading text in Playwright. A new hosted
+run is needed to measure the effect on execution and confirmation across model-generated ideas.
+
+A zero-cost follow-up with `local:openai/gpt-oss-20b` covered the same three confirmation fixtures (museum, library,
+academy). All three independent fixture checks passed. Discovery returned zero candidates again (two `PARTIAL`,
+one `FAILED`), so the follow-up yielded no model-generated suggestions for unedited execution.
+
 ## Hosted-model evaluation (mechanism)
 
-Prepared, not executed: running it makes paid provider calls. With an approved budget, put `DISCOVERY_MODEL` and the
-provider key in a discovery env file that only the operator can read, then:
+With an approved budget, put `DISCOVERY_MODEL` and the provider key in a discovery env file that only the operator
+can read, then:
 
 ```sh
 BROWSER_USE_BENCHMARK=1 BROWSER_USE_BENCHMARK_ENV_FILE=/secure/path/discovery.env \
