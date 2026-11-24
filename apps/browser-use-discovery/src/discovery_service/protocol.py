@@ -213,15 +213,15 @@ class CandidateBatch(BaseModel):
 _WS = re.compile(r'\s+')
 _PATH = re.compile(r'^/[A-Za-z0-9._~/-]{0,179}$')
 _UNSAFE = re.compile(
-    r'\b(delete|password|log ?in|sign ?in|sign ?up|register|credential|api key|token|exploit|'
+    r'\b(delete|password|log ?in|sign ?in|credential|api key|token|exploit|'
     r'inject|xss|sql|ssrf|attack)\b',
     re.I,
 )
-_PAYMENT = re.compile(r'\b(payment|credit card)\b', re.I)
+_LIVE_ONLY = re.compile(r'\b(payment|credit card|sign ?up|register)\b', re.I)
 
 
 def unsafe_result(text: str, live: bool) -> bool:
-    return bool(_UNSAFE.search(text) or (not live and _PAYMENT.search(text)))
+    return bool(_UNSAFE.search(text) or (not live and _LIVE_ONLY.search(text)))
 
 
 def clean_text(value: Any, limit: int) -> str:

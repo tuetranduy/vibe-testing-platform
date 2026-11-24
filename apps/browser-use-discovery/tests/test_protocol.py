@@ -125,6 +125,16 @@ def test_live_discovery_preserves_observed_routes_without_query_state():
     assert sanitize_candidates([route], paths, live=True)[0].relevantPaths == ['/mc/bike-summary', '/mc/your-bike']
 
 
+def test_live_discovery_can_report_an_observed_registration_route():
+    registration = cand(title='Register before browsing books', goal='Open Register and find the account form.',
+                        relevant_paths=['/register'])
+    paths = frozenset({'/register'})
+    assert sanitize_candidates([registration], paths) == []
+    assert sanitize_candidates([registration], paths, live=True)[0].relevantPaths == ['/register']
+    with_credentials = {**registration, 'rationale': 'The page showed a password with a secret value.'}
+    assert sanitize_candidates([with_credentials], paths, live=True) == []
+
+
 def test_sanitize_caps_count_and_dedupes():
     many = [cand(title=f'Scenario number {i}') for i in range(30)] + [cand(title='Scenario number 1')]
     out = sanitize_candidates(many, KNOWN)

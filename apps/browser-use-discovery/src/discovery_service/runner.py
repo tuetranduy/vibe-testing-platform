@@ -185,6 +185,8 @@ def build_task(origin: str, start_url: str, scope: str = '/', *, snapshot: bool 
         '- Open menus, tabs and dialogs. Use filters, search and pagination. Fill and submit forms with synthetic\n'
         '  test data to observe server validation and reach the next step, including in checkout and payment flows.\n'
         '  Continue when an optional cookie prompt is absent. Match repeated actions to their surrounding labels.\n'
+        '  For registration scenarios, name the observed controls and outcome. Describe required inputs as synthetic\n'
+        '  test details without including any credential values.\n'
         '- Complete payments only if the site explicitly identifies a sandbox or test mode. Use the sandbox\n'
         '  payment details. Stop before confirming a real order, charge, deletion or account change.\n'
         '- Stop at sign-in and download prompts.\n'
