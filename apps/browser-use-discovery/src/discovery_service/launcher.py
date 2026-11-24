@@ -368,6 +368,7 @@ class Session:
             max_steps=min(MAX_AGENT_STEPS, self.broker.max_requests - 1),
             timeout_s=self.agent_timeout(),
             **({'proxy': f'http://{EGRESS_ALIAS}:{EGRESS_PORT}'} if self.proxy_mode else {}),
+            **({'snapshot': [page.model_dump() for page in self.request.snapshot]} if self.request.snapshot else {}),
         )
         while True:
             try:
@@ -529,6 +530,8 @@ async def discover(request: DiscoveryRequest, cfg: Config, model: Any = None,
         target = match_target(cfg.fixture_url, request.targetUrl)
     except PolicyError:
         return DiscoveryResponse(runId=request.runId, status='BLOCKED', reason='target_not_allowed'), {'reason': 'target_not_allowed'}
+    if request.snapshot and cfg.target_mode != 'bundled':
+        return DiscoveryResponse(runId=request.runId, status='BLOCKED', reason='target_not_allowed'), {'reason': 'snapshot_requires_offline_mode'}
     try:
         await asyncio.to_thread(check_target_mode, cfg)
     except ConfigError as e:
@@ -555,7 +558,9 @@ async def discover(request: DiscoveryRequest, cfg: Config, model: Any = None,
         return DiscoveryResponse(runId=request.runId, status='CANCELLED', reason='cancelled'), {'reason': 'cancelled'}
     except OSError:
         return DiscoveryResponse(runId=request.runId, status='FAILED', reason='docker_unavailable'), {'reason': 'docker_unavailable'}
-    response, reason = to_response(request.runId, outcome, scoped_paths(fixture_paths(SITE_DIR), target.path))
+    known = (frozenset(page.path for page in request.snapshot) if request.snapshot
+             else scoped_paths(fixture_paths(SITE_DIR), target.path))
+    response, reason = to_response(request.runId, outcome, known)
     if deadline_hit:
         reason = response.reason = 'hard_deadline'
     reported_steps = (outcome or {}).get('steps')

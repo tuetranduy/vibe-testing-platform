@@ -7,8 +7,23 @@ export const DiscoverySecondsSchema = z.number().int().min(15).max(120);
 /** A broker job's whole wall-clock budget: container start, the agent and result delivery. */
 export const DiscoveryJobSecondsSchema = z.number().int().min(10).max(120);
 export const DiscoveryStepsSchema = z.number().int().min(2).max(20);
-export const DiscoveryCapabilitySchema = z.object({ fixtureUrl: z.string().nullable() });
+export const DiscoveryCapabilitySchema = z.object({ fixtureUrl: z.string().nullable(), verifiedSites: z.boolean().optional() });
 export const DiscoveryRolloutSchema = z.object({ available: z.boolean(), enabled: z.boolean() });
+export const DiscoverySiteChallengeSchema = z.object({ name: z.string(), value: z.string(), verified: z.boolean() });
+
+export const DiscoveryFixturePathSchema = z.string().max(180).regex(
+  /^\/(?:[a-zA-Z0-9_-][a-zA-Z0-9._~-]*(?:\/[a-zA-Z0-9_-][a-zA-Z0-9._~-]*)*\/?)?$/,
+  "Expected a fixture path without a host, query, fragment or dot segments",
+);
+
+/** One public HTTPS hostname. A proof for a parent does not authorize siblings or subdomains. */
+export const DiscoveryLiveUrlSchema = HttpUrlSchema
+  .refine((value) => value.length <= 2048 && !/[?#]/.test(value), "Use an HTTPS page URL without a query or fragment")
+  .transform((value) => new URL(value))
+  .refine((url) => url.protocol === "https:" && !url.port &&
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(url.hostname) &&
+    url.hostname.length <= 220, "Use an HTTPS domain on the default port")
+  .refine((url) => DiscoveryFixturePathSchema.safeParse(url.pathname).success, "Use a supported page path");
 
 /** Exact fixture URL. Do not transmit query parameters, fragments or credentials to the launcher. */
 export const DiscoveryFixtureUrlSchema = HttpUrlSchema
@@ -21,16 +36,16 @@ export const DiscoveryInputSchema = z.strictObject({
   schemaVersion: version, runId, targetUrl: DiscoveryFixtureUrlSchema,
   timeoutSeconds: DiscoveryJobSecondsSchema.optional(),
   maxAgentSteps: DiscoveryStepsSchema.optional(),
+  snapshot: z.array(z.object({
+    path: DiscoveryFixturePathSchema,
+    title: z.string().max(150),
+    evidence: z.string().max(550),
+  }).strict()).min(1).max(6).optional(),
 });
 export type DiscoveryInput = z.infer<typeof DiscoveryInputSchema>;
 
 const candidateText = (min: number, max: number) =>
   z.string().trim().min(min).max(max).refine((value) => !/[\p{Cc}\p{Cf}]/u.test(value), "Use plain text");
-
-export const DiscoveryFixturePathSchema = z.string().max(180).regex(
-  /^\/(?:[a-zA-Z0-9_-][a-zA-Z0-9._~-]*(?:\/[a-zA-Z0-9_-][a-zA-Z0-9._~-]*)*\/?)?$/,
-  "Expected a fixture path without a host, query, fragment or dot segments",
-);
 
 const DiscoveryCandidateSchema = z.strictObject({
   title: candidateText(3, 80),

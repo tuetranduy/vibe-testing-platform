@@ -39,6 +39,7 @@ const ENDPOINTS: { method: Method; pattern: RegExp; query: readonly string[] }[]
   { method: "PATCH", pattern: new RegExp(`^/v1/users/${ID}$`), query: [] },
   { method: "POST", pattern: /^\/v1\/test-runs$/, query: [] },
   { method: "GET", pattern: /^\/v1\/discovery\/capability$/, query: [] },
+  { method: "POST", pattern: /^\/v1\/discovery\/site-verification$/, query: [] },
   { method: "GET", pattern: /^\/v1\/settings\/discovery$/, query: [] },
   { method: "PUT", pattern: /^\/v1\/settings\/discovery$/, query: [] },
   { method: "GET", pattern: /^\/v1\/test-runs$/, query: ["limit", "cursor", "owner"] },

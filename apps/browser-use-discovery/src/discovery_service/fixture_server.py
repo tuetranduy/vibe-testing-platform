@@ -15,6 +15,7 @@ import http.server
 import os
 import threading
 from functools import partial
+from html import escape
 from pathlib import Path
 
 SITE_DIR = Path(os.environ.get('DISCOVERY_FIXTURE_DIR') or Path(__file__).resolve().parents[2] / 'fixture' / 'site')
@@ -52,6 +53,38 @@ def serve(host: str, port: int, site_dir: Path = SITE_DIR) -> _Server:
         raise FileNotFoundError(f'fixture site missing: {site_dir}')
     server = _Server((host, port), partial(_Handler, directory=str(site_dir)))
     threading.Thread(target=server.serve_forever, name='fixture', daemon=True).start()
+    return server
+
+
+def serve_snapshot(port: int, pages: list[dict[str, str]]) -> _Server:
+    """Serve escaped evidence on loopback only, with no scripts, assets or access to the bundled files."""
+    links = ''.join(f'<li><a href="{escape(page["path"], quote=True)}">{escape(page["path"])}</a></li>' for page in pages)
+    bodies = {
+        page['path']: (
+            '<!doctype html><meta charset="utf-8"><title>Captured page</title>'
+            f'<main><h1>{escape(page["title"])}</h1><p>{escape(page["evidence"])}</p></main>'
+            f'<aside><h2>Snapshot index (not site navigation)</h2><ul>{links}</ul></aside>'
+        ).encode()
+        for page in pages
+    }
+
+    class SnapshotHandler(_Handler):
+        def send_head(self):
+            from io import BytesIO
+
+            body = bodies.get(self.path)
+            if body is None:
+                self.send_error(404)
+                return None
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Content-Security-Policy', "default-src 'none'")
+            self.end_headers()
+            return BytesIO(body)
+
+    server = _Server(('127.0.0.1', port), SnapshotHandler)
+    threading.Thread(target=server.serve_forever, name='snapshot', daemon=True).start()
     return server
 
 

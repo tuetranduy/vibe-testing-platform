@@ -153,7 +153,7 @@ export function SuggestionReview({ runId, discoveryNotice, onSelected, onCancel 
                   <p className="suggestion-text">{s.requirement}</p>
                 )}
                 {s.why && <p className="text-muted-foreground">Why: {s.why}</p>}
-                {s.discovery && <p className="text-sm text-muted-foreground">Fixture pages for this idea · {s.discovery.relevantPaths.join(", ")}</p>}
+                {s.discovery && <p className="text-sm text-muted-foreground">Pages for this idea · {s.discovery.relevantPaths.join(", ")}</p>}
                 {s.destructive && !set.run.destructiveActionsAllowed && (
                   <p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">
                     <Icon name="info" /> Will be blocked: this run doesn&apos;t allow destructive actions

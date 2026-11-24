@@ -60,6 +60,7 @@ const deps: ApiDeps = {
     maxActiveRunsPerTenant: env.MAX_ACTIVE_RUNS_PER_TENANT,
     privateAllowlist: env.TARGET_PRIVATE_ALLOWLIST,
     discovery: discoveryAdmission(env),
+    verifiedDiscoverySites: env.BROWSER_USE_DISCOVERY_VERIFIED_SITES === "on" && Boolean(env.BROWSER_USE_DISCOVERY_FIXTURE_URL),
     secretsKey: env.secretsKey,
     artifactUrlTtlSeconds: 300,
     sseHeartbeatMs: 20_000,

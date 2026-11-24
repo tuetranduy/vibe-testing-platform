@@ -23,8 +23,15 @@ Migrations run first, so each one must work with the previous version of the cod
 
 ## Browser Use fixture pilot
 
-Production runs the disposable fixture pilot (`docs/Browser_Use_Integration_Plan_for_Vibe_Testing_Platform.md`).
-It is fixture-only: the agent explores a network-less copy of the bundled demo site, never a user's site.
+Production supports the disposable fixture and self-service discovery for verified public HTTPS sites. On a live site,
+the worker reads a small set of same-origin HTML pages and captures headings, public links and button labels. The
+Browser Use agent receives an inert copy inside its existing network-isolated container.
+
+Any signed-in member can open **New test**, enter the site's final HTTPS page URL, choose **Find test ideas**, and
+click **Verify site for Browser Use**. Publish the displayed DNS TXT record and click **Check DNS record**. Once
+verified, select **Autonomous Discovery (Browser Use)**. The record is bound to the tenant and exact hostname. Remove
+it to revoke verification. For an operational rollback, set the repository variable
+`BROWSER_USE_DISCOVERY_VERIFIED_SITES=off` and redeploy.
 
 | Part | Where |
 |---|---|

@@ -1,8 +1,10 @@
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  BrowserProviderError,
   DiscoveryFixtureUrlSchema,
   SuggestionSchema,
   type DiscoveryCandidate,
+  type DiscoveryInput,
   type DiscoveryOutcomeReason,
   type DiscoveryOutcomeStatus,
   type DiscoveryResult,
@@ -29,6 +31,7 @@ export interface AutonomousSurveyDeps {
   /** Both absent: this worker has no discovery transport; opted-in runs record BLOCKED / not_configured. */
   fixtureUrl?: string;
   port?: AutonomousDiscoveryPort;
+  prepareVerifiedSite?: (ctx: StageContext) => Promise<{ draft: SuggestionSetDraft; snapshot: NonNullable<DiscoveryInput["snapshot"]> }>;
   /** The tenant's rollout flag. A disable closes admission and stops in-flight discovery. */
   allowsTenant?: (tenantId: string) => boolean | Promise<boolean>;
   /** Claims one attempt of the tenant's quota. False: BUSY / tenant_quota, without starting a job. */
@@ -150,8 +153,21 @@ export function withAutonomousDiscovery(
   discovery?: AutonomousSurveyDeps,
 ): EngineStages["survey"] {
   return async (ctx) => {
-    const draft = await survey(ctx);
     const options = ctx.request.options;
+    const verified = options.verifiedSiteDiscovery === true;
+    let draft: SuggestionSetDraft;
+    let snapshot: DiscoveryInput["snapshot"];
+    if (verified) {
+      if (!discovery?.prepareVerifiedSite || !discovery.port || !discovery.fixtureUrl) {
+        throw new BrowserProviderError("Verified site discovery is unavailable on this worker");
+      }
+      if (discovery.reserve && !(await discovery.reserve(ctx.tenantId))) {
+        throw new BrowserProviderError("This tenant has reached its hourly discovery limit");
+      }
+      ({ draft, snapshot } = await discovery.prepareVerifiedSite(ctx));
+    } else {
+      draft = await survey(ctx);
+    }
     if (!options.autonomousDiscovery) return draft;
 
     const started = ctx.now().getTime();
@@ -168,13 +184,13 @@ export function withAutonomousDiscovery(
       return draft;
     };
     const isEnabled = async () => {
-      try { return await discovery?.allowsTenant?.(ctx.tenantId) !== false; }
+      try { return verified || await discovery?.allowsTenant?.(ctx.tenantId) !== false; }
       catch { return false; }
     };
 
     if (!discovery?.port || !discovery.fixtureUrl) return skip("BLOCKED", "not_configured");
-    if (ctx.request.environment !== "staging") return skip("BLOCKED", "environment");
-    const target = DiscoveryFixtureUrlSchema.safeParse(ctx.request.targetUrl);
+    if (!verified && ctx.request.environment !== "staging") return skip("BLOCKED", "environment");
+    const target = DiscoveryFixtureUrlSchema.safeParse(verified ? discovery.fixtureUrl : ctx.request.targetUrl);
     if (!target.success || target.data !== discovery.fixtureUrl) return skip("BLOCKED", "fixture_mismatch");
 
     await ctx.boundary();
@@ -184,11 +200,13 @@ export function withAutonomousDiscovery(
     let stageMs = Math.min(remaining, budgetMs);
     let jobSeconds = Math.min(120, Math.floor(stageMs / 1000) - DISCOVERY_RESULT_GRACE_S);
     if (jobSeconds < MIN_JOB_SECONDS) return skip("TIMED_OUT", "no_budget");
-    if (discovery.reserve && !(await discovery.reserve(ctx.tenantId))) return skip("BUSY", "tenant_quota");
+    if (!verified && discovery.reserve && !(await discovery.reserve(ctx.tenantId))) return skip("BUSY", "tenant_quota");
 
     let admission: Extract<DiscoveryAdmission, { granted: true }> | undefined;
     if (discovery.admit) {
-      const refund = async () => { await Promise.resolve(discovery.refund?.(ctx.tenantId)).catch(() => {}); };
+      const refund = async () => {
+        if (!verified) await Promise.resolve(discovery.refund?.(ctx.tenantId)).catch(() => {});
+      };
       let granted: DiscoveryAdmission;
       try {
         granted = await discovery.admit({
@@ -242,6 +260,7 @@ export function withAutonomousDiscovery(
         {
           schemaVersion: "discovery.v1", runId: ctx.runId, targetUrl, timeoutSeconds: jobSeconds,
           ...(options.discoveryMaxSteps === undefined ? {} : { maxAgentSteps: options.discoveryMaxSteps }),
+          ...(snapshot && { snapshot }),
         },
         { signal, onProgress: async (agentSteps) => {
           if (signal.aborted || agentSteps <= steps) return;

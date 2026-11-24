@@ -10,6 +10,7 @@ import { admitDiscoveryRun, discoveryEnabled, refundDiscoveryAttempt, reserveDis
 import {
   createFakeStages,
   createRealStages,
+  prepareVerifiedSite,
   type AnalyzeStageDeps,
   type EngineStages,
   type ExploreStageDeps,
@@ -39,8 +40,9 @@ export type EngineConfig = Partial<
     | "RUNNER_NODE_MODULES_DIR"
     | "RUNNER_URL"
     | "RUNNER_TOKEN"
+    | "BROWSER_USE_DISCOVERY_VERIFIED_SITES"
   > & DiscoveryEnv
->;
+> & { secretsKey?: Buffer };
 
 /**
  * The survey's Browser Use wiring. Always present, so a run the API admitted still records a typed outcome and
@@ -48,6 +50,7 @@ export type EngineConfig = Partial<
  */
 export function createDiscoveryDeps(config: EngineConfig, deps: Pick<EngineDeps, "discoveryRollout" | "logger" | "metrics">): AutonomousSurveyDeps {
   const admission = discoveryAdmission(config);
+  const { secretsKey } = config;
   const metrics = deps.metrics;
   const port = !admission
     ? undefined
@@ -72,6 +75,8 @@ export function createDiscoveryDeps(config: EngineConfig, deps: Pick<EngineDeps,
   };
   return {
     ...(admission && counted ? { fixtureUrl: admission.fixtureUrl, port: counted } : {}),
+    ...(config.BROWSER_USE_DISCOVERY_VERIFIED_SITES === "on" && secretsKey
+      ? { prepareVerifiedSite: (ctx) => prepareVerifiedSite(ctx, secretsKey) } : {}),
     allowsTenant: async (tenantId) => Boolean(admission?.tenantIds.includes(tenantId)) && await discoveryEnabled(deps.discoveryRollout, tenantId),
     reserve: (tenantId) => reserveDiscoveryAttempt(deps.discoveryRollout, tenantId, hourlyLimit),
     refund: (tenantId) => refundDiscoveryAttempt(deps.discoveryRollout, tenantId),

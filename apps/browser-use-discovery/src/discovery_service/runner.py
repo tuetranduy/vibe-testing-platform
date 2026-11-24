@@ -161,10 +161,16 @@ def path_scope(path: str) -> str:
     return path.rsplit('/', 1)[0] + '/'
 
 
-def build_task(origin: str, start_url: str, scope: str = '/') -> str:
+def build_task(origin: str, start_url: str, scope: str = '/', *, snapshot: bool = False) -> str:
     scope_url = origin + scope
+    context = (
+        'These are offline captures of public pages. Use the observed headings, paths and labels as evidence. '
+        'The snapshot index is a reader tool, not a feature of the live site. Do not propose tests of the capture itself.\n'
+        if snapshot else ''
+    )
     return f"""You are doing functional QA test discovery on a disposable demo website.
 
+{context}
 Start at {start_url}. Explore only pages under {scope_url} by reading pages and following links; pages elsewhere on
 {origin} belong to other fixtures and are out of scope.
 Identify the main end-user workflows (navigation, search, product browsing, cart, forms) and propose functional
@@ -189,7 +195,7 @@ async def _run(transport: Transport, host_link: 'HostLink', start: dict[str, Any
     from browser_use import Agent, Browser
 
     from discovery_service.brokered_model import BrokerChannel, BrokeredModel
-    from discovery_service.fixture_server import serve
+    from discovery_service.fixture_server import serve, serve_snapshot
     from discovery_service.protocol import CandidateBatch
 
     host, port, path = str(start['host']), int(start['port']), str(start['path'])
@@ -197,12 +203,16 @@ async def _run(transport: Transport, host_link: 'HostLink', start: dict[str, Any
     timeout_s = max(5.0, min(float(start.get('timeout_s', AGENT_TIMEOUT_S)), float(AGENT_TIMEOUT_S)))
 
     proxy = start.get('proxy')
+    snapshot = start.get('snapshot')
     if isinstance(proxy, str) and re.fullmatch(r'http://[a-z0-9-]{1,63}:[0-9]{2,5}', proxy):
         # Proxy mode: no local copy. Chromium reaches the approved target only through the job's egress proxy; the
         # container's network has no other peer and no route out.
         server = None
         os.environ['VTP_PROXY_SERVER'] = proxy
         os.environ['BH_CHROME_PATH'] = '/app/bin/chromium-proxied'
+    elif snapshot:
+        server = serve_snapshot(port, snapshot)
+        path = snapshot[0]['path']
     else:
         server = serve('127.0.0.1', port)  # the in-container copy; `host` resolves here via --add-host
     origin, start_url = f'http://{host}:{port}', f'http://{host}:{port}{path}'
@@ -235,7 +245,7 @@ async def _run(transport: Transport, host_link: 'HostLink', start: dict[str, Any
     workspace = Path(os.environ.get('TMPDIR', '/tmp')) / 'agent-workspace'
     workspace.mkdir(parents=True, exist_ok=True)
     agent = Agent(
-        build_task(origin, start_url, path_scope(path)),
+        build_task(origin, start_url, '/' if snapshot else path_scope(path), snapshot=bool(snapshot)),
         llm=BrokeredModel(channel),
         browser=browser,
         output_model_schema=CandidateBatch,

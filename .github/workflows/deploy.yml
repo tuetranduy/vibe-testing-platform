@@ -104,6 +104,7 @@ jobs:
           # Repository variables: BROWSER_USE_DISCOVERY=off removes the worker's pilot settings on the next deploy.
           BROWSER_USE_DISCOVERY: ${{ vars.BROWSER_USE_DISCOVERY }}
           BROWSER_USE_DISCOVERY_MODEL: ${{ vars.BROWSER_USE_DISCOVERY_MODEL }}
+          BROWSER_USE_DISCOVERY_VERIFIED_SITES: ${{ vars.BROWSER_USE_DISCOVERY_VERIFIED_SITES || 'on' }}
         run: scripts/deploy/deploy-worker.sh
 
       - name: Build and push the API and web images to Cloudflare
@@ -124,6 +125,7 @@ jobs:
           SECRETS_JSON: ${{ toJSON(secrets) }}
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'anthropic' }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
+          BROWSER_USE_DISCOVERY_VERIFIED_SITES: ${{ (vars.BROWSER_USE_DISCOVERY == 'off' && 'off') || vars.BROWSER_USE_DISCOVERY_VERIFIED_SITES || 'on' }}
         run: |
           cd apps/edge
           sed -i "s/__IMAGE_TAG__/$SHA/g" wrangler.jsonc
@@ -134,7 +136,7 @@ jobs:
             const out = Object.fromEntries(names.filter((n) => s[n]).map((n) => [n, s[n]]));
             require("fs").writeFileSync("/tmp/worker-secrets.json", JSON.stringify(out));
           '
-          vars=(--var "LLM_PROVIDER:$LLM_PROVIDER")
+          vars=(--var "LLM_PROVIDER:$LLM_PROVIDER" --var "BROWSER_USE_DISCOVERY_VERIFIED_SITES:$BROWSER_USE_DISCOVERY_VERIFIED_SITES")
           if [ -n "$LLM_MODEL" ]; then vars+=(--var "LLM_MODEL:$LLM_MODEL"); fi
           pnpm exec wrangler deploy --secrets-file /tmp/worker-secrets.json "${vars[@]}"
           rm -f /tmp/worker-secrets.json

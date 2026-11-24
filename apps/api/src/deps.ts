@@ -16,6 +16,7 @@ export interface ApiConfig {
   maxActiveRunsPerTenant: number;
   privateAllowlist: string[];
   discovery?: DiscoveryAdmission;
+  verifiedDiscoverySites?: boolean;
   secretsKey: Buffer;
   /** Signed artifact URL lifetime; capped at 300 s. */
   artifactUrlTtlSeconds: number;
@@ -55,6 +56,7 @@ export interface ApiDeps {
   storage: ArtifactStorage;
   cancelSignal: CancelSignal;
   resolve: Resolver;
+  resolveTxt?: (name: string) => Promise<string[][]>;
   /** Receives every audit entry after it is logged and stored (tests; an external sink). */
   audit?: (entry: Record<string, unknown>) => void;
   /** Failed-login counter; unset: a process-local one. */

@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiLlmConfig } from "../deps";
-import { FAKE_LLM, REDIS_URL, SECRETS_KEY, auth, createTestApi, validBody, type TestApi } from "../test-support";
+import { FAKE_LLM, REDIS_URL, SECRETS_KEY, auth, createTestApi, signInMember, validBody, type TestApi } from "../test-support";
 
 let t: TestApi;
 beforeAll(async () => {
@@ -19,6 +19,8 @@ beforeEach(() => {
   t.deps.config.maxActiveRunsPerTenant = 100;
   t.deps.config.llm = FAKE_LLM;
   delete t.deps.config.discovery;
+  delete t.deps.config.verifiedDiscoverySites;
+  delete t.deps.resolveTxt;
 });
 
 const post = (body: unknown, headers: Record<string, string> = {}) =>
@@ -274,6 +276,31 @@ describe("POST /v1/test-runs: the run's model (request → Settings → environm
     expect((await toggle(false)).json()).toEqual({ available: true, enabled: false });
     expect((await capability()).json()).toEqual({ fixtureUrl: null });
     expect((await post(request)).statusCode).toBe(422);
+  });
+
+  it("lets a member prove one hostname by DNS without activating fixture rollout", async () => {
+    t.deps.config.verifiedDiscoverySites = true;
+    const member = await signInMember(t);
+    const targetUrl = "https://shop.example.com/catalog";
+    const records = new Map<string, string[][]>();
+    t.deps.resolveTxt = async (name) => records.get(name) ?? [];
+    const check = (url: string) => t.app.inject({
+      method: "POST", url: "/v1/discovery/site-verification", headers: member.headers, payload: { url },
+    });
+    const body = { targetUrl, options: { autonomousDiscovery: true, verifiedSiteDiscovery: true } };
+    const pending = (await check(targetUrl)).json();
+    expect(pending).toMatchObject({ name: "_vibe-testing.shop.example.com", verified: false });
+    expect((await post(body, member.headers)).json().code).toBe("DISCOVERY_SITE_UNVERIFIED");
+    records.set(pending.name, [[pending.value.slice(0, 20), pending.value.slice(20)]]);
+    expect((await check(targetUrl)).json().verified).toBe(true);
+    expect((await check("https://www.shop.example.com/catalog")).json().verified).toBe(false);
+    expect((await post({ ...body, options: { ...body.options, additionalAllowedHosts: ["example.net"] } }, member.headers)).statusCode).toBe(400);
+    const created = await post(body, member.headers);
+    expect(created.statusCode).toBe(202);
+    expect((await new RunRepository(t.tdb.db).findById(created.json().runId))?.request.options)
+      .toMatchObject({ autonomousDiscovery: true, verifiedSiteDiscovery: true, analyzeLiveSite: false });
+    records.clear();
+    expect((await post(body, member.headers)).json().code).toBe("DISCOVERY_SITE_UNVERIFIED");
   });
 
   it("nothing saved, nothing requested: the environment's choice is recorded", async () => {

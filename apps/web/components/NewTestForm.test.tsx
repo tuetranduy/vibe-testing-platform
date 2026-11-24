@@ -76,6 +76,24 @@ describe("simple test setup", () => {
     expect(payload(fetch).requirement).toBe("");
     expect(destructiveActionsAllowed(CreateTestRunRequestSchema.parse(payload(fetch)))).toBe(true);
   });
+  it("offers Browser Use on a verified live site after the member checks DNS", async () => {
+    const challenge = { name: "_vibe-testing.shop.example.com", value: "vibe-testing=test-proof" };
+    vi.mocked(getDiscoveryCapability).mockResolvedValue({ fixtureUrl: null, verifiedSites: true });
+    const fetch = api(json(200, { ...challenge, verified: false }), json(200, { ...challenge, verified: true }));
+    render(<NewTestForm />);
+    const user = await fill();
+    await user.click(screen.getByRole("button", { name: "Find test ideas" }));
+    await user.click(await screen.findByRole("button", { name: "Verify site for Browser Use" }));
+    expect(await screen.findByText(challenge.name)).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /Autonomous Discovery/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Check DNS record" }));
+    await user.click(await screen.findByRole("checkbox", { name: /Autonomous Discovery/ }));
+    await user.click(screen.getByRole("button", { name: "Explore website" }));
+    expect(payload(fetch, 2)).toMatchObject({ targetUrl: "https://shop.example.com", environment: "production", requirement: "",
+      options: { autonomousDiscovery: true, verifiedSiteDiscovery: true, allowDestructiveActions: false,
+        autoConfirmCriteria: false, additionalAllowedHosts: [] } });
+    expect(push).toHaveBeenCalledWith("/runs/run_new");
+  });
   it("opts an approved fixture into Browser Use with manual review and bounded discovery settings", async () => {
     const targetUrl = "http://127.0.0.1:4599/";
     vi.mocked(getDiscoveryCapability).mockResolvedValue({ fixtureUrl: targetUrl });

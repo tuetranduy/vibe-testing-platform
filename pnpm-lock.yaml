@@ -396,6 +396,9 @@ importers:
       fflate:
         specifier: 0.8.2
         version: 0.8.2
+      parse5:
+        specifier: 8.0.1
+        version: 8.0.1
       playwright-core:
         specifier: 1.56.1
         version: 1.56.1

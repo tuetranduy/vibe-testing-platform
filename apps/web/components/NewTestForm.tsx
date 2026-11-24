@@ -7,10 +7,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/ui/native-select";
-import { CreateTestRunRequestSchema, DiscoveryFixtureUrlSchema, HttpUrlSchema, type CreateTestRunRequestInput, type LlmSettingsView, type ReasoningLevel } from "@platform/contracts";
+import { CreateTestRunRequestSchema, DiscoveryFixtureUrlSchema, DiscoveryLiveUrlSchema, HttpUrlSchema, type CreateTestRunRequestInput, type LlmSettingsView, type ReasoningLevel } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ApiRequestError, createRun, getCriteria, getDiscoveryCapability, getLlmSettings, getRun, getSuggestions } from "../lib/api";
+import { ApiRequestError, checkDiscoverySite, createRun, getCriteria, getDiscoveryCapability, getLlmSettings, getRun, getSuggestions } from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
 import { Icon } from "./Icon";
 import { LEVEL_LABEL, modelGroups } from "./llm-format";
@@ -38,6 +38,10 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const [maxSteps, setMaxSteps] = useState("40");
   const [autoConfirm, setAutoConfirm] = useState(false);
   const [discoveryFixture, setDiscoveryFixture] = useState<string | null>(null);
+  const [verifiedSites, setVerifiedSites] = useState(false);
+  const [verification, setVerification] = useState<(Awaited<ReturnType<typeof checkDiscoverySite>> & { origin: string }) | null>(null);
+  const [verificationPending, setVerificationPending] = useState(false);
+  const [verificationError, setVerificationError] = useState("");
   const [discover, setDiscover] = useState(false);
   const [discoverySeconds, setDiscoverySeconds] = useState("120");
   const [discoverySteps, setDiscoverySteps] = useState("20");
@@ -60,7 +64,11 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   useEffect(() => {
     if (mode !== "explore") return;
     let live = true;
-    getDiscoveryCapability().then(({ fixtureUrl }) => live && setDiscoveryFixture(fixtureUrl), () => {});
+    getDiscoveryCapability().then(({ fixtureUrl, verifiedSites }) => {
+      if (!live) return;
+      setDiscoveryFixture(fixtureUrl);
+      setVerifiedSites(Boolean(verifiedSites));
+    }, () => {});
     return () => { live = false; };
   }, [mode]);
 
@@ -91,8 +99,27 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const levels = effectiveModel?.reasoningLevels.filter((l) => l !== "default") ?? [];
   const host = HttpUrlSchema.safeParse(targetUrl.trim()).success ? new URL(targetUrl.trim()).host : null;
   const fixture = DiscoveryFixtureUrlSchema.safeParse(targetUrl.trim());
-  const canDiscover = mode === "explore" && fixture.success && fixture.data === discoveryFixture && effectiveModel?.provider !== "fake";
+  const liveSite = DiscoveryLiveUrlSchema.safeParse(targetUrl.trim());
+  const canVerify = mode === "explore" && verifiedSites && liveSite.success && effectiveModel?.provider !== "fake";
+  const siteVerification = canVerify && verification?.origin === liveSite.data.origin ? verification : null;
+  const canDiscover = mode === "explore" && effectiveModel?.provider !== "fake" &&
+    ((fixture.success && fixture.data === discoveryFixture) || siteVerification?.verified === true);
   const usingDiscovery = canDiscover && discover;
+  const usingVerifiedSite = usingDiscovery && siteVerification?.verified === true;
+
+  async function verifySite() {
+    if (!liveSite.success) return;
+    setVerificationPending(true);
+    setVerificationError("");
+    try {
+      const result = await checkDiscoverySite(liveSite.data.href);
+      setVerification({ ...result, origin: liveSite.data.origin });
+    } catch (error) {
+      setVerificationError(error instanceof Error ? error.message : "Site verification could not be checked");
+    } finally {
+      setVerificationPending(false);
+    }
+  }
   const errorFor = (id: string) => errors[id] ? <p id={`${id}-error`} className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px"><Icon name="error" /> {errors[id]}</p> : null;
   const invalid = (id: string) => ({ "aria-invalid": errors[id] ? true as const : undefined, "aria-describedby": errors[id] ? `${id}-error` : undefined });
 
@@ -119,14 +146,15 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
     const body: CreateTestRunRequestInput = {
       targetUrl: targetUrl.trim(), requirement: mode === "explore" ? "" : requirement.trim(),
       // Action consent is acknowledged for the app. Populate the legacy API authorization fields automatically.
-      environment: usingDiscovery ? "staging" : "production",
+      environment: usingDiscovery && !usingVerifiedSite ? "staging" : "production",
       options: {
         maxRunSeconds: Number(maxRunSeconds), maxExplorationSteps: Number(maxSteps),
         generatePlaywright: true, rerunGeneratedTest: rerun, autoConfirmCriteria: usingDiscovery ? false : autoConfirm,
         allowDestructiveActions: !usingDiscovery,
         ...(host && !usingDiscovery ? { confirmProductionHost: host } : {}),
         ...(usingDiscovery ? { autonomousDiscovery: true, discoveryMaxSeconds: Number(discoverySeconds), discoveryMaxSteps: Number(discoverySteps) } : {}),
-        additionalAllowedHosts: hosts.split(/[\s,]+/).filter(Boolean),
+        ...(usingVerifiedSite ? { verifiedSiteDiscovery: true } : {}),
+        additionalAllowedHosts: usingVerifiedSite ? [] : hosts.split(/[\s,]+/).filter(Boolean),
       },
       ...((model || reasoning) ? { llm: { ...(model ? { model } : {}), ...(reasoning ? { reasoning } : {}) } } : {}),
     };
@@ -150,6 +178,12 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
       setPending(false);
       if (err instanceof ApiRequestError) {
         if (err.code === "TARGET_NOT_ALLOWED") { showErrors({ targetUrl: err.message }); return; }
+        if (err.code === "DISCOVERY_SITE_UNVERIFIED") {
+          setVerification(null);
+          setDiscover(false);
+          showErrors({ targetUrl: err.message });
+          return;
+        }
         if (err.code === "IDEMPOTENCY_CONFLICT") key.current = null;
         const fields = Object.fromEntries((err.issues ?? []).map((i) => [String(i.path.at(-1)), i.message]));
         if (Object.keys(fields).length) showErrors(fields);
@@ -181,12 +215,27 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
             {errorFor("requirement")}
             <div className="example-row" role="group" aria-label="Example tests"><span className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Try an example</span>{EXAMPLES.map((ex) => <Button variant="plain" key={ex.label} type="button" className="example-chip" onClick={() => { setRequirement(ex.text); prompt.current?.focus(); }}><Icon name={ex.icon} />{ex.label}</Button>)}</div>
           </Field> : <div className="explore-intro"><Icon name="sparkle" /><div><strong>Let the agent find a starting point.</strong><p>It explores your website and suggests useful tests. Choose an idea, review the checks, and start when you’re ready.</p></div></div>}
+          {canVerify && !siteVerification?.verified && <Field className="gap-2">
+            <div><Button type="button" variant="outline" disabled={verificationPending} onClick={() => void verifySite()}>
+              {verificationPending ? "Checking DNS…" : siteVerification ? "Check DNS record" : "Verify site for Browser Use"}
+            </Button></div>
+            {siteVerification && <div className="text-sm text-muted-foreground">
+              <p>Add this TXT record to verify control of the site.</p>
+              <dl className="mt-1 break-all">
+                <dt>Name</dt><dd><code>{siteVerification.name}</code></dd>
+                <dt>Value</dt><dd><code>{siteVerification.value}</code></dd>
+              </dl>
+            </div>}
+            {verificationError && <p role="alert" className="text-sm text-destructive">{verificationError}</p>}
+          </Field>}
           {canDiscover && <Field className="gap-2">
             <div className="flex items-center gap-2">
               <Checkbox id="autonomousDiscovery" checked={discover} onCheckedChange={(checked) => setDiscover(checked === true)} aria-describedby="discovery-hint" />
               <label htmlFor="autonomousDiscovery">Autonomous Discovery (Browser Use)</label>
             </div>
-            <p id="discovery-hint" className="text-sm text-muted-foreground">Explore the staging fixture for additional test ideas. This uses extra AI calls and requires criteria review.</p>
+            <p id="discovery-hint" className="text-sm text-muted-foreground">{siteVerification?.verified
+              ? "Suggest tests from read-only snapshots of this verified site. This uses extra AI calls and requires criteria review."
+              : "Explore the staging fixture for additional test ideas. This uses extra AI calls and requires criteria review."}</p>
             {errorFor("autonomousDiscovery")}
             {usingDiscovery && <div className="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1">
               <Field><label htmlFor="discoveryMaxSeconds">Discovery time (seconds)</label><Input id="discoveryMaxSeconds" name="discoveryMaxSeconds" type="number" min={15} max={120} value={discoverySeconds} onChange={(e) => setDiscoverySeconds(e.target.value)} {...invalid("discoveryMaxSeconds")} />{errorFor("discoveryMaxSeconds")}</Field>
@@ -212,11 +261,11 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
             <Field><label htmlFor="maxExplorationSteps">Step limit</label><Input id="maxExplorationSteps" type="number" min={1} max={100} value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} {...invalid("maxExplorationSteps")} /><p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Steps in the test plan.</p>{errorFor("maxExplorationSteps")}</Field>
           </div>
           <label className="flex min-h-8 cursor-pointer items-center gap-2.5 text-[0.9375rem] has-disabled:cursor-not-allowed has-disabled:text-muted-foreground"><Checkbox checked={rerun} onCheckedChange={(checked) => setRerun(checked === true)} />Verify results by rerunning the saved test</label>
-          <label className="flex min-h-8 cursor-pointer items-center gap-2.5 text-[0.9375rem] has-disabled:cursor-not-allowed has-disabled:text-muted-foreground"><Checkbox checked={autoConfirm} onCheckedChange={(checked) => setAutoConfirm(checked === true)} />Start immediately after planning (skip review)</label>
-          <Field><label htmlFor="additionalAllowedHosts">Other website hosts</label><Input id="additionalAllowedHosts" placeholder="login.example.com, help.example.com" value={hosts} onChange={(e) => setHosts(e.target.value)} {...invalid("additionalAllowedHosts")} /><p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Only needed if the test moves to another host.</p>{errorFor("additionalAllowedHosts")}</Field>
+          <label className="flex min-h-8 cursor-pointer items-center gap-2.5 text-[0.9375rem] has-disabled:cursor-not-allowed has-disabled:text-muted-foreground"><Checkbox disabled={usingDiscovery} checked={!usingDiscovery && autoConfirm} onCheckedChange={(checked) => setAutoConfirm(checked === true)} />Start immediately after planning (skip review)</label>
+          {!usingVerifiedSite && <Field><label htmlFor="additionalAllowedHosts">Other website hosts</label><Input id="additionalAllowedHosts" placeholder="login.example.com, help.example.com" value={hosts} onChange={(e) => setHosts(e.target.value)} {...invalid("additionalAllowedHosts")} /><p className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Only needed if the test moves to another host.</p>{errorFor("additionalAllowedHosts")}</Field>}
         </CollapsibleContent>
       </Collapsible>
-      <div className="composer-footer"><p className="composer-note"><Icon name="shield" />{autoConfirm ? "The test starts after planning." : "Review the checks before the test runs."}</p><Button size="lg" type="submit" disabled={pending || prefill === "loading"}>{pending ? "Starting…" : mode === "explore" ? "Explore website" : "Create test"}<Icon name="arrow" /></Button></div>
+      <div className="composer-footer"><p className="composer-note"><Icon name="shield" />{autoConfirm && !usingDiscovery ? "The test starts after planning." : "Review the checks before the test runs."}</p><Button size="lg" type="submit" disabled={pending || prefill === "loading"}>{pending ? "Starting…" : mode === "explore" ? "Explore website" : "Create test"}<Icon name="arrow" /></Button></div>
     </form>
   );
 }

@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from discovery_service.launcher import APP_DIR, DEFAULT_IMAGE, LABEL, Config, discover
-from discovery_service.protocol import DiscoveryRequest, DiscoveryResponse
+from discovery_service.protocol import DiscoveryRequest, DiscoveryResponse, SnapshotPage
 from discovery_service.scripted_model import ScriptedModel
 
 IMAGE = os.environ.get('DISCOVERY_IMAGE', DEFAULT_IMAGE)
@@ -80,6 +80,20 @@ def test_scripted_discovery_completes():
         assert all(p.startswith('/') and '://' not in p for p in c.relevantPaths)
     assert 1 <= stats['agentSteps'] <= 19 and stats['modelRequests'] <= 20
     DiscoveryResponse.model_validate_json(resp.line())
+    assert leftover_containers() == []
+
+
+def test_browser_use_reads_snapshot_without_serving_bundled_fixture_pages():
+    paths = ['/benchmark/museum/index.html', '/benchmark/museum/exhibit.html']
+    request = req('it-snapshot').model_copy(update={'snapshot': [
+        SnapshotPage(path=path, title=title, evidence='A heading was present')
+        for path, title in zip(paths, ('Museum', 'Exhibit'))
+    ]})
+    model = ScriptedModel()
+    result, stats = asyncio.run(discover(request, cfg(), model=model))
+    assert result.status == 'COMPLETED', stats
+    assert set(model.observations['pages']) == set(paths)
+    assert set(path for candidate in result.candidates for path in candidate.relevantPaths) == set(paths)
     assert leftover_containers() == []
 
 

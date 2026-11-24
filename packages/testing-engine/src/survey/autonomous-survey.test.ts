@@ -55,6 +55,23 @@ const published = (ctx: StageContext) => vi.mocked(ctx.publish).mock.calls.map((
 const outcome = (ctx: StageContext) => published(ctx).find((event) => event.type === "discovery.completed" || event.type === "discovery.failed");
 
 describe("fixture discovery in the existing survey", () => {
+  it("runs verified live evidence through the offline broker without sending the public URL", async () => {
+    const ctx = context();
+    ctx.request.environment = "production";
+    ctx.request.targetUrl = "https://shop.example.com/catalog";
+    ctx.request.options.verifiedSiteDiscovery = true;
+    const snapshot = [{ path: "/catalog", title: "Catalog", evidence: "Heading: Products" }];
+    const prepareVerifiedSite = vi.fn(async () => ({ draft: baseline, snapshot }));
+    const discover = vi.fn(completeWith([{ ...candidate, relevantPaths: ["/catalog"] }]));
+    const standard = vi.fn(survey);
+    const result = await withAutonomousDiscovery(standard, {
+      fixtureUrl, prepareVerifiedSite, port: { discover }, allowsTenant: () => false, reserve: async () => true,
+    })(ctx);
+    expect(standard).not.toHaveBeenCalled();
+    expect(prepareVerifiedSite).toHaveBeenCalledWith(ctx);
+    expect(discover).toHaveBeenCalledWith(expect.objectContaining({ targetUrl: fixtureUrl, snapshot }), expect.any(Object));
+    expect(result.suggestions.some((suggestion) => suggestion.discovery?.relevantPaths.includes("/catalog"))).toBe(true);
+  });
   it("leaves a run that did not opt in untouched: same suggestions, no discovery events, no adapter call", async () => {
     const ctx = context();
     delete ctx.request.options.autonomousDiscovery;

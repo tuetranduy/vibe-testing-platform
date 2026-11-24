@@ -819,8 +819,11 @@ Add a clearly separate **Discovery** section containing pages/journeys mapped an
       - the launcher refuses `bridge`, `host`, and missing or non-internal target networks.
     - `discovery_blocked_destinations_total{reason}` is in place, with alerts for forbidden addresses and for repeated off-allowlist attempts.
     - A scripted crawl's own baseline is about 2 off-allowlist and 4 CONNECT refusals per job. Chromium makes these even with background networking disabled.
-  - [ ] **Open — needs authorization, a real target environment and its evidence:**
-    - Arbitrary and external targets stay disabled. Proxy mode only joins internal `vtp-discovery-targets*` networks. The production pilot accepts only its configured disposable fixture.
+  - [x] **Verified live-site snapshots:** members of any tenant can prove control of an exact public HTTPS hostname
+    with a tenant-bound DNS TXT record. The worker reads bounded, unauthenticated HTML from that origin and the
+    Browser Use agent receives only escaped snapshots in its network-isolated container.
+  - [ ] **Open — direct browser interaction with live sites:**
+    - Proxy mode only joins internal `vtp-discovery-targets*` networks.
     - The platform's own survey of a proxy-mode target is not wired.
     - An approved external staging target would need a target network with a controlled route out, its own boundary tests (redirects, DNS rebinding against a real resolver), and the §8.2 review.
   - [x] **Fair multi-tenant admission (worker side, Redis).**

@@ -1,6 +1,7 @@
 import {
   CreateTestRunRequestSchema,
   DiscoveryFixtureUrlSchema,
+  DiscoveryLiveUrlSchema,
   MAX_SECRETS,
   extractInlineInputs,
   MAX_TEST_DATA_ENTRIES,
@@ -23,9 +24,9 @@ import {
 } from "@platform/db";
 import { createRunEventPublisher, discoveryEnabled, type RunEventPublisher } from "@platform/event-bus";
 import { catalogModel } from "@platform/llm/catalog";
-import { createRunRedactor, encryptSecret, redactByKey, secretFingerprint, validateTargetUrl } from "@platform/security";
+import { createRunRedactor, discoverySiteChallenge, discoverySiteVerified, encryptSecret, redactByKey, secretFingerprint, validateTargetUrl } from "@platform/security";
 import { createHmac } from "node:crypto";
-import { actorId, listScope, runScope, type Principal } from "../auth/principal";
+import { actorId, listScope, requireUser, runScope, type Principal } from "../auth/principal";
 import type { ApiDeps } from "../deps";
 import { HttpError, zodIssues } from "../errors";
 import { NO_VERDICT, observeStage } from "../metrics";
@@ -123,7 +124,17 @@ export class TestRunService {
     const { saved, availability } = await new LlmSettingsService(this.deps).state(tenantId);
     const resolved = resolveRunLlm({ override: req.llm, saved, env: this.deps.config.llm.envChoice, availability });
     if (!resolved.ok) throw modelNotAvailable(resolved.issue);
-    if (req.options.autonomousDiscovery) {
+    if (req.options.verifiedSiteDiscovery) {
+      requireUser(principal);
+      const target = DiscoveryLiveUrlSchema.safeParse(req.targetUrl);
+      if (!this.deps.config.verifiedDiscoverySites || !target.success || resolved.choice.provider === "fake") {
+        throw new HttpError(422, "DISCOVERY_UNAVAILABLE", "Live discovery needs a verified HTTPS site and a hosted model");
+      }
+      if (!await discoverySiteVerified(discoverySiteChallenge(this.deps.config.secretsKey, tenantId, target.data.hostname), this.deps.resolveTxt)) {
+        throw new HttpError(422, "DISCOVERY_SITE_UNVERIFIED", "Publish the site's verification TXT record before starting discovery",
+          [{ path: ["targetUrl"], message: "Verify this site to start discovery" }]);
+      }
+    } else if (req.options.autonomousDiscovery) {
       const admission = this.deps.config.discovery;
       const target = DiscoveryFixtureUrlSchema.safeParse(req.targetUrl);
       if (!admission?.tenantIds.includes(tenantId) || !target.success || target.data !== admission.fixtureUrl ||

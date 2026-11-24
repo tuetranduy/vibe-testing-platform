@@ -46,6 +46,12 @@ EXPECTED_MAX, NEGATIVE_MAX = 5, 5
 PATH_MAX_LEN, PATHS_MAX = 180, 8
 RUN_ID = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 
+class SnapshotPage(BaseModel):
+    model_config = ConfigDict(extra='forbid', frozen=True)
+    path: str = Field(max_length=180, pattern=r'^/(?:[a-zA-Z0-9_-][a-zA-Z0-9._~-]*(?:/[a-zA-Z0-9_-][a-zA-Z0-9._~-]*)*/?)?$')
+    title: str = Field(max_length=150)
+    evidence: str = Field(max_length=550)
+
 
 class DiscoveryRequest(BaseModel):
     """Node -> launcher. Callers may lower the budget for the operator's fixture.
@@ -61,6 +67,7 @@ class DiscoveryRequest(BaseModel):
     targetUrl: str = Field(min_length=1, max_length=2048)
     timeoutSeconds: int | None = Field(default=None, strict=True, ge=MIN_JOB_SECONDS, le=MAX_JOB_SECONDS)
     maxAgentSteps: int | None = Field(default=None, strict=True, ge=2, le=20)
+    snapshot: list[SnapshotPage] | None = Field(default=None, min_length=1, max_length=6)
 
 
 class DiscoveryStatistics(BaseModel):

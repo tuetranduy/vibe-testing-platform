@@ -121,6 +121,7 @@ export const RunOptionsSchema = z
     rerunGeneratedTest: z.boolean().optional(),
     autoConfirmCriteria: z.boolean().default(false),
     autonomousDiscovery: z.boolean().optional(),
+    verifiedSiteDiscovery: z.boolean().optional(),
     discoveryMaxSeconds: DiscoverySecondsSchema.optional(),
     discoveryMaxSteps: DiscoveryStepsSchema.optional(),
     allowDestructiveActions: z.boolean().default(false),
@@ -152,6 +153,7 @@ export const RunOptionsSchema = z
   })
   .transform(({ rerunGeneratedTest, ...options }) => ({
     ...options,
+    ...(options.verifiedSiteDiscovery && { analyzeLiveSite: false }),
     rerunGeneratedTest: rerunGeneratedTest ?? !options.allowDestructiveActions,
   }));
 export type RunOptions = z.infer<typeof RunOptionsSchema>;
@@ -184,11 +186,17 @@ export const CreateTestRunRequestSchema = z
     llm: LlmOverrideSchema.optional(),
   })
   .superRefine((r, ctx) => {
-    if (r.options.autonomousDiscovery && (r.environment !== "staging" || r.requirement !== "" || r.options.autoConfirmCriteria)) {
+    if (r.options.verifiedSiteDiscovery && (!r.options.autonomousDiscovery || r.options.allowDestructiveActions ||
+        r.options.additionalAllowedHosts.length || Object.keys(r.secrets).length || Object.keys(r.testData).length ||
+        r.credentialProfileId || r.testDataSetId)) {
+      ctx.addIssue({ code: "custom", path: ["options", "verifiedSiteDiscovery"],
+        message: "Verified site discovery uses one site and requires read-only settings without credentials or test data" });
+    }
+    if (r.options.autonomousDiscovery && ((!r.options.verifiedSiteDiscovery && r.environment !== "staging") || r.requirement !== "" || r.options.autoConfirmCriteria)) {
       ctx.addIssue({
         code: "custom",
         path: ["options", "autonomousDiscovery"],
-        message: "Autonomous Discovery requires a staging run with blank instructions and manual criteria review",
+        message: "Autonomous Discovery requires blank instructions and manual criteria review. The fixture pilot uses staging.",
       });
     }
     // D9, amended 2026-09-28: production allows destructive actions only with the target host typed as confirmation.

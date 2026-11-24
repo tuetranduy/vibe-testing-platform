@@ -18,6 +18,7 @@
     // network: the API only checks the exact URL and never fetches it.
     "BROWSER_USE_DISCOVERY_PRODUCTION": "fixture-pilot",
     "BROWSER_USE_DISCOVERY_FIXTURE_URL": "http://browser-use-fixture:4599/",
+    "BROWSER_USE_DISCOVERY_VERIFIED_SITES": "on",
     "BROWSER_USE_DISCOVERY_TENANTS": "t_default",
     "TARGET_PRIVATE_ALLOWLIST": "browser-use-fixture:4599"
   },

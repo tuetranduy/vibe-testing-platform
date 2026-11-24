@@ -3,7 +3,7 @@ import type { DiscoverySummary } from "@platform/contracts";
 /** One sentence for the report: what happened to Browser Use discovery, never a test verdict. */
 export function discoveryOutcomeText(summary: Pick<DiscoverySummary, "status" | "fallbackUsed" | "acceptedCount" | "candidateCount" | "pageCount">): string {
   if (!summary.fallbackUsed) {
-    return `${summary.acceptedCount} of ${summary.candidateCount} candidate ideas were offered for review. The candidates referenced ${summary.pageCount} fixture pages.`;
+    return `${summary.acceptedCount} of ${summary.candidateCount} candidate ideas were offered for review. The candidates referenced ${summary.pageCount} pages.`;
   }
   switch (summary.status) {
     case "TIMED_OUT": return "Browser Use reached its time limit. This run used the standard survey suggestions.";

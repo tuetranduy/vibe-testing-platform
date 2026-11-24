@@ -144,6 +144,7 @@ const EnvSchema = z
      */
     BROWSER_USE_DISCOVERY_LAUNCHER: emptyAsUnset(z.string().refine(path.isAbsolute, "must be an absolute executable path")),
     BROWSER_USE_DISCOVERY_FIXTURE_URL: emptyAsUnset(DiscoveryFixtureUrlSchema),
+    BROWSER_USE_DISCOVERY_VERIFIED_SITES: emptyAsUnset(z.enum(["on", "off"])),
     BROWSER_USE_DISCOVERY_SERVICE_URL: emptyAsUnset(z.url().transform((url) => new URL(url)).refine(
       (url) => url.href === `${url.origin}/` && (url.protocol === "https:" ||
         // Loopback, or a single-label service name on a private container network (no dots: never a public host).
@@ -215,6 +216,10 @@ const EnvSchema = z
             message: "the disposable Browser Use discovery pilot needs BROWSER_USE_DISCOVERY_PRODUCTION=fixture-pilot in production",
           });
         }
+      }
+      if (env.BROWSER_USE_DISCOVERY_VERIFIED_SITES === "on") {
+        ctx.addIssue({ code: "custom", path: ["BROWSER_USE_DISCOVERY_VERIFIED_SITES"],
+          message: "verified discovery requires the isolated Browser Use broker in production" });
       }
     }
     if (env.NODE_ENV === "production" && env.BROWSER_USE_DISCOVERY_LAUNCHER) {

@@ -1,6 +1,8 @@
 import { RunRepository } from "@platform/db";
 import { runAssistKey, runAssistAnswerKey, runAssistChannel, discoveryEnabled, setDiscoveryEnabled } from "@platform/event-bus";
-import { runScope, actorId, requireAdmin } from "../auth/principal";
+import { runScope, actorId, requireAdmin, requireUser } from "../auth/principal";
+import { DiscoveryLiveUrlSchema } from "@platform/contracts";
+import { discoverySiteChallenge, discoverySiteVerified } from "@platform/security";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { ApiDeps } from "../deps";
@@ -31,7 +33,19 @@ export async function testRunRoutes(app: FastifyInstance, deps: ApiDeps): Promis
     const { tenantId } = req.principal;
     reply.header("Cache-Control", "no-store");
     const enabled = discovery?.tenantIds.includes(tenantId) && await discoveryEnabled(deps.discoveryRollout, tenantId);
-    return { fixtureUrl: enabled ? discovery?.fixtureUrl ?? null : null };
+    return {
+      fixtureUrl: enabled ? discovery?.fixtureUrl ?? null : null,
+      ...(deps.config.verifiedDiscoverySites && { verifiedSites: true }),
+    };
+  });
+
+  app.post("/v1/discovery/site-verification", async (req, reply) => {
+    const { tenantId } = requireUser(req.principal);
+    if (!deps.config.verifiedDiscoverySites) throw new HttpError(422, "DISCOVERY_UNAVAILABLE", "Verified site discovery is unavailable");
+    const { url } = parseOr400(z.strictObject({ url: DiscoveryLiveUrlSchema }), req.body);
+    const challenge = discoverySiteChallenge(deps.config.secretsKey, tenantId, url.hostname);
+    reply.header("Cache-Control", "no-store");
+    return { ...challenge, verified: await discoverySiteVerified(challenge, deps.resolveTxt) };
   });
 
   app.get("/v1/settings/discovery", async (req, reply) => {

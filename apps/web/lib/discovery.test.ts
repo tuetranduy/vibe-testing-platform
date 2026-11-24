@@ -13,6 +13,6 @@ describe("discoveryOutcomeText", () => {
 
   it("reports offered ideas as counts, never a verdict", () => {
     expect(discoveryOutcomeText({ status: "COMPLETED", candidateCount: 5, acceptedCount: 3, pageCount: 4, fallbackUsed: false }))
-      .toBe("3 of 5 candidate ideas were offered for review. The candidates referenced 4 fixture pages.");
+      .toBe("3 of 5 candidate ideas were offered for review. The candidates referenced 4 pages.");
   });
 });
