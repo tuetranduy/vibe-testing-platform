@@ -10,16 +10,12 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { CreateTestRunRequestSchema, DiscoveryFixtureUrlSchema, DiscoveryLiveUrlSchema, HttpUrlSchema, type CreateTestRunRequestInput, type LlmSettingsView, type ReasoningLevel } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ApiRequestError, checkDiscoverySite, createRun, getCriteria, getDiscoveryCapability, getLlmSettings, getRun, getSuggestions } from "../lib/api";
+import { ApiRequestError, createRun, getCriteria, getDiscoveryCapability, getLlmSettings, getRun, getSuggestions } from "../lib/api";
 import { newIdempotencyKey } from "../lib/uuid";
 import { Icon } from "./Icon";
 import { LEVEL_LABEL, modelGroups } from "./llm-format";
 
 type Errors = Record<string, string>;
-type VerificationCheck = { origin: string; revision: number } & (
-  { result: Awaited<ReturnType<typeof checkDiscoverySite>>; error?: never } |
-  { result?: never; error: string }
-);
 const EXAMPLES = [
   { label: "Search", icon: "search" as const, text: "Search for a product and check that the results match the search term." },
   { label: "Shopping cart", icon: "layers" as const, text: "Add a product to the cart and check that the total includes its price." },
@@ -42,10 +38,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const [maxSteps, setMaxSteps] = useState("40");
   const [autoConfirm, setAutoConfirm] = useState(false);
   const [discoveryFixture, setDiscoveryFixture] = useState<string | null>(null);
-  const [verifiedSites, setVerifiedSites] = useState(false);
-  const [verification, setVerification] = useState<VerificationCheck | null>(null);
-  const [verificationRevision, setVerificationRevision] = useState(0);
-  const [copyStatus, setCopyStatus] = useState<{ origin: string; message: string } | null>(null);
+  const [liveSites, setLiveSites] = useState(false);
   const [discover, setDiscover] = useState(false);
   const [discoverySeconds, setDiscoverySeconds] = useState("120");
   const [discoverySteps, setDiscoverySteps] = useState("20");
@@ -71,7 +64,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
     getDiscoveryCapability().then(({ fixtureUrl, verifiedSites }) => {
       if (!live) return;
       setDiscoveryFixture(fixtureUrl);
-      setVerifiedSites(Boolean(verifiedSites));
+      setLiveSites(Boolean(verifiedSites));
     }, () => {});
     return () => { live = false; };
   }, [mode]);
@@ -104,40 +97,13 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const host = HttpUrlSchema.safeParse(targetUrl.trim()).success ? new URL(targetUrl.trim()).host : null;
   const fixture = DiscoveryFixtureUrlSchema.safeParse(targetUrl.trim());
   const liveSite = DiscoveryLiveUrlSchema.safeParse(targetUrl.trim());
-  const verificationOrigin = mode === "explore" && verifiedSites && liveSite.success && effectiveModel?.provider !== "fake"
-    ? liveSite.data.origin : null;
-  const currentCheck = verificationOrigin && verification?.origin === verificationOrigin ? verification : null;
-  const siteVerification = currentCheck?.result;
-  const verificationPending = verificationOrigin !== null && currentCheck?.revision !== verificationRevision;
-  const canDiscover = mode === "explore" && effectiveModel?.provider !== "fake" &&
-    ((fixture.success && fixture.data === discoveryFixture) || (!verificationPending && siteVerification?.verified === true));
+  const usingFixture = fixture.success && fixture.data === discoveryFixture;
+  // Any public HTTPS page qualifies: the worker reads it with plain GETs, so no proof of ownership is asked for.
+  const onLiveSite = !usingFixture && liveSites && liveSite.success;
+  const canDiscover = mode === "explore" && effectiveModel?.provider !== "fake" && (usingFixture || onLiveSite);
   const usingDiscovery = canDiscover && discover;
-  const usingVerifiedSite = usingDiscovery && siteVerification?.verified === true;
+  const usingVerifiedSite = usingDiscovery && onLiveSite;
 
-  useEffect(() => {
-    if (!verificationOrigin) return;
-    let active = true;
-    const timer = setTimeout(() => {
-      const source = { origin: verificationOrigin, revision: verificationRevision };
-      void checkDiscoverySite(verificationOrigin + "/").then(
-        (result) => { if (active) setVerification({ ...source, result }); },
-        (error: unknown) => {
-          if (active) setVerification({ ...source, error: error instanceof Error ? error.message : "DNS could not be checked" });
-        },
-      );
-    }, 450);
-    return () => { active = false; clearTimeout(timer); };
-  }, [verificationOrigin, verificationRevision]);
-
-  async function copyRecord(label: string, text: string) {
-    if (!verificationOrigin) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopyStatus({ origin: verificationOrigin, message: `Copied ${label.toLowerCase()}.` });
-    } catch {
-      setCopyStatus({ origin: verificationOrigin, message: `Select and copy the record ${label.toLowerCase()} manually.` });
-    }
-  }
   const errorFor = (id: string) => errors[id] ? <p id={`${id}-error`} className="flex items-start gap-1.5 text-sm font-medium text-destructive [&_.icon]:mt-px"><Icon name="error" /> {errors[id]}</p> : null;
   const invalid = (id: string) => ({ "aria-invalid": errors[id] ? true as const : undefined, "aria-describedby": errors[id] ? `${id}-error` : undefined });
 
@@ -196,13 +162,6 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
       setPending(false);
       if (err instanceof ApiRequestError) {
         if (err.code === "TARGET_NOT_ALLOWED") { showErrors({ targetUrl: err.message }); return; }
-        if (err.code === "DISCOVERY_SITE_UNVERIFIED") {
-          setVerification(null);
-          setVerificationRevision((value) => value + 1);
-          setDiscover(false);
-          showErrors({ targetUrl: err.message });
-          return;
-        }
         if (err.code === "IDEMPOTENCY_CONFLICT") key.current = null;
         const fields = Object.fromEntries((err.issues ?? []).map((i) => [String(i.path.at(-1)), i.message]));
         if (Object.keys(fields).length) showErrors(fields);
@@ -234,38 +193,13 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
             {errorFor("requirement")}
             <div className="example-row" role="group" aria-label="Example tests"><span className="hint text-[0.8125rem] text-(--text-subtle) [&_.icon]:mr-0.5">Try an example</span>{EXAMPLES.map((ex) => <Button variant="plain" key={ex.label} type="button" className="example-chip" onClick={() => { setRequirement(ex.text); prompt.current?.focus(); }}><Icon name={ex.icon} />{ex.label}</Button>)}</div>
           </Field> : <div className="explore-intro"><Icon name="sparkle" /><div><strong>Let the agent find a starting point.</strong><p>It explores your website and suggests useful tests. Choose an idea, review the checks, and start when you’re ready.</p></div></div>}
-          {verificationPending && !siteVerification && <p role="status" className="text-sm text-muted-foreground">Checking site verification…</p>}
-          {siteVerification && !siteVerification.verified && <details className="rounded-md border px-3 py-2">
-            <summary className="cursor-pointer text-sm font-medium">Set up Browser Use for this site</summary>
-            <div className="mt-2 space-y-2 text-sm text-muted-foreground">
-              <p>In your DNS provider, add this TXT record once. Then check it here.</p>
-              <dl className="space-y-2">
-                {([["Name", siteVerification.name], ["Value", siteVerification.value]] as const).map(([label, text]) => <div key={label}>
-                  <dt>{label}</dt>
-                  <dd className="flex items-center gap-2"><code className="min-w-0 flex-1 break-all">{text}</code>
-                    <Button variant="outline" size="sm" type="button" onClick={() => void copyRecord(label, text)}>Copy {label.toLowerCase()}</Button>
-                  </dd>
-                </div>)}
-              </dl>
-              <Button type="button" variant="outline" disabled={verificationPending} onClick={() => {
-                setCopyStatus(null);
-                setVerificationRevision((value) => value + 1);
-              }}>{verificationPending ? "Checking DNS…" : "Check DNS record"}</Button>
-              <p role="status">{copyStatus && copyStatus.origin === verificationOrigin ? copyStatus.message :
-                !verificationPending && currentCheck?.revision ? "The TXT record was not found yet." : ""}</p>
-            </div>
-          </details>}
-          {currentCheck?.error && !verificationPending && <Field className="gap-2">
-            <p role="alert" className="text-sm text-destructive">{currentCheck.error}</p>
-            <div><Button type="button" variant="outline" onClick={() => setVerificationRevision((value) => value + 1)}>Retry site verification</Button></div>
-          </Field>}
           {canDiscover && <Field className="gap-2">
             <div className="flex items-center gap-2">
               <Checkbox id="autonomousDiscovery" checked={discover} onCheckedChange={(checked) => setDiscover(checked === true)} aria-describedby="discovery-hint" />
               <label htmlFor="autonomousDiscovery">Autonomous Discovery (Browser Use)</label>
             </div>
-            <p id="discovery-hint" className="text-sm text-muted-foreground">{siteVerification?.verified
-              ? "Suggest tests from read-only snapshots of this verified site. This uses extra AI calls and requires criteria review."
+            <p id="discovery-hint" className="text-sm text-muted-foreground">{onLiveSite
+              ? "Suggest more tests from read-only snapshots of a few pages on this site. This uses extra AI calls and requires criteria review."
               : "Explore the staging fixture for additional test ideas. This uses extra AI calls and requires criteria review."}</p>
             {errorFor("autonomousDiscovery")}
             {usingDiscovery && <div className="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1">

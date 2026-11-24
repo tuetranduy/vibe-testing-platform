@@ -23,15 +23,14 @@ Migrations run first, so each one must work with the previous version of the cod
 
 ## Browser Use fixture pilot
 
-Production supports the disposable fixture and self-service discovery for verified public HTTPS sites. On a live site,
+Production supports the disposable fixture and self-service discovery for any public HTTPS site. On a live site,
 the worker reads a small set of same-origin HTML pages and captures headings, public links and button labels. The
 Browser Use agent receives an inert copy inside its existing network-isolated container.
 
-Any signed-in member can open **New test**, enter the site's final HTTPS page URL, and choose **Find test ideas**.
-The form checks DNS automatically. For a new hostname, open **Set up Browser Use for this site**, copy the displayed
-DNS TXT record into your DNS provider, and click **Check DNS record**. Once verified, select **Autonomous Discovery (Browser Use)**.
-The record is bound to the tenant and exact hostname. Remove
-it to revoke verification. For an operational rollback, set the repository variable
+Any signed-in member can open **New test**, enter the site's final HTTPS page URL, choose **Find test ideas**, and select
+**Autonomous Discovery (Browser Use)**. No proof of site ownership is needed: the worker only sends plain GETs to a few
+same-origin pages (no scripts, forms or credentials, each request re-checked against the public-address policy), which is
+less than the standard survey's browser already does. Runs count against the tenant's hourly discovery limit. For an operational rollback, set the repository variable
 `BROWSER_USE_DISCOVERY_VERIFIED_SITES=off` and redeploy.
 
 | Part | Where |

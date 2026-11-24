@@ -9,14 +9,13 @@ export const DiscoveryJobSecondsSchema = z.number().int().min(10).max(120);
 export const DiscoveryStepsSchema = z.number().int().min(2).max(20);
 export const DiscoveryCapabilitySchema = z.object({ fixtureUrl: z.string().nullable(), verifiedSites: z.boolean().optional() });
 export const DiscoveryRolloutSchema = z.object({ available: z.boolean(), enabled: z.boolean() });
-export const DiscoverySiteChallengeSchema = z.object({ name: z.string(), value: z.string(), verified: z.boolean() });
 
 export const DiscoveryFixturePathSchema = z.string().max(180).regex(
   /^\/(?:[a-zA-Z0-9_-][a-zA-Z0-9._~-]*(?:\/[a-zA-Z0-9_-][a-zA-Z0-9._~-]*)*\/?)?$/,
   "Expected a fixture path without a host, query, fragment or dot segments",
 );
 
-/** One public HTTPS hostname. A proof for a parent does not authorize siblings or subdomains. */
+/** A public HTTPS page on the default port; live-site discovery reads only this exact origin. */
 export const DiscoveryLiveUrlSchema = HttpUrlSchema
   .refine((value) => value.length <= 2048 && !/[?#]/.test(value), "Use an HTTPS page URL without a query or fragment")
   .transform((value) => new URL(value))

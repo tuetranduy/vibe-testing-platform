@@ -819,9 +819,10 @@ Add a clearly separate **Discovery** section containing pages/journeys mapped an
       - the launcher refuses `bridge`, `host`, and missing or non-internal target networks.
     - `discovery_blocked_destinations_total{reason}` is in place, with alerts for forbidden addresses and for repeated off-allowlist attempts.
     - A scripted crawl's own baseline is about 2 off-allowlist and 4 CONNECT refusals per job. Chromium makes these even with background networking disabled.
-  - [x] **Verified live-site snapshots:** members of any tenant can prove control of an exact public HTTPS hostname
-    with a tenant-bound DNS TXT record. The worker reads bounded, unauthenticated HTML from that origin and the
-    Browser Use agent receives only escaped snapshots in its network-isolated container.
+  - [x] **Live-site snapshots:** members of any tenant can run discovery on any public HTTPS page. The worker reads
+    bounded, unauthenticated HTML from that exact origin and the Browser Use agent receives only escaped snapshots in
+    its network-isolated container. The DNS TXT ownership proof was dropped (2026-11-24): the reads are less than the
+    standard survey's browser already makes to unverified sites, and the tenant's hourly discovery limit still applies.
   - [ ] **Open — direct browser interaction with live sites:**
     - Proxy mode only joins internal `vtp-discovery-targets*` networks.
     - The platform's own survey of a proxy-mode target is not wired.

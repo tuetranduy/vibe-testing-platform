@@ -24,7 +24,7 @@ import {
 } from "@platform/db";
 import { createRunEventPublisher, discoveryEnabled, type RunEventPublisher } from "@platform/event-bus";
 import { catalogModel } from "@platform/llm/catalog";
-import { createRunRedactor, discoverySiteChallenge, discoverySiteVerified, encryptSecret, redactByKey, secretFingerprint, validateTargetUrl } from "@platform/security";
+import { createRunRedactor, encryptSecret, redactByKey, secretFingerprint, validateTargetUrl } from "@platform/security";
 import { createHmac } from "node:crypto";
 import { actorId, listScope, requireUser, runScope, type Principal } from "../auth/principal";
 import type { ApiDeps } from "../deps";
@@ -128,11 +128,7 @@ export class TestRunService {
       requireUser(principal);
       const target = DiscoveryLiveUrlSchema.safeParse(req.targetUrl);
       if (!this.deps.config.verifiedDiscoverySites || !target.success || resolved.choice.provider === "fake") {
-        throw new HttpError(422, "DISCOVERY_UNAVAILABLE", "Live discovery needs a verified HTTPS site and a hosted model");
-      }
-      if (!await discoverySiteVerified(discoverySiteChallenge(this.deps.config.secretsKey, tenantId, target.data.hostname), this.deps.resolveTxt)) {
-        throw new HttpError(422, "DISCOVERY_SITE_UNVERIFIED", "Publish the site's verification TXT record before starting discovery",
-          [{ path: ["targetUrl"], message: "Verify this site to start discovery" }]);
+        throw new HttpError(422, "DISCOVERY_UNAVAILABLE", "Live discovery needs a public HTTPS page URL and a hosted model");
       }
     } else if (req.options.autonomousDiscovery) {
       const admission = this.deps.config.discovery;

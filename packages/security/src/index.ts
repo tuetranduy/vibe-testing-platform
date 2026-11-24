@@ -5,4 +5,3 @@ export * from "./secret-vault";
 export * from "./action-policy";
 export * from "./secret-fingerprint";
 export * from "./password";
-export * from "./discovery-site";

@@ -2,7 +2,6 @@ import {
   ApiErrorSchema,
   CreateTestRunResponseSchema,
   DiscoveryCapabilitySchema,
-  DiscoverySiteChallengeSchema,
   DiscoveryRolloutSchema,
   LlmSettingsViewSchema,
   SuggestionSetResponseSchema,
@@ -72,8 +71,6 @@ import { z } from "zod";
 const BASE = "/api/v1/test-runs";
 
 export const getDiscoveryCapability = () => request(DiscoveryCapabilitySchema, "/api/v1/discovery/capability");
-export const checkDiscoverySite = (url: string) =>
-  request(DiscoverySiteChallengeSchema, "/api/v1/discovery/site-verification", { method: "POST", body: { url } });
 export const getDiscoveryRollout = () => request(DiscoveryRolloutSchema, "/api/v1/settings/discovery");
 export const updateDiscoveryRollout = (enabled: boolean) =>
   request(DiscoveryRolloutSchema, "/api/v1/settings/discovery", { method: "PUT", body: { enabled } });

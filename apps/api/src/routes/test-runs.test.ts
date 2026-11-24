@@ -20,7 +20,6 @@ beforeEach(() => {
   t.deps.config.llm = FAKE_LLM;
   delete t.deps.config.discovery;
   delete t.deps.config.verifiedDiscoverySites;
-  delete t.deps.resolveTxt;
 });
 
 const post = (body: unknown, headers: Record<string, string> = {}) =>
@@ -278,29 +277,22 @@ describe("POST /v1/test-runs: the run's model (request → Settings → environm
     expect((await post(request)).statusCode).toBe(422);
   });
 
-  it("lets a member prove one hostname by DNS without activating fixture rollout", async () => {
+  it("lets a member start live-site discovery on any public HTTPS site without fixture rollout or proof of ownership", async () => {
     t.deps.config.verifiedDiscoverySites = true;
     const member = await signInMember(t);
     const targetUrl = "https://shop.example.com/catalog";
-    const records = new Map<string, string[][]>();
-    t.deps.resolveTxt = async (name) => records.get(name) ?? [];
-    const check = (url: string) => t.app.inject({
-      method: "POST", url: "/v1/discovery/site-verification", headers: member.headers, payload: { url },
-    });
     const body = { targetUrl, options: { autonomousDiscovery: true, verifiedSiteDiscovery: true } };
-    const pending = (await check(targetUrl)).json();
-    expect(pending).toMatchObject({ name: "_vibe-testing.shop.example.com", verified: false });
-    expect((await post(body, member.headers)).json().code).toBe("DISCOVERY_SITE_UNVERIFIED");
-    records.set(pending.name, [[pending.value.slice(0, 20), pending.value.slice(20)]]);
-    expect((await check(targetUrl)).json().verified).toBe(true);
-    expect((await check("https://www.shop.example.com/catalog")).json().verified).toBe(false);
+    expect((await t.app.inject({
+      method: "POST", url: "/v1/discovery/site-verification", headers: member.headers, payload: { url: targetUrl },
+    })).statusCode).toBe(404);
+    expect((await post({ ...body, targetUrl: "http://shop.example.com/catalog" }, member.headers)).json().code).toBe("DISCOVERY_UNAVAILABLE");
     expect((await post({ ...body, options: { ...body.options, additionalAllowedHosts: ["example.net"] } }, member.headers)).statusCode).toBe(400);
     const created = await post(body, member.headers);
     expect(created.statusCode).toBe(202);
     expect((await new RunRepository(t.tdb.db).findById(created.json().runId))?.request.options)
       .toMatchObject({ autonomousDiscovery: true, verifiedSiteDiscovery: true, analyzeLiveSite: false });
-    records.clear();
-    expect((await post(body, member.headers)).json().code).toBe("DISCOVERY_SITE_UNVERIFIED");
+    delete t.deps.config.verifiedDiscoverySites;
+    expect((await post(body, member.headers)).json().code).toBe("DISCOVERY_UNAVAILABLE");
   });
 
   it("nothing saved, nothing requested: the environment's choice is recorded", async () => {

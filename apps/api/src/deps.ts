@@ -56,7 +56,6 @@ export interface ApiDeps {
   storage: ArtifactStorage;
   cancelSignal: CancelSignal;
   resolve: Resolver;
-  resolveTxt?: (name: string) => Promise<string[][]>;
   /** Receives every audit entry after it is logged and stored (tests; an external sink). */
   audit?: (entry: Record<string, unknown>) => void;
   /** Failed-login counter; unset: a process-local one. */

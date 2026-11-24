@@ -3,7 +3,7 @@ import {
   BrowserProviderError, DiscoveryFixturePathSchema, DiscoveryLiveUrlSchema,
   type DiscoveryInput, type SitePage, type SuggestionSetDraft,
 } from "@platform/contracts";
-import { assertActionAllowed, defaultResolver, discoverySiteChallenge, discoverySiteVerified, validateTargetUrl } from "@platform/security";
+import { assertActionAllowed, defaultResolver, validateTargetUrl } from "@platform/security";
 import { parse, type DefaultTreeAdapterMap } from "parse5";
 import { requireLlm, type StageContext } from "../orchestrator/stages";
 import { toPageInventory, type RawPageInventory } from "./inventory";
@@ -103,19 +103,19 @@ export function inventoryOfVerifiedHtml(html: string, url: URL): RawPageInventor
   };
 }
 
-export async function prepareVerifiedSite(
-  ctx: StageContext,
-  key: Buffer,
-): Promise<{ draft: SuggestionSetDraft; snapshot: Snapshot }> {
+/**
+ * Read a few same-origin pages of any public HTTPS site with plain GETs: no scripts, subresources, forms or
+ * credentials, and every request re-checked against the public-address policy. No proof of ownership is needed,
+ * since this reads less than the standard survey's browser does.
+ */
+export async function prepareVerifiedSite(ctx: StageContext): Promise<{ draft: SuggestionSetDraft; snapshot: Snapshot }> {
   const llm = requireLlm(ctx);
   const parsed = DiscoveryLiveUrlSchema.safeParse(ctx.request.targetUrl);
   if (!parsed.success) {
-    throw new BrowserProviderError("Verified discovery requires an HTTPS URL with a supported page path");
+    throw new BrowserProviderError("Live-site discovery requires an HTTPS URL with a supported page path");
   }
   const target = parsed.data;
   const signal = ctx.budgetSignal(ctx.budgets.explorationMs);
-  const challenge = discoverySiteChallenge(key, ctx.tenantId, target.hostname);
-  if (!await race(discoverySiteVerified(challenge), signal)) throw new BrowserProviderError("The site's verification TXT record is missing");
   const pages: SitePage[] = [];
   const visited = new Set<string>();
 
@@ -142,12 +142,11 @@ export async function prepareVerifiedSite(
     }
   };
   const first = await read(target);
-  if (!first) throw new BrowserProviderError("The verified site did not serve a readable HTTPS page. Use its final page URL.");
+  if (!first) throw new BrowserProviderError("The site did not serve a readable HTTPS page. Use its final page URL.");
   for (const link of chooseSurveyLinks({ startUrl: target.href, links: first.links, additionalAllowedHosts: [], max: MAX_SURVEY_LINKS })) {
     if (signal.aborted) break;
     await read(link);
   }
-  if (!await race(discoverySiteVerified(challenge), ctx.signal)) throw new BrowserProviderError("Site verification changed during discovery");
   const suggestions = (await suggestTests(llm, {
     runId: ctx.runId, startUrl: target.href, environment: ctx.request.environment, destructiveAllowed: false,
     testDataKeys: [], secretNames: [], pages, screenshot: null, signal: ctx.signal, deadlineAt: ctx.deadlineAt, redact: ctx.redact,
