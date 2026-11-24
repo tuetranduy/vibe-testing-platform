@@ -27,9 +27,10 @@ Production supports the disposable fixture and self-service discovery for verifi
 the worker reads a small set of same-origin HTML pages and captures headings, public links and button labels. The
 Browser Use agent receives an inert copy inside its existing network-isolated container.
 
-Any signed-in member can open **New test**, enter the site's final HTTPS page URL, choose **Find test ideas**, and
-click **Verify site for Browser Use**. Publish the displayed DNS TXT record and click **Check DNS record**. Once
-verified, select **Autonomous Discovery (Browser Use)**. The record is bound to the tenant and exact hostname. Remove
+Any signed-in member can open **New test**, enter the site's final HTTPS page URL, and choose **Find test ideas**.
+The form checks DNS automatically. For a new hostname, open **Set up Browser Use for this site**, copy the displayed
+DNS TXT record into your DNS provider, and click **Check DNS record**. Once verified, select **Autonomous Discovery (Browser Use)**.
+The record is bound to the tenant and exact hostname. Remove
 it to revoke verification. For an operational rollback, set the repository variable
 `BROWSER_USE_DISCOVERY_VERIFIED_SITES=off` and redeploy.
 

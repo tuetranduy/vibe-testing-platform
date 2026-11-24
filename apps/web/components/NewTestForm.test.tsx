@@ -83,8 +83,10 @@ describe("simple test setup", () => {
     render(<NewTestForm />);
     const user = await fill();
     await user.click(screen.getByRole("button", { name: "Find test ideas" }));
-    await user.click(await screen.findByRole("button", { name: "Verify site for Browser Use" }));
+    await user.click(await screen.findByText("Set up Browser Use for this site"));
     expect(await screen.findByText(challenge.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Copy value" }));
+    expect(await navigator.clipboard.readText()).toBe(challenge.value);
     expect(screen.queryByRole("checkbox", { name: /Autonomous Discovery/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Check DNS record" }));
     await user.click(await screen.findByRole("checkbox", { name: /Autonomous Discovery/ }));
@@ -93,6 +95,16 @@ describe("simple test setup", () => {
       options: { autonomousDiscovery: true, verifiedSiteDiscovery: true, allowDestructiveActions: false,
         autoConfirmCriteria: false, additionalAllowedHosts: [] } });
     expect(push).toHaveBeenCalledWith("/runs/run_new");
+  });
+  it("offers Browser Use automatically when the hostname already has a proof", async () => {
+    vi.mocked(getDiscoveryCapability).mockResolvedValue({ fixtureUrl: null, verifiedSites: true });
+    const fetch = api(json(200, { name: "_vibe-testing.shop.example.com", value: "vibe-testing=proof", verified: true }));
+    render(<NewTestForm />);
+    const user = await fill();
+    await user.click(screen.getByRole("button", { name: "Find test ideas" }));
+    expect(await screen.findByRole("checkbox", { name: /Autonomous Discovery/ })).toBeEnabled();
+    expect(payload(fetch)).toEqual({ url: "https://shop.example.com/" });
+    expect(screen.queryByText("Set up Browser Use for this site")).not.toBeInTheDocument();
   });
   it("opts an approved fixture into Browser Use with manual review and bounded discovery settings", async () => {
     const targetUrl = "http://127.0.0.1:4599/";
