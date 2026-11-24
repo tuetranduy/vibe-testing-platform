@@ -87,7 +87,19 @@ printf '%s' "$GHCR_TOKEN" | ssh "${ssh_opts[@]}" "$target" bash -c "'
   chmod 600 .env
   docker login ghcr.io -u deploy --password-stdin
   trap \"docker logout ghcr.io\" EXIT
+  # The server is shared and short of disk: drop this app\x27s superseded images that no container uses before
+  # pulling, and never recreate containers on a nearly full disk (they then fail to start, ENOSPC: 2026-11-24).
+  for name in \"$WORKER_IMAGE_NAME\" \"$BROWSER_USE_AGENT_IMAGE_NAME\" \"$BROWSER_USE_BROKER_IMAGE_NAME\"; do
+    for img in \$(docker images --format \"{{.Repository}}:{{.Tag}}\" \"\$name\" | grep -v \":$SHA\$\"); do
+      [ -n \"\$(docker ps -aq --filter ancestor=\$img)\" ] || docker rmi \"\$img\" || true
+    done
+  done
   docker compose pull
+  avail=\$(df -Pk /var/lib/docker | tail -1 | tr -s \" \" | cut -d\" \" -f4)
+  if [ \"\$avail\" -lt 1572864 ]; then
+    echo \"Only \$((avail / 1024)) MB free after pulling: not recreating containers. Free disk and re-run the deploy.\" >&2
+    exit 1
+  fi
   docker compose up -d --wait --remove-orphans
   # Only this app\x27s older images: the server is shared and short of disk.
   for name in \"$WORKER_IMAGE_NAME\" \"$BROWSER_USE_AGENT_IMAGE_NAME\" \"$BROWSER_USE_BROKER_IMAGE_NAME\"; do
