@@ -37,7 +37,10 @@ export type RunLogQuery = z.infer<typeof RunLogQuerySchema>;
 
 export const RunLogPageSchema = z.object({
   lines: z.array(RunLogLineSchema),
+  /** Set when more lines matched than `limit`: the next page starts here. */
   nextCursor: z.string().nullable(),
+  /** After this page's last line (null when it is empty): what a live view polls from. */
+  lastCursor: z.string().nullable(),
 });
 export type RunLogPage = z.infer<typeof RunLogPageSchema>;
 

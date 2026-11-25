@@ -88,7 +88,11 @@ export class RunLogRepository {
       .limit(query.limit + 1);
     const page = rows.slice(0, query.limit);
     const last = page.at(-1);
-    return { lines: page.map(toLine), nextCursor: rows.length > query.limit && last ? encodeCursor(last) : null };
+    return {
+      lines: page.map(toLine),
+      nextCursor: rows.length > query.limit && last ? encodeCursor(last) : null,
+      lastCursor: last ? encodeCursor(last) : null,
+    };
   }
 
   async count(runId: string): Promise<number> {

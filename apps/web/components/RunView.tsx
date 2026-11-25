@@ -6,6 +6,7 @@ import { isTerminalLifecycle, type RunLifecycle, type TestRunSummary } from "@pl
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ApiRequestError, cancelRun, getRun, type ConfirmResult } from "../lib/api";
 import { initialProgress, lifecycleRank, progressReducer, type ProgressState } from "../lib/progress-reducer";
+import { startClientLogReporter } from "../lib/client-log-reporter";
 import { connectRunEvents, type ConnectionStatus } from "../lib/run-events";
 import { AssistancePanel } from "./AssistancePanel";
 import { CriteriaReview } from "./CriteriaReview";
@@ -16,6 +17,7 @@ import { LiveStats } from "./LiveStats";
 import { LifecycleBadge } from "./StatusBadge";
 import { RunFlow } from "./RunFlow";
 import { RunProgress } from "./RunProgress";
+import { RunLogsSection } from "./RunLogs/RunLogs";
 import { RunReport } from "./RunReport";
 import { RunTimeline } from "./RunTimeline";
 import { SuggestionReview } from "./SuggestionReview";
@@ -73,6 +75,9 @@ export function RunView({ runId }: { runId: string }) {
     setSummary(s);
     return s;
   }, [runId]);
+
+  // Our own frontend errors while this run's page is open reach its admin run logs.
+  useEffect(() => startClientLogReporter(runId), [runId]);
 
   // 1. The run summary.
   useEffect(() => {
@@ -435,6 +440,8 @@ export function RunView({ runId }: { runId: string }) {
           </div>
         </div>
       )}
+
+      <RunLogsSection runId={runId} summary={{ ...summary, lifecycle }} />
     </div>
   );
 }

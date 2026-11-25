@@ -94,7 +94,7 @@ describe("RunLogRepository", () => {
     const run = await newRun(OTHER_TENANT_ID);
     const repo = new RunLogRepository(tdb.db);
     await repo.appendMany([line(run.id)]);
-    expect(await repo.list(TEST_TENANT_ID, run.id, { limit: 500 })).toEqual({ lines: [], nextCursor: null });
+    expect(await repo.list(TEST_TENANT_ID, run.id, { limit: 500 })).toEqual({ lines: [], nextCursor: null, lastCursor: null });
   });
 
   it("countWebAppLines counts one user's web_app lines", async () => {
@@ -122,5 +122,21 @@ describe("RunLogRepository", () => {
     expect(await repo.deleteOlderThan(cutoff, 2)).toBe(2);
     expect(await repo.deleteOlderThan(cutoff, 2)).toBe(1);
     expect(await repo.count(run.id)).toBe(1);
+  });
+});
+
+describe("RunLogRepository live polling", () => {
+  it("lastCursor continues after the last line even when there is no next page", async () => {
+    const run = await newRun();
+    const repo = new RunLogRepository(tdb.db);
+    await repo.appendMany([line(run.id, { time: at(0), message: "a" })]);
+    const first = await repo.list(TEST_TENANT_ID, run.id, { limit: 500 });
+    expect(first.nextCursor).toBeNull();
+    expect(first.lastCursor).not.toBeNull();
+    await repo.appendMany([line(run.id, { time: at(1), message: "b" })]);
+    const next = await repo.list(TEST_TENANT_ID, run.id, { limit: 500, after: first.lastCursor! });
+    expect(next.lines.map((l) => l.message)).toEqual(["b"]);
+    const empty = await repo.list(TEST_TENANT_ID, run.id, { limit: 500, after: next.lastCursor! });
+    expect(empty).toEqual({ lines: [], nextCursor: null, lastCursor: null });
   });
 });

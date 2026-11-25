@@ -1,4 +1,14 @@
+import { reportClientError } from "./client-log-reporter";
 import {
+  LlmExchangeSchema,
+  RunLlmCallsSchema,
+  RunLogPageSchema,
+  type LlmExchange,
+  type RunLlmCalls,
+  type RunLifecycle,
+  type RunLogLevel,
+  type RunLogPage,
+  type RunLogSource,
   ApiErrorSchema,
   CreateTestRunResponseSchema,
   CoverageResponseSchema,
@@ -130,7 +140,9 @@ async function request<T>(
       cache: "no-store",
     });
   } catch {
-    throw new ApiRequestError(0, "NETWORK_ERROR", "Could not reach the server. Check your connection and try again.");
+    const message = "Could not reach the server. Check your connection and try again.";
+    reportClientError("api", `${init.method ?? "GET"} ${path}: ${message}`);
+    throw new ApiRequestError(0, "NETWORK_ERROR", message);
   }
   const text = await res.text();
   let data: unknown = null;
@@ -141,6 +153,9 @@ async function request<T>(
   }
   if (!res.ok) {
     const err = ApiErrorSchema.safeParse(data);
+    if (res.status >= 500) {
+      reportClientError("api", `${init.method ?? "GET"} ${path}: ${err.success ? err.data.message : `The server answered ${res.status}.`}`);
+    }
     if (res.status === 401 && err.success && err.data.code === "SESSION_INVALID") onSessionEnded();
     if (err.success) throw new ApiRequestError(res.status, err.data.code, err.data.message, err.data.issues);
     throw new ApiRequestError(res.status, `HTTP_${res.status}`, `The server answered ${res.status}.`);
@@ -369,3 +384,29 @@ export const createApiToken = (body: CreateApiTokenRequest): Promise<CreatedApiT
   request(CreatedApiTokenSchema, TOKENS, { method: "POST", body });
 
 export const revokeApiToken = (id: string): Promise<ApiTokenView> => request(ApiTokenViewSchema, `${TOKENS}/${seg(id)}`, { method: "DELETE" });
+
+// Admin run logs (2026-11-25): every source's lines about a run and its model calls (administrators only).
+
+export interface RunLogFilters {
+  source?: RunLogSource[];
+  minLevel?: RunLogLevel;
+  stage?: RunLifecycle;
+  q?: string;
+}
+
+export function getRunLogs(runId: string, filters: RunLogFilters & { after?: string; limit?: number } = {}): Promise<RunLogPage> {
+  const qs = new URLSearchParams();
+  if (filters.after) qs.set("after", filters.after);
+  if (filters.source?.length) qs.set("source", filters.source.join(","));
+  if (filters.minLevel) qs.set("minLevel", filters.minLevel);
+  if (filters.stage) qs.set("stage", filters.stage);
+  if (filters.q) qs.set("q", filters.q);
+  if (filters.limit) qs.set("limit", String(filters.limit));
+  const query = qs.toString();
+  return request(RunLogPageSchema, `${runPath(runId)}/logs${query ? `?${query}` : ""}`);
+}
+
+export const getRunLlmCalls = (runId: string): Promise<RunLlmCalls> => request(RunLlmCallsSchema, `${runPath(runId)}/llm-calls`);
+
+export const getLlmExchange = (runId: string, callId: string): Promise<LlmExchange> =>
+  request(LlmExchangeSchema, `${runPath(runId)}/llm-calls/${seg(callId)}/exchange`);
