@@ -211,7 +211,7 @@ describe("createReplanner", () => {
 
   it("rejects a single denied step even when blocking substitutes a one-step fallback with the same id (KI-086)", async () => {
     const { llm } = setup({ json: { steps: [out("click", "Delete the account")] } });
-    expect(await createReplanner(llm)!.replan(input({ remaining: [] }), call)).toEqual({ steps: null, reason: "action_blocked" });
+    expect(await createReplanner(llm)!.replan(input({ remaining: [] }), call)).toMatchObject({ steps: null, reason: "action_blocked", issues: [expect.stringContaining("disabled")] });
   });
 
   it("a cancelled run is not swallowed", async () => {

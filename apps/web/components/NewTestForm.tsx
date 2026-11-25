@@ -8,9 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/ui/native-select";
 import {
-  CreateTestRunRequestSchema, DEFAULT_DISCOVERY_MODEL_CALLS, DEFAULT_DISCOVERY_SECONDS, DEFAULT_EXPLORATION_STEPS,
+  CreateTestRunRequestSchema, DEFAULT_DISCOVERY_SECONDS, DEFAULT_EXPLORATION_STEPS,
   DEFAULT_RUN_SECONDS, DiscoveryFixtureUrlSchema, DiscoveryLiveUrlSchema, HttpUrlSchema, MAX_DISCOVERY_AGENTS,
-  MAX_DISCOVERY_MODEL_CALLS, MAX_DISCOVERY_SECONDS, MAX_EXPLORATION_STEPS, MAX_RUN_SECONDS,
+  MAX_DISCOVERY_SECONDS, MAX_EXPLORATION_STEPS, MAX_RUN_SECONDS,
   type CreateTestRunRequestInput, type LlmSettingsView, type ReasoningLevel,
 } from "@platform/contracts";
 import { useRouter } from "next/navigation";
@@ -46,7 +46,6 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   const [liveSites, setLiveSites] = useState(false);
   const [discover, setDiscover] = useState(false);
   const [discoverySeconds, setDiscoverySeconds] = useState(String(DEFAULT_DISCOVERY_SECONDS));
-  const [discoverySteps, setDiscoverySteps] = useState(String(DEFAULT_DISCOVERY_MODEL_CALLS));
   const [discoveryAgents, setDiscoveryAgents] = useState("1");
   // Live sites: let the agent interact with the real site (on by default where the deployment offers it).
   const [canInteract, setCanInteract] = useState(false);
@@ -128,7 +127,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
   }, [errors, settingsOpen]);
 
   function showErrors(next: Errors) {
-    const first = ["targetUrl", "requirement", "autonomousDiscovery", "discoveryMaxSeconds", "discoveryMaxSteps", "discoveryAgents", "model", "reasoning", "maxRunSeconds", "maxExplorationSteps", "additionalAllowedHosts"].find((id) => id in next);
+    const first = ["targetUrl", "requirement", "autonomousDiscovery", "discoveryMaxSeconds", "discoveryAgents", "model", "reasoning", "maxRunSeconds", "maxExplorationSteps", "additionalAllowedHosts"].find((id) => id in next);
     pendingFocus.current = first ?? null;
     if (first && first !== "targetUrl" && first !== "requirement") setSettingsOpen(true);
     setErrors(next);
@@ -147,7 +146,7 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
         generatePlaywright: true, rerunGeneratedTest: rerun, autoConfirmCriteria: usingDiscovery ? false : autoConfirm,
         allowDestructiveActions: !usingDiscovery,
         ...(host && !usingDiscovery ? { confirmProductionHost: host } : {}),
-        ...(usingDiscovery ? { autonomousDiscovery: true, discoveryMaxSeconds: Number(discoverySeconds), discoveryMaxSteps: Number(discoverySteps) } : {}),
+        ...(usingDiscovery ? { autonomousDiscovery: true, discoveryMaxSeconds: Number(discoverySeconds) } : {}),
         ...(usingDiscovery && Number(discoveryAgents) > 1 ? { discoveryAgents: Number(discoveryAgents) } : {}),
         ...(usingVerifiedSite ? { verifiedSiteDiscovery: true } : {}),
         ...(usingVerifiedSite && canInteract && interact ? { discoveryLiveInteraction: true } : {}),
@@ -228,7 +227,6 @@ export function NewTestForm({ from = null, suggestion = null }: { from?: string 
             </div>}
             {usingDiscovery && <div className="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1">
               <Field><label htmlFor="discoveryMaxSeconds">Discovery time (seconds)</label><Input id="discoveryMaxSeconds" name="discoveryMaxSeconds" type="number" min={15} max={MAX_DISCOVERY_SECONDS} value={discoverySeconds} onChange={(e) => setDiscoverySeconds(e.target.value)} {...invalid("discoveryMaxSeconds")} />{errorFor("discoveryMaxSeconds")}</Field>
-              <Field><label htmlFor="discoveryMaxSteps">Discovery model calls</label><Input id="discoveryMaxSteps" name="discoveryMaxSteps" type="number" min={2} max={MAX_DISCOVERY_MODEL_CALLS} value={discoverySteps} onChange={(e) => setDiscoverySteps(e.target.value)} {...invalid("discoveryMaxSteps")} />{errorFor("discoveryMaxSteps")}</Field>
               <Field><label htmlFor="discoveryAgents">Browser Use agents</label><Input id="discoveryAgents" name="discoveryAgents" type="number" min={1} max={MAX_DISCOVERY_AGENTS} value={discoveryAgents} onChange={(e) => setDiscoveryAgents(e.target.value)} {...invalid("discoveryAgents")} aria-describedby={errors.discoveryAgents ? "discoveryAgents-error agents-hint" : "agents-hint"} /><p id="agents-hint" className="text-sm text-muted-foreground">Each extra agent explores another page in parallel when a slot is free, with the same limits.</p>{errorFor("discoveryAgents")}</Field>
             </div>}
           </Field>}

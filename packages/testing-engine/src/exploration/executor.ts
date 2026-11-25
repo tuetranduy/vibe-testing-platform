@@ -941,7 +941,7 @@ class ExplorationRun {
     const port = this.deps.assistance;
     const failed = planned[at]!;
     if (!port || this.mayHaveRun(failed) || this.pageClosed() || this.plannedCount >= this.max) return null;
-    let previous = false;
+    let previous: ReplanReason | undefined;
     while (this.assistanceCount < MAX_ASSISTANCE_REQUESTS) {
       await this.reserve();
       if (this.pageClosed()) return null;
@@ -949,7 +949,10 @@ class ExplorationRun {
       if (!screenshotArtifactId) return null;
       this.assistanceCount++;
       const reason = this.steps.findLast((s) => s.plannedStepId === failed.id && s.error)?.error ?? "The step could not be completed";
-      const question = this.redactString(`${previous ? "The previous instruction could not be turned into usable steps. " : ""}Step ${failed.id}: ${failed.description} failed: ${reason}. What should the test do next?`);
+      const feedback = previous === "action_blocked" || previous === "destructive_not_planned"
+        ? "The replacement plan included an action this run did not authorize. Suggest a step within the approved test. "
+        : previous ? "The previous instruction could not be turned into usable steps. " : "";
+      const question = this.redactString(`${feedback}Step ${failed.id}: ${failed.description} failed: ${reason}. What should the test do next?`);
       const requestId = randomBytes(16).toString("hex");
       const timeoutMs = port.timeoutMs ?? DEFAULT_ASSISTANCE_TIMEOUT_MS;
       const expiresAt = new Date(this.ctx.now().getTime() + timeoutMs).toISOString();
@@ -973,9 +976,10 @@ class ExplorationRun {
         requestId, answer: answer.kind, ...(answer.kind === "instruction" ? { instruction: this.redactString(answer.text) } : {}),
       } });
       if (answer.kind !== "instruction") return null;
-      const steps = await this.replan(scenario, planned, at, false, { guidance: this.redactString(answer.text) });
+      const steps = await this.replan(scenario, planned, at, false, {
+        guidance: this.redactString(answer.text), onRejected: (reason) => { previous = reason; },
+      });
       if (steps) return steps;
-      previous = true;
     }
     return null;
   }
@@ -1004,11 +1008,14 @@ class ExplorationRun {
     planned: PlannedStep[],
     at: number,
     signIn = false,
-    { observation, page, guidance, arrived }: { observation?: string; page?: PageContext; guidance?: string; arrived?: boolean } = {},
+    { observation, page, guidance, arrived, onRejected }: {
+      observation?: string; page?: PageContext; guidance?: string; arrived?: boolean; onRejected?: (reason: ReplanReason) => void;
+    } = {},
   ): Promise<PlannedStep[] | null> {
     const failed = planned[at]!;
     // Recovery and unseen-page arrivals enter here; ordinary on-track steps produce no diagnostic (KI-089, 2026-11-22).
     const rejected = async (reason: ReplanReason, detail?: string): Promise<null> => {
+      onRejected?.(reason);
       let redacted = detail ? this.redactString(detail) : undefined;
       // These diagnostics enter the public timeline: strip credential values even when model context retains them.
       for (const name of this.ctx.secrets.names) {
@@ -1534,8 +1541,13 @@ class ExplorationRun {
     }
     if (field) field.selector = located.element.selector;
     await this.enforcePolicy(step, step.description, located, "fill");
-    const generated = provided === null ? await this.generatedInput(step, located) : null;
-    const value = provided ?? generated!.value;
+    const radio = this.recorder.check !== undefined && step.kind !== "search" && step.inputRef?.source !== "secret" && located.info.role === "radio"
+      && (await this.recorder.describeField?.(this.page, located.element.selector).catch((err: unknown) => {
+        this.rethrowIfFatal(err);
+        return null;
+      }))?.type === "radio";
+    const generated = provided === null && !radio ? await this.generatedInput(step, located) : null;
+    const value = provided ?? generated?.value ?? "";
 
     await this.reserve();
     const startedAt = this.ctx.now();
@@ -1551,15 +1563,22 @@ class ExplorationRun {
     };
     let chose: "select" | "choose" | void = undefined;
     try {
-      if (how === "fill") await this.recorder.fill(this.page, located.element.selector, value);
+      if (radio && this.recorder.check) {
+        const option = normalizeName(value);
+        if (option && ![located.info.name, located.info.text].some((label) => normalizeName(label ?? "") === option)
+          && normalizeName(await this.recorder.value?.(this.page, located.element.selector) ?? "") !== option) {
+          throw new Error("The located radio button does not match the requested option");
+        }
+        await this.recorder.check(this.page, located.element.selector);
+      } else if (how === "fill") await this.recorder.fill(this.page, located.element.selector, value);
       else chose = await this.recorder.select(this.page, located.element.selector, value);
     } catch (err) {
       this.rethrowIfFatal(err);
       await this.record({ ...base, outcome: "FAILED", error: firstLine(err) });
       return "failed";
     }
-    await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true, ...(chose === "choose" ? { fillMethod: "choose" as const } : {}) });
-    if (how === "fill") this.typed.push({ step, located, value, ...(generated ? { generatedValue: generated.value } : {}) });
+    await this.record({ ...base, outcome: "SUCCESS", onGoldenPath: true, ...(radio ? { fillMethod: "check" as const } : chose === "choose" ? { fillMethod: "choose" as const } : {}) });
+    if (how === "fill" && !radio) this.typed.push({ step, located, value, ...(generated ? { generatedValue: generated.value } : {}) });
     return "ok";
   }
 

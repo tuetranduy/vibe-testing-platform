@@ -155,7 +155,8 @@ export function RunView({ runId }: { runId: string }) {
   const onConfirmed = useCallback((result: ConfirmResult) => {
     setConfirmation(result);
     setSummary((s) => (s && s.lifecycle === "AWAITING_CONFIRMATION" ? { ...s, lifecycle: "PLANNING" } : s));
-  }, []);
+    void refresh().catch(() => {});
+  }, [refresh]);
 
   // 5. Announce the end of a run this page was watching (not one that had already ended when it
   //    opened): the view swaps to the report, which a screen reader wouldn't otherwise hear.
@@ -405,7 +406,7 @@ export function RunView({ runId }: { runId: string }) {
       ) : lifecycle === "AWAITING_SELECTION" ? (
         <SuggestionReview runId={runId} discoveryNotice={discoveryActivity?.type === "discovery.failed" ? discoveryActivity.message : null} onSelected={onSelected} onCancel={() => setCancel("confirming")} />
       ) : lifecycle === "AWAITING_CONFIRMATION" ? (
-        <CriteriaReview runId={runId} onConfirmed={onConfirmed} />
+        <CriteriaReview key={runId} runId={runId} actionTarget={summary.allowDestructiveActions ? undefined : new URL(summary.targetUrl).host} onConfirmed={onConfirmed} />
       ) : terminal ? (
         <>
           <RunReport

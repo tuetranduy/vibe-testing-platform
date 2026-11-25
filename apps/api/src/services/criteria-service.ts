@@ -238,15 +238,19 @@ export class CriteriaService {
           : `Criterion ${c.id} will be reported as Inconclusive`,
       );
 
+    const approval = parsed.data.allowDestructiveActions;
     await this.publisher().publish({
       runId,
       stage: run.lifecycle, // AWAITING_CONFIRMATION, captured before the transition below
       type: "criteria.confirmed",
       message: `Criteria revision ${confirmed.revision} confirmed`,
-      payload: { revision: confirmed.revision },
+      payload: { revision: confirmed.revision, ...(approval && { allowDestructiveActions: true as const }) },
     });
 
-    const planned = await this.runs.transition(runId, "AWAITING_CONFIRMATION", "PLANNING", { heartbeatAt: new Date() });
+    const planned = await this.runs.transition(runId, "AWAITING_CONFIRMATION", "PLANNING", {
+      heartbeatAt: new Date(),
+      ...(approval && { approvedActionHost: run.request.environment === "production" ? new URL(run.request.targetUrl).host : null }),
+    });
     observeStage(this.deps.metrics, "AWAITING_CONFIRMATION", run.lifecycleChangedAt, planned.lifecycleChangedAt);
 
     try {

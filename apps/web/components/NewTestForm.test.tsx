@@ -141,7 +141,7 @@ describe("simple test setup", () => {
     await user.click(screen.getByRole("button", { name: "Explore website" }));
     expect(payload(fetch)).toMatchObject({
       targetUrl, requirement: "", environment: "staging",
-      options: { autonomousDiscovery: true, discoveryMaxSeconds: 60, discoveryMaxSteps: 40, discoveryAgents: 2, autoConfirmCriteria: false, allowDestructiveActions: false },
+      options: { autonomousDiscovery: true, discoveryMaxSeconds: 60, discoveryAgents: 2, autoConfirmCriteria: false, allowDestructiveActions: false },
     });
   });
   it("opts written instructions into Browser Use route discovery with manual review (Phase B)", async () => {
@@ -158,7 +158,7 @@ describe("simple test setup", () => {
     await user.click(create());
     expect(payload(fetch)).toMatchObject({
       targetUrl, requirement: "Add a product to the cart and check the total.", environment: "staging",
-      options: { autonomousDiscovery: true, discoveryMaxSeconds: 240, discoveryMaxSteps: 40, autoConfirmCriteria: false, allowDestructiveActions: false },
+      options: { autonomousDiscovery: true, discoveryMaxSeconds: 240, autoConfirmCriteria: false, allowDestructiveActions: false },
     });
     expect(CreateTestRunRequestSchema.safeParse(payload(fetch)).success).toBe(true);
   });

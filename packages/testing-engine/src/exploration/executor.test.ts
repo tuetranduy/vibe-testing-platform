@@ -605,6 +605,22 @@ describe("runExploration (fake explorer)", () => {
     expect(session.ops()).toEqual(["close"]);
   });
 
+  it.each(["fill", "select"] as const)("checks a matching radio placed in a %s step and records a replayable check", async (kind) => {
+    const { ctx } = fakeCtx();
+    const selector = "#Gender_Male";
+    const session = new FakeSession({ observe: () => [{ selector, description: "Male", method: "fill", arguments: [] }] });
+    const { recorder, fills, selects } = fakeRecorder({ describe: () => ({ role: "radio", name: "Male", text: null }) });
+    const checked: string[] = [];
+    recorder.check = async (_page, found) => { checked.push(found); };
+    recorder.describeField = async () => ({ tag: "input", type: "radio", name: "Gender", label: "Male",
+      placeholder: null, autocomplete: null, maxLength: null, min: null, max: null, pattern: null, options: [] });
+    const plan = planOf(step(kind, "Select the Male option for Gender", { inputRef: { source: "literal", key: "Male" } }));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder });
+    expect(checked).toEqual([selector]);
+    expect(fills.concat(selects)).toEqual([]);
+    expect(outcome.steps).toContainEqual(expect.objectContaining({ kind: "fill", fillMethod: "check", outcome: "SUCCESS", onGoldenPath: true }));
+  });
+
   it("secrets: a fill step with a secret inputRef is filled by the recorder, never by act(); the value is no longer redacted from rows and events", async () => {
     const { ctx, events } = fakeCtx({ secrets: { password: SECRET }, testData: { email: "qa@demo.test" }, targetUrl: "https://shop.test/" });
     const session = new FakeSession({

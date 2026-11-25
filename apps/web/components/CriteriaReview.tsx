@@ -2,6 +2,7 @@
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ADDED_BY_PLATFORM, describeExpectedOutcome, isInferred, type NormalizedRequirement, type SiteAnalysis } from "@platform/contracts";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -12,6 +13,7 @@ import { LiveSiteSummary } from "./SiteAnalysisPanel";
 
 interface Props {
   runId: string;
+  actionTarget?: string;
   /** Called once the server has frozen the criteria and queued the run. */
   onConfirmed: (result: ConfirmResult) => void;
 }
@@ -21,13 +23,14 @@ const listIds = (ids: string[]) => (ids.length <= 1 ? ids.join("") : `${ids.slic
 
 const messageOf = (err: unknown) => (err instanceof ApiRequestError ? err.message : "Something went wrong. Please try again.");
 
-export function CriteriaReview({ runId, onConfirmed }: Props) {
+export function CriteriaReview({ runId, actionTarget, onConfirmed }: Props) {
   const router = useRouter();
   const [requirement, setRequirement] = useState<NormalizedRequirement | null>(null);
   const [startingOver, setStartingOver] = useState<"ask" | "working" | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [allowTargetActions, setAllowTargetActions] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Criteria whose editor is open: confirming would freeze the old text, so it waits for them. */
   const [editing, setEditing] = useState<ReadonlySet<string>>(new Set());
@@ -124,7 +127,7 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
     setConfirming(true);
     setError(null);
     try {
-      onConfirmed(await confirmCriteria(runId));
+      onConfirmed(await (actionTarget && allowTargetActions ? confirmCriteria(runId, {}, true) : confirmCriteria(runId)));
     } catch (err) {
       setError(messageOf(err));
       setConfirming(false);
@@ -274,6 +277,18 @@ export function CriteriaReview({ runId, onConfirmed }: Props) {
               </div>
             )}
           </dl>
+          {actionTarget && (
+            <div className="flex items-start gap-2">
+              <Checkbox id="approve-target-actions" checked={allowTargetActions} disabled={confirming}
+                onCheckedChange={(checked) => setAllowTargetActions(checked === true)} aria-describedby="approve-target-actions-hint" />
+              <div>
+                <label htmlFor="approve-target-actions">Allow this test to make changes on {actionTarget}</label>
+                <p id="approve-target-actions-hint" className="text-sm text-muted-foreground">
+                  This allows actions in the test such as placing an order or submitting a payment. An enabled replay can repeat those actions.
+                </p>
+              </div>
+            </div>
+          )}
           <Button size="lg" className="h-auto min-h-8 w-full whitespace-normal"
             type="button"
             onClick={confirm}

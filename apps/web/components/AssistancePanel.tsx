@@ -16,6 +16,7 @@ export function AssistancePanel({ runId, request }: { runId: string; request: No
   const { state: image, onLoadError } = useArtifactUrl({ runId, artifactId: request.screenshotArtifactId });
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
+  const [sent, setSent] = useState<"instruction" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -29,6 +30,7 @@ export function AssistancePanel({ runId, request }: { runId: string; request: No
     setError(null);
     try {
       await answerAssistance(runId, request.requestId, body);
+      setSent("stop" in body ? "stop" : "instruction");
     } catch (err) {
       setError(err instanceof Error ? err.message : "The answer could not be sent");
       setPending(false);
@@ -40,7 +42,9 @@ export function AssistancePanel({ runId, request }: { runId: string; request: No
       <h2 id="assistance-title">The test is stuck — tell it what to do next</h2>
       <p style={{ overflowWrap: "anywhere" }}>{request.question}</p>
       <p style={{ overflowWrap: "anywhere" }}>Current URL: {request.url}</p>
-      <p role="status">{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")} left to answer</p>
+      <p role="status">{sent === "instruction" ? "Answer received. Waiting for the worker to plan the next steps."
+        : sent === "stop" ? "Stop request received."
+          : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} left to answer`}</p>
       {image.status === "ready" ? (
         <img src={image.url} alt="The current page where the test is stuck" onError={onLoadError} style={{ width: "100%", height: "auto" }} />
       ) : (

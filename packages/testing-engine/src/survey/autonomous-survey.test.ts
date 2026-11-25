@@ -120,7 +120,7 @@ describe("fixture discovery in the existing survey", () => {
     const result = await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover }, observe })(ctx);
     // The deadline leaves 175 s, so the broker gets 170 s before the result grace period.
     expect(discover).toHaveBeenCalledWith({
-      schemaVersion: "discovery.v1", runId: "run_fixture", targetUrl: fixtureUrl, timeoutSeconds: 170, maxAgentSteps: 40,
+      schemaVersion: "discovery.v1", runId: "run_fixture", targetUrl: fixtureUrl, timeoutSeconds: 170,
     }, { signal: expect.any(AbortSignal), onProgress: expect.any(Function) });
     expect(result.pages).toBe(baseline.pages);
     expect(result.suggestions.slice(0, 2)).toEqual(baseline.suggestions.slice(0, 2));
@@ -242,13 +242,14 @@ describe("fixture discovery in the existing survey", () => {
     expect(outcome(ctx)?.payload).toMatchObject({ status: "TIMED_OUT", reason: "worker_deadline", attempted: true });
   });
 
-  it("uses the run's lower discovery budget and steps", async () => {
+  it("uses the run's lower discovery time and ignores the legacy step setting", async () => {
     const ctx = context();
     ctx.request.options.discoveryMaxSeconds = 30;
     ctx.request.options.discoveryMaxSteps = 6;
     const discover = vi.fn(completeWith([candidate]));
     await withAutonomousDiscovery(survey, { fixtureUrl, port: { discover } })(ctx);
-    expect(discover.mock.calls[0]?.[0]).toMatchObject({ timeoutSeconds: 25, maxAgentSteps: 6 });
+    expect(discover.mock.calls[0]?.[0]).toMatchObject({ timeoutSeconds: 25 });
+    expect(discover.mock.calls[0]?.[0]).not.toHaveProperty("maxAgentSteps");
   });
 
   it("does not start a job without enough survey time left", async () => {

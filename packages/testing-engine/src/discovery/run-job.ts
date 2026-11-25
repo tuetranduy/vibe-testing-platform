@@ -1,13 +1,11 @@
 import { setTimeout as delay } from "node:timers/promises";
 import {
-  DEFAULT_DISCOVERY_MODEL_CALLS,
   DEFAULT_DISCOVERY_SECONDS,
   DiscoveryFixtureUrlSchema,
   DiscoveryLiveUrlSchema,
   MAX_DISCOVERY_AGENTS,
   MAX_DISCOVERY_FINDINGS,
   MAX_DISCOVERY_SECONDS,
-  MAX_DISCOVERY_TOTAL_CALLS,
   type DiscoveryCandidate,
   type DiscoveryFindingCandidate,
   type DiscoveryInput,
@@ -110,7 +108,6 @@ export interface DiscoveryJobOptions<T> {
   /** A second job in one run needs its own broker job id: `<runId>-<jobId>`. */
   jobId?: string;
   maxSeconds?: number;
-  maxSteps?: number;
   /** Turns a completed job's candidates into the stage's value; `acceptedCount` is what the stage kept. */
   accept(candidates: DiscoveryCandidate[]): { value: T | null; acceptedCount: number };
   /** The stage's fallback, for the user-facing messages ("Showing standard survey suggestions."). */
@@ -279,12 +276,10 @@ export async function runDiscoveryJob<T>(
     }
     let steps = 0;
     const agentSteps = new Map<string, number>();
-    const maxSteps = options.maxSteps ?? runOptions.discoveryMaxSteps ?? DEFAULT_DISCOVERY_MODEL_CALLS;
     const agents = [{ runId: baseRunId, focus }, ...extras];
     const job = (agent: { runId: string; focus?: string }) => port.discover(
       {
         schemaVersion: "discovery.v1", runId: agent.runId, targetUrl, timeoutSeconds: jobSeconds,
-        maxAgentSteps: maxSteps,
         ...(live ? { live: true as const } : snapshot && { snapshot }),
         ...(agent.focus && { focus: agent.focus }),
         ...(model && { model }),
@@ -292,7 +287,7 @@ export async function runDiscoveryJob<T>(
       { signal, onProgress: async (reached) => {
         if (signal.aborted) return;
         agentSteps.set(agent.runId, Math.max(agentSteps.get(agent.runId) ?? 0, reached));
-        const total = Math.min(MAX_DISCOVERY_TOTAL_CALLS, [...agentSteps.values()].reduce((a, b) => a + b, 0));
+        const total = [...agentSteps.values()].reduce((a, b) => a + b, 0);
         if (total <= steps) return;
         steps = total;
         await publish({
@@ -395,8 +390,8 @@ export function mergeAgentResults(runId: string, settled: PromiseSettledResult<D
     ...(findings.length > 0 && { findings }),
     ...(stats.length > 0 && {
       statistics: {
-        agentSteps: Math.min(MAX_DISCOVERY_TOTAL_CALLS, sum(stats.map((s) => s.agentSteps))),
-        modelRequests: Math.min(MAX_DISCOVERY_TOTAL_CALLS, sum(stats.map((s) => s.modelRequests))),
+        agentSteps: sum(stats.map((s) => s.agentSteps)),
+        modelRequests: sum(stats.map((s) => s.modelRequests)),
         durationMs: Math.max(...stats.map((s) => s.durationMs)),
         inputTokens: sum(stats.map((s) => s.inputTokens)),
         outputTokens: Math.min(1_000_000, sum(stats.map((s) => s.outputTokens))),

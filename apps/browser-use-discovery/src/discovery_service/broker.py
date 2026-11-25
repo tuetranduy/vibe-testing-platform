@@ -19,8 +19,6 @@ from pydantic_ai.messages import BinaryContent, FilePart, FileUrl, ModelMessages
 from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.settings import ToolOrOutput
 
-from discovery_service.protocol import DEFAULT_MODEL_CALLS
-
 
 PARAMS = TypeAdapter(ModelRequestParameters)
 RESPONSE = TypeAdapter(ModelResponse)
@@ -145,7 +143,6 @@ def _tool_choice(value: Any, params: ModelRequestParameters) -> Any:
 @dataclass
 class Broker:
     model: Model
-    max_requests: int = DEFAULT_MODEL_CALLS
     requests: int = 0
     usage: dict[str, int] = field(default_factory=lambda: {'input': 0, 'output': 0})
     priced_requests: int = 0
@@ -156,8 +153,6 @@ class Broker:
         return float(self.total_cost) if self.requests > 0 and self.priced_requests == self.requests else None
 
     async def handle(self, payload: Any) -> dict[str, Any]:
-        if self.requests >= self.max_requests:
-            raise BrokerRefused('model request budget exhausted')
         if not isinstance(payload, dict):
             raise BrokerRefused('malformed model request')
         try:

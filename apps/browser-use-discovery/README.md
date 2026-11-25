@@ -24,8 +24,8 @@ exit   : 0 (a response was written), 143 (CANCELLED by a signal), 2 (invalid req
 - `reason` is a code, never text from a page or provider: `ok`, `no_valid_candidates`, `timeout`, `max_steps`,
   `hard_deadline`, `cancelled`, `agent_error`, `no_result`, `target_not_allowed`, `model_not_configured`,
   `docker_unavailable`, `invalid_request`.
-- A request can set `timeoutSeconds` (10–360, default 240) and `maxAgentSteps` (2–60 model calls, default 40,
-  including any delivery repair).
+- A request can set `timeoutSeconds` (10–360, default 240). The agent can make model calls throughout its time budget.
+  Older callers can still send `maxAgentSteps`.
   `timeoutSeconds` is the **whole job's** wall-clock budget from receipt: the orphan reaper, container start, the
   agent and result delivery. The agent gets what remains after a 5 s start reserve and a 5 s delivery margin (at
   least 5 s). At the budget the launcher stops and removes the container and answers `FAILED`/`hard_deadline`, so a
@@ -209,7 +209,7 @@ Browser Use can submit forms with synthetic data and continue through checkout a
 
 ```
 Node ──stdin/stdout──▶ launcher (host; holds model key) ──docker run -i──▶ container (untrusted)
-                          │  broker: ≤60 model calls,                     runner + Browser Use agent
+                          │  broker: timed model calls,                    runner + Browser Use agent
                           │  no media/native tools,                        + REPL (model-authored Python)
                           │  clamped settings                              + Chromium + fixture copy on loopback
                           └─ validates + sanitizes the result              --network none: only `lo` exists

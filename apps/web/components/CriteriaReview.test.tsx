@@ -325,6 +325,23 @@ describe("CriteriaReview", () => {
     );
   });
 
+  it.each([false, true])("sends action approval only when the user checks it (%s)", async (approved) => {
+    const user = userEvent.setup();
+    const confirm = vi.fn((init: RequestInit | undefined) => {
+      expect(init?.body ? JSON.parse(String(init.body)).allowDestructiveActions : undefined).toBe(approved ? true : undefined);
+      return json(202, { revision: 1, warnings: [] });
+    });
+    routeFetch({ [`GET ${CRITERIA}`]: () => json(200, requirementFixture()), [`POST ${CONFIRM}`]: confirm });
+    const onConfirmed = vi.fn();
+    render(<CriteriaReview runId="run_1" actionTarget="demo.example" onConfirmed={onConfirmed} />);
+    const consent = await screen.findByRole("checkbox", { name: /allow this test to make changes on demo.example/i });
+    expect(consent).not.toBeChecked();
+    if (approved) await user.click(consent);
+    await user.click(screen.getByRole("button", { name: /confirm and start/i }));
+    await waitFor(() => expect(onConfirmed).toHaveBeenCalled());
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
   it("shows a server error from confirm and re-enables the button", async () => {
     const user = userEvent.setup();
     routeFetch({

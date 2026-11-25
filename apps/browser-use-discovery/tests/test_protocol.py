@@ -39,7 +39,7 @@ def test_discovery_limits_accept_extended_job_budget():
     base = {'schemaVersion': 'discovery.v1', 'runId': 'r', 'targetUrl': 'http://x/'}
     request = parse_request(json.dumps(dict(base, timeoutSeconds=360, maxAgentSteps=60)).encode())
     assert (request.timeoutSeconds, request.maxAgentSteps) == (360, 60)
-    for field, value in [('timeoutSeconds', 361), ('maxAgentSteps', 61)]:
+    for field, value in [('timeoutSeconds', 361), ('maxAgentSteps', 1)]:
         with pytest.raises(ValueError):
             parse_request(json.dumps(dict(base, **{field: value})).encode())
 

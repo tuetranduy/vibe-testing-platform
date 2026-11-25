@@ -263,6 +263,7 @@ class Compiler {
       case "fill": {
         const problem = unreplayable(step.element);
         if (problem) return problem;
+        if (step.fillMethod === "check") return null;
         const ref = step.inputRef;
         if (!ref) return "has no input reference";
         if (step.generatedValue != null) return null; // a value nobody provided, generated and typed during exploration

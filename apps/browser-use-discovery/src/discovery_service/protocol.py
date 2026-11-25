@@ -29,9 +29,7 @@ Reason = Literal[
     'target_not_allowed', 'model_not_configured', 'docker_unavailable', 'invalid_request',
 ]
 
-# Mirrors packages/contracts/src/discovery.ts. One model call can be used to repair the final output.
-DEFAULT_MODEL_CALLS, MAX_MODEL_CALLS = 40, 60
-MAX_AGENT_STEPS = MAX_MODEL_CALLS - 1
+# Mirrors packages/contracts/src/discovery.ts.
 DEFAULT_JOB_SECONDS, MAX_JOB_SECONDS = 240, 360
 MIN_JOB_SECONDS = 10
 MAX_JOB_DURATION_MS = (MAX_JOB_SECONDS + 60) * 1000
@@ -95,7 +93,8 @@ class DiscoveryRequest(BaseModel):
     runId: str = Field(pattern=RUN_ID.pattern)
     targetUrl: str = Field(min_length=1, max_length=2048)
     timeoutSeconds: int | None = Field(default=None, strict=True, ge=MIN_JOB_SECONDS, le=MAX_JOB_SECONDS)
-    maxAgentSteps: int | None = Field(default=None, strict=True, ge=2, le=MAX_MODEL_CALLS)
+    # Compatibility with discovery.v1 requests from older workers. The elapsed-time budget applies.
+    maxAgentSteps: int | None = Field(default=None, strict=True, ge=2)
     snapshot: list[SnapshotPage] | None = Field(default=None, min_length=1, max_length=6)
     focus: str | None = Field(default=None, min_length=FOCUS_MIN, max_length=FOCUS_MAX)
     # Live interaction: targetUrl is a public HTTPS page reached through the job's inspecting egress proxy.
@@ -112,8 +111,8 @@ class DiscoveryRequest(BaseModel):
 
 class DiscoveryStatistics(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    agentSteps: int = Field(ge=0, le=MAX_MODEL_CALLS)
-    modelRequests: int = Field(ge=0, le=MAX_MODEL_CALLS)
+    agentSteps: int = Field(ge=0)
+    modelRequests: int = Field(ge=0)
     durationMs: int = Field(ge=0, le=MAX_JOB_DURATION_MS)
     inputTokens: int = Field(ge=0, le=100_000_000)
     outputTokens: int = Field(ge=0, le=1_000_000)

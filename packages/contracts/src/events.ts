@@ -78,7 +78,7 @@ export const TestEventSchema = z.discriminatedUnion("type", [
     }),
   ),
   ev("criteria.updated", z.object({ revision: z.number().int().min(1) })),
-  ev("criteria.confirmed", z.object({ revision: z.number().int().min(1) })),
+  ev("criteria.confirmed", z.object({ revision: z.number().int().min(1), allowDestructiveActions: z.literal(true).optional() })),
   ev(
     "plan.created",
     z.object({

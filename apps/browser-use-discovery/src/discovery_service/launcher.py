@@ -32,8 +32,6 @@ from discovery_service.broker import Broker, BrokerRefused, is_zero_cost, make_m
 from discovery_service.policy import FixtureTarget, LiveTarget, PolicyError, fixture_paths, match_request
 from discovery_service.protocol import (
     DEFAULT_JOB_SECONDS,
-    DEFAULT_MODEL_CALLS,
-    MAX_AGENT_STEPS,
     MAX_FRAME_BYTES,
     MAX_JOB_DURATION_MS,
     MAX_JOB_SECONDS,
@@ -438,7 +436,6 @@ class Session:
         assert self.proc and self.proc.stdout
         await self._send(
             'start', host=self.target.host, port=self.target.port, path=self.target.path,
-            max_steps=min(MAX_AGENT_STEPS, self.broker.max_requests - 1),
             timeout_s=self.agent_timeout(),
             **({'proxy': f'http://{EGRESS_ALIAS}:{EGRESS_PORT}'} if self.proxy_mode else {}),
             **({'scheme': 'https', 'spki': self.spki} if self.live else {}),
@@ -475,7 +472,7 @@ class Session:
                     await self._send('model_error', id=rid, message='model request failed')
             elif kind == 'progress':
                 steps = frame.get('steps')
-                if type(steps) is int and self.steps < steps <= self.broker.max_requests:
+                if type(steps) is int and self.steps < steps <= self.broker.requests + 1:
                     self.steps = steps
                     diag('discovery.progress', runId=self.request.runId, agentSteps=steps)
                     if self.on_progress:
@@ -618,7 +615,7 @@ async def discover(request: DiscoveryRequest, cfg: Config, model: Any = None,
         return DiscoveryResponse(runId=request.runId, status='BLOCKED', reason='target_not_allowed'), {'reason': 'target_mode'}
     try:
         chosen = model if model is not None else make_run_model(request.model) if request.model else make_model(cfg.model)
-        broker = Broker(chosen, max_requests=request.maxAgentSteps or DEFAULT_MODEL_CALLS)
+        broker = Broker(chosen)
     # RuntimeError: Pydantic AI's UserError for a provider whose key is not set (e.g. DEEPSEEK_API_KEY). Without it
     # here, a missing key escaped to the job service and was reported as an agent crash (FAILED / agent_error).
     except (ValueError, ImportError, RuntimeError) as e:
@@ -649,7 +646,7 @@ async def discover(request: DiscoveryRequest, cfg: Config, model: Any = None,
     if deadline_hit:
         reason = response.reason = 'hard_deadline'
     reported_steps = (outcome or {}).get('steps')
-    steps = max(session.steps, reported_steps if type(reported_steps) is int and 0 <= reported_steps <= broker.max_requests else 0)
+    steps = max(session.steps, reported_steps if type(reported_steps) is int and 0 <= reported_steps <= broker.requests + 1 else 0)
     statistics = DiscoveryStatistics(
         agentSteps=steps, modelRequests=broker.requests,
         inputTokens=min(broker.usage['input'], 100_000_000), outputTokens=min(broker.usage['output'], 1_000_000),

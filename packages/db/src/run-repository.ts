@@ -73,6 +73,8 @@ export interface TransitionPatch {
   deadlineAt?: Date | null;
   startedAt?: Date;
   finishedAt?: Date;
+  /** The production host approved during criteria review, or null for a staging run. */
+  approvedActionHost?: string | null;
 }
 
 export interface Page<T> {
@@ -272,10 +274,20 @@ export class RunRepository {
 
     const now = new Date();
     const terminal = isTerminalLifecycle(to);
+    const { approvedActionHost, ...fields } = patch;
+    if (approvedActionHost !== undefined && !(from === "AWAITING_CONFIRMATION" && to === "PLANNING")) {
+      throw new RunInvariantError("Action approval requires criteria confirmation");
+    }
     const [row] = await this.db
       .update(testRuns)
       .set({
-        ...patch,
+        ...fields,
+        ...(approvedActionHost !== undefined && {
+          requestJson: sql`jsonb_set(${testRuns.requestJson}, '{options}', (${testRuns.requestJson}->'options') || ${JSON.stringify({
+            allowDestructiveActions: true,
+            ...(approvedActionHost !== null ? { confirmProductionHost: approvedActionHost } : {}),
+          })}::jsonb)`,
+        }),
         lifecycle: to,
         lifecycleChangedAt: now,
         updatedAt: now,

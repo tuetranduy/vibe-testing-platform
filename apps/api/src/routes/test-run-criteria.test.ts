@@ -126,8 +126,8 @@ const getCriteria = (runId: string) => t.app.inject({ method: "GET", url: `/v1/t
 const putCriteria = (runId: string, body: unknown) =>
   t.app.inject({ method: "PUT", url: `/v1/test-runs/${runId}/criteria`, headers: auth, payload: body as object });
 
-const confirmCriteria = (runId: string) =>
-  t.app.inject({ method: "POST", url: `/v1/test-runs/${runId}/criteria/confirm`, headers: auth });
+const confirmCriteria = (runId: string, payload?: { allowDestructiveActions: true }) =>
+  t.app.inject({ method: "POST", url: `/v1/test-runs/${runId}/criteria/confirm`, headers: auth, payload });
 
 describe("GET /v1/test-runs/:runId/criteria", () => {
   it("returns 409 CRITERIA_NOT_READY before analysis finishes", async () => {
@@ -369,6 +369,7 @@ describe("POST /v1/test-runs/:runId/criteria/confirm", () => {
     const run = await new RunRepository(t.tdb.db).getById(runId);
     expect(run.lifecycle).toBe("PLANNING");
     expect(run.heartbeatAt).toBeInstanceOf(Date);
+    expect(run.request.options.allowDestructiveActions).toBe(false);
 
     expect(t.queue.execute).toContain(runId);
 
@@ -377,6 +378,17 @@ describe("POST /v1/test-runs/:runId/criteria/confirm", () => {
     expect(confirmed).toBeDefined();
     expect(confirmed!.payload).toEqual({ revision: 1 });
     expect(confirmed!.message).toBe("Criteria revision 1 confirmed");
+  });
+
+  it("records explicit approval on the target host before checkout can be planned", async () => {
+    const runId = await setupAwaitingConfirmation(baseRequirement(), { environment: "production", options: { allowDestructiveActions: false } });
+    expect((await confirmCriteria(runId, { allowDestructiveActions: true })).statusCode).toBe(202);
+    const run = await new RunRepository(t.tdb.db).getById(runId);
+    expect(run.lifecycle).toBe("PLANNING");
+    expect(run.request.options).toMatchObject({ allowDestructiveActions: true, confirmProductionHost: new URL(run.targetUrl).host });
+    expect(t.queue.execute).toContain(runId);
+    const events = await new EventRepository(t.tdb.db).listAfter(runId, 0);
+    expect(events.find((event) => event.type === "criteria.confirmed")?.payload).toMatchObject({ allowDestructiveActions: true });
   });
 
   it("warns about unclear criteria: Inconclusive, or judged by AI from the page (a semantic one)", async () => {

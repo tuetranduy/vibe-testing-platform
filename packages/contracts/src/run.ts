@@ -129,6 +129,7 @@ export const RunOptionsSchema = z
     /** Live sites: let Browser Use interact with the real site and submit forms with test data. */
     discoveryLiveInteraction: z.boolean().optional(),
     discoveryMaxSeconds: DiscoverySecondsSchema.optional(),
+    /** Retained for older clients and saved runs. Browser Use is governed by its time budget. */
     discoveryMaxSteps: DiscoveryStepsSchema.optional(),
     /** Phase C: Browser Use agents exploring in parallel, each in its own container and broker slot (1–3; absent: 1). */
     discoveryAgents: z.number().int().min(1).max(MAX_DISCOVERY_AGENTS).optional(),

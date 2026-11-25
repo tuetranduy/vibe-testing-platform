@@ -111,6 +111,8 @@ export type SiteAnalysisDraft = z.input<typeof SiteAnalysisSchema>;
  * starts — typically the accepted suggestions, possibly edited. A key the run already has is replaced.
  */
 export const ConfirmCriteriaRequestSchema = z.object({
+  /** Explicit consent to let the reviewed test make lasting changes on the run's target. */
+  allowDestructiveActions: z.boolean().optional(),
   testData: z
     .record(DataKeySchema, SuggestedTestDataValueSchema)
     .refine((o) => Object.keys(o).length <= MAX_TEST_DATA_SUGGESTIONS, `At most ${MAX_TEST_DATA_SUGGESTIONS} test data values`)

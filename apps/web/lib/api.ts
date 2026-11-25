@@ -225,8 +225,10 @@ export const reproduceFinding = (runId: string, findingId: string): Promise<{ fi
     `${runPath(runId)}/findings/${encodeURIComponent(findingId)}/reproduce`, { method: "POST" });
 
 /** Confirms the criteria; `testData` (V1.3: the accepted suggestions) becomes the run's before it starts. */
-export const confirmCriteria = (runId: string, testData: Record<string, string | number | boolean> = {}): Promise<ConfirmResult> =>
-  request(ConfirmResultSchema, `${runPath(runId)}/criteria/confirm`, Object.keys(testData).length > 0 ? { method: "POST", body: { testData } } : { method: "POST" });
+export const confirmCriteria = (runId: string, testData: Record<string, string | number | boolean> = {}, allowDestructiveActions = false): Promise<ConfirmResult> =>
+  request(ConfirmResultSchema, `${runPath(runId)}/criteria/confirm`, allowDestructiveActions || Object.keys(testData).length > 0
+    ? { method: "POST", body: { testData, ...(allowDestructiveActions && { allowDestructiveActions: true }) } }
+    : { method: "POST" });
 
 /** The requirement's analysis against the live site (V1.3); 404 NO_SITE_ANALYSIS when the run has none. */
 export const getSiteAnalysis = (runId: string): Promise<SiteAnalysis> => request(SiteAnalysisSchema, `${runPath(runId)}/site-analysis`);

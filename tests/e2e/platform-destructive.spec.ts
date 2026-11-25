@@ -79,6 +79,24 @@ describe("Task 21 step 5 — destructive", () => {
     expect(await shopStats(stack)).toEqual({ deleteClicks: 1 });
   });
 
+  it.skipIf(stack.mode === "live")("approval at criteria review lets the worker finish the authorized test", async () => {
+    await fetch(`${stack.shopUrl}/__test/reset`, { method: "POST" });
+    const runId = await client.create({
+      targetUrl: `${stack.targetUrl}/`,
+      requirement: REQUIREMENTS.deletion,
+      environment: "production",
+      testData: { email: VALID_EMAIL },
+      secrets: { password: VALID_PASSWORD },
+      options: { rerunGeneratedTest: false, allowDestructiveActions: false },
+    });
+    await client.waitFor(runId, (run) => run.lifecycle === "AWAITING_CONFIRMATION");
+    expect(await shopStats(stack)).toEqual({ deleteClicks: 0 });
+    expect((await client.call("POST", `/v1/test-runs/${runId}/criteria/confirm`, { allowDestructiveActions: true })).status).toBe(202);
+    expect(await client.finished(runId)).toMatchObject({ lifecycle: "COMPLETED", allowDestructiveActions: true });
+    expect((await client.report(runId)).criteria.some((c) => c.reason === "DESTRUCTIVE_ACTION_NOT_AUTHORIZED")).toBe(false);
+    expect(await shopStats(stack)).toEqual({ deleteClicks: 1 });
+  });
+
   it.skipIf(stack.mode === "live")("production with the host confirmed still stops a neutral step that resolves to Delete account: BLOCKED / DESTRUCTIVE_ACTION_NOT_AUTHORIZED; zero delete clicks", async () => {
     await fetch(`${stack.shopUrl}/__test/reset`, { method: "POST" });
     const runId = await client.create({

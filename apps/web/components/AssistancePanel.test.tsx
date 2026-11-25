@@ -15,6 +15,7 @@ describe("AssistancePanel (2026-11-21)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue with this instruction" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     expect(String(fetch.mock.calls[1]![0])).toBe("/api/v1/test-runs/run1/assistance/req1");
+    expect(await screen.findByText(/Answer received/)).toBeInTheDocument();
   });
   it("can stop without entering an instruction", async () => {
     const fetch = vi.fn(async () => json(202, { accepted: true }));

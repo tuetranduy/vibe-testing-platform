@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from discovery_service.protocol import (
-    DEFAULT_JOB_SECONDS, DEFAULT_MODEL_CALLS, MAX_AGENT_STEPS, MAX_JOB_SECONDS, FrameError, decode_frame, encode_frame,
+    DEFAULT_JOB_SECONDS, MAX_JOB_SECONDS, FrameError, decode_frame, encode_frame,
 )
 
 PR_SET_DUMPABLE = 4
@@ -226,7 +226,6 @@ async def _run(transport: Transport, host_link: 'HostLink', start: dict[str, Any
     from discovery_service.protocol import CandidateBatch
 
     host, port, path = str(start['host']), int(start['port']), str(start['path'])
-    max_steps = max(1, min(int(start.get('max_steps', DEFAULT_MODEL_CALLS - 1)), MAX_AGENT_STEPS))
     timeout_s = max(5.0, min(float(start.get('timeout_s', DEFAULT_JOB_SECONDS)), MAX_JOB_SECONDS))
 
     proxy = start.get('proxy')
@@ -292,7 +291,8 @@ async def _run(transport: Transport, host_link: 'HostLink', start: dict[str, Any
     )
     started = time.monotonic()
     try:
-        agent_task = asyncio.ensure_future(agent.run(max_steps=max_steps, timeout=timeout_s))
+        # Browser Use requires a positive integer. The wall-clock timers bound the run.
+        agent_task = asyncio.ensure_future(agent.run(max_steps=sys.maxsize - 1, timeout=timeout_s))
         try:
             result = await asyncio.wait_for(agent_task, timeout_s + 20)
         except asyncio.CancelledError:
