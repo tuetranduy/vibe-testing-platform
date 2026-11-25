@@ -393,7 +393,7 @@ export async function reachableNamedControl(page: Page, name: string, roles: rea
  * the explorer is asked, so a step that names its control ("Click the 'New User' button") needs no model call. Its XPath
  * selector, or null when no element or more than one matches, or the one that does cannot be clicked.
  */
-export async function exactNamedControl(page: Page, name: string | RegExp, roles: readonly string[]): Promise<string | null> {
+export async function exactNamedControl(page: Page | Locator, name: string | RegExp, roles: readonly string[]): Promise<string | null> {
   const found: string[] = [];
   for (const role of roles) {
     const locator = page.getByRole(role as Parameters<Page["getByRole"]>[0], { name, exact: true });

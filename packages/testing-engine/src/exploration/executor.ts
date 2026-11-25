@@ -78,6 +78,7 @@ import { SITE_ERROR_SCRIPT, siteErrorOf, type PageHeadline } from "./site-error"
 import { MAX_REPLANS, createReplanner, type Replanner } from "./replanner";
 import { captureNamedFact } from "./named-facts";
 import { createPageContextRecorder, type PageContext } from "./page-context";
+import { CHECKOUT_SECTION_SCRIPT, isCheckoutSection, namedCheckoutSection, savedShippingContinue, waitedCheckoutSection, type CheckoutSection } from "./checkout-section";
 import { createStepReviewer, type StepReviewer } from "./step-review";
 import { DEFAULT_ASSISTANCE_TIMEOUT_MS, MAX_ASSISTANCE_REQUESTS, type AssistancePort } from "./assistance";
 
@@ -822,7 +823,8 @@ class ExplorationRun {
     // Per URL path, not per accordion state; queries and hashes do not distinguish pages (KI-089, 2026-11-22).
     const refineArrival = async (at: number): Promise<boolean> => {
       const path = pagePath(this.url());
-      if (this.input.seenUrls === undefined || !this.replanner || !path || seenPaths.has(path) || refinedPaths.has(path) || refinedPaths.size >= 3 || !planned[at + 1]) return false;
+      if (this.input.seenUrls === undefined || !this.replanner || !path || seenPaths.has(path) || refinedPaths.has(path) || refinedPaths.size >= 3) return false;
+      if (planned.slice(at + 1).every(({ kind }) => kind === "capture_checkpoint" || kind === "wait_for")) return false;
       refinedPaths.add(path);
       const steps = await this.replan(scenario, planned, at + 1, false, { arrived: true });
       if (!steps) return false;
@@ -849,8 +851,21 @@ class ExplorationRun {
       await this.judgeCriteria(first, judgeAfter.get(first.id) ?? []);
     }
     for (let i = opensTarget ? 1 : 0; i < planned.length; i++) {
-      const step = planned[i]!;
       await this.ctx.boundary();
+      const shippingContinue = savedShippingContinue(planned, i);
+      if (shippingContinue !== null && await this.canUseSavedShippingAddress(planned.slice(i, shippingContinue))) {
+        const next = planned[shippingContinue]!;
+        const setup = planned.splice(i, shippingContinue - i);
+        planned[i] = { ...next, criterionIds: [...new Set([...setup.flatMap((step) => step.criterionIds), ...next.criterionIds])] };
+        this.revised.set(scenario.id, [...planned]);
+        judgeAfter = this.judgeSchedule({ ...scenario, steps: planned });
+        await this.ctx.publish({
+          type: "plan.revised",
+          message: "Shipping Address already has a saved selection. Continue from the current section.",
+          payload: { scenarioId: scenario.id, afterStepId: planned[i - 1]?.id ?? next.id, stepCount: planned.length - i },
+        });
+      }
+      const step = planned[i]!;
       this.startPlanned();
       // A model-backed wait may outlast a toast. Capture the next checkpoint's notifications as
       // soon as its preceding action succeeds, provided no other action intervenes.
@@ -905,6 +920,38 @@ class ExplorationRun {
       await this.judgeCriteria(step, judgeAfter.get(step.id) ?? []);
     }
     await this.judgeCriteria(null, judgeAfter.get(null) ?? []);
+  }
+
+  private async checkoutSection(): Promise<CheckoutSection | null> {
+    try {
+      const section = await this.page.evaluate(CHECKOUT_SECTION_SCRIPT) as CheckoutSection | null;
+      return isCheckoutSection(section) ? section : null;
+    } catch (err) {
+      this.rethrowIfFatal(err);
+      return null;
+    }
+  }
+
+  private async canUseSavedShippingAddress(setup: PlannedStep[]): Promise<boolean> {
+    const { originalText, criteria } = this.input.requirement;
+    const genericAddressStep = /^\s*(?:[-*]\s*|\d+[.)]\s+)?(?:fill(?: in| out)?|complete) (?:the )?(?:shipping|billing) address (?:section|form|step|panel)\.?\s*$/i;
+    const addressRequirement = /\b(?:address|street|postcode|postal code|zip code|store pickup)\b/i;
+    if ([...originalText.split(/\r?\n/), ...criteria.map((criterion) => criterion.statement)]
+      .some((text) => addressRequirement.test(text) && !genericAddressStep.test(text))) return false;
+    const section = await this.checkoutSection();
+    if (section?.name !== "shipping address" || !section.savedAddress) return false;
+    const supplied = setup.flatMap((step) => step.inputRef && Object.hasOwn(this.ctx.request.testData, step.inputRef.key) ? [step.inputRef.key] : []);
+    if (supplied.length === 0) return true;
+    const label = ` ${normalizeName(section.savedAddress)} `;
+    const matchesLabel = (key: string) => {
+      const value = normalizeName(String(this.ctx.request.testData[key] ?? ""));
+      return value !== "" && label.includes(` ${value} `);
+    };
+    // The shipping selector displays the postal address; contact fields can be reused only after the same inputs were entered.
+    const street = Object.keys(this.ctx.request.testData).find((key) => /^(?:address|address_line_?1|street|street_address)$/.test(dataKey(key)));
+    return street !== undefined && matchesLabel(street) && supplied.every((key) => matchesLabel(key) ||
+      (/^(?:email|phone|fax)/.test(dataKey(key)) && this.steps.some((step) => step.scenarioId === (this.multiScenario ? this.scenarioId : undefined) &&
+        step.kind === "fill" && step.onGoldenPath && step.inputRef?.source === "testData" && step.inputRef.key === key)));
   }
 
   /** No checkpoint shortcut: a URL change can still land on an error page, and a fill can reveal validation. */
@@ -1297,6 +1344,23 @@ class ExplorationRun {
    * nothing, so the attempt fails instead of recording a search that never ran.
    */
   private async act(step: PlannedStep, observeInstruction = step.description, searchField?: string): Promise<Attempt> {
+    const section = namedCheckoutSection(step.description);
+    const forward = normalizeName(namedControl(step.description)?.name ?? "") === "continue";
+    const checkout = section && forward && searchField === undefined && observeInstruction === step.description
+      ? await this.checkoutSection() : null;
+    if (checkout) {
+      const selector = checkout.name === section
+        ? await exactNamedControl(this.page.locator(checkout.panel), /^continue$/i, ["button", "link"]) : null;
+      if (selector) {
+        const [ref, info] = await Promise.all([this.recorder.record(this.page, selector), this.recorder.describe(this.page, selector)]);
+        const located = { element: { selector, description: "Continue", method: "click", arguments: [] }, ref, info };
+        return this.click(step, observeInstruction, located, true);
+      }
+      await this.reserve();
+      await this.record({ plannedStepId: step.id, kind: "observe", instruction: observeInstruction, urlBefore: this.url(),
+        outcome: "FAILED", error: `No unique Continue control in the requested section. The open checkout section is ${checkout.name}.`, startedAt: this.ctx.now() });
+      return "final";
+    }
     // A step that names its control ("Click the 'New User' button"): the one element with exactly that role and name, found
     // without a model call (2026-11-19). Not for pointer methods, nor for a search's submit (its own lookup below).
     const direct = searchField === undefined && observeInstruction === step.description && !POINTER_STEP.test(step.description)
@@ -1339,6 +1403,8 @@ class ExplorationRun {
     }
     // Not found, but the step names its control ("the Add to wishlist button", KI-072): that role and name on this page.
     if (!located && searchField === undefined) located = await this.byName(step);
+    // A stateful wizard already contains the form. A guessed intermediate control or route can undo its progress.
+    if (!located && searchField === undefined && await this.checkoutSection()) return "final";
     // An unseen flow may have intermediate sections (KI-088, 2026-11-22): follow at most three policy-checked
     // ways there, locating the target again after each. Each click is recorded for the compiled golden path.
     for (let advances = 0; !located && searchField === undefined && observeInstruction === step.description && advances < 3; advances++) {
@@ -1504,6 +1570,7 @@ class ExplorationRun {
     let located = await this.findField(step);
     // No field on this page (e.g. credentials planned on the start page, KI-001): ask once for the way to its form.
     if (!located) {
+      if (await this.checkoutSection()) return "final";
       const opened = await this.openForm(step);
       if (typeof opened === "string") return opened;
       located = opened;
@@ -1519,6 +1586,7 @@ class ExplorationRun {
     // A link is the way to the field (e.g. "Search the catalog" on a page without a search box points at the
     // Products link, KI-001): follow it once, then look for the field on that page. Never type into a link.
     if (located.info.role === "link") {
+      if (await this.checkoutSection()) return "final";
       const followed = await this.click(step, step.description, located);
       if (followed !== "ok") return followed;
       located = await this.locate(step, step.description);
@@ -2032,8 +2100,21 @@ class ExplorationRun {
   /** Polls for the step's element; whether it appeared or not, exploration goes on (see the header). */
   private async waitFor(step: PlannedStep): Promise<void> {
     this.cacheWrites = [];
+    const expected = waitedCheckoutSection(step.description);
     for (let poll = 0; poll < WAIT_FOR_POLLS; poll++) {
-      if (await this.locate(step, step.description)) return this.writeCache();
+      const active = expected ? await this.checkoutSection() : null;
+      if (active && expected === active.name) {
+        await this.reserve();
+        await this.record({ plannedStepId: step.id, kind: "observe", instruction: step.description, urlBefore: this.url(),
+          outcome: "SUCCESS", startedAt: this.ctx.now() });
+        return;
+      }
+      if (!active && await this.locate(step, step.description)) return this.writeCache();
+      if (active && poll === WAIT_FOR_POLLS - 1) {
+        await this.reserve();
+        await this.record({ plannedStepId: step.id, kind: "observe", instruction: step.description, urlBefore: this.url(),
+          outcome: "FAILED", error: `The open checkout section is ${active.name}.`, startedAt: this.ctx.now() });
+      }
       if (poll < WAIT_FOR_POLLS - 1) {
         try {
           await sleep(this.deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS, this.input.budget);

@@ -503,6 +503,21 @@ describe("compilePlaywrightTest: assertions", () => {
     expect(stepBlock(hidden.source, "AC-2")).toMatch(/\.toBeHidden\(\);/);
   });
 
+  it("replays a generated order number without requiring the number from exploration", () => {
+    const facts = shopFacts().map((f) => f.key === "toast" ? { ...f, read: { mode: "visible" as const,
+      element: ref({ strategy: "text", text: "Order number: 12456", exact: true }) } } : f);
+    const check = criterion("AC-2", { kind: "visible", fact: { key: "toast", checkpoint: "after_add" }, expected: true });
+    const result = compile({ facts, requirement: requirementOf([{ ...check, statement: "The site shows a generated order number on the order confirmation." }]) });
+    expect(stepBlock(result.source, "AC-2")).toContain('page.getByText(new RegExp(data.criteria["AC-2"].pattern, "i"))');
+    expect(result.dataJson).not.toContain("12456");
+    const locator = new RegExp(String(dataOf(result.dataJson).criteria["AC-2"]!.pattern), "i");
+    expect(locator.test("Order number: 78910")).toBe(true);
+    expect(locator.test("Order number: pending")).toBe(false);
+    expect(checkGeneratedSource(result.source)).toEqual([]);
+    const exact = compile({ facts, requirement: requirementOf([{ ...check, statement: "Order number 12456 is visible." }]) });
+    expect(exact.dataJson).toContain("12456");
+  });
+
   it('replays a grounded absent field with the same label matching semantics', () => {
     const absent = shopFacts().map(f => f.key === 'toast' ? { ...f, value: false, read: { element: ref({ strategy: 'label', text: 'Company', exact: false }), mode: 'visible' as const } } : f);
     const out = compile({ facts: absent, requirement: requirementOf([criterion('AC-2', { kind: 'visible', fact: { key: 'toast', checkpoint: 'after_add' }, expected: false })]) });

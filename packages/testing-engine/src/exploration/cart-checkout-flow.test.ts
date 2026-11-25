@@ -176,3 +176,104 @@ describe("frontends-demo cart → checkout (KI-058, KI-059, KI-060)", () => {
     expect(compiled.compiledCriteria).toEqual(ids);
   }, 60_000);
 });
+
+describe("saved-address checkout on a single URL", () => {
+  it.each([false, true])("preserves the checkout state and required address edits (explicit address: %s)", async (explicitAddress) => {
+    const target = "http://checkout.test/";
+    let orders = 0;
+    await page.unroute(`${target}**`);
+    await page.route(`${target}**`, async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === "/order") {
+        expect(route.request().method()).toBe("POST");
+        orders++;
+        return route.fulfill({ status: 204 });
+      }
+      if (path === "/receipt") return route.fulfill({ contentType: "text/html", body: "<h1>Order complete</h1>" });
+      return route.fulfill({ contentType: "text/html", body: `<button onclick="location.href='/cart'">Continue</button>
+        <ol>
+          <li><h2>1 Shipping Address</h2><div class="step" id="shipping">
+            <label>Shipping address <select><option value="42">Jane Doe, 12 Example Street, Testville</option><option value="">New Address</option></select></label>
+            <label><input type="checkbox">In-Store Pickup</label>
+            <a href="/cart">Back</a><input type="button" value="Continue" onclick="this.closest('.step').hidden=true; document.getElementById('methods').hidden=false">
+          </div></li>
+          <li><h2>2 Shipping Method</h2><div class="step" id="methods" hidden>
+            <label><input type="radio" checked>Ground</label><input type="button" value="Continue" onclick="this.closest('.step').hidden=true; document.getElementById('confirm').hidden=false">
+          </div></li>
+          <li><h2>3 Confirm Order</h2><div class="step" id="confirm" hidden>
+            <button onclick="fetch('/order',{method:'POST'}).then(() => location.href='/receipt')">Confirm order</button>
+          </div></li>
+        </ol>` });
+    });
+
+    const receipt = ac("AC-1", "Verify the order completed", "The order completes successfully.",
+      { kind: "visible", fact: outcome("receipt", "after_order"), expected: true });
+    const runRequirement = { ...requirement, originalText: explicitAddress ? "Use a different shipping address and place an order." : "Check out and place an order.\n- fill billing address section\n- fill shipping address section",
+      criteria: [receipt], facts: [{ key: "receipt", checkpoint: "after_order", description: 'Whether the "Order complete" heading is visible', valueType: "boolean" as const }] };
+    const scenarioSteps = [
+      ps("PS-1", "navigate", "Open the target URL"),
+      ps("PS-2", "wait_for", "Wait for the Shipping Method section to open."),
+      ps("PS-3", "wait_for", "Wait for the Shipping address section of the checkout to open."),
+      ps("PS-4", "click", "Uncheck the 'Ship to same address' checkbox in the Shipping Address section."),
+      { ...ps("PS-5", "fill", "Fill the shipping street address"), inputRef: { source: "testData" as const, key: "streetAddress" } },
+      ps("PS-6", "click", "Click the 'Continue' button in the Shipping Address section."),
+      ps("PS-7", "wait_for", "Wait for the Shipping Method section to open."),
+      ps("PS-8", "click", "Click the 'Continue' button in the Shipping Method section."),
+      { ...ps("PS-9", "click", "Click the 'Confirm order' button"), destructive: true },
+      ps("PS-10", "capture_checkpoint", "Verify the receipt", "after_order"),
+    ].map((step) => ({ ...step, criterionIds: [receipt.id] }));
+    const runPlan: TestPlan = { ...plan, scenarios: [{ ...plan.scenarios[0]!, steps: scenarioSteps, criterionIds: [receipt.id] }] };
+    const signal = new AbortController().signal;
+    const ctx: StageContext = { runId: "run_cart", tenantId: "t_default", signal, deadlineAt: null,
+      request: { targetUrl: target, requirement: runRequirement.originalText, browser: "chromium", environment: "staging", testData: { streetAddress: "12 Example Street" }, secretNames: [],
+        options: { maxRunSeconds: 120, maxExplorationSteps: 40, generatePlaywright: true, rerunGeneratedTest: false, autoConfirmCriteria: true, allowDestructiveActions: true, additionalAllowedHosts: [] } },
+      budgets: { explorationMs: 120_000, rerunMs: 30_000 }, secrets: { names: [], get: () => undefined }, redact: (v) => v,
+      publish: async () => {}, addCleanup: () => {}, boundary: async () => {}, budgetSignal: () => signal, now: () => new Date(), llm: null,
+    };
+    const observed: string[] = [];
+    const navigated: string[] = [];
+    const session: ExplorerSession = {
+      page,
+      navigate: async (url) => { navigated.push(url); await page.goto(url); return { url: page.url() }; },
+      observe: async (instruction) => {
+        observed.push(instruction);
+        const elements = instruction.startsWith('Find the element that shows: Whether the "Order complete"')
+          ? [{ selector: "h1", description: "Order receipt heading", method: "click", arguments: [] }] : [];
+        return { elements, llm: null };
+      },
+      act: async () => { throw new Error("Only replay an observed action"); },
+      actOn: async (element) => { await page.locator(element.selector).click(); return { success: true, message: "clicked", element, navigationBlocks: [], llm: null }; },
+      extract: async (_instruction, schema) => ({ data: schema.parse({ receipt: true }), llm: null }),
+      screenshot: () => page.screenshot(), close: async () => {},
+    };
+    let artifacts = 0;
+    let replans = 0;
+    let routeRecoveries = 0;
+    const out = await runExploration(ctx, { plan: runPlan, requirement: runRequirement, session, budget: signal, seenUrls: [target] }, {
+      pollIntervalMs: 10, actionQuietMs: 20,
+      replanner: { async replan() { replans++; return { steps: null, reason: "model_failed" }; } },
+      findRoutes: async () => { routeRecoveries++; return []; },
+      store: { saveFact: async () => {}, saveStep: async () => {}, saveScreenshot: async () => ({ artifactId: `art_${++artifacts}` }) },
+    });
+
+    expect(navigated).toEqual([target]);
+    expect(routeRecoveries).toBe(0);
+    expect(out.steps.find((step) => step.plannedStepId === "PS-2")?.outcome).toBe("FAILED");
+    expect(out.steps.find((step) => step.plannedStepId === "PS-3")?.outcome).toBe("SUCCESS");
+    if (explicitAddress) {
+      expect(out.revisedPlan).toBeUndefined();
+      expect(replans).toBe(1);
+      expect(observed).toEqual([scenarioSteps[3]!.description]);
+      expect(orders).toBe(0);
+      expect(page.url()).toBe(target);
+    } else {
+      expect(replans, JSON.stringify(out.steps.map(({ plannedStepId, kind, outcome, error }) => ({ plannedStepId, kind, outcome, error })))).toBe(0);
+      expect(observed).toEqual([expect.stringContaining('Find the element that shows: Whether the "Order complete"')]);
+      expect(out.revisedPlan?.scenarios[0]!.steps.map(({ id }) => id)).toEqual(["PS-1", "PS-2", "PS-3", "PS-6", "PS-7", "PS-8", "PS-9", "PS-10"]);
+      expect(out.steps.filter((step) => step.kind === "act" && step.onGoldenPath).map((step) => step.plannedStepId)).toEqual(["PS-6", "PS-8", "PS-9"]);
+      expect(orders).toBe(1);
+      expect(page.url()).toBe(`${target}receipt`);
+      expect(verifyCriterion({ criterion: receipt, facts: out.facts, steps: out.steps, blocked: [], stopReason: out.stopReason, plan: runPlan }).status).toBe("PASS");
+    }
+  }, 30_000);
+});

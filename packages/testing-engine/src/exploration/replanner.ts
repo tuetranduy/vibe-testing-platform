@@ -169,6 +169,7 @@ You get the criteria, the steps already done, the step that failed, the steps th
 Rules:
 - Read dialogs and overlays first. A successful browser action may have been refused by the site. If a modal says terms must be accepted, close it, tick the agreement checkbox and redo the action before continuing.
 - Reach what the failed step was for another way: open a menu, a tab or a link the page shows, navigate to a URL the page links to, or search. Do not repeat the failed step as it was (unless the page shows a prerequisite to fix first, or the message says it opened a sign-in prompt: then fix that prerequisite and retry).
+- In a checkout accordion, start from the open section shown in the page context and stay in checkout. Use the open section's visible Continue to advance and name its section in each Continue step. For Billing Address or Shipping Address, use a selected saved address when it meets the requirement. If a new address is needed and an address book is shown, select its actual New Address option before accessing country or other address fields. Use a same-address checkbox only if it is visible. Do not add a wait for a section to open after a Continue that opens it.
 - Capture every checkpoint that was still to be captured exactly once, at the moment its facts are visible, in the same order; capture no other checkpoint.
 - Each step is one action that always applies; never a conditional step.
 - Use a click on the named option for radio buttons and checkboxes.

@@ -502,9 +502,19 @@ class Compiler {
     const assert = (build: (locator: string) => string) => this.withReads(w, fresh, build);
 
     switch (outcome.kind) {
-      case "visible":
+      case "visible": {
+        const candidate = fresh[0]?.candidate;
+        const generatedOrderNumber = outcome.expected && candidate?.strategy === "text"
+          && /^order\s+(?:number|id)\s*[:#]?\s*\d+$/i.test(candidate.text.trim())
+          && /\b(?:generated|assigned|new|unique)\s+order\s+(?:number|id|identifier)\b/i.test(plan.criterion.statement);
+        if (generatedOrderNumber) {
+          const pattern = param("pattern", "^Order\\s+(?:number|ID)\\s*[:#]?\\s*\\d+$");
+          w.line(`await expect.soft(page.getByText(new RegExp(${pattern}, ${lit("i")})), message).toBeVisible();`);
+          return;
+        }
         assert((l) => `await expect.soft(${l}, message).${outcome.expected ? "toBeVisible" : "toBeHidden"}();`);
         return;
+      }
 
       case "text_matches": {
         const read = fresh[0]!;

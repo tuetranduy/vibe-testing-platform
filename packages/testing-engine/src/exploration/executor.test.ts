@@ -1398,6 +1398,7 @@ describe("runExploration (fake explorer)", () => {
     const evaluated: unknown[] = [];
     Object.assign(session.page, {
       evaluate: async (_fn: unknown, arg: unknown) => {
+        if (!Array.isArray(arg)) return null;
         evaluated.push(arg);
         return ["https://shop.test/Summer-BBQ/Grills/"];
       },
