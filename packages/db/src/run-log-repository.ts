@@ -29,12 +29,14 @@ type Row = typeof runLogs.$inferSelect;
 
 const LEVELS = RunLogLevelSchema.options;
 
-const encodeCursor = (row: Pick<Row, "time" | "id">) => Buffer.from(`${row.time.toISOString()}|${row.id}`).toString("base64url");
+// Lines with the same time keep the order they were stored in (seq), so a cursor is `time|seq`.
+const encodeCursor = (row: Pick<Row, "time" | "seq">) => Buffer.from(`${row.time.toISOString()}|${row.seq}`).toString("base64url");
 
-function decodeCursor(cursor: string): { time: Date; id: string } | null {
-  const [iso, id] = Buffer.from(cursor, "base64url").toString("utf8").split("|");
+function decodeCursor(cursor: string): { time: Date; seq: number } | null {
+  const [iso, seq] = Buffer.from(cursor, "base64url").toString("utf8").split("|");
   const time = new Date(iso ?? "");
-  return id && !Number.isNaN(time.getTime()) ? { time, id } : null;
+  const n = Number(seq);
+  return Number.isSafeInteger(n) && !Number.isNaN(time.getTime()) ? { time, seq: n } : null;
 }
 
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
@@ -102,7 +104,7 @@ export class RunLogRepository {
   }
 
   /**
-   * One page of a run's lines; empty for a run outside the tenant. By default in `(time, id)` order from `after`;
+   * One page of a run's lines; empty for a run outside the tenant. By default in `(time, seq)` order from `after`;
    * `tail` the last `limit` lines; `afterSeq` the lines stored since, in insertion order (live polling).
    */
   async list(tenantId: string, runId: string, query: ListQuery): Promise<RunLogPage> {
@@ -132,20 +134,20 @@ export class RunLogRepository {
         .select()
         .from(runLogs)
         .where(and(...where))
-        .orderBy(desc(runLogs.time), desc(runLogs.id))
+        .orderBy(desc(runLogs.time), desc(runLogs.seq))
         .limit(query.limit);
       return { lines: rows.reverse().map(toLine), nextCursor: null, pollSeq };
     }
 
     const cursor = query.after ? decodeCursor(query.after) : null;
     if (cursor) {
-      where.push(or(gt(runLogs.time, cursor.time), and(eq(runLogs.time, cursor.time), gt(runLogs.id, cursor.id)))!);
+      where.push(or(gt(runLogs.time, cursor.time), and(eq(runLogs.time, cursor.time), gt(runLogs.seq, cursor.seq)))!);
     }
     const rows = await this.db
       .select()
       .from(runLogs)
       .where(and(...where))
-      .orderBy(asc(runLogs.time), asc(runLogs.id))
+      .orderBy(asc(runLogs.time), asc(runLogs.seq))
       .limit(query.limit + 1);
     const page = rows.slice(0, query.limit);
     const last = page.at(-1);

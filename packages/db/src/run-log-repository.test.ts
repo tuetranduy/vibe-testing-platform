@@ -72,6 +72,19 @@ describe("RunLogRepository", () => {
     expect(pages).toBe(3);
   });
 
+  it("lines with the same time keep the order they were written in, across pages", async () => {
+    const run = await newRun();
+    const repo = new RunLogRepository(tdb.db);
+    await repo.appendMany(Array.from({ length: 20 }, (_, i) => line(run.id, { time: at(0), message: `m${i}` })));
+    const all = await repo.list(TEST_TENANT_ID, run.id, { limit: 500 });
+    expect(all.lines.map((l) => l.message)).toEqual(Array.from({ length: 20 }, (_, i) => `m${i}`));
+    const first = await repo.list(TEST_TENANT_ID, run.id, { limit: 7 });
+    const second = await repo.list(TEST_TENANT_ID, run.id, { limit: 7, after: first.nextCursor! });
+    expect([...first.lines, ...second.lines].map((l) => l.message)).toEqual(Array.from({ length: 14 }, (_, i) => `m${i}`));
+    const tail = await repo.list(TEST_TENANT_ID, run.id, { limit: 3, tail: "1" });
+    expect(tail.lines.map((l) => l.message)).toEqual(["m17", "m18", "m19"]);
+  });
+
   it("list filters by source, minLevel, stage and q", async () => {
     const run = await newRun();
     const repo = new RunLogRepository(tdb.db);

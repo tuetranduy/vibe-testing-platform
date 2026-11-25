@@ -34,7 +34,9 @@ export const clock = (iso: string) => {
 
 export function mergeTimeline(lines: RunLogLine[], calls: LlmCallView[]): TimelineItem[] {
   const items: TimelineItem[] = [...lines.map((line) => ({ kind: "line" as const, line })), ...calls.map((call) => ({ kind: "call" as const, call }))];
-  return items.sort((a, b) => timeOf(a).localeCompare(timeOf(b)));
+  // Same time: lines in the order they were stored (seq); a model call after them.
+  const seqOf = (item: TimelineItem) => (item.kind === "line" ? item.line.seq : Number.MAX_SAFE_INTEGER);
+  return items.sort((a, b) => timeOf(a).localeCompare(timeOf(b)) || seqOf(a) - seqOf(b));
 }
 
 export const lineAnchor = (id: string) => `run-log-${id}`;
