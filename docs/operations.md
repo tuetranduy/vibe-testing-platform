@@ -294,7 +294,7 @@ or `/runs/<id>/logs`). Members never see it; its API answers them 403. Sources:
 | `browser_use` | `discovery.*` events and, with the local launcher, its JSON diagnostics lines (never page text or model output) |
 | `runner` | the Playwright CLI's stderr tail (last 200 lines) of a rerun |
 | `target_site` | the tested site's console errors and warnings, uncaught page errors, failed requests and 4xx/5xx responses in the sandboxed browser (no bodies; a missing favicon and Chromium's own "Failed to load resource" console lines are left out) |
-| `web_app` | our web app's frontend errors while a run's pages are open (at most 300 per person per run) |
+| `web_app` | our web app's frontend errors while a run's pages are open (at most 300 lines per person per run, and 60 requests per person per 15 minutes on the sign-in throttle's store) |
 
 Each model call's prompt and response, as sent after the run redactor and with image bytes left out, is stored
 gzipped in `llm_call_exchanges`. Since 2026-10-07 a run's secret values are not masked, so both can contain them.

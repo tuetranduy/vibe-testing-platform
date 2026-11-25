@@ -142,6 +142,25 @@ describe("client-logs", () => {
     expect((await post(runId, other.headers, batch(1))).statusCode).toBe(404);
   });
 
+  it("limits each person to 60 client-log requests per 15 minutes", async () => {
+    const member = await signInMember(t);
+    const runId = await createRun(member.headers);
+    for (let i = 0; i < 60; i++) expect((await post(runId, member.headers, batch(1))).statusCode).toBe(204);
+    const limited = await post(runId, member.headers, batch(1));
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json()).toMatchObject({ code: "RATE_LIMITED" });
+    const other = await signInMember(t);
+    expect((await post(await createRun(other.headers), other.headers, batch(1))).statusCode).toBe(204);
+  });
+
+  it("a message with a NUL character is stored, not a 500", async () => {
+    const member = await signInMember(t);
+    const runId = await createRun(member.headers);
+    expect((await post(runId, member.headers, batch(1, "bad\u0000byte"))).statusCode).toBe(204);
+    const [stored] = (await new RunLogRepository(t.tdb.db).list(TEST_TENANT_ID, runId, { limit: 10, source: ["web_app"] })).lines;
+    expect(stored!.message).toBe("badbyte");
+  });
+
   it("the service token cannot send client logs", async () => {
     const runId = await createRun();
     expect((await post(runId, auth, batch(1))).statusCode).toBe(403);

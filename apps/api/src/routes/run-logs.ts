@@ -4,9 +4,12 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { requireAdmin, runScope } from "../auth/principal";
 import type { ApiDeps } from "../deps";
 import { HttpError } from "../errors";
+import { memoryLoginThrottle } from "../services/user-service";
 
 /** Frontend-error lines one person's browser may add to one run. */
 export const CLIENT_LOG_BUDGET = 300;
+/** Client-log requests one person may send per sign-in throttle window (15 minutes), across runs. */
+export const CLIENT_LOG_REQUESTS = 60;
 const DAY_MS = 86_400_000;
 
 const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
@@ -21,6 +24,8 @@ const UNLOGGED_ROUTE = /\/(logs|llm-calls(\/.*)?|client-logs)$/;
 export async function runLogRoutes(app: FastifyInstance, deps: ApiDeps): Promise<void> {
   const runs = new RunRepository(deps.db);
   const logs = new RunLogRepository(deps.db);
+  // The sign-in throttle's store (Redis in production, shared by every API process), under its own keys.
+  const throttle = deps.loginThrottle ?? memoryLoginThrottle();
   const calls = new LlmCallRepository(deps.db);
   const exchanges = new LlmExchangeRepository(deps.db);
   const retentionDays = deps.config.runLogRetentionDays ?? 14;
@@ -98,6 +103,9 @@ export async function runLogRoutes(app: FastifyInstance, deps: ApiDeps): Promise
   app.post<{ Params: { runId: string } }>("/v1/test-runs/:runId/client-logs", async (req, reply) => {
     const p = req.principal;
     if (p.kind !== "user" || p.token) throw new HttpError(403, "FORBIDDEN", "Only a signed-in person's browser sends its errors");
+    const key = `client-logs:${p.tenantId}:${p.userId}`;
+    if ((await throttle.failures(key)) >= CLIENT_LOG_REQUESTS) throw new HttpError(429, "RATE_LIMITED", "Too many error reports; try again later");
+    await throttle.fail(key);
     const run = await runs.getRequired(runScope(p), req.params.runId);
     const batch = ClientLogBatchSchema.parse(req.body);
     const room = CLIENT_LOG_BUDGET - (await logs.countWebAppLines(run.id, p.userId));
