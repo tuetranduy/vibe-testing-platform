@@ -52,15 +52,22 @@ const LOW_LEVELS = new Set<string>(["trace", "debug", "info"]);
 /** Per-run line counts kept for this many runs (oldest forgotten first). */
 const MAX_TRACKED_RUNS = 5000;
 
-const cut = (s: string) => (s.length > MAX_STRING ? `${s.slice(0, MAX_STRING)}…[truncated ${s.length - MAX_STRING} chars]` : s);
+/** Cuts at MAX_STRING, one code unit earlier when that would split a surrogate pair (an emoji). */
+function cut(s: string): string {
+  if (s.length <= MAX_STRING) return s;
+  const last = s.charCodeAt(MAX_STRING - 1);
+  const end = last >= 0xd800 && last <= 0xdbff ? MAX_STRING - 1 : MAX_STRING;
+  return `${s.slice(0, end)}…[truncated ${s.length - end} chars]`;
+}
 
-function truncate(value: unknown): unknown {
+/** Long strings cut; a value inside itself becomes "[Circular]" (the logger's redaction keeps cycles). */
+function truncate(value: unknown, ancestors: object[] = []): unknown {
   if (typeof value === "string") return cut(value);
-  if (Array.isArray(value)) return value.map(truncate);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, truncate(v)]));
-  }
-  return value;
+  if (!value || typeof value !== "object") return value;
+  if (ancestors.includes(value)) return "[Circular]";
+  const path = [...ancestors, value];
+  if (Array.isArray(value)) return value.map((v) => truncate(v, path));
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, truncate(v, path)]));
 }
 
 /** `record.source` when it is a known source, else the process (`worker` / `api` / `runner`), else `worker`. */
@@ -137,12 +144,32 @@ export function createRunLogSink(opts: RunLogSinkOptions): RunLogSink {
       try {
         await opts.write(batch);
       } catch (err) {
-        drop("insert_failed", batch.length);
         try {
           opts.onWriteError?.(err);
         } catch {
           // ignored
         }
+        // One line the database refuses must not cost the others (other runs' lines included): retry one by one.
+        // Three refusals in a row means the database is down, not one bad line: the rest are dropped.
+        let failed = batch.length;
+        if (batch.length > 1) {
+          failed = 0;
+          let inARow = 0;
+          for (const [i, line] of batch.entries()) {
+            if (inARow >= 3) {
+              failed += batch.length - i;
+              break;
+            }
+            try {
+              await opts.write([line]);
+              inARow = 0;
+            } catch {
+              failed += 1;
+              inARow += 1;
+            }
+          }
+        }
+        if (failed > 0) drop("insert_failed", failed);
       }
     }
   }

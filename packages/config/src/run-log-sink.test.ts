@@ -156,3 +156,67 @@ describe("createRunLogSink", () => {
     expect(written).toHaveLength(1);
   });
 });
+
+describe("createRunLogSink with lines a database might refuse", () => {
+  it("never cuts a long string through an emoji", async () => {
+    const { sink, all } = setup();
+    sink.accept(rec({ html: `${"a".repeat(16_383)}😀${"b".repeat(100)}` }));
+    await sink.flush();
+    const html = all()[0]!.fields.html as string;
+    expect(html.startsWith("a".repeat(16_383))).toBe(true);
+    expect(html.charCodeAt(16_383)).not.toBe(0xd83d);
+    expect(html).toMatch(/…\[truncated \d+ chars\]$/);
+    await sink.close();
+  });
+
+  it("keeps a line with a circular field", async () => {
+    const { sink, all } = setup();
+    const loop: Record<string, unknown> = { a: 1 };
+    loop.self = loop;
+    sink.accept(rec({ loop }));
+    await sink.flush();
+    expect(all()[0]!.fields).toEqual({ loop: { a: 1, self: "[Circular]" } });
+    await sink.close();
+  });
+
+  it("a refused batch is retried line by line, so one bad line costs one line", async () => {
+    const written: SinkLine[] = [];
+    const drops: Record<string, number> = {};
+    const sink = createRunLogSink({
+      component: "worker",
+      write: async (lines) => {
+        if (lines.some((l) => l.message === "bad")) throw new Error("invalid input syntax for type json");
+        written.push(...lines);
+      },
+      onDrop: (reason, n) => void (drops[reason] = (drops[reason] ?? 0) + n),
+    });
+    sink.accept(rec({ msg: "one" }));
+    sink.accept(rec({ msg: "bad" }));
+    sink.accept(rec({ msg: "two" }));
+    await sink.flush();
+    expect(written.map((l) => l.message)).toEqual(["one", "two"]);
+    expect(drops.insert_failed).toBe(1);
+    await sink.close();
+  });
+});
+
+describe("createRunLogSink when the database is down", () => {
+  it("gives up retrying after three refused lines in a row", async () => {
+    let writes = 0;
+    const drops: Record<string, number> = {};
+    const sink = createRunLogSink({
+      component: "worker",
+      batchSize: 1000,
+      write: async () => {
+        writes += 1;
+        throw new Error("connect ECONNREFUSED");
+      },
+      onDrop: (reason, n) => void (drops[reason] = (drops[reason] ?? 0) + n),
+    });
+    for (let i = 0; i < 10; i++) sink.accept(rec({ msg: `m${i}` }));
+    await sink.flush();
+    expect(writes).toBe(4);
+    expect(drops.insert_failed).toBe(10);
+    await sink.close();
+  });
+});

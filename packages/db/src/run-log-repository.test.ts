@@ -140,3 +140,38 @@ describe("RunLogRepository live polling", () => {
     expect(empty).toEqual({ lines: [], nextCursor: null, lastCursor: null });
   });
 });
+
+describe("RunLogRepository stores what Postgres would reject", () => {
+  it("a lone surrogate, a NUL and a bigint are made storable; the other lines in the batch are kept", async () => {
+    const run = await newRun();
+    const repo = new RunLogRepository(tdb.db);
+    const half = "😀".slice(0, 1);
+    const stored = await repo.appendMany([
+      line(run.id, { time: at(0), message: "good" }),
+      line(run.id, { time: at(1), message: `nul\u0000here ${half}`, fields: { text: `a\u0000b`, cut: `x${half}`, big: 10n as unknown, nested: { s: half } } }),
+      line(run.id, { time: at(2), message: "also good" }),
+    ]);
+    expect(stored).toBe(3);
+    const lines = (await repo.list(TEST_TENANT_ID, run.id, { limit: 10 })).lines;
+    expect(lines.map((l) => l.message)).toEqual(["good", "nulhere \uFFFD", "also good"]);
+    expect(lines[1]!.fields).toEqual({ text: "ab", cut: "x\uFFFD", big: "10", nested: { s: "\uFFFD" } });
+  });
+
+  it("a circular field is stored as [Circular]", async () => {
+    const run = await newRun();
+    const repo = new RunLogRepository(tdb.db);
+    const loop: Record<string, unknown> = { a: 1 };
+    loop.self = loop;
+    expect(await repo.appendMany([line(run.id, { fields: { loop } })])).toBe(1);
+    const [stored] = (await repo.list(TEST_TENANT_ID, run.id, { limit: 10 })).lines;
+    expect(stored!.fields).toEqual({ loop: { a: 1, self: "[Circular]" } });
+  });
+
+  it("a Date field is stored as its ISO string", async () => {
+    const run = await newRun();
+    const repo = new RunLogRepository(tdb.db);
+    await repo.appendMany([line(run.id, { fields: { at: new Date("2026-11-25T10:00:00.000Z") } })]);
+    const [stored] = (await repo.list(TEST_TENANT_ID, run.id, { limit: 10 })).lines;
+    expect(stored!.fields).toEqual({ at: "2026-11-25T10:00:00.000Z" });
+  });
+});

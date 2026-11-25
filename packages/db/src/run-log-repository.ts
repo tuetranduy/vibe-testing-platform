@@ -37,6 +37,29 @@ function decodeCursor(cursor: string): { time: Date; id: string } | null {
   return id && !Number.isNaN(time.getTime()) ? { time, id } : null;
 }
 
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/** A string Postgres accepts in `text` and `jsonb`: no NUL, no half of a surrogate pair. */
+const storableText = (s: string) => s.replace(/\u0000/g, "").replace(LONE_SURROGATE, "\uFFFD");
+
+/**
+ * A value Postgres accepts in `jsonb`: strings made storable, BigInts as strings, a value inside itself
+ * "[Circular]", anything JSON can't hold dropped as JSON.stringify would.
+ */
+export function storableJson(value: unknown, ancestors: object[] = []): unknown {
+  if (typeof value === "string") return storableText(value);
+  if (typeof value === "bigint") return value.toString();
+  if (value === null || typeof value !== "object") return value;
+  if (ancestors.includes(value)) return "[Circular]";
+  const toJSON = (value as { toJSON?: unknown }).toJSON;
+  if (typeof toJSON === "function") return storableJson(toJSON.call(value), [...ancestors, value]);
+  const path = [...ancestors, value];
+  if (Array.isArray(value)) return value.map((v) => storableJson(v, path));
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[storableText(k)] = storableJson(v, path);
+  return out;
+}
+
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 function toLine(row: Row): RunLogLine {
@@ -63,7 +86,15 @@ export class RunLogRepository {
     const known = new Set(
       (await this.db.select({ id: testRuns.id }).from(testRuns).where(inArray(testRuns.id, ids))).map((r) => r.id),
     );
-    const rows = lines.filter((l) => known.has(l.runId)).map((l) => ({ id: newId("log"), ...l }));
+    const rows = lines
+      .filter((l) => known.has(l.runId))
+      .map((l) => ({
+        id: newId("log"),
+        ...l,
+        component: storableText(l.component),
+        message: storableText(l.message),
+        fields: storableJson(l.fields) as Record<string, unknown>,
+      }));
     if (rows.length === 0) return 0;
     await this.db.insert(runLogs).values(rows);
     return rows.length;
