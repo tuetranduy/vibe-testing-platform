@@ -149,3 +149,38 @@ describe("createLogger", () => {
     expect(runs.get("run_1")?.stage).toBe("EXPLORING");
   });
 });
+
+describe("createLogger sink", () => {
+  it("sink receives redacted, enriched run lines only", () => {
+    const runs = createRunLogRegistry();
+    runs.register("run_1", { tenantId: "t_1", stage: "EXPLORING", redact: maskValues(SECRET) });
+    const got: Record<string, unknown>[] = [];
+    const { logger, lines } = capture({ runs, sink: (r) => void got.push(r) });
+    logger.info({ a: 1 }, "no run");
+    logger.warn({ runId: "run_1", password: "p", note: `has ${SECRET}` }, "run line");
+    expect(lines).toHaveLength(2);
+    expect(got).toEqual([
+      {
+        level: "warn",
+        time: at.toISOString(),
+        component: "worker",
+        runId: "run_1",
+        tenantId: "t_1",
+        stage: "EXPLORING",
+        password: "[REDACTED]",
+        note: "has [REDACTED]",
+        msg: "run line",
+      },
+    ]);
+  });
+
+  it("a throwing sink does not stop stdout", () => {
+    const { logger, lines } = capture({
+      sink: () => {
+        throw new Error("sink broke");
+      },
+    });
+    logger.info({ runId: "run_1" }, "still written");
+    expect(lines.map((l) => JSON.parse(l).msg)).toEqual(["still written"]);
+  });
+});

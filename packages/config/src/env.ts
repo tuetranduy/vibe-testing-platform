@@ -173,6 +173,10 @@ const EnvSchema = z
     SCHEDULE_MIN_INTERVAL_MINUTES: intWithDefault(15, 1, 24 * 60),
     ARTIFACT_RETENTION_DAYS: intWithDefault(30),
     SECRET_ARTIFACT_RETENTION_DAYS: intWithDefault(7),
+    /** Admin run logs: how long run log lines and model-call prompts/responses are kept. */
+    RUN_LOG_RETENTION_DAYS: intWithDefault(14),
+    /** Admin run logs: lines kept per run per process; past it only warn and above. */
+    RUN_LOG_MAX_LINES: intWithDefault(20000),
     API_PORT: intWithDefault(3001, 1, 65535),
     /** The worker's Prometheus endpoint (`GET /metrics`); 0 disables it. */
     WORKER_METRICS_PORT: intWithDefault(9464, 0, 65535),

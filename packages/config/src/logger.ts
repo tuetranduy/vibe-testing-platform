@@ -65,6 +65,11 @@ export interface LoggerOptions {
   /** Receives each line (no trailing newline). Default: stdout. */
   write?: (line: string) => void;
   now?: () => Date;
+  /**
+   * Admin run logs (2026-11-25): also receives each line that names a run (`runId`), as written (enriched and
+   * redacted). Must not throw; if it does, the line is still written to stdout.
+   */
+  sink?: (record: Record<string, unknown>) => void;
 }
 
 /** How many `cause` links a logged error keeps. */
@@ -130,7 +135,15 @@ export function createLogger(opts: LoggerOptions, bindings: Record<string, unkno
         }
         let record = redactByKey({ component: opts.component, ...fields, msg }) as object;
         if (scope) record = scope.redact(record) as object;
-        write(stringify({ level, time: now().toISOString(), ...record }));
+        const line = { level, time: now().toISOString(), ...record } as Record<string, unknown>;
+        write(stringify(line));
+        if (opts.sink && typeof line.runId === "string") {
+          try {
+            opts.sink(line);
+          } catch {
+            // the stdout line is written; the run's stored log loses this one
+          }
+        }
       } catch (err) {
         write(
           JSON.stringify({
