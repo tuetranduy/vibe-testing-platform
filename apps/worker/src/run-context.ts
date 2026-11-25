@@ -73,6 +73,7 @@ export async function createRunContext(
     redis: deps.redis,
     redact,
     logger: deps.logger,
+    logEvents: { logger: deps.logger },
   });
 
   let lifecycle = run.lifecycle;
@@ -91,7 +92,7 @@ export async function createRunContext(
   const unwatch = await deps.cancelWatcher.watch(run.id, () => abort(new CancelledError()));
   let lastBeat: Promise<void> = Promise.resolve();
   const heartbeat = setInterval(() => {
-    lastBeat = runs.heartbeat(run.id).catch((err) => deps.logger.warn({ err, runId: run.id }, "heartbeat failed"));
+    lastBeat = runs.heartbeat(run.id).catch((err) => deps.logger.warn({ err, runId: run.id, source: "infra" }, "heartbeat failed"));
   }, deps.config.heartbeatMs);
 
   const ctx: StageContext = {
@@ -224,7 +225,7 @@ export async function createRunContext(
           try {
             await fn();
           } catch (err) {
-            deps.logger.warn({ err, runId: run.id }, "cleanup failed");
+            deps.logger.warn({ err, runId: run.id, source: "infra" }, "cleanup failed");
           }
         }
       } finally {

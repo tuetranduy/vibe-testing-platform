@@ -60,7 +60,9 @@ export function createDiscoveryDeps(
   const port = !admission
     ? undefined
     : config.BROWSER_USE_DISCOVERY_LAUNCHER
-      ? createBrowserUseDiscoveryClient(config.BROWSER_USE_DISCOVERY_LAUNCHER)
+      ? createBrowserUseDiscoveryClient(config.BROWSER_USE_DISCOVERY_LAUNCHER, {
+        onDiagnostic: (line) => deps.logger.info({ runId: line.runId, source: "browser_use", diagnostic: line }, typeof line.event === "string" ? line.event : "browser use"),
+      })
       : config.BROWSER_USE_DISCOVERY_SERVICE_URL && config.BROWSER_USE_DISCOVERY_SERVICE_TOKEN
         ? createDiscoveryServiceClient(config.BROWSER_USE_DISCOVERY_SERVICE_URL, config.BROWSER_USE_DISCOVERY_SERVICE_TOKEN, {
             onCleanupError: () => metrics?.discoveryCleanupErrors.inc(),

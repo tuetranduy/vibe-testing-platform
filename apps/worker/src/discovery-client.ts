@@ -37,7 +37,15 @@ export function discoverySignature(
 }
 
 /** The launcher owns the isolated container. Its stdin/stdout carry one request and one response. */
-export function createBrowserUseDiscoveryClient(launcher: string): AutonomousDiscoveryPort {
+export interface BrowserUseLauncherOptions {
+  /**
+   * Admin run logs: each JSON diagnostics line (≤ 512 chars) the launcher writes for this run. Its contract
+   * keeps page text, model output and agent code out of them.
+   */
+  onDiagnostic?: (line: Record<string, unknown>) => void;
+}
+
+export function createBrowserUseDiscoveryClient(launcher: string, options: BrowserUseLauncherOptions = {}): AutonomousDiscoveryPort {
   return {
     async discover(input, { signal, onProgress }) {
       signal.throwIfAborted();
@@ -54,12 +62,14 @@ export function createBrowserUseDiscoveryClient(launcher: string): AutonomousDis
           if (error) reject(new DiscoveryPortError("unavailable", "Browser Use discovery launcher failed"));
           else resolve(stdout);
         });
-        if (child.stderr && onProgress) {
+        if (child.stderr && (onProgress || options.onDiagnostic)) {
           createInterface({ input: child.stderr }).on("line", (line) => {
             if (line.length > 512 || signal.aborted) return;
             let value: Record<string, unknown>;
             try { value = JSON.parse(line); } catch { return; }
-            if (value?.event !== "discovery.progress" || value.runId !== request.runId) return;
+            if (!value || typeof value !== "object" || value.runId !== request.runId) return;
+            try { options.onDiagnostic?.(value); } catch { /* a log line is never the job's problem */ }
+            if (value.event !== "discovery.progress" || !onProgress) return;
             const progress = AgentStepsSchema.safeParse(value.agentSteps);
             if (progress.success && progress.data > 0) publishing = publishing.then(() => onProgress(progress.data)).catch(() => {});
           });

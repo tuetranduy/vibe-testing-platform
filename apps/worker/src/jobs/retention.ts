@@ -1,4 +1,4 @@
-import { ArtifactRepository, ExplorationCacheRepository, type Database } from "@platform/db";
+import { ArtifactRepository, ExplorationCacheRepository, LlmExchangeRepository, RunLogRepository, type Database } from "@platform/db";
 import type { ArtifactStorage } from "@platform/storage";
 import type { WorkerLogger } from "../deps";
 
@@ -91,4 +91,41 @@ export const EXPLORATION_CACHE_MAX_IDLE_DAYS = 30;
 export async function pruneExplorationCache(deps: Pick<RetentionDeps, "db" | "now">): Promise<number> {
   const now = (deps.now ?? (() => new Date()))();
   return new ExplorationCacheRepository(deps.db).deleteUnusedSince(new Date(now.getTime() - EXPLORATION_CACHE_MAX_IDLE_DAYS * 86_400_000));
+}
+
+export interface PruneRunLogsDeps {
+  db: Database;
+  logger: WorkerLogger;
+  /** RUN_LOG_RETENTION_DAYS (14). */
+  retentionDays: number;
+  now?: () => Date;
+  /** Rows per delete statement; default 5000. */
+  batchSize?: number;
+  /** Real-time limit for the pass; default 1 hour. What is left waits for the next pass. */
+  passTimeoutMs?: number;
+}
+
+/**
+ * Daily (admin run logs, 2026-11-25): deletes run log lines and model-call prompts/responses older than
+ * RUN_LOG_RETENTION_DAYS, in batches. The `llm_calls` rows (usage numbers) are kept.
+ */
+export async function pruneRunLogs(deps: PruneRunLogsDeps): Promise<{ logLinesDeleted: number; exchangesDeleted: number }> {
+  const now = (deps.now ?? (() => new Date()))();
+  const cutoff = new Date(now.getTime() - deps.retentionDays * 86_400_000);
+  const limit = deps.batchSize ?? 5000;
+  const deadline = Date.now() + (deps.passTimeoutMs ?? PASS_TIMEOUT_MS);
+  const drain = async (step: (cutoff: Date, limit: number) => Promise<number>) => {
+    let total = 0;
+    while (Date.now() < deadline) {
+      const n = await step(cutoff, limit);
+      total += n;
+      if (n < limit) break;
+    }
+    return total;
+  };
+  const logs = new RunLogRepository(deps.db);
+  const exchanges = new LlmExchangeRepository(deps.db);
+  const logLinesDeleted = await drain((c, l) => logs.deleteOlderThan(c, l));
+  const exchangesDeleted = await drain((c, l) => exchanges.deleteOlderThan(c, l));
+  return { logLinesDeleted, exchangesDeleted };
 }

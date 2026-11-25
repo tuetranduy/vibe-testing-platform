@@ -1,4 +1,4 @@
-import { createLogger, createRunLogRegistry, loadEnvOrExit, redisTlsOptions, resolveEnvLlmChoice } from "@platform/config";
+import { loadEnvOrExit, redisTlsOptions, resolveEnvLlmChoice } from "@platform/config";
 import { createDb, ensureTenant, runMigrations } from "@platform/db";
 import { DEFAULT_REAPER_CONFIG, createRunQueue } from "@platform/event-bus";
 import type { LlmTransport } from "@platform/llm";
@@ -6,11 +6,11 @@ import { createArtifactStorage } from "@platform/storage";
 import { writeFileSync } from "node:fs";
 import { Redis } from "ioredis";
 import { CancelWatcher } from "./cancel-watcher";
-import type { WorkerLogger } from "./deps";
 import { createEngines, rerunWorkspaceConfig, type EngineDeps } from "./engine";
 import { stagehandExtension } from "./exploration";
 import { createWorkerMetrics, startMetricsServer } from "./metrics";
 import { createRunLlmFactory } from "./run-llm";
+import { createWorkerLogging } from "./run-logging";
 import { preflightBrowserSandbox, preflightRunner } from "./sandbox/preflight";
 import { startWorkers } from "./worker";
 
@@ -26,10 +26,11 @@ export interface BootOptions {
 export async function bootWorker(opts: BootOptions = {}): Promise<void> {
   const env = loadEnvOrExit();
 
-  const runLogs = createRunLogRegistry();
-  const logger: WorkerLogger = createLogger({ component: "worker", level: env.LOG_LEVEL, runs: runLogs });
-
   const metrics = createWorkerMetrics();
+  // Stdout JSON lines, and every run's lines in run_logs too (admin run logs) once the database is up.
+  const logging = createWorkerLogging({ level: env.LOG_LEVEL, maxLinesPerRun: env.RUN_LOG_MAX_LINES, metrics });
+  const { logger, runLogs } = logging;
+
   if (env.WORKER_METRICS_PORT > 0) {
     const server = await startMetricsServer(metrics.registry, env.WORKER_METRICS_PORT);
     logger.info({ port: server.port }, "metrics listening");
@@ -37,6 +38,7 @@ export async function bootWorker(opts: BootOptions = {}): Promise<void> {
 
   const handle = createDb(env.DATABASE_URL);
   if (process.env.RUN_MIGRATIONS_ON_START !== "false") await runMigrations(handle.db);
+  logging.attachDb(handle.db);
   await ensureTenant(handle.db, env.DEFAULT_TENANT_ID);
 
   const tls = redisTlsOptions(env);
@@ -93,6 +95,7 @@ export async function bootWorker(opts: BootOptions = {}): Promise<void> {
         heartbeatMs: 10_000,
         ...DEFAULT_REAPER_CONFIG,
         confirmationTtlHours: env.CONFIRMATION_TTL_HOURS,
+        runLogRetentionDays: env.RUN_LOG_RETENTION_DAYS,
         timeScale: 1,
       },
       db: handle.db,
@@ -129,6 +132,7 @@ export async function bootWorker(opts: BootOptions = {}): Promise<void> {
     cancelWatcher.close();
     publisher.disconnect();
     connection.disconnect();
+    await logging.sink.close();
     await handle.close();
     process.exit(0);
   };

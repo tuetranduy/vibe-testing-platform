@@ -93,7 +93,7 @@ export function createRunTestDeps(input: RerunDepsInput): RunTestStageDeps {
           throw err;
         }
       }),
-    spawn: countedSpawn(overrides.spawn ?? (config.runner ? createRemoteRunnerSpawn(config.runner) : createRunnerSpawn({ logger })), input.metrics),
+    spawn: loggedSpawn(countedSpawn(overrides.spawn ?? (config.runner ? createRemoteRunnerSpawn(config.runner) : createRunnerSpawn({ logger })), input.metrics), logger),
     workspace: overrides.workspace ?? { baseDir: config.workspaceDir, nodeModulesDir: config.nodeModulesDir },
     evidence: overrides.evidence ?? ((ctx) => createRerunEvidenceStore({ db, storage, config, metrics: input.metrics }, ctx)),
     // Infrastructure failures (proxy, workspace, spawn, browser launch) reach the worker log with their cause.
@@ -115,4 +115,20 @@ function countedSpawn(spawn: RunTestStageDeps["spawn"], metrics: WorkerMetrics |
     }
   };
   return Object.assign(counted, spawn);
+}
+
+/** Lines of the runner's stderr tail kept in the run log. */
+const RUNNER_TAIL_LINES = 200;
+
+/** Admin run logs: the Playwright CLI's stderr tail, one `runner` line each, under the rerun's run. */
+export function loggedSpawn(spawn: RunTestStageDeps["spawn"], logger: Pick<WorkerLogger, "info">): RunTestStageDeps["spawn"] {
+  const logged: RunTestStageDeps["spawn"] = async (runnerInput) => {
+    const result = await spawn(runnerInput);
+    if (runnerInput.runId && result.stderrTail) {
+      const lines = result.stderrTail.split("\n").map((l) => l.trim()).filter((l) => l.length > 0).slice(-RUNNER_TAIL_LINES);
+      for (const line of lines) logger.info({ runId: runnerInput.runId, source: "runner" }, line);
+    }
+    return result;
+  };
+  return Object.assign(logged, spawn);
 }

@@ -63,7 +63,7 @@ export async function failBeforeContext(deps: WorkerDeps, run: TestRun, err: unk
     deps.metrics?.testRuns.inc({ lifecycle: "ERRORED", verdict: NO_VERDICT });
     await recordSelectedDiscoveryOutcome(deps, run, "ERRORED", null, (id) => new SuggestionRepository(deps.db).get(id));
     await new SecretRepository(deps.db).purge(run.id);
-    await createRunEventPublisher({ events: new EventRepository(deps.db), redis: deps.redis, redact: redactByKey }).publish({
+    await createRunEventPublisher({ events: new EventRepository(deps.db), redis: deps.redis, redact: redactByKey, logEvents: { logger: deps.logger } }).publish({
       runId: run.id,
       stage: "ERRORED",
       type: "run.errored",

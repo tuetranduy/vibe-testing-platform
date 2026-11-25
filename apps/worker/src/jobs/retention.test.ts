@@ -1,14 +1,14 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ArtifactRepository, ExplorationCacheRepository } from "@platform/db";
+import { ArtifactRepository, ExplorationCacheRepository, LlmCallRepository, LlmExchangeRepository, RunLogRepository } from "@platform/db";
 import { TEST_TENANT_ID } from "@platform/db/testing";
 import { createLocalStorage, resolveLocalObjectPath, type ArtifactStorage } from "@platform/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { storeArtifact } from "../artifacts";
 import { silentLogger } from "../deps";
 import { createHarness, seedRun, type WorkerHarness } from "../test-support";
-import { pruneExplorationCache, retentionJob } from "./retention";
+import { pruneExplorationCache, pruneRunLogs, retentionJob } from "./retention";
 
 let h: WorkerHarness;
 let root: string;
@@ -147,5 +147,42 @@ describe("pruneExplorationCache (V1.1 F8)", () => {
     expect(await pruneExplorationCache({ db: h.tdb.db })).toBe(1);
     expect(await cache.get(TEST_TENANT_ID, "prune-old")).toBeNull();
     expect(await cache.get(TEST_TENANT_ID, "prune-new")).not.toBeNull();
+  });
+});
+
+describe("pruneRunLogs (admin run logs)", () => {
+  it("deletes log lines and exchanges older than RUN_LOG_RETENTION_DAYS and keeps newer ones", async () => {
+    const run = await seedRun(h);
+    const now = new Date();
+    const daysAgo = (d: number) => new Date(now.getTime() - d * DAY);
+    const logs = new RunLogRepository(h.tdb.db);
+    const line = { runId: run.id, source: "worker", level: "info", stage: null, component: "worker", fields: {} } as const;
+    await logs.appendMany([
+      { ...line, time: daysAgo(15), message: "old" },
+      { ...line, time: daysAgo(13), message: "new" },
+    ]);
+    const calls = new LlmCallRepository(h.tdb.db);
+    const exchanges = new LlmExchangeRepository(h.tdb.db);
+    const call = (await calls.create({
+      runId: run.id, stage: "PLANNING", provider: "anthropic", model: "m",
+      inputTokens: 1, outputTokens: 1, estimatedCostUsd: 0, latencyMs: 1, status: "SUCCESS",
+    }));
+    const recent = (await calls.create({
+      runId: run.id, stage: "PLANNING", provider: "anthropic", model: "m",
+      inputTokens: 1, outputTokens: 1, estimatedCostUsd: 0, latencyMs: 1, status: "SUCCESS",
+    }));
+    const ex = { system: "s", messages: [], response: null, error: null, truncated: false };
+    await exchanges.put(call.id, run.id, ex);
+    await exchanges.put(recent.id, run.id, ex);
+    await h.tdb.pool.query("UPDATE llm_call_exchanges SET created_at = now() - interval '15 days' WHERE llm_call_id = $1", [call.id]);
+
+    expect(await pruneRunLogs({ db: h.tdb.db, logger: silentLogger, retentionDays: 14, batchSize: 1 })).toEqual({
+      logLinesDeleted: 1,
+      exchangesDeleted: 1,
+    });
+    expect((await logs.list(TEST_TENANT_ID, run.id, { limit: 10 })).lines.map((l) => l.message)).toEqual(["new"]);
+    expect(await exchanges.get(TEST_TENANT_ID, call.id)).toBeNull();
+    expect(await exchanges.get(TEST_TENANT_ID, recent.id)).not.toBeNull();
+    expect(await calls.listByRun(run.id)).toHaveLength(2);
   });
 });

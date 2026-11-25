@@ -31,6 +31,12 @@ export function createWorkerMetrics(registry = new Registry()) {
       buckets: RUN_DURATION_BUCKETS,
       registers,
     }),
+    runLogDropped: new Counter({
+      name: "run_log_dropped_total",
+      help: "Run log lines not stored in run_logs (buffer full, per-run cap, insert failed); they are still on stdout",
+      labelNames: ["reason"],
+      registers,
+    }),
     activeRuns: new Gauge({ name: "active_worker_runs", help: "Run jobs (analyze / execute) this worker is processing", registers }),
     discoveryJobs: new Counter({
       name: "discovery_jobs_total",

@@ -222,9 +222,13 @@ export function createRemoteRunnerSpawn(opts: RunnerClientOptions): SpawnRunner 
       if (input.signal.aborted) return killed;
       throw err;
     }
-    const out = JSON.parse(text) as { exitCode?: number | null; signal?: NodeJS.Signals | null; error?: string };
+    const out = JSON.parse(text) as { exitCode?: number | null; signal?: NodeJS.Signals | null; error?: string; stderrTail?: unknown };
     if (out.error) throw new Error(`the runner could not start Playwright (${out.error})`);
-    return { exitCode: out.exitCode ?? null, signal: out.signal ?? null };
+    return {
+      exitCode: out.exitCode ?? null,
+      signal: out.signal ?? null,
+      ...(typeof out.stderrTail === "string" ? { stderrTail: out.stderrTail } : {}),
+    };
   };
 }
 

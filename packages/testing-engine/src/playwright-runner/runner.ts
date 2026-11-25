@@ -39,6 +39,8 @@ import { prepareWorkspace, type Workspace, type WorkspaceConfig } from "./worksp
  */
 
 export interface RunnerProcessInput {
+  /** The run this rerun belongs to (the worker logs the runner's output under it). */
+  runId?: string;
   /** The workspace; the child's working directory. */
   cwd: string;
   /** The Playwright CLI entry script, run with the worker's Node. */
@@ -55,6 +57,8 @@ export interface RunnerProcessInput {
 export interface RunnerProcessResult {
   exitCode: number | null;
   signal: string | null;
+  /** The end of the Playwright CLI's stderr (bounded), when the spawn port kept it. */
+  stderrTail?: string;
 }
 
 /** Spawn port (Ruling R32), implemented by the worker. Rejects only when the child cannot be started. */
@@ -235,7 +239,7 @@ export async function runGeneratedTest(input: RunGeneratedTestInput, deps: RunGe
   const signal = AbortSignal.any([input.signal, budget]);
   let exit: RunnerProcessResult;
   try {
-    exit = await deps.spawn({ cwd: workspace.dir, cliPath: workspace.cliPath, args: ["test", "--config", CONFIG_FILE], env, tmpDir: workspace.tmpDir, signal });
+    exit = await deps.spawn({ runId: input.runId, cwd: workspace.dir, cliPath: workspace.cliPath, args: ["test", "--config", CONFIG_FILE], env, tmpDir: workspace.tmpDir, signal });
   } catch (err) {
     if (signal.aborted) return errored(input.signal.aborted ? REASON.aborted : REASON.budget);
     logFailure("Playwright runner could not be started", err);

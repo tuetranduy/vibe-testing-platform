@@ -95,6 +95,7 @@ export async function reapRuns(deps: ReaperDeps): Promise<ReapResult> {
     redis: deps.redis,
     redact: redactByKey,
     logger: deps.logger,
+    logEvents: { logger: deps.logger, source: "infra" },
   });
   const result: ReapResult = { workerLost: [], timedOut: [], neverStarted: [], confirmationExpired: [], selectionExpired: [], secretsPurged: [], suiteRunsSettled: [] };
 

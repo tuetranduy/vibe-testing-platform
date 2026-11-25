@@ -117,7 +117,7 @@ export function createRunnerSpawn(opts: RunnerSpawnOptions): SpawnRunner {
       if (first.exitCode !== 0 && first.exitCode !== 1) {
         opts.logger.warn({ exitCode: first.exitCode, signal: first.signal, stderr: stderrTail }, "Playwright runner exited abnormally");
       }
-      return first;
+      return stderrTail ? { ...first, stderrTail } : first;
     } finally {
       input.signal.removeEventListener("abort", onAbort);
       child.stderr?.destroy();

@@ -23,6 +23,8 @@ export interface WorkerConfig {
   /** A run whose heartbeat is older than this is considered lost (WORKER_LOST). */
   staleAfterMs: number;
   confirmationTtlHours: number;
+  /** RUN_LOG_RETENTION_DAYS: run log lines and model-call prompts/responses are deleted after this (default 14). */
+  runLogRetentionDays?: number;
   /** A QUEUED run older than this whose analyze job isn't pending was never picked up. */
   queuedStaleAfterMs: number;
   /** Grace after `deadlineAt` before the reaper times out a run whose worker didn't. */

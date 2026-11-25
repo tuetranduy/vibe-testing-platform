@@ -121,3 +121,49 @@ describe("createRunEventPublisher", () => {
     expect(runEventsChannel("run_1")).toBe("run-events:run_1");
   });
 });
+
+describe("createRunEventPublisher logs each event (admin run logs)", () => {
+  const logger = () => {
+    const lines: { level: string; obj: Record<string, unknown>; msg: string | undefined }[] = [];
+    const at = (level: string) => (obj: object, msg?: string) => void lines.push({ level, obj: obj as Record<string, unknown>, msg });
+    return { lines, log: { info: at("info"), warn: at("warn"), error: at("error") } };
+  };
+
+  it("writes one run line per persisted event, infra events tagged infra", async () => {
+    const run = await newRun();
+    const { lines, log } = logger();
+    const pub = createRunEventPublisher({ events: new EventRepository(tdb.db), redis, redact: (v) => v, logEvents: { logger: log } });
+    await pub.publish({ runId: run.id, stage: "QUEUED", type: "stage.started", message: "Queued", payload: { stage: "QUEUED" } });
+    await pub.publish({
+      runId: run.id,
+      stage: "EXPLORING",
+      type: "egress.blocked",
+      message: "Blocked a request",
+      payload: { host: "evil.test", reason: "PRIVATE_ADDRESS" },
+    } as never);
+    await pub.publish({ runId: run.id, stage: "SURVEYING", type: "discovery.started", message: "Browser Use started", payload: { engine: "browser_use" } } as never);
+    expect(lines.map((l) => [l.level, l.obj.source, l.obj.event, l.msg])).toEqual([
+      ["info", undefined, "stage.started", "Queued"],
+      ["warn", "infra", "egress.blocked", "Blocked a request"],
+      ["info", "browser_use", "discovery.started", "Browser Use started"],
+    ]);
+    expect(lines[0]!.obj).toMatchObject({ runId: run.id, stage: "QUEUED", sequence: 1, payload: { stage: "QUEUED" } });
+  });
+
+  it("a publisher marked infra tags every event infra (the reaper)", async () => {
+    const run = await newRun();
+    const { lines, log } = logger();
+    const pub = createRunEventPublisher({ events: new EventRepository(tdb.db), redis, redact: (v) => v, logEvents: { logger: log, source: "infra" } });
+    await pub.publish({ runId: run.id, stage: "ERRORED", type: "run.errored", message: "Run failed: WORKER_LOST", payload: { category: "WORKER_LOST", message: "lost" } } as never);
+    expect(lines.map((l) => [l.level, l.obj.source])).toEqual([["error", "infra"]]);
+  });
+
+  it("a throwing logger never fails the publish", async () => {
+    const run = await newRun();
+    const boom = () => {
+      throw new Error("log down");
+    };
+    const pub = createRunEventPublisher({ events: new EventRepository(tdb.db), redis, redact: (v) => v, logEvents: { logger: { info: boom, warn: boom, error: boom } } });
+    await expect(pub.publish({ runId: run.id, stage: "QUEUED", type: "stage.started", message: "Queued", payload: { stage: "QUEUED" } })).resolves.toMatchObject({ sequence: 1 });
+  });
+});

@@ -147,3 +147,25 @@ it("backs off after broker errors while treating backpressure as an ordinary fal
   await expect(remote.discover(input, context)).rejects.toBeInstanceOf(DiscoveryPortError);
   expect(fetch).toHaveBeenCalledTimes(5);
 });
+
+describe("Browser Use launcher diagnostics (admin run logs)", () => {
+  it("forwards each valid diagnostics line of this run, and nothing else", async () => {
+    const lines = [
+      { event: "discovery.progress", runId: input.runId, agentSteps: 1 },
+      { event: "container.exited", runId: input.runId, exitCode: 0, oom: false },
+      { event: "container.exited", runId: "run_other" },
+      "not json",
+      { event: "huge", runId: input.runId, pad: "x".repeat(600) },
+    ].map((l) => (typeof l === "string" ? l : JSON.stringify(l)));
+    const file = path.join(dir, "launcher");
+    writeFileSync(
+      file,
+      `#!${process.execPath}\nprocess.stdin.resume();process.stdin.on("end",()=>{for (const l of ${JSON.stringify(lines)}) process.stderr.write(l+"\\n");process.stdout.write(${JSON.stringify(JSON.stringify(response))});});\n`,
+      { mode: 0o700 },
+    );
+    const got: Record<string, unknown>[] = [];
+    const discover = createBrowserUseDiscoveryClient(file, { onDiagnostic: (line) => void got.push(line) });
+    await expect(discover.discover(input, { signal: AbortSignal.timeout(5000) })).resolves.toEqual(response);
+    expect(got.map((l) => l.event)).toEqual(["discovery.progress", "container.exited"]);
+  });
+});

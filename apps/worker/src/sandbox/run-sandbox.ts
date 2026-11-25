@@ -130,7 +130,7 @@ export async function openRunSandbox(ctx: StageContext, deps: RunSandboxDeps): P
       },
       // Fail closed: an unguarded browser is torn down.
       onError: (err) => {
-        deps.logger.warn({ err, runId: ctx.runId }, "navigation guard lost; closing the sandbox");
+        deps.logger.warn({ err, runId: ctx.runId, source: "infra" }, "navigation guard lost; closing the sandbox");
         void close();
       },
     });

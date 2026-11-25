@@ -16,7 +16,7 @@ import { analyzeRunJob } from "./jobs/analyze-run";
 import { executeRunJob } from "./jobs/execute-run";
 import { rerunRunJob } from "./jobs/rerun-run";
 import { reviseCriterionJob } from "./jobs/revise-criterion";
-import { pruneExplorationCache, retentionJob } from "./jobs/retention";
+import { pruneExplorationCache, pruneRunLogs, retentionJob } from "./jobs/retention";
 
 export interface RunningWorkers {
   close(): Promise<void>;
@@ -74,13 +74,23 @@ export async function startWorkers(
           return 0;
         });
         if (pruned > 0) deps.logger.info({ pruned }, "unused exploration cache entries deleted");
+        const logs = await pruneRunLogs({
+          db: deps.db,
+          logger: deps.logger,
+          retentionDays: deps.config.runLogRetentionDays ?? 14,
+          ...(deps.now ? { now: deps.now } : {}),
+        }).catch((err: unknown) => {
+          deps.logger.warn({ err }, "run logs could not be pruned; retrying next pass");
+          return { logLinesDeleted: 0, exchangesDeleted: 0 };
+        });
+        if (logs.logLinesDeleted > 0 || logs.exchangesDeleted > 0) deps.logger.info(logs, "expired run logs deleted");
       },
       { connection: opts.connection, concurrency: 1, maxStalledCount: 0 },
     );
   }
 
   for (const w of [runs, revisions, ...(retention ? [retention] : [])]) {
-    w.on("failed", (job, err) => deps.logger.error({ job: job?.name, runId: job?.data?.runId, err }, "job failed"));
+    w.on("failed", (job, err) => deps.logger.error({ job: job?.name, runId: job?.data?.runId, source: "infra", err }, "job failed"));
     w.on("error", (err) => deps.logger.error({ err }, "worker error"));
   }
 
