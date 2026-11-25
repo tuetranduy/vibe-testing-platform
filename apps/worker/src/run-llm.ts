@@ -1,7 +1,7 @@
 import { providerOfModel, resolveEnvLlmChoice, type Env } from "@platform/config";
 import { ModelProviderError, type DiscoveryModel, type LlmChoice, type LlmKeyProvider, type StoredTestRunRequest } from "@platform/contracts";
-import { LlmCallRepository, ProviderKeyRepository, type Database, type TestRun } from "@platform/db";
-import { LlmClient, PROVIDER_LABELS, createTransport, type LlmTransport } from "@platform/llm";
+import { LlmCallRepository, LlmExchangeRepository, ProviderKeyRepository, type Database, type TestRun } from "@platform/db";
+import { LlmClient, PROVIDER_LABELS, createTransport, type LlmCallRecord, type LlmTransport } from "@platform/llm";
 import { decryptProviderKey } from "@platform/security";
 import type { WorkerLogger } from "./deps";
 import { recordLlmCall, type WorkerMetrics } from "./metrics";
@@ -55,6 +55,7 @@ export function createRunLlmFactory(deps: RunLlmFactoryDeps): RunLlmFactory {
   const environment = resolveEnvLlmChoice(deps.env);
   const keys = new ProviderKeyRepository(deps.db);
   const calls = new LlmCallRepository(deps.db);
+  const exchanges = new LlmExchangeRepository(deps.db);
 
   async function keyFor(tenantId: string, provider: LlmKeyProvider): Promise<string> {
     const label = PROVIDER_LABELS[provider];
@@ -108,11 +109,31 @@ export function createRunLlmFactory(deps: RunLlmFactoryDeps): RunLlmFactory {
         logger: deps.logger,
         recordCall: async (call) => {
           if (deps.metrics) recordLlmCall(deps.metrics, call);
-          await calls.create(call);
+          const { exchange, ...row } = call;
+          const created = await calls.create(row);
+          try {
+            await exchanges.put(created.id, call.runId, boundedExchange(exchange));
+          } catch (err) {
+            deps.logger.warn({ err, runId: call.runId }, "failed to record LLM exchange");
+          }
         },
         onRecordError: (err, call) => deps.logger.warn({ err, runId: call.runId }, "failed to record LLM call"),
       });
       return { choice, llm };
     },
   };
+}
+
+/** An exchange's JSON stays under this; past it, only the system prompt and the last two messages are kept. */
+const MAX_EXCHANGE_CHARS = 4_194_304;
+
+/** The stored exchange (admin run logs): the record as sent, bounded. */
+export function boundedExchange(exchange: LlmCallRecord["exchange"]) {
+  const whole = { ...exchange, truncated: false };
+  if (JSON.stringify(whole).length <= MAX_EXCHANGE_CHARS) return whole;
+  const keep = 2;
+  const messages = exchange.messages.map((m, i) =>
+    i < exchange.messages.length - keep ? { role: "user" as const, content: "[omitted]" } : m,
+  );
+  return { ...exchange, messages, truncated: true };
 }

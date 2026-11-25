@@ -97,6 +97,13 @@ describe("LlmClient.generateStructured", () => {
         estimatedCostUsd: 0.007,
         latencyMs: 25,
         status: "SUCCESS",
+        purpose: null,
+        exchange: {
+          system: "You extract answers.",
+          messages: [{ role: "user", content: "What is the answer?" }],
+          response: JSON.stringify({ answer: "42", count: 2 }),
+          error: null,
+        },
       },
     ]);
   });
@@ -510,5 +517,69 @@ describe("a fallback model on provider errors (2026-11-19)", () => {
     transport.enqueue({ error: new LlmTransportError("no credit", { status: 402, retryable: false }) });
     fallback.enqueue({ error: new LlmTransportError("bad key", { status: 401, retryable: false }) });
     await expect(client.generateStructured({ ...base(), schema: Answer })).rejects.toBeInstanceOf(ModelProviderError);
+  });
+});
+
+describe("LlmClient call records keep the exchange (admin run logs)", () => {
+  it("records the redacted request and the response text", async () => {
+    const { client, transport, calls } = setup();
+    transport.enqueue({ json: { answer: "42", count: 2 } });
+    await client.generateStructured({
+      ...base(),
+      system: "Never say s3cret.",
+      messages: [{ role: "user", content: "The code is s3cret" }],
+      redact: maskValues("s3cret"),
+      schema: Answer,
+    });
+    expect(calls[0]!.exchange).toEqual({
+      system: "Never say [REDACTED].",
+      messages: [{ role: "user", content: "The code is [REDACTED]" }],
+      response: JSON.stringify({ answer: "42", count: 2 }),
+      error: null,
+    });
+  });
+
+  it("a correction round records its own messages", async () => {
+    const { client, transport, calls } = setup();
+    transport.enqueue({ json: { answer: "" } }, { json: { answer: "ok", count: 1 } });
+    await client.generateStructured({ ...base(), schema: Answer });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.exchange.messages).toHaveLength(1);
+    const second = calls[1]!.exchange.messages;
+    expect(second).toHaveLength(3);
+    expect(second[1]).toMatchObject({ role: "assistant" });
+    expect(String(second[2]!.content)).toContain("answer");
+  });
+
+  it("a provider error records the error and no response", async () => {
+    const { client, transport, calls } = setup();
+    transport.enqueue({ error: new LlmTransportError("bad request: max_tokens", { status: 400, retryable: false }) });
+    await expect(client.generateStructured({ ...base(), schema: Answer })).rejects.toBeInstanceOf(ModelProviderError);
+    expect(calls[0]).toMatchObject({ status: "PROVIDER_ERROR" });
+    expect(calls[0]!.exchange).toMatchObject({ response: null, error: "bad request: max_tokens" });
+    expect(calls[0]!.exchange.system).toBe("You extract answers.");
+  });
+
+  it("purpose is the schemaName", async () => {
+    const { client, transport, calls } = setup();
+    transport.enqueue({ json: { answer: "a", count: 1 } }, { json: { answer: "b", count: 1 } });
+    await client.generateStructured({ ...base(), schema: Answer, schemaName: "Observation" });
+    await client.generateStructured({ ...base(), schema: Answer });
+    expect(calls.map((c) => c.purpose)).toEqual(["Observation", null]);
+  });
+
+  it("image parts keep their type and size, not their bytes", async () => {
+    const { client, transport, calls } = setup();
+    transport.enqueue({ json: { answer: "a", count: 1 } });
+    const data = Buffer.from("x".repeat(3000)).toString("base64");
+    await client.generateStructured({
+      ...base(),
+      messages: [{ role: "user", content: [{ type: "text", text: "look" }, { type: "image", data, mimeType: "image/png" }] }],
+      schema: Answer,
+    });
+    expect(calls[0]!.exchange.messages[0]!.content).toEqual([
+      { type: "text", text: "look" },
+      { type: "image", mimeType: "image/png", data: `[image omitted: ${data.length} base64 chars]` },
+    ]);
   });
 });

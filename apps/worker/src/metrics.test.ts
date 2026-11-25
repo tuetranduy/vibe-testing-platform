@@ -1,3 +1,4 @@
+import type { LlmMessage } from "@platform/llm";
 import { RunRepository, SecretRepository } from "@platform/db";
 import { TEST_TENANT_ID } from "@platform/db/testing";
 import { encryptSecret } from "@platform/security";
@@ -43,6 +44,8 @@ describe("worker metrics", () => {
       estimatedCostUsd: 0.0081,
       latencyMs: 900,
       status: "SUCCESS",
+      purpose: null,
+      exchange: { system: "", messages: [] as LlmMessage[], response: null, error: null },
     } as const;
     recordLlmCall(m, call);
     recordLlmCall(m, { ...call, status: "PROVIDER_ERROR", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 });

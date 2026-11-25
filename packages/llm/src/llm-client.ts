@@ -10,7 +10,7 @@ import { z, type ZodType } from "zod";
 import { estimateCostUsd, priceFor } from "./pricing";
 import { DEFAULT_RETRY, backoffMs, sleep as defaultSleep, type RetryPolicy } from "./retry";
 import { LlmTransportError, type LlmTransport, type LlmTransportResponse } from "./transport";
-import type { JsonSchema, LlmCallRecord, LlmCallSink, LlmCallStatus, LlmMessage, LlmUsage } from "./types";
+import type { JsonSchema, LlmCallRecord, LlmCallSink, LlmCallStatus, LlmExchangeRecord, LlmMessage, LlmUsage } from "./types";
 
 export interface LlmClientOptions {
   transport: LlmTransport;
@@ -163,7 +163,7 @@ export class LlmClient {
     const usage: LlmUsage = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
     let messages = input.messages;
     for (let round = 0; ; round++) {
-      const { response, latencyMs, answeredAt } = await this.request(input, messages, jsonSchema);
+      const { response, latencyMs, answeredAt, sent } = await this.request(input, messages, jsonSchema);
       // Priced and recorded by the requested model (providers may echo a resolved snapshot id), or by the
       // model that served it after a refusal fallback, at the price in force when it answered.
       const servedBy = response.fallbackModel ?? this.active.model;
@@ -181,6 +181,7 @@ export class LlmClient {
         estimatedCostUsd: cost,
         latencyMs,
         status: result.ok ? "SUCCESS" : "INVALID_OUTPUT",
+        exchange: { ...sent, response: response.text, error: null },
       });
       if (result.ok) return { data: result.data, usage };
       if (round >= 1) {
@@ -201,9 +202,10 @@ export class LlmClient {
     input: LlmCallInput,
     messages: LlmMessage[],
     jsonSchema: JsonSchema,
-  ): Promise<{ response: LlmTransportResponse; latencyMs: number; answeredAt: number }> {
+  ): Promise<{ response: LlmTransportResponse; latencyMs: number; answeredAt: number; sent: SentRequest }> {
     const { signal } = input;
     const redacted = input.redact({ system: input.system, messages }) as { system: string; messages: LlmMessage[] };
+    const sent: SentRequest = { system: redacted.system, messages: withoutImageBytes(redacted.messages) };
     for (let attempt = 0; ; attempt++) {
       if (signal.aborted) throw abortError(signal);
       const started = this.now();
@@ -226,14 +228,14 @@ export class LlmClient {
         const answeredAt = this.now();
         // Served by the fallback: priced and recorded under its model.
         const served = this.active.model === this.opts.model ? response : { ...response, fallbackModel: response.fallbackModel ?? this.active.model };
-        return { response: served, latencyMs: answeredAt - started, answeredAt };
+        return { response: served, latencyMs: answeredAt - started, answeredAt, sent };
       } catch (err) {
         const latencyMs = this.now() - started;
         if (signal.aborted) {
-          await this.record(input, failedCall(model, latencyMs, "CANCELLED"));
+          await this.record(input, failedCall(model, latencyMs, "CANCELLED", sent, err));
           throw abortError(signal);
         }
-        await this.record(input, failedCall(model, latencyMs, "PROVIDER_ERROR"));
+        await this.record(input, failedCall(model, latencyMs, "PROVIDER_ERROR", sent, err));
         const transportErr = err instanceof LlmTransportError ? err : null;
         if (!transportErr?.retryable || attempt >= this.retry.maxRetries) {
           if (this.switchToFallback(transportErr)) {
@@ -279,10 +281,16 @@ export class LlmClient {
 
   private async record(
     input: LlmCallInput,
-    call: Omit<LlmCallRecord, "runId" | "stage" | "provider">,
+    call: Omit<LlmCallRecord, "runId" | "stage" | "provider" | "purpose">,
   ): Promise<void> {
     if (!this.opts.recordCall) return;
-    const record: LlmCallRecord = { runId: input.runId, stage: input.stage, provider: this.provider, ...call };
+    const record: LlmCallRecord = {
+      runId: input.runId,
+      stage: input.stage,
+      provider: this.provider,
+      purpose: input.schemaName ?? null,
+      ...call,
+    };
     try {
       await this.opts.recordCall(record);
     } catch (err) {
@@ -321,8 +329,38 @@ function correctionPrompt(issues: string[]): string {
   );
 }
 
-function failedCall(model: string, latencyMs: number, status: LlmCallStatus): Omit<LlmCallRecord, "runId" | "stage" | "provider"> {
-  return { model, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, latencyMs, status };
+type SentRequest = Pick<LlmExchangeRecord, "system" | "messages">;
+
+function failedCall(
+  model: string,
+  latencyMs: number,
+  status: LlmCallStatus,
+  sent: SentRequest,
+  err: unknown,
+): Omit<LlmCallRecord, "runId" | "stage" | "provider" | "purpose"> {
+  return {
+    model,
+    inputTokens: 0,
+    outputTokens: 0,
+    estimatedCostUsd: 0,
+    latencyMs,
+    status,
+    exchange: { ...sent, response: null, error: messageOf(err) },
+  };
+}
+
+/** The exchange keeps an image part's type and size, not its bytes (a screenshot would dwarf the prompt). */
+function withoutImageBytes(messages: LlmMessage[]): LlmMessage[] {
+  return messages.map((m) =>
+    typeof m.content === "string"
+      ? m
+      : {
+          ...m,
+          content: m.content.map((part) =>
+            part.type === "image" ? { ...part, data: `[image omitted: ${part.data.length} base64 chars]` } : part,
+          ),
+        },
+  );
 }
 
 /** Keep typed abort reasons (CancelledError, DeadlineExceededError); anything else is a cancellation. */

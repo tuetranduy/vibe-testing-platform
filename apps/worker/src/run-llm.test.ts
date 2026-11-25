@@ -1,5 +1,5 @@
 import { ModelProviderError, type LlmChoice, type LlmKeyProvider } from "@platform/contracts";
-import { LlmCallRepository, ProviderKeyRepository, RunRepository, schema } from "@platform/db";
+import { LlmCallRepository, LlmExchangeRepository, ProviderKeyRepository, RunRepository, schema } from "@platform/db";
 import { TEST_TENANT_ID } from "@platform/db/testing";
 import { FakeTransport, type LlmClient } from "@platform/llm";
 import { encryptProviderKey } from "@platform/security";
@@ -207,5 +207,67 @@ describe("a fallback model (LLM_FALLBACK_MODEL, 2026-11-19)", () => {
     const same = await factory({ ...ENV, GEMINI_API_KEY: "gm-env", LLM_FALLBACK_MODEL: "gemini-3.5-flash-lite" }).forRun(run);
     await expect(ping(same.llm!, run.id)).rejects.toBeInstanceOf(ModelProviderError);
     expect(hosts.every((x) => x.includes("googleapis"))).toBe(true);
+  });
+});
+
+describe("createRunLlmFactory: each call's prompt and response (admin run logs)", () => {
+  const ANTHROPIC_ENV: RunLlmEnv = { ...ENV, ANTHROPIC_API_KEY: "sk-ant-env" };
+
+  it("stores the call and its exchange", async () => {
+    const transport = new FakeTransport().enqueue({ json: { ok: true } });
+    const run = await seedRun(h, { llm: OPUS_HIGH });
+    const { llm } = await factory(ANTHROPIC_ENV, transport).forRun(run);
+    await ping(llm!, run.id);
+    const [call] = await new LlmCallRepository(h.tdb.db).listByRun(run.id);
+    expect(await new LlmExchangeRepository(h.tdb.db).get(TEST_TENANT_ID, call!.id)).toEqual({
+      system: "",
+      messages: [{ role: "user", content: "ping" }],
+      response: JSON.stringify({ ok: true }),
+      error: null,
+      truncated: false,
+    });
+  });
+
+  it("an exchange over 4 MB keeps the system prompt and the last two messages", async () => {
+    const transport = new FakeTransport().enqueue({ json: { ok: true } });
+    const run = await seedRun(h, { llm: OPUS_HIGH });
+    const { llm } = await factory(ANTHROPIC_ENV, transport).forRun(run);
+    const big = "y".repeat(2_200_000);
+    await llm!.generateJson({
+      system: "sys",
+      messages: [
+        { role: "user", content: big },
+        { role: "assistant", content: big },
+        { role: "user", content: "a" },
+        { role: "assistant", content: "b" },
+      ],
+      jsonSchema: { type: "object" },
+      stage: "PLANNING",
+      runId: run.id,
+      signal: new AbortController().signal,
+      redact: (v) => v,
+    });
+    const [call] = await new LlmCallRepository(h.tdb.db).listByRun(run.id);
+    const ex = await new LlmExchangeRepository(h.tdb.db).get(TEST_TENANT_ID, call!.id);
+    expect(ex).toMatchObject({ system: "sys", truncated: true });
+    expect(ex!.messages).toEqual([
+      { role: "user", content: "[omitted]" },
+      { role: "user", content: "[omitted]" },
+      { role: "user", content: "a" },
+      { role: "assistant", content: "b" },
+    ]);
+  });
+
+  it("an exchange write failure keeps the call row and logs a warning", async () => {
+    const transport = new FakeTransport().enqueue({ json: { ok: true } });
+    const run = await seedRun(h, { llm: OPUS_HIGH });
+    const warn = vi.fn();
+    const logger = { ...silentLogger, warn };
+    const put = vi.spyOn(LlmExchangeRepository.prototype, "put").mockRejectedValueOnce(new Error("disk full"));
+    const { llm } = await factory(ANTHROPIC_ENV, transport, logger).forRun(run);
+    await expect(ping(llm!, run.id)).resolves.toBeTruthy();
+    put.mockRestore();
+    expect(await new LlmCallRepository(h.tdb.db).listByRun(run.id)).toHaveLength(1);
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ runId: run.id }), "failed to record LLM exchange");
   });
 });
