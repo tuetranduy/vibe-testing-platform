@@ -13,6 +13,9 @@ export function namedFactSubject(description: string): { name: string; kind: str
   const match = /^(.{1,80}?)\s+(?:text\s+)?(input|field|button|selector|control|dialog|product card|card|line)\b/i.exec(text);
   if (!match) return null;
   const name = match[1]!.replace(/^(?:product page|cart item)\s+/i, '').trim().replace(/^["'“‘]|["'”’]$/g, '');
+  // A bracket or list separator before the noun means the description names several controls,
+  // e.g. "login form (username field, password field …)": no single label stands for them.
+  if (/[()[\]{},;]/.test(name)) return null;
   if (!name || /\b(?:whether|visible|shown|current|after|before|inside|any|some|unrelated|matching|selected|corresponding)\b/i.test(name)) return null;
   return { name, kind: match[2]!.toLowerCase() };
 }

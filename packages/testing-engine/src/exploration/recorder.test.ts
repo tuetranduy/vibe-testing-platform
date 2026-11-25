@@ -134,6 +134,13 @@ describe('named fact grounding regressions', () => {
     expect(await captureNamedFact(page, request('Whether any unrelated product card appears in the result grid'), 'visible', 'step')).toBeNull();
   });
 
+  it('leaves a description naming several controls to exploration instead of inventing a label', async () => {
+    await page.setContent('<form><label for="u">Tài khoản</label><input id="u"><label for="p">Mật khẩu</label><input id="p" type="password"><button>Đăng nhập</button></form>');
+    const description = 'Whether the login form (username field, password field and submit button) is displayed';
+    expect(namedFactSubject(description)).toBeNull();
+    expect(await captureNamedFact(page, request(description), 'visible', 'step')).toBeNull();
+  });
+
   it('counts repeated result rows instead of the internal children of the first card', async () => {
     await page.setContent('<main><div id="grid">' + Array.from({ length: 12 }, (_, i) => `<article data-testid="card"><img><h2>Product ${i}</h2><p>€10</p><button>Add</button></article>`).join('') + '</div></main>');
     const element = await recordElement(page, 'article:first-child');
