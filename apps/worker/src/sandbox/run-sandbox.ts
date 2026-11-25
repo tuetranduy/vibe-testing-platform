@@ -5,6 +5,7 @@ import { findFreePort, launchSandboxedBrowser, type BrowserExtension, type Sandb
 import { createEgressEventReporter } from "./egress-events";
 import { startEgressProxy, type EgressBlockEvent } from "./egress-proxy";
 import { computeAllowedHosts, installNavigationGuard, type NavigationBlockEvent } from "./navigation-guard";
+import type { TargetSiteEvent } from "./target-site-watch";
 
 /**
  * One run's browser sandbox (Ruling R12 convenience for the explore stage): egress proxy →
@@ -15,7 +16,7 @@ import { computeAllowedHosts, installNavigationGuard, type NavigationBlockEvent 
 export interface RunSandboxDeps {
   /** The worker's TARGET_PRIVATE_ALLOWLIST. The browser's own CDP loopback entry is added here. */
   privateAllowlist: string[];
-  logger: Pick<WorkerLogger, "warn">;
+  logger: Pick<WorkerLogger, "info" | "warn">;
   resolve?: Resolver;
   /** e.g. the Stagehand runtime extension (supplied by `@platform/stagehand-adapter`, Ruling R9). */
   extensions?: BrowserExtension[];
@@ -112,6 +113,7 @@ export async function openRunSandbox(ctx: StageContext, deps: RunSandboxDeps): P
       extensions: deps.extensions,
       executablePath: deps.executablePath,
       signal: ctx.signal,
+      onTargetSite: (event) => logTargetSite(deps.logger, ctx.runId, event),
     });
     await scope.own(() => browser.close());
     stopIfClosed();
@@ -153,4 +155,15 @@ export async function openRunSandbox(ctx: StageContext, deps: RunSandboxDeps): P
   } finally {
     ctx.signal.removeEventListener("abort", onAbort);
   }
+}
+
+/** Admin run logs: one `target_site` line per thing the tested site did wrong; serious ones at warn. */
+export function logTargetSite(logger: Pick<WorkerLogger, "info" | "warn">, runId: string, event: TargetSiteEvent): void {
+  const serious =
+    event.kind === "pageerror" ||
+    event.kind === "requestfailed" ||
+    (event.kind === "response" && event.status >= 500) ||
+    (event.kind === "console" && event.level === "error");
+  const { kind, ...fields } = event;
+  logger[serious ? "warn" : "info"]({ runId, source: "target_site", kind, ...fields }, `target site: ${kind}`);
 }

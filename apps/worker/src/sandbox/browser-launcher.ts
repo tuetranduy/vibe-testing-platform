@@ -8,6 +8,7 @@ import path from "node:path";
 import { BROWSER_WINDOW_ARGS } from "@platform/testing-engine";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { applySessionHygiene, restoreFullHd } from "./session-hygiene";
+import { watchTargetSite, type TargetSiteEvent } from "./target-site-watch";
 
 /**
  * Launches Chromium ourselves (spike: Stagehand v4 caveats 1–4): detached in its own process
@@ -33,6 +34,8 @@ export interface LaunchSandboxedBrowserOptions {
   launchTimeoutMs?: number;
   /** The run signal: aborting stops the launch promptly and releases everything it created. */
   signal?: AbortSignal;
+  /** Admin run logs: the tested site's console errors, page errors and failed requests, on every page. */
+  onTargetSite?: (event: TargetSiteEvent) => void;
 }
 
 /** Structural (plain fields) so `@platform/stagehand-adapter` can declare a matching type (Ruling R10). */
@@ -255,7 +258,11 @@ export async function launchSandboxedBrowser(opts: LaunchSandboxedBrowserOptions
 
   /** Idempotent; safe to run again to catch anything created after an earlier run. */
   // Until the launch has returned, nothing is worth a graceful disconnect: kill right away.
-  const teardown = () => releaseBrowser({ browser, proc, profileDir }, { graceful: launched });
+  let unwatch = noop;
+  const teardown = () => {
+    unwatch();
+    return releaseBrowser({ browser, proc, profileDir }, { graceful: launched });
+  };
   let closing: Promise<void> | undefined;
   const close = () => {
     disposed = true;
@@ -319,6 +326,7 @@ export async function launchSandboxedBrowser(opts: LaunchSandboxedBrowserOptions
     const context = browser.contexts()[0];
     if (!context) throw new Error("Chromium has no default browser context");
     await applySessionHygiene(browser, context);
+    if (opts.onTargetSite) unwatch = watchTargetSite(context, opts.onTargetSite);
     stopIfDisposed();
     const page = context.pages().find((p) => p.url() === "about:blank") ?? (await context.newPage());
     stopIfDisposed();
