@@ -283,7 +283,31 @@ carries the error that ended the run. Useful filters: all lines of one run
 (`runId`), and errors by `component`. The API's HTTP access log is Fastify's (pino), with the `authorization`,
 `cookie`, `x-session-token` and `x-api-token` headers redacted and request bodies never logged.
 
+**Run logs (admin run logs, 2026-11-25).** Every line that names a run (`runId`) is also stored in PostgreSQL
+(`run_logs`), as written to stdout (enriched and redacted), and shown to administrators on the run page (**Logs**,
+or `/runs/<id>/logs`). Members never see it; its API answers them 403. Sources:
+
+| `source` | What |
+|---|---|
+| `worker`, `api` | the processes' own run lines; the API adds one `request` line per request to a run's routes (method, route, status, duration; no bodies or headers), except the logs routes themselves |
+| `infra` | run events about infrastructure (`egress.blocked`, `artifact.*`), everything the reaper does to a run, queue job failures, heartbeat/cleanup/sandbox failures, and the per-run cap notice |
+| `browser_use` | `discovery.*` events and, with the local launcher, its JSON diagnostics lines (never page text or model output) |
+| `runner` | the Playwright CLI's stderr tail (last 200 lines) of a rerun |
+| `target_site` | the tested site's console errors and warnings, uncaught page errors, failed requests and 4xx/5xx responses in the sandboxed browser (no bodies) |
+| `web_app` | our web app's frontend errors while a run's pages are open (at most 300 per person per run) |
+
+Each model call's prompt and response, as sent after the run redactor and with image bytes left out, is stored
+gzipped in `llm_call_exchanges`. Since 2026-10-07 a run's secret values are not masked, so both can contain them.
+A process keeps at most `RUN_LOG_MAX_LINES` (20000) lines per run; past it only `warn` and above, plus one
+`run log line cap reached` line. Lines are written in batches every 500 ms; a slow or failing database drops lines
+(never the run) and counts them in `run_log_dropped_total{reason}` (`buffer_full`, `cap`, `insert_failed`) on the
+worker's and the API's `/metrics`. The lines stay on stdout either way.
+
 ## Retention
+
+The daily pass also deletes `run_logs` lines and `llm_call_exchanges` prompts/responses older than
+`RUN_LOG_RETENTION_DAYS` (14), in batches of 5000. The `llm_calls` rows (tokens, cost) are kept for the usage
+dashboard; their prompts then show as expired.
 
 A daily `retention` job (its own queue) deletes expired artifacts, the object first and then its row.
 `expires_at` is set when an artifact is stored: `STANDARD` after `ARTIFACT_RETENTION_DAYS` (30); `SECRET_BEARING`

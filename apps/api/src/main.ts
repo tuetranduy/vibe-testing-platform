@@ -1,5 +1,5 @@
-import { createLogger, discoveryAdmission, loadEnvOrExit, redisTlsOptions, resolveEnvLlmChoice } from "@platform/config";
-import { createDb, ensureTenant, runMigrations } from "@platform/db";
+import { createLogger, createRunLogSink, discoveryAdmission, loadEnvOrExit, redisTlsOptions, resolveEnvLlmChoice } from "@platform/config";
+import { RunLogRepository, createDb, ensureTenant, runMigrations } from "@platform/db";
 import { DEFAULT_REAPER_CONFIG, RunEventHub, createRevisionQueue, createRunQueue, createScheduleSync, startReaper } from "@platform/event-bus";
 import { defaultResolver } from "@platform/security";
 import { createArtifactStorage } from "@platform/storage";
@@ -13,7 +13,24 @@ import { UserService, redisLoginThrottle } from "./services/user-service";
 import { redisTokenThrottle } from "./auth/principal";
 
 const env = loadEnvOrExit();
-const log = createLogger({ component: "api", level: env.LOG_LEVEL });
+// Stdout JSON lines, and every run's lines in run_logs too (admin run logs) once the database is up.
+let runLogRepo: RunLogRepository | null = null;
+let runLogDropped: ((reason: string, n: number) => void) | null = null;
+let lastRunLogError = 0;
+const runLogSink = createRunLogSink({
+  component: "api",
+  maxLinesPerRun: env.RUN_LOG_MAX_LINES,
+  write: async (lines) => {
+    if (runLogRepo) await runLogRepo.appendMany(lines);
+  },
+  onDrop: (reason, n) => runLogDropped?.(reason, n),
+  onWriteError: (err) => {
+    if (Date.now() - lastRunLogError < 60_000) return;
+    lastRunLogError = Date.now();
+    log.warn({ err }, "run log lines could not be stored; they are on stdout only");
+  },
+});
+const log = createLogger({ component: "api", level: env.LOG_LEVEL, sink: runLogSink.accept });
 
 async function retry(fn: () => Promise<void>, what: string, attempts = 30): Promise<void> {
   for (let i = 1; ; i++) {
@@ -30,6 +47,7 @@ async function retry(fn: () => Promise<void>, what: string, attempts = 30): Prom
 const handle = createDb(env.DATABASE_URL);
 if (process.env.RUN_MIGRATIONS_ON_START !== "false") await runMigrations(handle.db);
 await ensureTenant(handle.db, env.DEFAULT_TENANT_ID);
+runLogRepo = new RunLogRepository(handle.db);
 
 const tls = redisTlsOptions(env);
 const redis = new Redis(env.REDIS_URL, { ...tls, maxRetriesPerRequest: 3 });
@@ -52,6 +70,7 @@ const storage = createArtifactStorage(env);
 await retry(() => storage.ensureReady(), "artifact storage");
 
 const metrics = createApiMetrics({ queue });
+runLogDropped = (reason, n) => metrics.runLogDropped.inc({ reason }, n);
 
 const deps: ApiDeps = {
   config: {
@@ -77,7 +96,9 @@ const deps: ApiDeps = {
     },
     auth: { sessionTtlHours: env.SESSION_TTL_HOURS },
     scheduleMinIntervalMinutes: env.SCHEDULE_MIN_INTERVAL_MINUTES,
+    runLogRetentionDays: env.RUN_LOG_RETENTION_DAYS,
   },
+  logger: log,
   schedules,
   loginThrottle: redisLoginThrottle(redis),
   tokenThrottle: redisTokenThrottle(redis),
@@ -127,6 +148,7 @@ const shutdown = async () => {
   redis.disconnect();
   subscriber.disconnect();
   queueConnection.disconnect();
+  await runLogSink.close();
   await handle.close();
   process.exit(0);
 };

@@ -29,6 +29,8 @@ export interface ApiConfig {
   auth: ApiAuthConfig;
   /** SCHEDULE_MIN_INTERVAL_MINUTES (V1.2 F3); unset: 15. */
   scheduleMinIntervalMinutes?: number;
+  /** RUN_LOG_RETENTION_DAYS (admin run logs); unset: 14. */
+  runLogRetentionDays?: number;
 }
 
 export interface ApiAuthConfig {
@@ -67,6 +69,8 @@ export interface ApiDeps {
   schedules?: ScheduleSync;
   /** API tokens' hourly request count (V1.2 F4); unset: a process-local one. */
   tokenThrottle?: TokenThrottle;
+  /** The API's own logger: its run lines (and one line per request to a run's routes) reach the run logs. */
+  logger?: { info(obj: object, msg?: string): void };
   /** The clock (tests). */
   now?: () => Date;
 }

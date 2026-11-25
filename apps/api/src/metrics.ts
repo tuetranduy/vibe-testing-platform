@@ -56,6 +56,12 @@ export function createApiMetrics(opts: { queue?: Pick<RunQueue, "depth">; depthT
     }),
     // The API runs the reaper too (@platform/event-bus startReaper), so it counts what it reaps.
     runsReaped: new Counter({ name: "runs_reaped_total", help: "Runs the reaper ended", labelNames: ["reason"], registers }),
+    runLogDropped: new Counter({
+      name: "run_log_dropped_total",
+      help: "Run log lines not stored in run_logs (buffer full, per-run cap, insert failed); they are still on stdout",
+      labelNames: ["reason"],
+      registers,
+    }),
   };
 }
 
