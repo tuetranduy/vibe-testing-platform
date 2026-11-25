@@ -23,3 +23,4 @@ export * from "./events";
 export * from "./report";
 export * from "./report-text";
 export * from "./engine-errors";
+export * from "./run-logs";
