@@ -21,7 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRun, getRunLlmCalls, getRunLogs, type RunLogFilters } from "../../lib/api";
 import { useMe } from "../../lib/me";
 import { Disclosure } from "../Disclosure";
-import { ERROR_CATEGORY_LABEL } from "../format";
+import { ERROR_CATEGORY_LABEL, VERDICT_LABEL } from "../format";
 import { LlmCallsTable, LlmExchangeDialog } from "./LlmCalls";
 import { LogTimeline, SOURCE_LABEL, clock, lineAnchor, mergeTimeline } from "./LogTimeline";
 
@@ -160,8 +160,18 @@ export function RunLogs({ runId, summary, pollMs = POLL_MS }: { runId: string; s
 
   const callsInView = (calls?.calls ?? []).filter((c) => !filtered && (!stage || c.stage === stage));
   const items = mergeTimeline(lines, callsInView);
-  const failed = summary.lifecycle === "ERRORED" || summary.verdict === "FAILED";
-  const failures = lines.filter((l) => l.level === "error" || l.level === "fatal").slice(-5);
+  const errored = summary.lifecycle === "ERRORED";
+  const failed = errored || summary.verdict === "FAILED";
+  const notPassed = errored || (summary.verdict !== null && summary.verdict !== "PASSED");
+  const errors = lines.filter((l) => l.level === "error" || l.level === "fatal");
+  // No error line (a blocked or inconclusive run, usually): the warnings are the best lead.
+  const failures = (errors.length > 0 ? errors : lines.filter((l) => l.level === "warn")).slice(-5);
+  const whyTitle = failed ? "Why it failed" : "Why it did not pass";
+  const whyReason = summary.errorCategory
+    ? ERROR_CATEGORY_LABEL[summary.errorCategory]
+    : summary.verdict
+      ? VERDICT_LABEL[summary.verdict]
+      : "the run did not finish";
 
   const jump = (id: string) => {
     setTab("timeline");
@@ -171,13 +181,13 @@ export function RunLogs({ runId, summary, pollMs = POLL_MS }: { runId: string; s
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      {failed && (
-        <section aria-label="Why it failed" className="banner banner-error flex-col items-stretch">
+      {notPassed && (
+        <section aria-label={whyTitle} className={`banner ${failed ? "banner-error" : "banner-warning"} flex-col items-stretch`}>
           <p className="banner-title">
-            Why it failed: {summary.errorCategory ? ERROR_CATEGORY_LABEL[summary.errorCategory] : "the checks did not pass"}
+            {whyTitle}: {whyReason}
           </p>
           {failures.length === 0 ? (
-            <p className="text-sm">No error lines were logged{load.status === "ready" ? "" : " yet"}.</p>
+            <p className="text-sm">No errors or warnings were logged{load.status === "ready" ? "" : " yet"}.</p>
           ) : (
             <ul className="flex flex-col gap-1.5 font-mono text-[0.8125rem]">
               {failures.map((l) => (

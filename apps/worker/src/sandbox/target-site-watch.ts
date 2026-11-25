@@ -11,6 +11,8 @@ export type TargetSiteEvent =
 const MAX_EVENTS_PER_PAGE = 1000;
 /** The browser's own pages, never the site's. */
 const OWN_PAGE = /^(chrome-extension|devtools|chrome):/;
+/** Chromium's own console line for a failed load: the `response` / `requestfailed` events already report it. */
+const LOAD_FAILURE = /^Failed to load resource:/;
 /** A missing favicon is the browser asking, not the site failing. */
 const FAVICON = /\/favicon\.ico(\?|$)/;
 
@@ -38,6 +40,7 @@ export function watchTargetSite(context: BrowserContext, on: (event: TargetSiteE
     const onConsole = (msg: ConsoleMessage) => {
       const type = msg.type();
       if (type !== "error" && type !== "warning") return;
+      if (LOAD_FAILURE.test(msg.text())) return;
       emit({ kind: "console", level: type, text: msg.text(), url: safeUrl(page) });
     };
     const onPageError = (err: Error) => {

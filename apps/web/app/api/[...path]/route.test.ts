@@ -53,6 +53,10 @@ describe("API proxy allow-list", () => {
     ["POST", "/api/v1/test-runs/run_1/cancel", POST],
     ["GET", "/api/v1/test-runs/run_1/report", GET],
     ["GET", "/api/v1/test-runs/run_1/artifacts/art_1/url?reveal=true", GET],
+    ["GET", "/api/v1/test-runs/run_1/logs?after=abc&source=worker%2Cinfra&minLevel=warn&stage=EXPLORING&q=x&limit=500", GET],
+    ["GET", "/api/v1/test-runs/run_1/llm-calls", GET],
+    ["GET", "/api/v1/test-runs/run_1/llm-calls/llm_1/exchange", GET],
+    ["POST", "/api/v1/test-runs/run_1/client-logs", POST],
     ["GET", "/api/v1/settings/llm", GET],
     ["PUT", "/api/v1/settings/llm", PUT],
     ["PUT", "/api/v1/settings/llm/keys/anthropic", PUT],
@@ -126,6 +130,9 @@ describe("API proxy allow-list", () => {
     ["GET", "/api/v1/suites/ste_1/entries", GET],
     ["DELETE", "/api/v1/suite-runs/srn_1", DELETE],
     ["GET", "/api/v1/test-runs/run_1/reportXmd", GET],
+    ["POST", "/api/v1/test-runs/run_1/logs", POST],
+    ["GET", "/api/v1/test-runs/run_1/client-logs", GET],
+    ["GET", "/api/v1/test-runs/run_1/llm-calls/llm_1", GET],
     ["GET", "/api/v1/test-data-sets", GET],
     ["POST", "/api/v1/test-data-sets", POST],
     ["GET", "/api/v1/credential-profiles", GET],
@@ -144,6 +151,8 @@ describe("API proxy allow-list", () => {
     expect(calls[0]!.url).toBe("http://api.internal:3001/v1/test-runs/run_1/artifacts/art_1/url?reveal=true");
     await GET(req("GET", "/api/v1/test-runs/run_1?anything=1"));
     expect(calls[1]!.url).toBe("http://api.internal:3001/v1/test-runs/run_1");
+    await GET(req("GET", "/api/v1/test-runs/run_1/logs?minLevel=warn&token=x"));
+    expect(calls[2]!.url).toBe("http://api.internal:3001/v1/test-runs/run_1/logs?minLevel=warn");
   });
 });
 

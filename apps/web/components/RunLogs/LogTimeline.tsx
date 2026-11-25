@@ -55,7 +55,7 @@ export function LogTimeline({
   onOpenCall: (call: LlmCallView) => void;
 }) {
   return (
-    <ol aria-label="Timeline" className="flex min-w-0 flex-col divide-y divide-border font-mono text-[0.8125rem]">
+    <ol aria-label="Timeline" className="m-0 flex min-w-0 list-none flex-col p-0 divide-y divide-border font-mono text-[0.8125rem]">
       {items.map((item) =>
         item.kind === "call" ? (
           <li key={item.call.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-1.5">

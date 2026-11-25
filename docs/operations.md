@@ -289,11 +289,11 @@ or `/runs/<id>/logs`). Members never see it; its API answers them 403. Sources:
 
 | `source` | What |
 |---|---|
-| `worker`, `api` | the processes' own run lines; the API adds one `request` line per request to a run's routes (method, route, status, duration; no bodies or headers), except the logs routes themselves |
+| `worker`, `api` | the processes' own run lines; the API adds one `request` line per action on a run (any non-GET) or failed request (status 400+) to a run's routes (method, route, status, duration; no bodies or headers); successful reads and the logs routes themselves are not logged |
 | `infra` | run events about infrastructure (`egress.blocked`, `artifact.*`), everything the reaper does to a run, queue job failures, heartbeat/cleanup/sandbox failures, and the per-run cap notice |
 | `browser_use` | `discovery.*` events and, with the local launcher, its JSON diagnostics lines (never page text or model output) |
 | `runner` | the Playwright CLI's stderr tail (last 200 lines) of a rerun |
-| `target_site` | the tested site's console errors and warnings, uncaught page errors, failed requests and 4xx/5xx responses in the sandboxed browser (no bodies) |
+| `target_site` | the tested site's console errors and warnings, uncaught page errors, failed requests and 4xx/5xx responses in the sandboxed browser (no bodies; a missing favicon and Chromium's own "Failed to load resource" console lines are left out) |
 | `web_app` | our web app's frontend errors while a run's pages are open (at most 300 per person per run) |
 
 Each model call's prompt and response, as sent after the run redactor and with image bytes left out, is stored

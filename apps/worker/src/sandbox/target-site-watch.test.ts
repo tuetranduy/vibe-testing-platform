@@ -50,7 +50,9 @@ describe("watchTargetSite", () => {
     watchTargetSite(context, on);
     const page = await context.newPage();
     await page.goto(base);
-    await vi.waitFor(() => expect(events.filter((e) => e.kind === "console")).toHaveLength(2));
+    await vi.waitFor(() => expect(events.filter((e) => e.kind === "response")).toHaveLength(2));
+    await page.waitForTimeout(100);
+    // The browser's own "Failed to load resource" messages are left out: the response lines cover them.
     expect(events.filter((e) => e.kind === "console").map((e) => e.kind === "console" && [e.level, e.text])).toEqual([
       ["warning", "a warning"],
       ["error", "an error"],
@@ -130,6 +132,15 @@ describe("logTargetSite", () => {
     logTargetSite(logger, "run_1", { kind: "response", method: "GET", url: "u", status: 503 });
     logTargetSite(logger, "run_1", { kind: "pageerror", message: "m", url: "u" });
     expect(got.map(([level]) => level)).toEqual(["info", "warn", "info", "warn", "warn"]);
-    expect(got[2]).toEqual(["info", { runId: "run_1", source: "target_site", kind: "response", method: "GET", url: "u", status: 404 }, "target site: response"]);
+    expect(got[2]).toEqual(["info", { runId: "run_1", source: "target_site", kind: "response", method: "GET", url: "u", status: 404 }, "Tested site answered 404: GET u"]);
+    expect(got.map(([, , msg]) => msg)).toEqual([
+      "Tested site console warning: w",
+      "Tested site console error: e",
+      "Tested site answered 404: GET u",
+      "Tested site answered 503: GET u",
+      "Tested site page error: m",
+    ]);
+    logTargetSite(logger, "run_1", { kind: "requestfailed", method: "POST", url: "u2", failure: "net::ERR_CONNECTION_REFUSED" });
+    expect(got.at(-1)![2]).toBe("Tested site request failed: POST u2 (net::ERR_CONNECTION_REFUSED)");
   });
 });

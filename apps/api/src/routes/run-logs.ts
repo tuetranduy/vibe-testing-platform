@@ -26,11 +26,13 @@ export async function runLogRoutes(app: FastifyInstance, deps: ApiDeps): Promise
   const retentionDays = deps.config.runLogRetentionDays ?? 14;
   const now = () => (deps.now ?? (() => new Date()))();
 
-  // One line per request to a run's routes (no bodies, no headers): the API's part of the run's story.
+  // One line per action on, or failed request to, a run's routes (no bodies, no headers).
   app.addHook("onResponse", async (req, reply) => {
     const runId = (req.params as { runId?: unknown } | undefined)?.runId;
     const route = req.routeOptions.url;
     if (!deps.logger || typeof runId !== "string" || !route || UNLOGGED_ROUTE.test(route)) return;
+    // A successful read is the page refreshing itself; actions and failures are the run's story.
+    if (req.method === "GET" && reply.statusCode < 400) return;
     deps.logger.info(
       {
         runId,
@@ -40,7 +42,7 @@ export async function runLogRoutes(app: FastifyInstance, deps: ApiDeps): Promise
         durationMs: Math.round(reply.elapsedTime),
         principal: req.principal?.kind ?? "anonymous",
       },
-      "request",
+      `${req.method} ${route} → ${reply.statusCode}`,
     );
   });
 

@@ -104,6 +104,19 @@ describe("RunLogs", () => {
     expect(within(why).getByRole("button", { name: /Jump to line/ })).toBeInTheDocument();
   });
 
+  it("explains any run that did not pass, and not a passed one", async () => {
+    testMe.current = admin;
+    api((url) => (url.includes("/llm-calls") ? json(200, calls([])) : json(200, page([line({ level: "warn", message: "egress blocked" })]))));
+    const { unmount } = render(<RunLogs runId="run_1" summary={summaryFixture({ lifecycle: "COMPLETED", verdict: "INCONCLUSIVE" })} />);
+    const why = await screen.findByRole("region", { name: "Why it did not pass" });
+    expect(why).toHaveTextContent("Inconclusive");
+    expect(why).toHaveTextContent("egress blocked");
+    unmount();
+    render(<RunLogs runId="run_1" summary={summaryFixture({ lifecycle: "COMPLETED", verdict: "PASSED" })} />);
+    await screen.findByRole("list", { name: "Timeline" });
+    expect(screen.queryByRole("region", { name: /Why it/ })).not.toBeInTheDocument();
+  });
+
   it("filters by source and level", async () => {
     testMe.current = admin;
     const fetch = api((url) => (url.includes("/llm-calls") ? json(200, calls([])) : json(200, page([line()]))));

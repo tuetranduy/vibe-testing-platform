@@ -149,18 +149,22 @@ describe("client-logs", () => {
 });
 
 describe("request lines", () => {
-  it("a run route writes a request line; the logs route does not", async () => {
+  it("actions and failed requests on a run's routes write a request line; successful reads and the logs routes do not", async () => {
     const admin = await signInMember(t, "admin");
     const runId = await createRun();
     requestLines.length = 0;
     await get(`/v1/test-runs/${runId}`, admin.headers);
     await get(`/v1/test-runs/${runId}/logs`, admin.headers);
+    await get(`/v1/test-runs/${runId}/llm-calls/llm_nope/exchange`, admin.headers);
+    await get(`/v1/test-runs/${runId}/criteria`, admin.headers);
+    await t.app.inject({ method: "POST", url: `/v1/test-runs/${runId}/cancel`, headers: admin.headers });
     const mine = requestLines.filter((l) => l.obj.runId === runId);
-    expect(mine).toHaveLength(1);
-    expect(mine[0]).toMatchObject({
-      msg: "request",
-      obj: { runId, method: "GET", route: "/v1/test-runs/:runId", status: 200, principal: "user" },
-    });
-    expect(typeof mine[0]!.obj.durationMs).toBe("number");
+    expect(mine.map((l) => [l.obj.method, l.obj.route, l.obj.status])).toEqual([
+      ["GET", "/v1/test-runs/:runId/criteria", 409],
+      ["POST", "/v1/test-runs/:runId/cancel", 202],
+    ]);
+    expect(mine.map((l) => l.msg)).toEqual(["GET /v1/test-runs/:runId/criteria → 409", "POST /v1/test-runs/:runId/cancel → 202"]);
+    expect(mine[1]).toMatchObject({ obj: { principal: "user" } });
+    expect(typeof mine[1]!.obj.durationMs).toBe("number");
   });
 });

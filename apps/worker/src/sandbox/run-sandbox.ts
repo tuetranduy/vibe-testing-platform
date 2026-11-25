@@ -165,5 +165,20 @@ export function logTargetSite(logger: Pick<WorkerLogger, "info" | "warn">, runId
     (event.kind === "response" && event.status >= 500) ||
     (event.kind === "console" && event.level === "error");
   const { kind, ...fields } = event;
-  logger[serious ? "warn" : "info"]({ runId, source: "target_site", kind, ...fields }, `target site: ${kind}`);
+  logger[serious ? "warn" : "info"]({ runId, source: "target_site", kind, ...fields }, targetSiteMessage(event));
+}
+
+const clip = (s: string) => (s.length > 300 ? `${s.slice(0, 300)}…` : s);
+
+function targetSiteMessage(event: TargetSiteEvent): string {
+  switch (event.kind) {
+    case "console":
+      return `Tested site console ${event.level}: ${clip(event.text)}`;
+    case "pageerror":
+      return `Tested site page error: ${clip(event.message)}`;
+    case "requestfailed":
+      return `Tested site request failed: ${event.method} ${clip(event.url)} (${event.failure})`;
+    case "response":
+      return `Tested site answered ${event.status}: ${event.method} ${clip(event.url)}`;
+  }
 }
