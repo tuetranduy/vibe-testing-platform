@@ -460,10 +460,53 @@ export const llmCalls = pgTable(
     estimatedCostUsd: doublePrecision("estimated_cost_usd").notNull(),
     latencyMs: integer("latency_ms").notNull(),
     status: text("status").notNull(),
+    /** Why the call was made (the request's schema name, e.g. "Observation"); null for older calls. */
+    purpose: text("purpose"),
     createdAt: createdAt(),
   },
   // llm_calls_created: the cost dashboard's date-range scans (V1.1 F7).
   (t) => [index("llm_calls_run").on(t.runId), index("llm_calls_created").on(t.createdAt)],
+);
+
+/**
+ * Admin run logs (2026-11-25): one row per log line that named a run, from every source. Kept
+ * RUN_LOG_RETENTION_DAYS (14) by the retention job. Admin-only to read.
+ */
+export const runLogs = pgTable(
+  "run_logs",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => testRuns.id, { onDelete: "cascade" }),
+    tenantId: runTenantId(),
+    time: ts("time").notNull(),
+    source: text("source").notNull(),
+    level: text("level").notNull(),
+    stage: runLifecycleEnum("stage"),
+    component: text("component").notNull(),
+    message: text("message").notNull(),
+    fields: jsonb("fields").notNull(),
+  },
+  (t) => [index("run_logs_run_time").on(t.runId, t.time, t.id), index("run_logs_time").on(t.time)],
+);
+
+/** Each model call's prompt and response as sent, gzipped JSON (LlmExchange). Kept RUN_LOG_RETENTION_DAYS. */
+export const llmCallExchanges = pgTable(
+  "llm_call_exchanges",
+  {
+    llmCallId: text("llm_call_id")
+      .primaryKey()
+      .references(() => llmCalls.id, { onDelete: "cascade" }),
+    runId: text("run_id")
+      .notNull()
+      .references(() => testRuns.id, { onDelete: "cascade" }),
+    tenantId: runTenantId(),
+    body: bytea("body").notNull(),
+    bytes: integer("bytes").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("llm_call_exchanges_run").on(t.runId), index("llm_call_exchanges_created").on(t.createdAt)],
 );
 
 /** Settings → Defaults for new tests, per tenant. No row: the defaults come from the LLM_* environment. */

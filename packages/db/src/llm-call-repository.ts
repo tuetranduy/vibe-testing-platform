@@ -17,6 +17,8 @@ export interface NewLlmCall {
   estimatedCostUsd: number;
   latencyMs: number;
   status: string;
+  /** Why the call was made (the request's schema name); null when the caller named none. */
+  purpose?: string | null;
 }
 
 /** Per-request model usage, written by the worker's LlmClient sink. Holds no prompt or output text. */
