@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -821,6 +822,66 @@ const requireHere = createRequire(import.meta.url);
 const packageDir = (name: string) => path.dirname(realpathSync(requireHere.resolve(`${name}/package.json`)));
 
 describe("generated workspace", () => {
+  it("waits for the intended checkout panel after a slow billing POST", async () => {
+    const submitted: string[] = [];
+    const server = createServer((req, res) => {
+      if (req.method === "POST") {
+        submitted.push(req.url!);
+        if (req.url === "/billing") setTimeout(() => res.writeHead(204).end(), 5_900);
+        else res.writeHead(204).end();
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" }).end(`
+        <section id="billing"><button id="save-billing">Continue</button></section>
+        <section id="shipping" hidden><button id="save-shipping">Continue</button></section>
+        <p data-testid="toast" hidden>Shipping saved</p>
+        <script>
+          document.querySelector('#save-billing').onclick = async (event) => {
+            event.target.disabled = true;
+            await fetch('/billing', {method: 'POST'});
+            document.querySelector('#billing').hidden = true;
+            document.querySelector('#shipping').hidden = false;
+          };
+          document.querySelector('#save-shipping').onclick = async () => {
+            await fetch('/shipping', {method: 'POST'});
+            document.querySelector('[data-testid="toast"]').hidden = false;
+          };
+        </script>`);
+    });
+    const dir = mkdtempSync(path.join(os.tmpdir(), "generated-checkout-"));
+    try {
+      await new Promise<void>((resolve, reject) => server.once("error", reject).listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Checkout fixture has no TCP address");
+      const targetUrl = `http://127.0.0.1:${address.port}/`;
+      const control = (scope: string) => ref({ strategy: "role", role: "button", name: "Continue", exact: true, scope });
+      const steps = flow(
+        { kind: "navigate", urlAfter: targetUrl },
+        { kind: "act", element: control("css=#billing") },
+        { kind: "act", element: control("css=#shipping") },
+        { kind: "checkpoint", id: AFTER },
+      );
+      const run = compile({ targetUrl, steps, requirement: requirementOf([shopCriteria()[1]!]) });
+      const actions = run.source.split("\n").filter((line) => line.includes(".click("));
+      expect(actions).toHaveLength(2);
+      expect(actions.every((line) => /\.locator\(.+\)\.getByRole\(.+\)\.click\(\{ timeout: 30000 \}\)/.test(line))).toBe(true);
+      expect(run.compiledCriteria).toEqual(["AC-2"]);
+      writeFileSync(path.join(dir, "run.spec.ts"), run.source);
+      writeFileSync(path.join(dir, "helpers.ts"), run.helpersSource);
+      writeFileSync(path.join(dir, "run-data.json"), run.dataJson);
+      writeFileSync(path.join(dir, "playwright.config.cjs"), 'module.exports = { testDir: ".", use: { actionTimeout: 300 } };');
+      mkdirSync(path.join(dir, "node_modules", "@playwright"), { recursive: true });
+      symlinkSync(packageDir("@playwright/test"), path.join(dir, "node_modules", "@playwright", "test"));
+      const { stdout } = await exec(process.execPath, [path.join(packageDir("@playwright/test"), "cli.js"), "test", "--reporter=line"],
+        { cwd: dir, timeout: 25_000 });
+      expect(stdout).toContain("1 passed");
+      expect(submitted).toEqual(["/billing", "/shipping"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("run.spec.ts + helpers.ts + run-data.json pass tsc --noEmit with @playwright/test installed", async () => {
     const steps = shopFlow({ fill: { inputRef: { source: "secret", key: "password" } } });
     const criteria: AcceptanceCriterion[] = [

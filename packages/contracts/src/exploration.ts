@@ -4,7 +4,7 @@ import { InputRefSchema } from "./plan";
 import { BlockReasonSchema } from "./run";
 
 export const LocatorCandidateSchema = z.discriminatedUnion("strategy", [
-  z.object({ strategy: z.literal("role"), role: z.string(), name: z.string(), exact: z.boolean() }),
+  z.object({ strategy: z.literal("role"), role: z.string(), name: z.string(), exact: z.boolean(), scope: z.string().min(1).optional() }),
   z.object({ strategy: z.literal("label"), text: z.string(), exact: z.boolean().optional() }),
   z.object({ strategy: z.literal("placeholder"), text: z.string() }),
   z.object({ strategy: z.literal("text"), text: z.string(), exact: z.boolean() }),

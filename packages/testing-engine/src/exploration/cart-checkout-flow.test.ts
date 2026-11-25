@@ -271,6 +271,10 @@ describe("saved-address checkout on a single URL", () => {
       expect(observed).toEqual([expect.stringContaining('Find the element that shows: Whether the "Order complete"')]);
       expect(out.revisedPlan?.scenarios[0]!.steps.map(({ id }) => id)).toEqual(["PS-1", "PS-2", "PS-3", "PS-6", "PS-7", "PS-8", "PS-9", "PS-10"]);
       expect(out.steps.filter((step) => step.kind === "act" && step.onGoldenPath).map((step) => step.plannedStepId)).toEqual(["PS-6", "PS-8", "PS-9"]);
+      for (const [plannedStepId, scope] of [["PS-6", "css=#shipping"], ["PS-8", "css=#methods"]]) {
+        const ref = out.steps.find((step) => step.kind === "act" && step.plannedStepId === plannedStepId)?.element;
+        expect(ref?.candidates[ref.chosenIndex]).toMatchObject({ strategy: "role", name: "Continue", scope });
+      }
       expect(orders).toBe(1);
       expect(page.url()).toBe(`${target}receipt`);
       expect(verifyCriterion({ criterion: receipt, facts: out.facts, steps: out.steps, blocked: [], stopReason: out.stopReason, plan: runPlan }).status).toBe("PASS");

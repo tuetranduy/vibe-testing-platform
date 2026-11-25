@@ -149,6 +149,8 @@ const READ_HELPER: Partial<Record<ReadKind, string>> = {
 const LOAD_SETTLE_TIMEOUT_MS = 10_000;
 /** The executor's wait for a quiet network after a navigation (KI-044). */
 const NETWORK_QUIET_TIMEOUT_MS = 3_000;
+/** An asynchronous checkout save can leave its old Continue disabled while the next panel is still hidden. */
+const CHECKOUT_CONTROL_TIMEOUT_MS = 30_000;
 
 const FLIPPED = { gt: "lt", gte: "lte", lt: "gt", lte: "gte", eq: "eq", neq: "neq" } as const;
 type Operator = keyof typeof FLIPPED;
@@ -386,8 +388,10 @@ class Compiler {
           const press = step.actMethod === "press_enter";
           const pointer = step.actMethod === 'scroll_into_view' ? 'scrollIntoViewIfNeeded'
             : step.actMethod === 'hover' ? 'hover' : step.actMethod === 'double_click' ? 'dblclick' : null;
+          const candidate = step.element!.candidates[step.element!.chosenIndex];
+          const timeout = candidate?.strategy === "role" && candidate.scope && !pointer ? `{ timeout: ${CHECKOUT_CONTROL_TIMEOUT_MS} }` : "";
           this.withLocator(w, step.element!, `Step ${step.index} (${press ? "press Enter" : "act"})`, (l) =>
-            press ? `await ${l}.press(${lit("Enter")});` : `await ${l}.${pointer ?? 'click'}();`,
+            press ? `await ${l}.press(${lit("Enter")});` : `await ${l}.${pointer ?? 'click'}(${timeout});`,
           );
           w.line(`await ${action}();`);
           // SPA navigation can outlast the action's bounded network wait. Synchronize with
@@ -639,7 +643,7 @@ class Compiler {
   }
 
   private flagBrittle(w: SourceWriter, uses: { candidate: LocatorCandidate | null; what: string }[]): void {
-    const brittle = uses.filter((u) => u.candidate?.strategy === "xpath");
+    const brittle = uses.filter(({ candidate }) => candidate?.strategy === "xpath" || (candidate?.strategy === "role" && candidate.scope?.startsWith("xpath=")));
     if (brittle.length === 0) return;
     w.comment("brittle-locator");
     for (const { what } of brittle) {
@@ -657,7 +661,7 @@ class Compiler {
       this.locatorKeys.set(identity, key);
       this.data.locators[key] =
         c.strategy === "role"
-          ? { name: c.name }
+          ? { name: c.name, ...(c.scope ? { selector: c.scope } : {}) }
           : c.strategy === "label" || c.strategy === "placeholder" || c.strategy === "text"
             ? { text: c.text }
             : c.strategy === "testId"
@@ -668,7 +672,7 @@ class Compiler {
     switch (c.strategy) {
       case "role":
         if (!NAMEABLE_ROLES.has(c.role)) throw new Error("compiler: unsupported role");
-        return `page.getByRole(${lit(c.role)}, { name: ${d}.name, exact: ${lit(c.exact)} })`;
+        return `${c.scope ? `page.locator(${d}.selector)` : "page"}.getByRole(${lit(c.role)}, { name: ${d}.name, exact: ${lit(c.exact)} })`;
       case "label":
         return `page.getByLabel(${d}.text, { exact: ${lit(c.exact ?? true)} })`;
       case "placeholder":

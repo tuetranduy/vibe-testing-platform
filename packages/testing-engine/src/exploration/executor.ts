@@ -1353,6 +1353,12 @@ class ExplorationRun {
         ? await exactNamedControl(this.page.locator(checkout.panel), /^continue$/i, ["button", "link"]) : null;
       if (selector) {
         const [ref, info] = await Promise.all([this.recorder.record(this.page, selector), this.recorder.describe(this.page, selector)]);
+        const role = ref.candidates.find((candidate) => candidate.strategy === "role" && normalizeName(candidate.name) === "continue");
+        if (role?.strategy === "role") {
+          // In another open panel the same role and name may belong to a different checkout submit.
+          ref.candidates.unshift({ ...role, scope: checkout.panel });
+          ref.chosenIndex = 0;
+        }
         const located = { element: { selector, description: "Continue", method: "click", arguments: [] }, ref, info };
         return this.click(step, observeInstruction, located, true);
       }

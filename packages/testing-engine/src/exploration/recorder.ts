@@ -204,7 +204,7 @@ export async function describeElement(page: Page, target: ElementTarget, opts: R
 export function locatorFor(page: Page, c: LocatorCandidate): Locator {
   switch (c.strategy) {
     case "role":
-      return page.getByRole(c.role as Parameters<Page["getByRole"]>[0], { name: c.name, exact: c.exact });
+      return (c.scope ? page.locator(c.scope) : page).getByRole(c.role as Parameters<Page["getByRole"]>[0], { name: c.name, exact: c.exact });
     case "label":
       return page.getByLabel(c.text, { exact: c.exact ?? true });
     case "placeholder":

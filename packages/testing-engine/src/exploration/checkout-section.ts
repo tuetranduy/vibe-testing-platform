@@ -55,7 +55,9 @@ function readCheckoutSection(names: readonly SectionName[]): CheckoutSection | n
       const label = el.getAttribute("aria-label") ?? Array.from(el.labels ?? [], (label) => label.textContent).join(" ");
       return visible(el) && (el.checked || el.getAttribute("aria-checked") === "true" || !/^in[- ]store pickup$/i.test(label.trim()));
     });
-    return { name, panel: xpath(panel), savedAddress: !editableAddress && !otherShippingChoice ? savedAddress : null };
+    const id = panel.id ? `#${CSS.escape(panel.id)}` : null;
+    const scope = id && document.querySelectorAll(id).length === 1 ? `css=${id}` : xpath(panel);
+    return { name, panel: scope, savedAddress: !editableAddress && !otherShippingChoice ? savedAddress : null };
   }
   return null;
 }
