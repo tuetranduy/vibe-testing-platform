@@ -99,3 +99,30 @@ describe("failed API calls", () => {
     ]);
   });
 });
+
+describe("client-log batch size", () => {
+  it("splits batches so no request body passes 60 KB", async () => {
+    const { batches, send } = sent();
+    const stop = startClientLogReporter("run_1", { send });
+    for (let i = 0; i < 20; i++) reportClientError("render", `e${i}`, "s".repeat(16_000));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(batches.reduce((n, b) => n + b.lines.length, 0)).toBe(20);
+    for (const b of batches) expect(JSON.stringify({ lines: b.lines }).length).toBeLessThanOrEqual(60_000);
+    stop();
+  });
+
+  it("uses keepalive only for the last flush when the page goes away", async () => {
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+    const stop = startClientLogReporter("run_1");
+    reportClientError("render", "during");
+    await vi.advanceTimersByTimeAsync(5000);
+    reportClientError("render", "at the end");
+    stop();
+    vi.unstubAllGlobals();
+    const init = (i: number) => (fetch.mock.calls[i] as unknown as [string, RequestInit])[1];
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(init(0).keepalive).toBeFalsy();
+    expect(init(1).keepalive).toBe(true);
+  });
+});

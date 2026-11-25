@@ -1,7 +1,7 @@
 import type { ClientLogBatch, ClientLogLine } from "@platform/contracts";
 
 type Kind = ClientLogLine["kind"];
-type Send = (runId: string, batch: ClientLogBatch) => Promise<void>;
+type Send = (runId: string, batch: ClientLogBatch, opts: { keepalive: boolean }) => Promise<void>;
 
 const FLUSH_MS = 5000;
 const BATCH = 50;
@@ -9,6 +9,8 @@ const BATCH = 50;
 const MAX_PER_PAGE_LOAD = 300;
 const MAX_MESSAGE = 4096;
 const MAX_STACK = 16_384;
+/** A request body stays under this: browsers refuse `keepalive` bodies over 64 KiB (shared by all in flight). */
+const MAX_BODY = 60_000;
 
 interface Reporter {
   report(kind: Kind, message: string, stack?: string): void;
@@ -24,13 +26,14 @@ export function reportClientError(kind: Kind, message: string, stack?: string): 
   active?.report(kind, message, stack);
 }
 
-async function postClientLogs(runId: string, batch: ClientLogBatch): Promise<void> {
+async function postClientLogs(runId: string, batch: ClientLogBatch, { keepalive }: { keepalive: boolean }): Promise<void> {
   // Plain fetch, not lib/api's request(): a failure here must never be reported as another error.
   const res = await fetch(`/api/v1/test-runs/${encodeURIComponent(runId)}/client-logs`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(batch),
-    keepalive: true,
+    // Only the last flush, as the page goes away, needs to outlive it.
+    ...(keepalive ? { keepalive: true } : {}),
   });
   if (!res.ok) throw new Error(`client logs answered ${res.status}`);
 }
@@ -48,11 +51,19 @@ export function startClientLogReporter(runId: string, opts: { send?: Send } = {}
   let accepted = 0;
   let stopped = false;
 
-  const flush = () => {
-    if (queue.length === 0) return;
-    const lines = queue.splice(0, BATCH);
-    void send(runId, { lines }).catch(() => {});
-    if (queue.length > 0) flush();
+  /** Sends the queue in batches of at most 50 lines and 60 KB. */
+  const flush = (keepalive = false) => {
+    while (queue.length > 0) {
+      const lines: ClientLogLine[] = [];
+      let size = 12; // {"lines":[]}
+      while (queue.length > 0 && lines.length < BATCH) {
+        const next = JSON.stringify(queue[0]).length + 1;
+        if (lines.length > 0 && size + next > MAX_BODY) break;
+        lines.push(queue.shift()!);
+        size += next;
+      }
+      void send(runId, { lines }, { keepalive }).catch(() => {});
+    }
   };
 
   const reporter: Reporter = {
@@ -78,12 +89,15 @@ export function startClientLogReporter(runId: string, opts: { send?: Send } = {}
   };
   window.addEventListener("error", onError);
   window.addEventListener("unhandledrejection", onRejection as EventListener);
-  const timer = setInterval(flush, FLUSH_MS);
+  const timer = setInterval(() => flush(), FLUSH_MS);
+  const onPageHide = () => flush(true);
+  window.addEventListener("pagehide", onPageHide);
   active = reporter;
 
   return () => {
     if (stopped) return;
-    flush();
+    flush(true);
+    window.removeEventListener("pagehide", onPageHide);
     stopped = true;
     queue = [];
     clearInterval(timer);
