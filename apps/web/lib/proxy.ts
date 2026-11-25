@@ -63,7 +63,7 @@ const ENDPOINTS: { method: Method; pattern: RegExp; query: readonly string[] }[]
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/artifacts/${ID}/url$`), query: ["reveal"] },
   { method: "POST", pattern: new RegExp(`^/v1/test-runs/${ID}/results/AC-[1-9][0-9]*/review$`), query: [] },
   // Admin run logs (2026-11-25): the API answers members 403 on the reads; any viewer of a run may send client logs.
-  { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/logs$`), query: ["after", "source", "minLevel", "stage", "q", "limit"] },
+  { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/logs$`), query: ["after", "afterSeq", "tail", "source", "minLevel", "stage", "q", "limit"] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/llm-calls$`), query: [] },
   { method: "GET", pattern: new RegExp(`^/v1/test-runs/${ID}/llm-calls/${ID}/exchange$`), query: [] },
   { method: "POST", pattern: new RegExp(`^/v1/test-runs/${ID}/client-logs$`), query: [] },

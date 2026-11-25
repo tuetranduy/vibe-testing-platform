@@ -15,6 +15,7 @@ import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   bigint,
+  bigserial,
   boolean,
   check,
   customType,
@@ -487,8 +488,14 @@ export const runLogs = pgTable(
     component: text("component").notNull(),
     message: text("message").notNull(),
     fields: jsonb("fields").notNull(),
+    /** Insertion order across processes (a live view polls by it; a line's `time` can be older than its insert). */
+    seq: bigserial("seq", { mode: "number" }).notNull(),
   },
-  (t) => [index("run_logs_run_time").on(t.runId, t.time, t.id), index("run_logs_time").on(t.time)],
+  (t) => [
+    index("run_logs_run_time").on(t.runId, t.time, t.id),
+    index("run_logs_time").on(t.time),
+    index("run_logs_run_seq").on(t.runId, t.seq),
+  ],
 );
 
 /** Each model call's prompt and response as sent, gzipped JSON (LlmExchange). Kept RUN_LOG_RETENTION_DAYS. */

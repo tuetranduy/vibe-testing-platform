@@ -7,7 +7,7 @@ import {
   type RunLogQuery,
   type RunLogSource,
 } from "@platform/contracts";
-import { and, asc, count, eq, gt, ilike, inArray, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, ilike, inArray, lt, max, or, sql, type SQL } from "drizzle-orm";
 import type { Executor } from "./client";
 import { newId } from "./ids";
 import { runLogs, testRuns } from "./schema";
@@ -65,6 +65,7 @@ const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 function toLine(row: Row): RunLogLine {
   return {
     id: row.id,
+    seq: row.seq,
     time: row.time.toISOString(),
     source: row.source as RunLogSource,
     level: row.level as RunLogLevel,
@@ -100,13 +101,42 @@ export class RunLogRepository {
     return rows.length;
   }
 
-  /** One page of a run's lines in `(time, id)` order; empty for a run outside the tenant. */
+  /**
+   * One page of a run's lines; empty for a run outside the tenant. By default in `(time, id)` order from `after`;
+   * `tail` the last `limit` lines; `afterSeq` the lines stored since, in insertion order (live polling).
+   */
   async list(tenantId: string, runId: string, query: ListQuery): Promise<RunLogPage> {
-    const where: SQL[] = [eq(runLogs.runId, runId), eq(runLogs.tenantId, tenantId)];
+    const scope = and(eq(runLogs.runId, runId), eq(runLogs.tenantId, tenantId))!;
+    const where: SQL[] = [scope];
     if (query.source?.length) where.push(inArray(runLogs.source, query.source));
     if (query.minLevel) where.push(inArray(runLogs.level, LEVELS.slice(LEVELS.indexOf(query.minLevel))));
     if (query.stage) where.push(eq(runLogs.stage, query.stage));
     if (query.q) where.push(ilike(runLogs.message, `%${escapeLike(query.q)}%`));
+
+    if (query.afterSeq !== undefined) {
+      const rows = await this.db
+        .select()
+        .from(runLogs)
+        .where(and(...where, gt(runLogs.seq, query.afterSeq)))
+        .orderBy(asc(runLogs.seq))
+        .limit(query.limit);
+      return { lines: rows.map(toLine), nextCursor: null, pollSeq: rows.at(-1)?.seq ?? query.afterSeq };
+    }
+
+    // Read first: a line stored while the page is read is then polled again (and de-duplicated), never missed.
+    const [latest] = await this.db.select({ seq: max(runLogs.seq) }).from(runLogs).where(scope);
+    const pollSeq = latest?.seq === null || latest?.seq === undefined ? null : Number(latest.seq);
+
+    if (query.tail) {
+      const rows = await this.db
+        .select()
+        .from(runLogs)
+        .where(and(...where))
+        .orderBy(desc(runLogs.time), desc(runLogs.id))
+        .limit(query.limit);
+      return { lines: rows.reverse().map(toLine), nextCursor: null, pollSeq };
+    }
+
     const cursor = query.after ? decodeCursor(query.after) : null;
     if (cursor) {
       where.push(or(gt(runLogs.time, cursor.time), and(eq(runLogs.time, cursor.time), gt(runLogs.id, cursor.id)))!);
@@ -119,11 +149,7 @@ export class RunLogRepository {
       .limit(query.limit + 1);
     const page = rows.slice(0, query.limit);
     const last = page.at(-1);
-    return {
-      lines: page.map(toLine),
-      nextCursor: rows.length > query.limit && last ? encodeCursor(last) : null,
-      lastCursor: last ? encodeCursor(last) : null,
-    };
+    return { lines: page.map(toLine), nextCursor: rows.length > query.limit && last ? encodeCursor(last) : null, pollSeq };
   }
 
   async count(runId: string): Promise<number> {

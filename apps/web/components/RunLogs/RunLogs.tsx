@@ -27,6 +27,8 @@ import { LogTimeline, SOURCE_LABEL, clock, lineAnchor, mergeTimeline } from "./L
 
 const POLL_MS = 3000;
 const PAGE = 500;
+/** Polls after a watched run ends, for the lines still being written. */
+const AFTER_END_POLLS = 3;
 /** Lines kept in the view; older ones are dropped from the top while a long run streams. */
 const MAX_IN_VIEW = 20_000;
 
@@ -67,11 +69,17 @@ export function RunLogs({ runId, summary, pollMs = POLL_MS }: { runId: string; s
   const [calls, setCalls] = useState<RunLlmCalls | null>(null);
   const [load, setLoad] = useState<Load>({ status: "loading" });
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const cursor = useRef<string | null>(null);
+  /** The latest stored line seen: polling asks for what was stored after it, whatever its time. */
+  const pollSeq = useRef<number | null>(null);
   const generation = useRef(0);
   const [tab, setTab] = useState<"timeline" | "calls">("timeline");
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [openCall, setOpenCall] = useState<LlmCallView | null>(null);
+  const [why, setWhy] = useState<RunLogLine[]>([]);
+
+  const errored = summary.lifecycle === "ERRORED";
+  const failed = errored || summary.verdict === "FAILED";
+  const notPassed = errored || (summary.verdict !== null && summary.verdict !== "PASSED");
 
   const append = (more: RunLogLine[]) =>
     setLines((prev) => {
@@ -80,19 +88,33 @@ export function RunLogs({ runId, summary, pollMs = POLL_MS }: { runId: string; s
       return next.length > MAX_IN_VIEW ? next.slice(next.length - MAX_IN_VIEW) : next;
     });
 
+  // The run's last errors (or, with none, its last warnings), whatever page of the timeline is loaded.
+  const loadWhy = useCallback(async () => {
+    try {
+      const errors = await getRunLogs(runId, { minLevel: "error", tail: true, limit: 5 });
+      setWhy(errors.lines.length > 0 ? errors.lines : (await getRunLogs(runId, { minLevel: "warn", tail: true, limit: 5 })).lines);
+    } catch {
+      // the summary keeps what it had
+    }
+  }, [runId]);
+
+  useEffect(() => {
+    if (isAdmin && notPassed) void loadWhy();
+  }, [isAdmin, notPassed, loadWhy]);
+
   // First page (again whenever the filters change).
   useEffect(() => {
     if (!isAdmin) return;
     const gen = ++generation.current;
     setLoad({ status: "loading" });
     setLines([]);
-    cursor.current = null;
+    pollSeq.current = null;
     Promise.all([getRunLogs(runId, { ...filters, limit: PAGE }), getRunLlmCalls(runId)]).then(
       ([page, llm]) => {
         if (gen !== generation.current) return;
         setLines(page.lines);
         setNextCursor(page.nextCursor);
-        cursor.current = page.lastCursor;
+        pollSeq.current = page.pollSeq;
         setCalls(llm);
         setLoad({ status: "ready" });
       },
@@ -100,35 +122,42 @@ export function RunLogs({ runId, summary, pollMs = POLL_MS }: { runId: string; s
     );
   }, [isAdmin, runId, filters]);
 
-  // Live: new lines and calls every few seconds while the run is not over, then once more when it ends.
+  // Live: what was stored since the last poll, every few seconds while the run is not over.
   const poll = useCallback(async () => {
     const gen = generation.current;
     try {
       const [page, llm] = await Promise.all([
-        getRunLogs(runId, { ...filters, limit: PAGE, ...(cursor.current ? { after: cursor.current } : {}) }),
+        getRunLogs(runId, { ...filters, limit: PAGE, afterSeq: pollSeq.current ?? 0 }),
         getRunLlmCalls(runId),
       ]);
       if (gen !== generation.current) return;
       append(page.lines);
-      if (page.lastCursor) cursor.current = page.lastCursor;
+      if (page.pollSeq !== null) pollSeq.current = page.pollSeq;
       setCalls(llm);
     } catch {
       // the next tick tries again
     }
   }, [runId, filters]);
 
+  // When a watched run ends, its last lines are still being written (other processes, batched): a few more polls.
   const wasTerminal = useRef(terminal);
   useEffect(() => {
     if (!isAdmin || load.status !== "ready") return;
     if (terminal) {
-      if (!wasTerminal.current) void poll();
+      if (wasTerminal.current) return;
       wasTerminal.current = true;
-      return;
+      let left = AFTER_END_POLLS;
+      const timer = setInterval(() => {
+        void poll();
+        if (notPassed) void loadWhy();
+        if (--left <= 0) clearInterval(timer);
+      }, pollMs);
+      return () => clearInterval(timer);
     }
     wasTerminal.current = false;
     const timer = setInterval(() => void poll(), pollMs);
     return () => clearInterval(timer);
-  }, [isAdmin, load.status, terminal, poll, pollMs]);
+  }, [isAdmin, load.status, terminal, poll, pollMs, notPassed, loadWhy]);
 
   const loadMore = async () => {
     if (!nextCursor) return;
@@ -137,7 +166,6 @@ export function RunLogs({ runId, summary, pollMs = POLL_MS }: { runId: string; s
     if (gen !== generation.current) return;
     append(page.lines);
     setNextCursor(page.nextCursor);
-    if (page.lastCursor) cursor.current = page.lastCursor;
   };
 
   const download = async () => {
@@ -160,12 +188,7 @@ export function RunLogs({ runId, summary, pollMs = POLL_MS }: { runId: string; s
 
   const callsInView = (calls?.calls ?? []).filter((c) => !filtered && (!stage || c.stage === stage));
   const items = mergeTimeline(lines, callsInView);
-  const errored = summary.lifecycle === "ERRORED";
-  const failed = errored || summary.verdict === "FAILED";
-  const notPassed = errored || (summary.verdict !== null && summary.verdict !== "PASSED");
-  const errors = lines.filter((l) => l.level === "error" || l.level === "fatal");
-  // No error line (a blocked or inconclusive run, usually): the warnings are the best lead.
-  const failures = (errors.length > 0 ? errors : lines.filter((l) => l.level === "warn")).slice(-5);
+  const failures = why;
   const whyTitle = failed ? "Why it failed" : "Why it did not pass";
   const whyReason = summary.errorCategory
     ? ERROR_CATEGORY_LABEL[summary.errorCategory]
@@ -173,8 +196,10 @@ export function RunLogs({ runId, summary, pollMs = POLL_MS }: { runId: string; s
       ? VERDICT_LABEL[summary.verdict]
       : "the run did not finish";
 
-  const jump = (id: string) => {
+  const jump = (line: RunLogLine) => {
+    const id = line.id;
     setTab("timeline");
+    append([line]); // a line past the loaded page joins the timeline so there is something to jump to
     setExpanded((prev) => new Set(prev).add(id));
     requestAnimationFrame(() => document.getElementById(lineAnchor(id))?.scrollIntoView({ block: "center" }));
   };
@@ -198,7 +223,7 @@ export function RunLogs({ runId, summary, pollMs = POLL_MS }: { runId: string; s
                     {l.message}
                     {errorText(l) ? `: ${errorText(l)}` : ""}
                   </span>
-                  <Button variant="ghost" size="sm" type="button" className="h-6 px-2" onClick={() => jump(l.id)}>
+                  <Button variant="ghost" size="sm" type="button" className="h-6 px-2" onClick={() => jump(l)}>
                     Jump to line <span className="sr-only">{l.message}</span>
                   </Button>
                 </li>

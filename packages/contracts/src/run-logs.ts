@@ -11,6 +11,8 @@ export type RunLogLevel = z.infer<typeof RunLogLevelSchema>;
 
 export const RunLogLineSchema = z.object({
   id: z.string(),
+  /** Insertion order across every process: what a live view polls by (`afterSeq`). */
+  seq: z.number().int(),
   time: IsoDateTime,
   source: RunLogSourceSchema,
   level: RunLogLevelSchema,
@@ -32,6 +34,10 @@ export const RunLogQuerySchema = z.object({
   stage: RunLifecycleSchema.optional(),
   q: z.string().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(500),
+  /** Live: the lines stored after this sequence number, in the order they were stored (ignores `after`). */
+  afterSeq: z.coerce.number().int().min(0).optional(),
+  /** "1": the last `limit` matching lines, in time order (no next page). */
+  tail: z.enum(["1"]).optional(),
 });
 export type RunLogQuery = z.infer<typeof RunLogQuerySchema>;
 
@@ -39,8 +45,8 @@ export const RunLogPageSchema = z.object({
   lines: z.array(RunLogLineSchema),
   /** Set when more lines matched than `limit`: the next page starts here. */
   nextCursor: z.string().nullable(),
-  /** After this page's last line (null when it is empty): what a live view polls from. */
-  lastCursor: z.string().nullable(),
+  /** The run's latest stored line when this page was read (null: none yet): a live view polls `afterSeq` from it. */
+  pollSeq: z.number().int().nullable(),
 });
 export type RunLogPage = z.infer<typeof RunLogPageSchema>;
 

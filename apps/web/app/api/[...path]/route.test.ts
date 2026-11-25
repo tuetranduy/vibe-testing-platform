@@ -151,8 +151,8 @@ describe("API proxy allow-list", () => {
     expect(calls[0]!.url).toBe("http://api.internal:3001/v1/test-runs/run_1/artifacts/art_1/url?reveal=true");
     await GET(req("GET", "/api/v1/test-runs/run_1?anything=1"));
     expect(calls[1]!.url).toBe("http://api.internal:3001/v1/test-runs/run_1");
-    await GET(req("GET", "/api/v1/test-runs/run_1/logs?minLevel=warn&token=x"));
-    expect(calls[2]!.url).toBe("http://api.internal:3001/v1/test-runs/run_1/logs?minLevel=warn");
+    await GET(req("GET", "/api/v1/test-runs/run_1/logs?minLevel=warn&token=x&afterSeq=7&tail=1"));
+    expect(calls[2]!.url).toBe("http://api.internal:3001/v1/test-runs/run_1/logs?afterSeq=7&tail=1&minLevel=warn");
   });
 });
 

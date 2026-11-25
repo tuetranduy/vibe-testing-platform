@@ -394,9 +394,14 @@ export interface RunLogFilters {
   q?: string;
 }
 
-export function getRunLogs(runId: string, filters: RunLogFilters & { after?: string; limit?: number } = {}): Promise<RunLogPage> {
+export function getRunLogs(
+  runId: string,
+  filters: RunLogFilters & { after?: string; afterSeq?: number; tail?: boolean; limit?: number } = {},
+): Promise<RunLogPage> {
   const qs = new URLSearchParams();
   if (filters.after) qs.set("after", filters.after);
+  if (filters.afterSeq !== undefined) qs.set("afterSeq", String(filters.afterSeq));
+  if (filters.tail) qs.set("tail", "1");
   if (filters.source?.length) qs.set("source", filters.source.join(","));
   if (filters.minLevel) qs.set("minLevel", filters.minLevel);
   if (filters.stage) qs.set("stage", filters.stage);

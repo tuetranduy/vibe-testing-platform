@@ -8,8 +8,10 @@ import { RunLogs, RunLogsPage, RunLogsSection } from "./RunLogs";
 
 const admin = userFixture({ role: "admin" });
 
+let seq = 0;
 const line = (over: Partial<RunLogLine> = {}): RunLogLine => ({
   id: `log_${Math.random()}`,
+  seq: ++seq,
   time: "2026-11-25T10:00:01.000Z",
   source: "worker",
   level: "info",
@@ -36,7 +38,7 @@ const call = (over: Partial<LlmCallView> = {}): LlmCallView => ({
   ...over,
 });
 
-const page = (lines: RunLogLine[], lastCursor: string | null = lines.length ? "c1" : null) => ({ lines, nextCursor: null, lastCursor });
+const page = (lines: RunLogLine[], pollSeq: number | null = lines.at(-1)?.seq ?? null) => ({ lines, nextCursor: null, pollSeq });
 const calls = (items: LlmCallView[]) => ({
   calls: items,
   totals: {
@@ -89,28 +91,39 @@ describe("RunLogs", () => {
     ]);
   });
 
-  it("shows the failure summary for an errored run", async () => {
+  it("shows the failure summary for an errored run from its last errors, not the first page", async () => {
     testMe.current = admin;
+    const ended = line({ level: "error", message: "run errored", fields: { err: { message: "No API key for Anthropic" } } });
     api((url) =>
       url.includes("/llm-calls")
         ? json(200, calls([]))
-        : json(200, page([line({ message: "fine" }), line({ level: "error", message: "run errored", fields: { err: { message: "No API key for Anthropic" } } })])),
+        : url.includes("tail=1") && url.includes("minLevel=error")
+          ? json(200, page([ended]))
+          : json(200, page([line({ message: "fine" })])),
     );
     render(<RunLogs runId="run_1" summary={summaryFixture({ lifecycle: "ERRORED", errorCategory: "MODEL_PROVIDER" })} />);
     const why = await screen.findByRole("region", { name: "Why it failed" });
     expect(why).toHaveTextContent("Model provider error");
-    expect(why).toHaveTextContent("run errored");
+    await waitFor(() => expect(why).toHaveTextContent("run errored"));
     expect(why).toHaveTextContent("No API key for Anthropic");
     expect(within(why).getByRole("button", { name: /Jump to line/ })).toBeInTheDocument();
   });
 
   it("explains any run that did not pass, and not a passed one", async () => {
     testMe.current = admin;
-    api((url) => (url.includes("/llm-calls") ? json(200, calls([])) : json(200, page([line({ level: "warn", message: "egress blocked" })]))));
+    api((url) =>
+      url.includes("/llm-calls")
+        ? json(200, calls([]))
+        : url.includes("minLevel=error")
+          ? json(200, page([]))
+          : url.includes("tail=1") && url.includes("minLevel=warn")
+            ? json(200, page([line({ level: "warn", message: "egress blocked" })]))
+            : json(200, page([line()])),
+    );
     const { unmount } = render(<RunLogs runId="run_1" summary={summaryFixture({ lifecycle: "COMPLETED", verdict: "INCONCLUSIVE" })} />);
     const why = await screen.findByRole("region", { name: "Why it did not pass" });
     expect(why).toHaveTextContent("Inconclusive");
-    expect(why).toHaveTextContent("egress blocked");
+    await waitFor(() => expect(why).toHaveTextContent("egress blocked"));
     unmount();
     render(<RunLogs runId="run_1" summary={summaryFixture({ lifecycle: "COMPLETED", verdict: "PASSED" })} />);
     await screen.findByRole("list", { name: "Timeline" });
@@ -128,15 +141,26 @@ describe("RunLogs", () => {
     await waitFor(() => expect(urls(fetch).some((u) => u.includes("source=infra") && u.includes("minLevel=warn"))).toBe(true));
   });
 
-  it("polls while running and stops when terminal", async () => {
+  it("polls by sequence while running, keeps going briefly after the end, then stops", async () => {
     testMe.current = admin;
-    const fetch = api((url) => (url.includes("/llm-calls") ? json(200, calls([])) : json(200, page([line()]))));
-    const { rerender } = render(<RunLogs runId="run_1" summary={summaryFixture({ lifecycle: "EXPLORING" })} pollMs={30} />);
-    await waitFor(() => expect(urls(fetch).filter((u) => u.includes("/logs?after=c1")).length).toBeGreaterThanOrEqual(2));
-    rerender(<RunLogs runId="run_1" summary={summaryFixture({ lifecycle: "COMPLETED", verdict: "PASSED" })} pollMs={30} />);
-    await new Promise((r) => setTimeout(r, 60));
+    const first = line({ message: "first" });
+    let late: RunLogLine | null = null;
+    const fetch = api((url) => {
+      if (url.includes("/llm-calls")) return json(200, calls([]));
+      if (url.includes(`afterSeq=${first.seq}`) && late) return json(200, page([late]));
+      if (url.includes("afterSeq=")) return json(200, page([], first.seq));
+      return json(200, page([first]));
+    });
+    const live = summaryFixture({ lifecycle: "EXPLORING" });
+    const { rerender } = render(<RunLogs runId="run_1" summary={live} pollMs={30} />);
+    await waitFor(() => expect(urls(fetch).filter((u) => u.includes(`/logs?afterSeq=${first.seq}`)).length).toBeGreaterThanOrEqual(2));
+    // The run ends; its last line is stored a moment later, with an earlier time than the newest one shown.
+    rerender(<RunLogs runId="run_1" summary={summaryFixture({ lifecycle: "ERRORED", errorCategory: "INTERNAL" })} pollMs={30} />);
+    late = line({ level: "error", message: "run errored", time: "2026-11-25T10:00:00.500Z" });
+    expect(await within(await screen.findByRole("list", { name: "Timeline" })).findByText("run errored")).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 200));
     const before = fetch.mock.calls.length;
-    await new Promise((r) => setTimeout(r, 120));
+    await new Promise((r) => setTimeout(r, 150));
     expect(fetch.mock.calls.length).toBe(before);
   });
 
