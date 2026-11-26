@@ -67,7 +67,10 @@ Browser Use** and do not decide the result until marked critical. It uses the sa
 runs can let the agent work on the real site: **Interact with the live site** in the new-run form, on by default.
 Each job's egress proxy joins `vtp-discovery-live-egress` and forwards normal browser HTTPS requests and bodies to
 approved destinations. The agent can submit forms with synthetic data and continue through checkout and sandbox
-payment steps. Set the variable to `off` and redeploy to use snapshots only.
+payment steps. Set the variable to `off` and redeploy to use snapshots only. The page's own requests (its API, scripts,
+fonts) may go to any public host (`DISCOVERY_LIVE_OTHER_HOSTS: public` in `docker-compose.prod.yml`), so a front end
+whose API is on another domain still works; the agent still cannot open another site's pages, and requests to hosts
+other than the target are capped at 400 per job.
 
 **Parallel agents:** `BROWSER_USE_DISCOVERY_CAPACITY` (repository variable, 1–3, default 1) sets both the broker's job
 slots and the worker's fair-admission capacity. Each extra slot can hold another agent container (1 GiB each). Runs

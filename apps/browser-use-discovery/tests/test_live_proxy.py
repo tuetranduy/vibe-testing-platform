@@ -77,6 +77,13 @@ def test_subresource_hosts_and_rate_limit():
     assert not LiveProxy(HOST, key, other_hosts='none', workdir='/tmp/vtp-egress-test').host_allowed('cdn.example.com')
     assert LiveProxy(HOST, key, other_hosts='public', workdir='/tmp/vtp-egress-test').host_allowed('fonts.gstatic.com')
     assert site_of('www.shop.co.uk') == 'shop.co.uk'
+    # A front end whose API is on another site (production runs with `public`): its fetches go through, while
+    # opening the API host as a page stays refused.
+    front, api = 'shop-front.vercel.app', 'shop-api.onrender.com'
+    assert not LiveProxy(front, key, workdir='/tmp/vtp-egress-test').host_allowed(api)
+    assert LiveProxy(front, key, other_hosts='public', workdir='/tmp/vtp-egress-test').host_allowed(api)
+    assert request_decision('POST', {'sec-fetch-dest': 'empty'}, api, front).allowed
+    assert request_decision('GET', {'sec-fetch-dest': 'document'}, api, front).reason == 'not_allowlisted'
     now = [0.0]
     limit = RateLimit(rate=1, burst=2, total=3, clock=lambda: now[0])
     assert [limit.take(), limit.take(), limit.take()] == [True, True, False]

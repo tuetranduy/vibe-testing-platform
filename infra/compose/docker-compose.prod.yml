@@ -82,7 +82,10 @@ services:
       # missing); the agent container stays on its job's --internal network with the proxy as its only peer.
       DISCOVERY_LIVE_SITES: ${BROWSER_USE_DISCOVERY_LIVE_INTERACTION:-on}
       DISCOVERY_LIVE_EGRESS_NETWORK: vtp-discovery-live-egress
-      DISCOVERY_LIVE_OTHER_HOSTS: same-site
+      # public: a live page's requests may reach any public host, so sites whose API is on another domain (a
+      # vercel.app front end calling an onrender.com API) work. Opening another site's pages stays blocked, and
+      # requests to hosts other than the target stay capped per job.
+      DISCOVERY_LIVE_OTHER_HOSTS: public
       # Concurrent agent containers (Phase C multi-agent runs need more than one); matches the worker's capacity.
       DISCOVERY_JOB_SLOTS: ${BROWSER_USE_DISCOVERY_CAPACITY:-1}
       DISCOVERY_SERVICE_TOKEN: ${BROWSER_USE_DISCOVERY_SERVICE_TOKEN:?}
