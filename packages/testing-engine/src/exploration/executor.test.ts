@@ -778,6 +778,26 @@ describe("runExploration (fake explorer)", () => {
     expect(outcome.steps.filter((s) => s.kind === "fill").map((s) => s.generatedValue ?? null)).toEqual([null, "generated-1", "generated-1"]);
   });
 
+  it("a key generated as test data and later referenced as a secret nobody saved types one value (run_0mwx76owz55f67d2ad3bdc8a1)", async () => {
+    const { ctx } = fakeCtx();
+    const session = new FakeSession({
+      observe: (instruction, n) => [{ selector: `xpath=/html[1]/body[1]/f[${n + 1}]`, description: `field for ${instruction}`, method: "fill", arguments: [] }],
+    });
+    const { recorder, fills } = fakeRecorder({ describe: () => ({ role: "textbox", name: "Field", text: null }) });
+    let calls = 0;
+    const inputs: InputGenerator = { generate: async () => ({ value: `generated-${++calls}`, llm: null }) };
+    const signUp = [step("navigate", "Open the target URL"), step("fill", "Choose a password", { inputRef: { source: "testData", key: "new_account_password" } })];
+    const logIn = [step("navigate", "Open the target URL"), step("fill", "Type the new account's password", { inputRef: { source: "secret", key: "new_account_password" } })];
+    const plan: TestPlan = { ...planOf(...signUp), scenarios: [
+      { id: "SC-1", title: "Sign up", criterionIds: [], steps: signUp },
+      { id: "SC-2", title: "Log in", criterionIds: [], steps: logIn },
+    ] };
+    await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder, inputs, resetSession: async () => {} });
+
+    expect(calls).toBe(1);
+    expect(fills.map((f) => f.value)).toEqual(["generated-1", "generated-1"]);
+  });
+
   it("a failed fill with an empty value keeps the error text readable", async () => {
     const { ctx } = fakeCtx({ testData: { note: "" } });
     const session = new FakeSession({
@@ -1948,6 +1968,27 @@ describe("runExploration (fake explorer)", () => {
       expect(outcome.facts.map((f) => [f.key, f.checkpoint])).toContainEqual(["cartCount", "after_add"]);
       expect(outcome.revisedPlan?.scenarios[0]!.steps.map((s) => s.id)).toEqual(["PS-1", "PS-2", "PS-4", "PS-5"]);
       expect(events.filter((e) => e.type === "plan.revised").map((e) => e.payload)).toEqual([{ scenarioId: "SC-1", afterStepId: "PS-2", stepCount: 2 }]);
+    });
+
+    it("tells the replan which values the run already typed, by reference and field only (run_0mwx76owz55f67d2ad3bdc8a1)", async () => {
+      const { ctx } = fakeCtx({ testData: { email: "qa@demo.test" } });
+      const { r, asked } = replanner([null]);
+      const typed = planOf(
+        step("navigate", "Open"),
+        step("fill", "Type the email into the registration form", { inputRef: { source: "testData", key: "email" } }),
+        step("fill", "Choose a password", { inputRef: { source: "testData", key: "new_account_password" } }),
+        step("fill", "Type a search term", { inputRef: { source: "literal", key: "grill" } }),
+        step("click", grills),
+        step("capture_checkpoint", "Capture", { checkpoint: "after_add", criterionIds: ["AC-1"] }),
+      );
+      const inputs: InputGenerator = { generate: async () => ({ value: "Gen-Pass-1!aB", llm: null }) };
+      await runExploration(ctx, { plan: typed, requirement: requirementWith([cartFact]), session: lost(), budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, replanner: r, inputs });
+
+      expect(asked[0]!.entered).toEqual([
+        { inputRef: { source: "testData", key: "email" }, field: "Type the email into the registration form" },
+        { inputRef: { source: "testData", key: "new_account_password" }, field: "Choose a password" },
+      ]);
+      expect(JSON.stringify(asked[0]!.entered)).not.toContain("Gen-Pass-1!aB");
     });
 
     it("asks with fresh screenshot evidence, then runs a guided replan", async () => {

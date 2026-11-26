@@ -5,6 +5,7 @@
  */
 import { factRefsOf, type AcceptanceCriterion, type FactRequest, type PlannedStep } from "@platform/contracts";
 import { plannedDestructive } from "../shared/action-policy";
+import { inventedValueIssue } from "../shared/invented-values";
 import { MAX_PLANNED_STEPS, type PlannerOutput } from "./model-output";
 
 /** A validated scenario: its title, its steps (ids unique across the plan) and the criteria it serves. */
@@ -57,7 +58,7 @@ export function checkpointOrder(criteria: AcceptanceCriterion[]): [string, strin
  */
 export function validatePlanOutput(
   output: PlannerOutput,
-  requirement: { criteria: AcceptanceCriterion[]; facts: FactRequest[] },
+  requirement: { criteria: AcceptanceCriterion[]; facts: FactRequest[]; originalText?: string },
 ): PlanValidation {
   const issues: string[] = [];
   const criterionIds = requirement.criteria.map((c) => c.id);
@@ -76,6 +77,8 @@ export function validatePlanOutput(
       if (step.kind === "fill" && !step.inputRef) {
         issues.push(`${at(si, i)}.inputRef: required when kind = fill (reference the test data key or secret name it enters)`);
       }
+      const invented = inventedValueIssue(step, requirement.originalText);
+      if (invented) issues.push(`${at(si, i)}.${invented}`);
       if (step.kind !== "capture_checkpoint") return;
       if (!step.checkpoint) {
         issues.push(`${at(si, i)}.checkpoint: required when kind = capture_checkpoint`);

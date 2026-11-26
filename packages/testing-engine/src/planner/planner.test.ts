@@ -362,6 +362,16 @@ describe("planTest — model contract (one correction round, then ContractError)
     expect(lastCorrection(transport)).toMatch(/cart_page.*never captured/);
   });
 
+  it("a made-up password typed as a literal is corrected to a named test data key (run_0mwx76owz55f67d2ad3bdc8a1)", async () => {
+    const invented = loginPlan();
+    invented.steps[4] = step("fill", "Enter the password", { inputRef: { source: "literal", key: "password123" } });
+    const { llm, transport } = setup({ json: invented }, { json: loginPlan() });
+    await planTest(llm, input(loginRequirement()));
+    expect(transport.requests).toHaveLength(2);
+    expect(lastCorrection(transport)).toMatch(/steps\.4\.inputRef: a literal is only for a value written in the requirement/);
+    expect(lastCorrection(transport)).not.toContain("password123");
+  });
+
   it("a checkpoint still missing after the correction → ContractError", async () => {
     const { llm, transport } = setup({ json: withoutCartPage() }, { json: withoutCartPage() }, { json: cartPlan() });
     await expect(planTest(llm, input(cartRequirement()))).rejects.toBeInstanceOf(ContractError);

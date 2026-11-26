@@ -75,7 +75,7 @@ import { createWayThere, wayThereCandidates, type WayThere } from "./way-there";
 import { chooseRouteUrl } from "./route-recovery";
 import { SIGN_IN_STATE_SCRIPT, openedSignIn, type SignInState } from "./sign-in-prompt";
 import { SITE_ERROR_SCRIPT, siteErrorOf, type PageHeadline } from "./site-error";
-import { MAX_REPLANS, createReplanner, type Replanner } from "./replanner";
+import { MAX_REPLANS, createReplanner, type EnteredValue, type Replanner } from "./replanner";
 import { captureNamedFact } from "./named-facts";
 import { createPageContextRecorder, type PageContext } from "./page-context";
 import { CHECKOUT_SECTION_SCRIPT, isCheckoutSection, namedCheckoutSection, savedShippingContinue, waitedCheckoutSection, type CheckoutSection } from "./checkout-section";
@@ -707,7 +707,11 @@ class ExplorationRun {
   private assistanceCount = 0;
   private readonly visibleFacts: Set<string>;
   private readonly inputs: InputGenerator;
-  /** Values generated for this run, by `source:key`: made once, reused by every later fill of the key. */
+  /**
+   * Values generated for this run, by key: made once, reused by every later fill of the key in any scenario, whether it
+   * references it as test data or as a secret nobody saved (2026-11-26: a registration's `testData:password` and the
+   * login's `secret:password` type one password).
+   */
   private readonly generated = new Map<string, string>();
   /** Values typed since the last click or navigation (2026-10-07). */
   private typed: Typed[] = [];
@@ -1114,6 +1118,7 @@ class ExplorationRun {
         inventory: await this.readInventory(),
         testDataKeys: Object.keys(this.ctx.request.testData),
         secretNames: this.ctx.secrets.names,
+        entered: this.enteredValues(),
         firstId,
         targetUrl: this.ctx.request.targetUrl,
         policy: this.policy,
@@ -1295,17 +1300,28 @@ class ExplorationRun {
   }
 
   /** A value nobody provided, for the located field: one generator call per `source:key` in the run, reused after. */
+  /** The values this run typed so far, in every scenario: each reference once, with the field it went into (no value). */
+  private enteredValues(): EnteredValue[] {
+    const entered = new Map<string, EnteredValue>();
+    for (const step of this.steps) {
+      const ref = step.inputRef;
+      if (step.kind !== "fill" || step.outcome !== "SUCCESS" || !ref || ref.source === "literal") continue;
+      const id = `${ref.source}:${ref.key}`;
+      if (!entered.has(id)) entered.set(id, { inputRef: { source: ref.source, key: ref.key }, field: step.instruction.replace(/^By name: /, "").slice(0, 160) });
+    }
+    return [...entered.values()];
+  }
+
   private async generatedInput(step: PlannedStep, located: Located): Promise<{ value: string; llm: LlmStepUsage | null }> {
     const ref = step.inputRef!;
     const source = ref.source === "secret" ? "secret" : "testData";
-    if (this.generated.has(`${source}:${ref.key}`)) return this.generateFor(source, ref.key, step.description, NO_FIELD_FACTS);
+    if (this.generated.has(ref.key)) return this.generateFor(source, ref.key, step.description, NO_FIELD_FACTS);
     const field = (await this.recorder.describeField?.(this.page, located.element.selector).catch(() => null)) ?? NO_FIELD_FACTS;
     return this.generateFor(source, ref.key, step.description, field);
   }
 
   private async generateFor(source: "testData" | "secret", key: string, stepDescription: string, field: FieldFacts): Promise<{ value: string; llm: LlmStepUsage | null }> {
-    const id = `${source}:${key}`;
-    const known = this.generated.get(id);
+    const known = this.generated.get(key);
     if (known !== undefined) return { value: known, llm: null };
     const out = await this.inputs.generate({
       source,
@@ -1317,7 +1333,7 @@ class ExplorationRun {
       deadlineAt: this.ctx.deadlineAt,
       redact: this.ctx.redact,
     });
-    this.generated.set(id, out.value);
+    this.generated.set(key, out.value);
     return out;
   }
 

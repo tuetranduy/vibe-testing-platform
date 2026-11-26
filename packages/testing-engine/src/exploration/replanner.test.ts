@@ -145,6 +145,22 @@ describe("validateReplan", () => {
     expect(validateReplan({ steps: [out("login", "Submit"), out("login", "Submit again"), ...good] }, input({ signIn: true }))).toMatchObject({ ok: false });
   });
 
+  it("a made-up account value is a named test data key, never a literal, so a later login types it again (run_0mwx76owz55f67d2ad3bdc8a1)", () => {
+    const pw = (inputRef: PlannedStep["inputRef"]) => ({ steps: [out("fill", "Type the chosen password into the 'Mật khẩu' (password) field", { inputRef }), ...good] });
+    expect(validateReplan(pw({ source: "literal", key: "password123" }), input())).toMatchObject({ ok: false, issues: [expect.stringMatching(/^steps\.0\.inputRef: a literal is only for a value written in the requirement/)] });
+    expect(validateReplan(pw({ source: "testData", key: "new_account_password" }), input())).toMatchObject({ ok: true });
+  });
+
+  it("may type again a value another scenario made up, but never a saved secret it typed (2026-11-26)", () => {
+    const entered = [
+      { inputRef: { source: "secret" as const, key: "new_account_password" }, field: "Type the password into the registration form" },
+      { inputRef: { source: "secret" as const, key: "password" }, field: "Type the password into the sign-in form" },
+    ];
+    const pw = (key: string) => ({ steps: [out("fill", "Type the password of the new account", { inputRef: { source: "secret", key } }), ...good] });
+    expect(validateReplan(pw("new_account_password"), input({ entered, secretNames: ["password"] }))).toMatchObject({ ok: true });
+    expect(validateReplan(pw("password"), input({ entered, secretNames: ["password"] }))).toMatchObject({ ok: false });
+  });
+
   it("rejects a criterion id the scenario does not own", () => {
     expect(validateReplan({ steps: [out("click", "Click 'Add to cart'", { criterionIds: ["AC-9"] }), ...good.slice(1)] }, input())).toMatchObject({ ok: false });
   });
@@ -171,6 +187,13 @@ describe("createReplanner", () => {
     await createReplanner(llm)!.replan(input(), call);
     expect(transport.requests[0]!.maxTokens).toBe(32_000);
     expect(transport.requests[0]!.timeoutMs).toBe(300_000);
+  });
+
+  it("tells the model which values the run already entered, in every scenario, by reference only", () => {
+    const entered = [{ inputRef: { source: "testData" as const, key: "new_account_password" }, field: "Type the password into the registration form" }];
+    const prompt = buildReplanPrompt(input({ entered }));
+    expect(prompt).toContain('Values already entered in this run, in every scenario (JSON; the same "inputRef" types the same value again): [{"inputRef":{"source":"testData","key":"new_account_password"},"field":"Type the password into the registration form"}]');
+    expect(buildReplanPrompt(input())).not.toContain("Values already entered");
   });
 
   it("tells the model this replan's step limit", () => {
