@@ -17,8 +17,9 @@ is inspected. Standard browser HTTP methods and their bodies can reach approved 
 (web sockets) and document navigation to another host are refused. Upstream, the proxy resolves the name itself,
 refuses any non-public address, connects to the address it checked (no second lookup: DNS rebinding cannot swap it)
 and verifies the real certificate. Requests are rate limited. The one piece of browsing data it reports is the path
-of each document the browser opened on the target (``egress.page``), which grounds the agent's ideas in pages it
-really visited; it is held in the launcher's memory for the job only.
+of each page the browser opened on the target (``egress.page``): each document it loaded, and each page a later
+request's same-origin ``Referer`` names (a single-page app's route changes load no document). It grounds the agent's
+ideas in pages it really visited and is held in the launcher's memory for the job only.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ import sys
 import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable
+from urllib.parse import urlsplit
 
 import h11
 
@@ -210,6 +212,27 @@ def request_decision(method: str, headers: dict[str, str], host: str, target_hos
     return Decision(True)
 
 
+def observed_pages(target: bytes, headers: dict[str, str], host: str, target_host: str) -> list[str]:
+    """The target's pages one request shows the browser was on (pure; unit tested): the document it loads, and the page
+    its same-origin ``Referer`` names. A single-page app changes route with the History API and loads no document, but
+    its later requests (a form's fetch, a route's data) carry the page's URL, query and fragment removed."""
+    if host != target_host:
+        return []
+    pages: list[str] = []
+    page = target.split(b'?', 1)[0].decode('latin-1')
+    if headers.get('sec-fetch-dest') == 'document' and PAGE_PATH.fullmatch(page):
+        pages.append(page)
+    try:
+        referer = urlsplit(headers.get('referer', ''))
+        same_origin = referer.scheme == 'https' and referer.hostname == target_host and referer.port in (None, 443)
+    except ValueError:
+        return pages
+    path = referer.path
+    if same_origin and PAGE_PATH.fullmatch(path) and '..' not in path and '//' not in path and path not in pages:
+        pages.append(path)
+    return pages
+
+
 async def relay_request_body(incoming: h11.Connection, outgoing: h11.Connection, reader: asyncio.StreamReader,
                              upstream: asyncio.StreamWriter) -> None:
     """Relay exactly one HTTP message, framing chunked data afresh and discarding trailers."""
@@ -263,6 +286,7 @@ class LiveProxy:
         self.lookup = lookup
         self.limit = RateLimit()
         self.other_used = 0
+        self.pages: set[str] = set()  # reported once each
         self.contexts: dict[str, ssl.SSLContext] = {}
         os.makedirs(workdir, mode=0o700, exist_ok=True)
 
@@ -384,9 +408,10 @@ class LiveProxy:
                 writer.write(b'HTTP/1.1 100 Continue\r\n\r\n')
                 await writer.drain()
             await relay_request_body(incoming, outgoing, reader, up_writer)
-            page = request.target.split(b'?', 1)[0].decode('latin-1')
-            if host == self.target_host and headers.get('sec-fetch-dest') == 'document' and PAGE_PATH.fullmatch(page):
-                event('egress.page', path=page)
+            for page in observed_pages(request.target, headers, host, self.target_host):
+                if page not in self.pages:
+                    self.pages.add(page)
+                    event('egress.page', path=page)
             await pipe(up_reader, writer)
         except (h11.RemoteProtocolError, h11.LocalProtocolError):
             await refuse(writer, 'bad_request')

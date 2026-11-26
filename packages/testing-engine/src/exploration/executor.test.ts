@@ -75,8 +75,12 @@ class FakeSession implements ExplorerSession {
   readonly mainFrame = {};
 
   /** Starts a request on the page (as a click's fetch would); returns its `finish()`. */
-  startRequest(opts: { resourceType?: string; inIframe?: boolean } = {}): () => void {
-    const request = { resourceType: () => opts.resourceType ?? "fetch", frame: () => (opts.inIframe ? {} : this.mainFrame) };
+  startRequest(opts: { resourceType?: string; inIframe?: boolean; method?: string } = {}): () => void {
+    const request = {
+      resourceType: () => opts.resourceType ?? "fetch",
+      method: () => opts.method ?? "GET",
+      frame: () => (opts.inIframe ? {} : this.mainFrame),
+    };
     for (const l of this.listeners.get("request") ?? []) l(request);
     return () => {
       for (const l of this.listeners.get("requestfinished") ?? []) l(request);
@@ -580,6 +584,36 @@ describe("runExploration (fake explorer)", () => {
     const plan = planOf(step("navigate", "Open the page"), step("click", "Click Subscribe"), step("navigate", "Open https://shop.test/products"));
     const started = Date.now();
     const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, actionRequestsTimeoutMs: 50 });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(session.ops().filter((o) => o === "navigate")).toHaveLength(2);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it("a click's form submission (POST) is waited for past the read limit: a slow Register is answered before the next read", async () => {
+    // run_0mww1vvpf1f95f4eb053a2d17: POST /api/auth/register took ~25 s; after 5 s the success check read the
+    // still-submitting form, and the app's redirect to /home only came during the checkpoint.
+    const { ctx } = fakeCtx();
+    const log: string[] = [];
+    const session: FakeSession = new FakeSession({
+      actOn: () => {
+        const finish = session.startRequest({ method: "POST" });
+        setTimeout(() => (log.push("register answered"), finish()), 200);
+        return {};
+      },
+      navigate: (url) => void log.push(`navigate ${url}`),
+    });
+    const plan = planOf(step("navigate", "Open the target URL"), step("click", "Click Register"), step("navigate", "Open https://shop.test/login"));
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, actionRequestsTimeoutMs: 50, submitRequestsTimeoutMs: 5_000 });
+    expect(outcome.stopReason).toBe("COMPLETED");
+    expect(log).toEqual([`navigate ${TARGET}`, "register answered", "navigate https://shop.test/login"]);
+  });
+
+  it("a click's form submission that never finishes holds the next step only up to the submission limit", async () => {
+    const { ctx } = fakeCtx();
+    const session: FakeSession = new FakeSession({ actOn: () => (session.startRequest({ method: "POST" }), {}) });
+    const plan = planOf(step("navigate", "Open the page"), step("click", "Click Register"), step("navigate", "Open https://shop.test/login"));
+    const started = Date.now();
+    const outcome = await runExploration(ctx, { plan, requirement: requirementWith([]), session, budget: ctx.budgetSignal(1) }, { store: memoryStore().store, recorder: fakeRecorder().recorder, actionRequestsTimeoutMs: 50, submitRequestsTimeoutMs: 150 });
     expect(outcome.stopReason).toBe("COMPLETED");
     expect(session.ops().filter((o) => o === "navigate")).toHaveLength(2);
     expect(Date.now() - started).toBeLessThan(2_000);

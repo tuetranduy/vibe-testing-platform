@@ -324,6 +324,8 @@ export interface ExplorationDeps {
   actionRequestsTimeoutMs?: number;
   /** How long a click's requests must stay settled before the next step (KI-058); default ACTION_QUIET_MS. */
   actionQuietMs?: number;
+  /** How long a click's form submission (a POST, PUT, PATCH or DELETE) may hold the next step; default SUBMIT_REQUESTS_TIMEOUT_MS. */
+  submitRequestsTimeoutMs?: number;
   /** Cached element lookups from earlier runs (V1.1 F8); absent: every lookup asks the explorer. */
   cache?: ObserveCache;
   /**
@@ -380,6 +382,13 @@ const NETWORK_QUIET_TIMEOUT_MS = 3_000;
  * app's Register or Login is a fetch, not a page load, and a navigation started before it is answered cancels it.
  */
 const ACTION_REQUESTS_TIMEOUT_MS = 5_000;
+/**
+ * How long the next step waits for a click's form submission (a request that is not GET / HEAD / OPTIONS): a slow
+ * server's Register can take far longer than a read, and the step after it (the success check) would otherwise read
+ * the still-submitting form (run_0mww1vvpf1f95f4eb053a2d17: POST /api/auth/register answered after ~25 s).
+ */
+const SUBMIT_REQUESTS_TIMEOUT_MS = 30_000;
+const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const ACTION_REQUESTS_POLL_MS = 50;
 /**
  * How long no request of the click's may be pending before the next step goes (KI-058): a single-page app's link
@@ -2544,32 +2553,39 @@ class ExplorationRun {
   /**
    * The fetch / XHR / script / document requests the page's own frame starts from now on (a click's, KI-049, KI-058):
    * `settle()` waits until none has been pending for `actionQuietMs` (a route change loads its script, then fetches its
-   * data), at most `actionRequestsTimeoutMs` in all. An iframe's requests (ads) and other resources (images, styles,
-   * fonts) are not waited for. `dispose()` stops listening.
+   * data), at most `actionRequestsTimeoutMs` in all, or `submitRequestsTimeoutMs` while a form submission (a request
+   * that only reads, GET / HEAD / OPTIONS, is not one) is pending. An iframe's requests (ads) and other resources
+   * (images, styles, fonts) are not waited for. `dispose()` stops listening.
    */
   private watchRequests(): { settle(): Promise<void>; dispose(): void } {
     const page = this.page;
     const pending = new Set<PwRequest>();
+    const submissions = new Set<PwRequest>();
     const onRequest = (r: PwRequest) => {
       try {
-        if (ACTION_REQUEST_TYPES.has(r.resourceType()) && r.frame() === page.mainFrame()) pending.add(r);
+        if (!ACTION_REQUEST_TYPES.has(r.resourceType()) || r.frame() !== page.mainFrame()) return;
+        pending.add(r);
+        if (!READ_METHODS.has(r.method().toUpperCase())) submissions.add(r);
       } catch {
         // A request without a frame (a service worker's) is not the click's.
       }
     };
-    const onDone = (r: PwRequest) => void pending.delete(r);
+    const onDone = (r: PwRequest) => void (pending.delete(r), submissions.delete(r));
     page.on("request", onRequest);
     page.on("requestfinished", onDone);
     page.on("requestfailed", onDone);
     return {
       settle: async () => {
-        const deadline = Date.now() + (this.deps.actionRequestsTimeoutMs ?? ACTION_REQUESTS_TIMEOUT_MS);
+        const started = Date.now();
+        const deadline = started + (this.deps.actionRequestsTimeoutMs ?? ACTION_REQUESTS_TIMEOUT_MS);
+        const submitDeadline = started + (this.deps.submitRequestsTimeoutMs ?? SUBMIT_REQUESTS_TIMEOUT_MS);
         const quietMs = this.deps.actionQuietMs ?? ACTION_QUIET_MS;
-        let quietSince = Date.now();
+        let quietSince = started;
         for (;;) {
           const now = Date.now();
           if (pending.size > 0) quietSince = now;
-          if (now >= deadline || now - quietSince >= quietMs) break;
+          const until = submissions.size > 0 ? Math.max(deadline, submitDeadline) : deadline;
+          if (now >= until || now - quietSince >= quietMs) break;
           try {
             await sleep(ACTION_REQUESTS_POLL_MS, this.input.budget);
           } catch (err) {

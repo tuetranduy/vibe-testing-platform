@@ -1654,3 +1654,36 @@ replanner and way-there prompts (KI-078).
   the date control turns `ng-valid`. Not yet validated by a live run.
 - **Not handled:** options without `role="option"` (a plain `<ul><li>` menu) are not found; a `fill` step planned on such
   a dropdown still types into it.
+
+## KI-098 — A slow form submission was cut off after 5 s: the success check read the still-submitting form
+- **Severity:** High (a registration that works is reported FAIL, or INCONCLUSIVE when the fail rests on a model reading).
+- **Where:** `packages/testing-engine/src/exploration/executor.ts` (`watchRequests`, after every click).
+- **What:** `run_0mww1vvpf1f95f4eb053a2d17` (sample-app-mu-ivory.vercel.app, a single-page app): the Register click's
+  `POST /api/auth/register` was answered after about 25 s. The click waited for it at most 5 s (KI-049), so the
+  success extract ran on `/register` while the button still showed "Đang đăng ký..." and read
+  `registrationSuccessVisible = false` (MODEL_EXTRACTED: no element shows it). The app's redirect to `/home` only came
+  during the checkpoint, after the `url` fact had been read as `/register`. AC-1 was provisionally FAIL, left out of the
+  generated test, and ended INCONCLUSIVE / UNVERIFIED_EVIDENCE.
+- **Resolved for exploration (2026-11-25, working tree):** while a click's form submission (a main-frame fetch / XHR /
+  document request that is not GET, HEAD or OPTIONS) is pending, the next step waits up to 30 s
+  (`SUBMIT_REQUESTS_TIMEOUT_MS`) instead of 5 s; reads stay bounded at 5 s. Covered by unit tests (a slow POST is
+  answered before the next step; a stuck POST holds it only to the bound). Not yet validated by a live run.
+- **Not handled:** the generated test's `trackActionRequests` (helpers template) still waits at most 5 s, so the rerun
+  can still cut off a slow submission; that needs a new helpers template version.
+
+## KI-099 — Browser Use's live-site ideas on a single-page app were all dropped as ungrounded
+- **Severity:** Medium (Browser Use returns "no reviewable ideas" on every client-routed site; the run falls back).
+- **Where:** `apps/browser-use-discovery/src/discovery_service/egress_proxy.py` (`observed_pages`), `launcher.py`
+  (`pages_from`, grounding).
+- **What:** `run_0mww1vvpf1f95f4eb053a2d17`: the agent ran 47 steps (225 s of 240) and its job ended
+  `PARTIAL / no_valid_candidates`. Live grounding keeps an idea only when one of its paths is a page the job's proxy
+  saw the browser open, and the proxy recorded only `Sec-Fetch-Dest: document` requests. On a single-page app
+  `/register`, `/login` and `/home` are History API route changes with no document request, so only `/` was grounded
+  and ideas about those pages were dropped (most likely cause: the broker's own log with `livePages` was not read).
+- **Resolved (2026-11-25, working tree):** the proxy also reports the page a target request's same-origin `Referer`
+  names (https, the target host, port 443; query and fragment removed; the same path rules), once per page. A route
+  change's later requests (the form's fetch, the route's data) carry the page's URL, so the pages the agent worked on
+  are grounded, still observed outside the agent's container. Covered by unit tests and the live proxy end-to-end test.
+  Not yet validated by a live run.
+- **Not handled:** a route that makes no request at all, or a page whose referrer policy omits the path, stays
+  ungrounded.

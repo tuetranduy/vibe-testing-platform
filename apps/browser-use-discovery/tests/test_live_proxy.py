@@ -14,7 +14,7 @@ import ssl
 import pytest
 
 from discovery_service import egress_proxy
-from discovery_service.egress_proxy import LiveProxy, RateLimit, request_decision, site_of
+from discovery_service.egress_proxy import LiveProxy, RateLimit, observed_pages, request_decision, site_of
 from discovery_service.interception import leaf_certificate_pem, new_job_key
 from discovery_service.launcher import Config, egress_proxy_args, pages_from
 from discovery_service.policy import LiveTarget, PolicyError, match_request, normalize_live_url
@@ -52,6 +52,22 @@ def test_browser_methods_and_request_bodies_pass_on_approved_destinations():
     # Another host serves subresources only: no top-level navigation off the site.
     assert request_decision('GET', {'sec-fetch-dest': 'script'}, 'cdn.example.com', HOST).allowed
     assert request_decision('GET', {'sec-fetch-dest': 'document'}, 'cdn.example.com', HOST).reason == 'not_allowlisted'
+
+
+def test_observed_pages_include_in_app_routes_named_by_a_same_origin_referer():
+    # A single-page app changes route without loading a document (run_0mww1vvpf1f95f4eb053a2d17: /register, /login
+    # and /home were never document requests); its later requests name the page they came from.
+    assert observed_pages(b'/catalog?page=2', {'sec-fetch-dest': 'document'}, HOST, HOST) == ['/catalog']
+    assert observed_pages(b'/api/auth/register', {'sec-fetch-dest': 'empty', 'referer': f'https://{HOST}/register?step=1#top'},
+                          HOST, HOST) == ['/register']
+    assert observed_pages(b'/next', {'sec-fetch-dest': 'document', 'referer': f'https://{HOST}/prev'}, HOST, HOST) == ['/next', '/prev']
+    assert observed_pages(b'/next', {'sec-fetch-dest': 'document', 'referer': f'https://{HOST}/next'}, HOST, HOST) == ['/next']
+    # Only the target's own pages: not another host's referer, not a subresource host's request, not plain http.
+    for referer in ('https://evil.test/register', f'http://{HOST}/register', f'https://{HOST}:8443/register',
+                    f'https://{HOST}/../etc', f'https://{HOST}//x', 'not a url', ''):
+        assert observed_pages(b'/api/x', {'referer': referer}, HOST, HOST) == [], referer
+    assert observed_pages(b'/lib.js', {'referer': f'https://{HOST}/register'}, 'cdn.example.com', HOST) == []
+    assert observed_pages(b'/api/x', {'referer': f'https://{HOST}:443/home'}, HOST, HOST) == ['/home']
 
 
 def test_subresource_hosts_and_rate_limit():
@@ -167,6 +183,8 @@ def test_live_proxy_end_to_end(upstream, tmp_path, capsys):
         _, updated = await _request(port, f'{HOST}:443', chunked, pin)
         ambiguous = f'POST /checkout HTTP/1.1\r\nHost: {HOST}\r\nContent-Length: 2\r\nTransfer-Encoding: chunked\r\n\r\n'.encode()
         _, refused = await _request(port, f'{HOST}:443', ambiguous, pin)
+        api = f'POST /api/auth/register HTTP/1.1\r\nHost: {HOST}\r\nSec-Fetch-Dest: empty\r\nReferer: https://{HOST}/register\r\nContent-Length: 2\r\n\r\n{{}}'.encode()
+        await _request(port, f'{HOST}:443', api, pin)
         ws = f'GET /live HTTP/1.1\r\nHost: {HOST}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n'.encode()
         _, upgrade = await _request(port, f'{HOST}:443', ws, pin)
         smuggled = b'GET / HTTP/1.1\r\nHost: evil.test\r\n\r\n'
@@ -190,6 +208,7 @@ def test_live_proxy_end_to_end(upstream, tmp_path, capsys):
         (b'POST /checkout HTTP/1.1', b'quantity=1'),
         (b'GET /payment HTTP/1.1', b''),
         (b'PATCH /cart HTTP/1.1', b'abcde'),
+        (b'POST /api/auth/register HTTP/1.1', b'{}'),
     ]
     assert b'403' in refused and b'403' in upgrade and b'403' in wrong_host
     assert b'403' in off_site and b'403' in other_port
@@ -197,6 +216,8 @@ def test_live_proxy_end_to_end(upstream, tmp_path, capsys):
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith('{')]
     assert {'event': 'egress.page', 'path': '/catalog'} in events
     assert {'event': 'egress.page', 'path': '/checkout'} in events
+    assert {'event': 'egress.page', 'path': '/register'} in events  # an in-app route, named by its fetch's referer
+    assert {'event': 'egress.page', 'path': '/api/auth/register'} not in events
     reasons = [e.get('reason') for e in events if e['event'] == 'egress.blocked']
     assert 'bad_request' in reasons and 'upgrade_denied' in reasons and 'not_allowlisted' in reasons
     assert set(reasons) <= set(egress_proxy.REASONS)
